@@ -8,7 +8,7 @@
 | Run scope | M0 + M1 (D-001); M0 ships first as pre-release `v0.1.0-m0` (D-006) |
 | Inputs | CLAUDE.md; PRD v1.3 (§6 exit demos, §7.1 DC subset and re-scope ladder); REQUIREMENTS.md; stories/EPIC-01..17 (DC column); NFR.md; docs/02-ux/README.md; ARCHITECTURE.md; ADR-0001..0027 incl. amendments; data-model.md; api/openapi.yaml; platform.md; risks.md (SPK-01..08); P3-architecture-security-review.md (§9, §10, §14); gates/G2-attempt-1.md; DECISIONS.md (D-004, D-006, D-ORCH-001/002, D-ARCH-010/021); docs/05-quality/TEST-STRATEGY.md (§6 test IDs, §16 QA tasks) |
 | Companions | `tasks/WAVE-00.md` … `tasks/WAVE-09.md` (full task specs); `task-map.csv` (machine-checkable mapping); `generator/` (plan data, generator and validator, §14) |
-| Decisions | D-PLAN-001 … D-PLAN-010 in `docs/sdlc/DECISIONS.md`; later plan folds: D-ARCH-125 (fold 7), D-ARCH-139..147 (fold 9), D-SD-001 (2026-11-18: D-PM-068 delivery split, TASK-292/293) |
+| Decisions | D-PLAN-001 … D-PLAN-010 in `docs/sdlc/DECISIONS.md`; later plan folds: D-ARCH-125 (fold 7), D-ARCH-139..147 (fold 9), D-SD-001 (2026-11-18: D-PM-068 delivery split, TASK-292/293), D-ARCH-158 (2026-11-19: TASK-291 narrowed, TASK-294) |
 
 ## 1. Summary
 
@@ -51,7 +51,7 @@
 | 9 | Could stories (**cuttable**, ladder rung 1) | 7 (269–275) | 5/2 | 2 | 8 (0) | Only started when no Must/Should is at risk | — | — |
 | **Total** | | **281** | **70/211** | **76** | **293 (134)** | | | |
 
-> **Counts after P4.** The table is the P4 baseline (281 tasks). Late tasks added by the sheet folds (TASK-282 … TASK-293) and the D-SD-001 move of TASK-224, TASK-227 and TASK-231 from Wave 8 into Wave 7 (batches 7.9–7.11, IDs unchanged) are not folded into these columns; the current per-wave counts are in the `tasks/WAVE-xx.md` headers and the generator output (293 tasks, 82 batches at D-SD-001).
+> **Counts after P4.** The table is the P4 baseline (281 tasks). Late tasks added by the sheet folds and re-specifications (TASK-282 … TASK-294) and the D-SD-001 move of TASK-224, TASK-227 and TASK-231 from Wave 8 into Wave 7 (batches 7.9–7.11, IDs unchanged) are not folded into these columns; the current per-wave counts are in the `tasks/WAVE-xx.md` headers and the generator output (293 tasks, 82 batches at D-SD-001; 294 tasks, 82 batches at D-ARCH-158).
 
 **★ M0 checkpoint (`v0.1.0-m0`, D-006).** When Wave 3 exits (111 of the 113 M0 Must stories complete and US-061 and US-062 partial with their demo-critical part merged, D-PM-068; PRD §6.1 journeys green on the lane B `wave` profile, lane C `release-candidate` green on the SHA), release-manager tags `v0.1.0-m0` through `release.yml` (TASK-119) with a lightweight dossier and no gate; the dossier records US-061 and US-062 as partial and names their six route-level scenarios (D-PM-068). M0 Should stories are not in R0 unless they were pulled forward (US-035 is). Wave 4 tasks whose dependencies are all on `main` may back-fill idle slots before the tag (§6 rule 3). The M1 waves formally start after it.
 

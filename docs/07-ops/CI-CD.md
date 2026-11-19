@@ -99,6 +99,41 @@ runner entry on ubuntu with Testcontainers (`tools/ci/security-integration.mjs`)
 run or an inherited security proof; until then it reports `security-integration pending (record missing | not run)`.
 Degraded mode never applies to these paths.
 
+### Lane B on the shared host: the serial queue and the prerender re-run rule (interim)
+
+*Added 2026-11-19 by principal-architect (D-ARCH-158; ADR-0023 amendment O). This section is the single copy of the
+rule. TASK-294 part 294-A rewrites it with the outcome of its measurement, before G3.*
+
+Lane B runs one at a time on the developer host (D-ORCH-125). Agents do not start `quality:heavy` themselves: they
+prepare a clean evidence worktree at their final head, and the orchestrator's queue runs it when no Testcontainers
+container is running and at least 7 GB of memory is free. The queue script is orchestrator tooling outside the
+repository.
+
+One kind of `INVALID` run has its own rule, because its cause is a fixed limit inside the build tool and not the change
+under test. The build-time prerender of `apps/web` gives each request 10 s and no retry (`@react-router/dev` 8.5.1;
+`prerender.concurrency` is its only setting), and on a loaded host the first request, `/en/`, has run into that limit
+(D-TASK020-99/-100, D-ORCH-127).
+
+1. **Signature.** Both hold: (a) the verdict is `INVALID` with the reason `npm run build failed or timed out; suites
+   were not run`; (b) the run log of that attempt, which is the console output of `quality:heavy` and not `summary.md`,
+   has one line that contains `Prerender: Request failed for /` or `Prerender: Request timed out for /` and also
+   `aborted due to timeout`. The wording is read from the plugin source, because no failing log was kept: the first use
+   quotes the real line in its record. Any other build failure is outside the rule, a build that reaches
+   `--build-timeout-min` included.
+2. **Action.** The queue runs the same commit once more, with the same command line and the same preconditions. The run
+   directory of the first attempt is moved aside and never committed.
+3. **Accounting.** The re-run is not a fix cycle (CLAUDE.md section 7) and not a finding against the change. The
+   verdict of the second attempt is the verdict of the run. Each use is recorded in the DECISIONS entry that reports
+   the run: the commit, both stamps, the quoted signature line, and the free memory at the start of the first attempt.
+4. **Limits.** One re-run per commit. If the second attempt is `INVALID` with the signature again, there is no third
+   attempt, and TASK-294 part 294-A becomes the next queue job. The same applies at the second use of this rule within
+   20 consecutive queue runs: two such failures in 20 runs do not fit a failure rate below 1 %.
+5. **Outside the rule.** The product build stays one un-retried `react-router build` in the workspace script, the
+   Dockerfiles, lane A and lane C: no wrapper script, no patch, fork or `overrides` entry (D-ARCH-146). When the change
+   under test touches `apps/web/**`, `packages/ui/**` or the `@react-router/*` or `vite` entries of
+   `package-lock.json`, the use is also named in that change's code review, because the change itself may have moved
+   the time of the first request.
+
 ## 2. Dispatching lane C and nightly
 
 Check the month first (section 4), then dispatch on the SHA to judge (the run's ref is both the code and the workflow
