@@ -586,6 +586,79 @@ export async function invitedMemberships(client: Client): Promise<Row[]> {
 }
 
 /** [SEC-TC-74] [PR26-SEC-03] the standard-columns guard on the real tables, and a re-parenting UPDATE. */
+/**
+ * [SEC-TC-74] PR43-SEC-07 remainder on the real tables (PR65-SEC-05 (d), D-SEC-PR47-01 (3); security record PR-0065
+ * §5.4; TASK-293): a version reset to 1 after a correct bump; back-dated timestamps (unconstrained, RR-18) on UPDATE and
+ * INSERT; wrong stamps plus a foreign organisation (the BEFORE guard answers before WITH CHECK) against right stamps
+ * plus a foreign organisation (RLS); both MERGE forms. The member inserts act as a fresh user, as the lifecycle guard
+ * requires (D-ARCH-156).
+ */
+export async function stdColumnsRemainder(client: Client): Promise<Record<string, string>> {
+  const { orgA, orgB, userA, membershipA } = await world(client);
+  const fresh = await freshUser(client, 'Fresh');
+  const merger = await freshUser(client, 'Merger');
+  await asApp(client, orgA, userA);
+  const bumped = await outcome(
+    client,
+    `UPDATE public.organisations SET display_name = 'Org A2', updated_by = $2::uuid, version = version + 1 WHERE id = $1::uuid`,
+    [orgA, userA],
+  );
+  const resetToOne = await outcome(
+    client,
+    `UPDATE public.organisations SET display_name = 'Org A3', updated_by = $2::uuid, version = 1 WHERE id = $1::uuid`,
+    [orgA, userA],
+  );
+  const backdatedUpdate = await outcome(
+    client,
+    `UPDATE public.organisations SET display_name = 'Org A4', updated_by = $2::uuid, version = version + 1,
+            updated_at = '2000-01-01T00:00:00Z'::timestamptz WHERE id = $1::uuid`,
+    [orgA, userA],
+  );
+  const wrongStampsForeignOrg = await outcome(
+    client,
+    `UPDATE public.memberships SET org_id = $2::uuid, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`,
+    [membershipA, orgB, SYSTEM],
+  );
+  const rightStampsForeignOrg = await outcome(
+    client,
+    `UPDATE public.memberships SET org_id = $2::uuid, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`,
+    [membershipA, orgB, userA],
+  );
+  // The fixture organisation was created by SYSTEM, so the forged creator is the actor (any other value than the stored).
+  const mergeMatchedForgedCreator = await outcome(
+    client,
+    `MERGE INTO public.organisations o USING (SELECT $1::uuid AS id) s ON o.id = s.id
+      WHEN MATCHED THEN UPDATE SET display_name = 'Org A5', updated_by = $2::uuid, version = o.version + 1, created_by = $2::uuid`,
+    [orgA, userA],
+  );
+  await asApp(client, orgA, fresh);
+  const backdatedInsert = await outcome(
+    client,
+    `INSERT INTO public.memberships (org_id, user_id, status, created_by, updated_by, created_at, updated_at)
+     VALUES ($1::uuid, $2::uuid, 'ACTIVE', $2::uuid, $2::uuid, '2000-01-01T00:00:00Z'::timestamptz, '2000-01-01T00:00:00Z'::timestamptz)`,
+    [orgA, fresh],
+  );
+  await asApp(client, orgA, merger);
+  const mergeNotMatchedVersion = await outcome(
+    client,
+    `MERGE INTO public.memberships m USING (SELECT $1::uuid AS org_id, $2::uuid AS user_id) s
+        ON m.org_id = s.org_id AND m.user_id = s.user_id
+      WHEN NOT MATCHED THEN INSERT (org_id, user_id, status, created_by, updated_by, version)
+           VALUES (s.org_id, s.user_id, 'ACTIVE', s.user_id, s.user_id, 7)`,
+    [orgA, merger],
+  );
+  return {
+    bumped,
+    resetToOne,
+    backdatedUpdate,
+    backdatedInsert,
+    wrongStampsForeignOrg,
+    rightStampsForeignOrg,
+    mergeMatchedForgedCreator,
+    mergeNotMatchedVersion,
+  };
+}
+
 export async function stdColumns(client: Client): Promise<Record<string, string>> {
   const { orgA, orgB, userA, membershipA } = await world(client);
   await asApp(client, orgA, userA);

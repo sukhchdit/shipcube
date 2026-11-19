@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   ESCAPE_STRING_MARK,
+  EscapeContinuationError,
   SqlLexError,
   containsEscapeString,
   literalBody,
@@ -358,6 +359,27 @@ describe('SQL text helpers (bootstrap runner, migration linter)', () => {
       }
     },
   );
+
+  it.each([
+    ['LF', "SELECT E'x'\n'a\\'' ; SELECT 2; SELECT 1 AS \"q\" -- '\n;"],
+    ['CR', "SELECT E'x'\r'y'"],
+    ['a comment before the newline', "SELECT E'x' -- c\n'y'"],
+    ['a comment line between', "SELECT E'x'\n-- c\n  'y'"],
+  ])('[PR293-SEC-02] an E-string continued on a new line (%s) is refused: PostgreSQL keeps its escapes live there', (_shape, sql) => {
+    expect(() => tokenize(sql)).toThrow(EscapeContinuationError);
+    expect(() => splitStatements(sql)).toThrow(SqlLexError);
+  });
+
+  it('[PR293-SEC-02] controls: a plain string continued on a new line, an E-string followed by a string on the same line or after ;, and an E-string before a comment and code stay accepted; nested dynamic SQL with a continued E-string counts as an escape string', () => {
+    expect(tokenize("SELECT 'a'\n'b'").filter((token) => token.kind === 'string')).toHaveLength(2);
+    expect(() => tokenize("SELECT E'a' 'b'")).not.toThrow();
+    expect(() => tokenize("SELECT E'a';\n'b'")).not.toThrow();
+    expect(() => tokenize("SELECT E'a'\n-- c\nSELECT 1")).not.toThrow();
+    expect(() => tokenize(`SELECT E'a'${'\n--'.repeat(50_000)}`)).not.toThrow(); // linear scan, no backtracking
+    // The body of the literal is `SELECT E'x'` LF `'y'`: it does not lex, and it is an escape string (fail closed).
+    expect(containsEscapeString("SELECT 'SELECT E''x''\n''y'''")).toBe(true);
+    expect(containsEscapeString("SELECT 'SELECT ''x''\n''y'''")).toBe(false);
+  });
 
   it('fails on unterminated comments, strings, identifiers and dollar quotes', () => {
     expect(() => tokenize('/* open')).toThrow(/unterminated block comment/);

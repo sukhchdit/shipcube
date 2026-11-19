@@ -99,8 +99,9 @@
  * `SELECT set_config('lock_timeout', …)`. Still not seen: a function created in the file whose body sets
  * `lock_timeout` and that is then called (`SELECT f()`; PR #24 R1-n7), and a top-level set_config whose key is
  * computed. Rule 10 sees that call shape since TASK-293 (PR66-SEC-02: a top-level call of a writing routine of this or
- * an earlier migration file); it still does not see a writing routine of the bootstrap lane, a write reached only
- * through `EXECUTE` of a string built at run time, or a call through a computed name. The outcome controls are the
+ * an earlier migration file, also after RENAME TO / SET SCHEMA); it still does not see a writing routine of the
+ * bootstrap lane, a write reached only through `EXECUTE` of a string built at run time, a call through a computed name,
+ * attribute notation, a cast function or an aggregate support function (PR293-SEC-01 rows 3-5, pinned by tests). The outcome controls are the
  * catalog suite (C5 grants incl. PUBLIC, C1
  * ENABLE/FORCE, the C11 converse on definer-owned objects), the withTenantTx session-leak check and, for rule 11, the
  * next file's own leading `SET lock_timeout`.
@@ -117,6 +118,7 @@ import { fileURLToPath } from 'node:url';
 import { RenderRlsError, renderRls } from './render-rls.js';
 import {
   SqlLexError,
+  type Token,
   containsEscapeString,
   literalBody,
   normalise,
@@ -731,16 +733,55 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
     const conflict = /\bon conflict\b/.exec(rest);
     return conflict !== null && /\bdo update\b/.test(rest.slice(conflict.index + conflict[0].length));
   };
-  return (text) =>
-    text.split(';').some((segment) => {
-      if (simple.test(segment)) return true;
-      const insertRest = after(segment, insert.exec(segment));
-      if (insertRest !== undefined && insertWrites(insertRest)) return true;
-      const withRest = after(segment, withStart.exec(segment));
-      return withRest !== undefined && withWrite.test(withRest);
-    });
+  const segmentWrites = (segment: string): boolean => {
+    if (simple.test(segment)) return true;
+    const insertRest = after(segment, insert.exec(segment));
+    if (insertRest !== undefined && insertWrites(insertRest)) return true;
+    const withRest = after(segment, withStart.exec(segment));
+    return withRest !== undefined && withWrite.test(withRest);
+  };
+  /**
+   * Segments end at a `;` of CODE only: a `;` inside a string literal or a quoted identifier (`UPDATE "a;b"`,
+   * `WITH x AS (SELECT ';') DELETE …`) never cuts a statement (PR293-SEC-01 rows 9-11). Each string literal and dollar
+   * body is also read as a body of its own (dynamic SQL, `EXECUTE 'SELECT 1; DELETE …'`), down to MAX_DYNAMIC_DEPTH.
+   * Text that does not lex is read both whole and cut at every `;` (fail closed).
+   */
+  const check = (text: string, depth: number): boolean => {
+    let tokens: Token[];
+    try {
+      tokens = tokenize(text);
+    } catch {
+      return segmentWrites(text) || text.split(';').some(segmentWrites);
+    }
+    const segments: string[] = [];
+    let current = '';
+    for (const token of tokens) {
+      if (token.kind !== 'code') {
+        current += token.text;
+        if ((token.kind === 'string' || token.kind === 'dollar') && depth < MAX_DYNAMIC_DEPTH && check(literalBody(token), depth + 1)) {
+          return true;
+        }
+        continue;
+      }
+      const parts = token.text.split(';');
+      current += parts[0] ?? '';
+      for (const part of parts.slice(1)) {
+        segments.push(current);
+        current = part;
+      }
+    }
+    segments.push(current);
+    return segments.some(segmentWrites);
+  };
+  return (text) => check(text, 0);
 }
-const doBodyChangesData = bodyDataChanging('begin|then|else|loop|execute');
+/**
+ * PL/pgSQL statement starts before which a data-changing form also runs: `FOR target IN <query>` and `OPEN cursor
+ * [[NO] SCROLL] FOR <query>` accept INSERT, UPDATE, DELETE or MERGE with RETURNING (PR293-SEC-01 rows 2, 7, 8). A bare
+ * `for` stays out (row locks: `FOR UPDATE`), so `FOR r IN SELECT … FOR UPDATE` and `WHERE id IN (SELECT …)` stay clean.
+ */
+const OPEN_FOR = 'open [a-z_\\u0080-\\uFFFF][a-z0-9_$\\u0080-\\uFFFF]*(?: no)?(?: scroll)? for';
+const doBodyChangesData = bodyDataChanging(`begin|then|else|loop|execute|in|${OPEN_FOR}`);
 
 /** True when `statement` is a DO block whose body changes data (rule 10). */
 function doBlockChangesData(statement: string): boolean {
@@ -762,22 +803,35 @@ function doBlockChangesData(statement: string): boolean {
  *  - Names are compared as parsed identifiers (quoted names keep every character), never through a regular expression
  *    built from the SQL text (R1-m1). A routine created unqualified matches a call with any schema, and an unqualified
  *    call matches every schema; a name inside a string literal also counts (fail closed).
+ *  - `ALTER FUNCTION | PROCEDURE | ROUTINE … RENAME TO | SET SCHEMA` records the new name as a routine that calls the
+ *    old one, so the registry resolves a call under the new name transitively (PR293-SEC-01 row 1).
+ *  - Names are parsed identifiers, non-ASCII letters included (scan.l `ident_start`; code review R2-n1). A writing
+ *    definition whose name cannot be parsed is itself reported (fail closed): its calls could not be recognised.
  *  - Not a call: GRANT / REVOKE, COMMENT ON, ALTER / DROP FUNCTION | PROCEDURE | ROUTINE, CREATE TRIGGER (the trigger
  *    runs at a later DML statement, which rule 10 judges itself, except a plain `INSERT … VALUES`, which is no rule-10
  *    form: a writing trigger fired by one is not seen; R1-n2), and `FUNCTION | PROCEDURE | ROUTINE <name>(` references.
- *  - Not seen (stated limits): a routine created in the bootstrap lane, a write reached only through `EXECUTE` of a
- *    string built at run time, a call through a computed name, a call under another name after `ALTER … RENAME TO`,
- *    and a call written with a three-part name.
+ *    A call written with a three-part name (`db.schema.name(`) is seen through its last two parts (R2-n2).
+ *  - Not seen (stated limits; PR293-SEC-01 rows 3-5, pinned by tests): a routine created in the bootstrap lane, a write
+ *    reached only through `EXECUTE` of a string built at run time, a call through a computed name, a call in attribute
+ *    notation (`SELECT t.w FROM t` calls `w(t)`), a writer used as a cast function (`CREATE CAST … WITH FUNCTION w`,
+ *    then `x::type`) or as an aggregate support function (`CREATE AGGREGATE a (SFUNC = w, …)`, then `a(…)`).
  */
-const routineBodyChangesData = bodyDataChanging('begin|then|else|loop|execute|as|atomic|query');
+export const routineBodyChangesData = bodyDataChanging(`begin|then|else|loop|execute|as|atomic|query|in|${OPEN_FOR}`);
 const NOT_A_CALL_SITE =
   /^(?:grant|revoke|comment on|(?:alter|drop) (?:function|procedure|routine)|create (?:or replace )?(?:constraint )?trigger)\b/;
-/** One identifier of normalised text: quoted (`""` is a quote inside it) or plain. Linear: the branches never overlap. */
-const CALL_IDENT = '"(?:[^"]|"")*"|[a-z_][a-z0-9_$]*';
+/**
+ * One identifier of normalised text: quoted (`""` is a quote inside it) or plain, non-ASCII letters included (scan.l
+ * `ident_start [A-Za-z\200-\377_]`, `ident_cont [A-Za-z\200-\377_0-9\$]`). Linear: the branches never overlap.
+ */
+const CALL_IDENT = '"(?:[^"]|"")*"|[a-z_\\u0080-\\uFFFF][a-z0-9_$\\u0080-\\uFFFF]*';
 const ROUTINE_REFERENCE = new RegExp(`\\b(?:function|procedure|routine) (?:(?:${CALL_IDENT}) ?\\. ?)?(?:${CALL_IDENT}) ?\\(`, 'g');
-const NAMED_CALL = new RegExp(`(?<![a-z0-9_$"])(?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`, 'g');
+const NAMED_CALL = new RegExp(`(?<![a-z0-9_$"\\u0080-\\uFFFF])(?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`, 'g');
 /** The name a CREATE FUNCTION | PROCEDURE defines, in masked text (a quoted name may hold `""`, unlike ROUTINE_NAME). */
 const DEFINED_NAME = new RegExp(`^create (?:or replace )?(?:function|procedure) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT}) ?\\(`);
+/** `ALTER FUNCTION | PROCEDURE | ROUTINE <name>[(args)] RENAME TO <new> | SET SCHEMA <schema>`, in masked text. */
+const ALTERED_NAME = new RegExp(
+  `^alter (?:function|procedure|routine) (?:(${CALL_IDENT}) ?\\. ?)?(${CALL_IDENT})(?: ?\\([^)]*\\))? (rename to|set schema) (${CALL_IDENT})$`,
+);
 
 /** A routine name: `schema` null when the definition or the call does not qualify it. */
 interface RoutineName {
@@ -854,21 +908,35 @@ export class RoutineRegistry {
 }
 
 /**
- * Rule 10 call-site pass over one statement: records a routine `statement` defines in `registry`, or returns the
- * writing routine a top-level statement calls.
+ * Rule 10 call-site pass over one statement: records a routine `statement` defines (or renames, or moves) in
+ * `registry`, and returns the rule-10 message when the statement calls a writing routine, or defines a writing routine
+ * whose name cannot be read.
  */
 function writingRoutineCall(statement: string, registry: RoutineRegistry): string | undefined {
   const maskedText = masked(statement);
   const text = normalise(sqlText(statement, true));
   if (ROUTINE_DEFINITION.test(maskedText)) {
     const name = DEFINED_NAME.exec(maskedText);
-    if (name !== null) {
-      const routine = { schema: name[1] === undefined ? null : identifierValue(name[1]), name: identifierValue(name[2] as string) };
-      registry.define(routine, routineBodyChangesData(text), namedCalls(text));
+    const writes = routineBodyChangesData(text);
+    if (name === null) {
+      return writes
+        ? 'a routine whose body changes data, with a name the linter cannot read (its calls cannot be recognised; fail closed)'
+        : undefined;
     }
+    const routine = { schema: name[1] === undefined ? null : identifierValue(name[1]), name: identifierValue(name[2] as string) };
+    registry.define(routine, writes, namedCalls(text));
     return undefined;
   }
-  return NOT_A_CALL_SITE.test(maskedText) ? undefined : registry.calledWriter(namedCalls(text));
+  const moved = ALTERED_NAME.exec(maskedText);
+  if (moved !== null) {
+    const old = { schema: moved[1] === undefined ? null : identifierValue(moved[1]), name: identifierValue(moved[2] as string) };
+    const target = identifierValue(moved[4] as string);
+    registry.define(moved[3] === 'rename to' ? { schema: old.schema, name: target } : { schema: target, name: old.name }, false, [old]);
+    return undefined;
+  }
+  if (NOT_A_CALL_SITE.test(maskedText)) return undefined;
+  const writer = registry.calledWriter(namedCalls(text));
+  return writer === undefined ? undefined : `call of ${writer}, a routine of this or an earlier migration whose body changes data`;
 }
 
 const LITERAL_MARK = '';
@@ -1457,14 +1525,11 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
     if (header.kind !== 'contract' && DESTRUCTIVE.some((pattern) => pattern.test(code))) {
       add('2', `destructive statement outside a contract migration: "${preview}"`);
     }
-    const writer = writingRoutineCall(statement, history.routines);
+    const callSite = writingRoutineCall(statement, history.routines);
     if (header.dataChanging !== true && (DATA_CHANGING.some((pattern) => pattern.test(code)) || doBlockChangesData(statement))) {
       add('10', `data-changing statement without "data-changing: yes": "${preview}"`);
-    } else if (header.dataChanging !== true && writer !== undefined) {
-      add(
-        '10',
-        `call of ${writer}, a routine of this or an earlier migration whose body changes data, without "data-changing: yes" (PR66-SEC-02): "${preview}"`,
-      );
+    } else if (header.dataChanging !== true && callSite !== undefined) {
+      add('10', `${callSite}, without "data-changing: yes" (PR66-SEC-02): "${preview}"`);
     }
     if (isAuditDdl(statement, 'migrations')) {
       add('12', `audit object in a Prisma migration (audit DDL belongs to the bootstrap lane only): "${preview}"`);

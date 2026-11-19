@@ -14,7 +14,10 @@
  *  - `dolq_start [A-Za-z\200-\377_]`, `dolq_cont [A-Za-z\200-\377_0-9]`: a dollar tag may hold non-ASCII letters
  *    (`$é$ … $é$` is one string);
  *  - `space [ \t\n\r\f\v]`: white space is ASCII only (SQL_WHITESPACE); U+00A0, U+FEFF, U+3000 and every other
- *    non-ASCII character are identifier characters to PostgreSQL.
+ *    non-ASCII character are identifier characters to PostgreSQL;
+ *  - `quotecontinue`: a string continued after a newline keeps the state it closed in, so an E-string continued that
+ *    way is refused (EscapeContinuationError, PR293-SEC-02); a plain string continued that way reads the same either
+ *    way and is two string tokens here.
  * The scanner works on bytes and every byte of a multi-byte UTF-8 character is in `\200-\377`; this lexer works on
  * UTF-16 code units, where every code unit from 0x80 up (surrogates included) stands for such bytes.
  */
@@ -50,6 +53,40 @@ export class SqlLexError extends Error {
     super(message);
     this.name = 'SqlLexError';
   }
+}
+
+/**
+ * An E-string continued on a new line (PR293-SEC-02): refused, because PostgreSQL keeps its escapes live in the
+ * continued part. Nested reads (containsEscapeString) count it as an escape string, never as prose that does not lex.
+ */
+export class EscapeContinuationError extends SqlLexError {
+  constructor() {
+    super('an E-string continued on a new line is refused (PR293-SEC-02)');
+    this.name = 'EscapeContinuationError';
+  }
+}
+
+/**
+ * scan.l `quotecontinue {whitespace_with_newline}{quote}`: from `from` (right after a closing quote), white space and
+ * `--` comments that hold at least one newline, then a quote. A linear scan, not a regular expression (an alternation of
+ * white space and comments under `*` backtracks on a long run of `--` without a newline).
+ */
+function continuesString(sql: string, from: number): boolean {
+  let newline = false;
+  for (let k = from; k < sql.length;) {
+    const c = sql[k];
+    if (c === '-' && sql[k + 1] === '-') {
+      while (k < sql.length && sql[k] !== '\n' && sql[k] !== '\r') k += 1;
+    } else if (c === '\n' || c === '\r') {
+      newline = true;
+      k += 1;
+    } else if (c === ' ' || c === '\t' || c === '\f' || c === '\v') {
+      k += 1;
+    } else {
+      return newline && c === "'";
+    }
+  }
+  return false;
 }
 
 /** Splits SQL text into tokens. Adjacent code characters are merged into one token. */
@@ -120,6 +157,9 @@ export function tokenize(sql: string): Token[] {
           j += 1;
         }
       }
+      // scan.l {quotecontinue}: after a newline, a quote continues the string in the state it closed in, so the escapes
+      // of an E-string stay live in the next part; this lexer would start a plain string there. Fail closed (PR293-SEC-02).
+      if (escaped && continuesString(sql, j)) throw new EscapeContinuationError();
       push(escaped ? { kind: 'string', text: prefix + sql.slice(i, j), escape: true } : { kind: 'string', text: sql.slice(i, j) });
       i = j;
     } else if (ch === '"') {
@@ -360,7 +400,8 @@ export const MAX_NESTED_SQL_DEPTH = 4;
  * True when `sql` holds an E-prefixed escape string (`E'…'`, `e'…'`) as a TOKEN (PR11-SEC-16, D-ARCH-078): in code,
  * in a dollar-quoted body, or in a string literal read as dynamic SQL (`EXECUTE 'SELECT E''\x61pp…'''`), up to
  * MAX_NESTED_SQL_DEPTH levels. Never a regular expression over the text: `'abcde'`, `'a e'` and `name'…'` hold no
- * escape string. Nested text that does not lex (prose in a literal) holds no token and counts as clean; top-level text
+ * escape string. Nested text that does not lex (prose in a literal) holds no token and counts as clean, except a
+ * continued E-string (EscapeContinuationError), which counts as an escape string (PR293-SEC-02); top-level text
  * that does not lex throws SqlLexError. At the depth cap a string or dollar token that is still present counts as an
  * escape string (fail closed, PR43-SEC-06 c / PR #43 R1-n1): it is not read, so it cannot be shown clean.
  */
@@ -370,7 +411,7 @@ export function containsEscapeString(sql: string, depth = 0): boolean {
     tokens = tokenize(sql);
   } catch (error) {
     if (!(error instanceof SqlLexError) || depth === 0) throw error;
-    return false;
+    return error instanceof EscapeContinuationError; // a continued E-string is one (fail closed); other prose is not
   }
   return tokens.some(
     (token) =>

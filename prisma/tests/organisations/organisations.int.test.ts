@@ -39,6 +39,7 @@ import {
   secondMembership,
   secondOperator,
   stdColumns,
+  stdColumnsRemainder,
   SYSTEM,
   tenantBoundInvitationReference,
   tenantBoundRoleReference,
@@ -281,5 +282,16 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result['forgedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.organisations \(UPDATE\)$/);
     expect(result['reparent']).toMatch(/^42501 /);
     expect(result['correct']).toBe('ok');
+  });
+
+  it('[SEC-TC-74] [PR43-SEC-07] remainder on the real tables: a version reset to 1 and both MERGE forms raise; back-dated timestamps pass; wrong stamps plus a foreign organisation meet the guard first, right stamps meet RLS', async () => {
+    const result = await rolledBack(stdColumnsRemainder);
+    expect(result['bumped']).toBe('ok'); // precondition: version 2, so the reset is a change
+    expect(result['resetToOne']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.organisations \(UPDATE\)$/);
+    expect([result['backdatedUpdate'], result['backdatedInsert']]).toEqual(['ok', 'ok']); // RR-18: timestamps unconstrained
+    expect(result['wrongStampsForeignOrg']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: updated_by on public\.memberships \(UPDATE\)$/);
+    expect(result['rightStampsForeignOrg']).toMatch(RLS_REFUSED);
+    expect(result['mergeMatchedForgedCreator']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: created_by on public\.organisations \(UPDATE\)$/);
+    expect(result['mergeNotMatchedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.memberships \(INSERT\)$/);
   });
 });
