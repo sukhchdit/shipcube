@@ -272,3 +272,83 @@ D-TASK293-08..10 are not in the repository; I judged them through the code. They
 4. qa-lead acknowledges `required-suites.json` and `security-test-cases.md` (adopted 67), with R2-n3.
 5. The orchestrator logs D-TASK293-01..10 in DECISIONS.md.
 6. DUE (D-ORCH-134): merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file.
+
+---
+
+# Round 4 (delta, fix cycle 3): `06270ba` → `c618d8a`
+
+| Field | Value |
+|---|---|
+| Head | `c618d8a` (one commit on `06270ba`; still not pushed) |
+| Diff reviewed | `git diff 06270ba c618d8a`: 6 files, +130 / -17. Source: `sql-text.ts` (dollar-body catch), `scans.ts` (`bodyText`), `lint-migrations.ts` (`withWrite` lookbehind, `alteredRoutine`), `cases.ts` (JSDoc move). Tests: `lint-migrations.test.ts`, `scans-dynamic-sql.test.ts` |
+| Decisions | D-TASK293-11 (`bodyText` marks rather than rethrows) |
+| Reviewer | code-reviewer, 2026-11-19 |
+
+## R4.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R3-M1 is closed: a continued E-string in a dollar body keeps ESCAPE_STRING_MARK in sqlText and in the catalog
+         bodyText, so the DO / routine / nested-dollar shapes are rule 16 again, as on main. R3-n1..n3 are closed. In the
+         three-way probe no shape is refused by main and accepted by head. No BLOCKER, MAJOR or MINOR; the earlier
+         round-2 NIT R2-n3 (qa-lead) is the only open item.
+```
+
+## R4.2 Verification performed (same host rule: `git archive` extracts of `ca7e4b7` (main), `06270ba` (r3) and `c618d8a` (head), a node_modules junction on the head copy, tsx and Node single process; nothing ran in the worktree, whose `git status` is clean)
+
+- **Three-way linter probe (`probes/r4.mts`, 18 shapes; main / r3 / head):**
+
+| Shape | main | r3 | head |
+|---|---|---|---|
+| DO, continued E-string, hex `set_config` via EXECUTE | 16 | clean | **16** |
+| DO, continued E-string, hex `DELETE` via EXECUTE | 16 | clean | **16** |
+| DO with an inner `$i$` body holding a continued E-string (nested dollar) | 16 | clean | **16** |
+| uncontinued control | 16 | 16 | 16 |
+| top-level continued E-string | 16 | L | L (refused; stricter than main) |
+| DO `UPDATE "x;y"` / `EXECUTE 'SELECT 1; DELETE …'` | 10 / 10 | 10 / 10 | 10 / 10 |
+| `FOR r IN WITH x AS (…) SELECT … FOR UPDATE LOOP` (R3-n1) | clean | 10 | **clean** |
+| `WITH x AS (… FOR UPDATE) UPDATE t …` (real write after a lock) | 10 | 10 | 10 |
+| `FOR r IN WITH x AS (SELECT 1 FOR UPDATE), u AS (UPDATE … RETURNING …)` | clean | 10 | 10 |
+| writer with `numeric(10,2)` argument, `RENAME TO`, called (R3-n2) | clean | clean | **10** |
+| rename to `"w""q"`, called | clean | 10 | 10 |
+| unbalanced `ALTER FUNCTION z(numeric(10,2) RENAME …` | clean | clean | clean (no crash) |
+| `RENAME TO` / `SET SCHEMA` / non-ASCII writer | clean | 10 | 10 |
+
+  For every shape, head refuses at least what main refuses (the no-weakening direction). Where head refuses more, that is the intended extension of rules 10 and L.
+- **Catalog.**
+  - `scanFunctionBodies([{ prosrc: <continued E-string body> }])` on head gives `['public.f(): E-prefixed escape string']`, matching the new `scans-dynamic-sql.test.ts` rows.
+  - With strings blanked (`sqlText(…, false)`), no mark is written, which is correct: the mark only means something when strings are kept.
+- **Other catch sites (re-checked).**
+  - `routineCode.expand` reads with strings blanked, so the mark does not apply there. Its verbatim fallback keeps the `execute` word, so the dynamic-SQL rule still fires.
+  - `doBlockLockTimeouts` treats any SqlLexError as an unknown SET when the text names `lock_timeout`. That is the same fail-closed reading as main; a hex-spelt name was invisible on main too.
+  - `topLevelLockTimeout`, `lexedStatements` and `renderedPolicies` are unchanged and do not read nested bodies.
+  - `containsEscapeString` was already fail-closed in round 3.
+- **Cost.** Depth-4 nested `EXECUTE` at 42 / 171 / 692 KB takes 48 / 99 / 342 ms (r3: 44 / 129 / 372 ms). 8k strings in one DO body take 135 ms. The `withWrite` lookbehind is fixed-width and adds nothing measurable.
+- **Corpus.** Only the `catch` path of `sqlText` changed in `sql-text.ts`. Round 3 showed that no corpus file reaches it (534/534 identical to r2 on LF and CRLF), so the corpus is unchanged by construction.
+- **Repository lanes** with the head linter: `prisma/migrations` 0 findings, `prisma/bootstrap` 0.
+- **`alteredRoutine`.** It skips the argument list by parenthesis depth, and a quoted name inside it is skipped whole; a `""` acts as a close followed by a reopen, which nets out correctly. Masked text has already blanked strings and bodies. It returns `undefined` on an unbalanced list or a missing closing quote, so it fails silent rather than crashing; that is acceptable, because rename tracking only adds coverage.
+- **Gates I could run:** `prettier --check` on the 6 files is clean; typed ESLint (full-tree extract) gives 0 problems; the commit header is 92 characters.
+- **Not re-run:** Jest and `tsc -b`. The developer reports 32/32 mutants, including both mark-drop mutants. Lane B on `06270ba` passed every suite: integration 403 including the new remainder case, catalog 113, rls 157. That covers the PostgreSQL 18 side, which this delta does not touch (no int test or SQL changed). Lane B on `c618d8a` is queued.
+
+## R4.3 Round-3 closure
+
+| R3 item | Status | Evidence |
+|---|---|---|
+| R3-M1 mark dropped in nested fallbacks | **Closed** | `sql-text.ts:458-461` and `scans.ts:125-129` mark on `EscapeContinuationError` when strings are kept. Tests: DO and PL/pgSQL rule-16 rows, `bodyText` rows, both mark-drop mutants killed. My probe adds the nested-dollar shape (main 16, head 16) |
+| R3-n1 `FOR … IN WITH … FOR UPDATE` false positive | **Closed** | `withWrite` lookbehind `(?<!\bfor \|\bkey )update`; the real UPDATE after a CTE lock and an UPDATE CTE stay 10 |
+| R3-n2 parenthesised argument types in RENAME / SET SCHEMA | **Closed** | `alteredRoutine` depth skip; tests with `numeric(10,2)`, `varchar(20)` and a quoted `"my(type"` |
+| R3-n3 displaced JSDoc | **Closed** | `cases.ts:661` |
+
+D-TASK293-11 is accepted. Marking rather than rethrowing keeps the catalog scan's output a finding that names the function and the form, rather than an aborted scan.
+
+## R4.4 Findings
+
+None new. Still open from earlier rounds: R2-n3 (TEST-STRATEGY lines 192 and 599 still read "64/64" while 67 cases are adopted), for qa-lead.
+
+## R4.5 Merge conditions (replace R3.4)
+
+1. A lane-B PASS on `c618d8a` (queued), with the same observations as on `06270ba`: `catalog-c1-c14` = 113 with 0 skips, the 8 `[PR66-SEC-01]` rows, the 7 C16 / P9-CK cases, SEC-TC-76..78, the `[SEC-TC-74] [PR43-SEC-07] remainder` case, and the unit `lint-migrations`, `sql-text`, `scans-dynamic-sql` and `test-ids` suites.
+2. A security record on `c618d8a` that closes PR293-SEC-01/02.
+3. qa-lead acknowledges `required-suites.json` and `security-test-cases.md` (adopted 67), with R2-n3.
+4. The orchestrator logs D-TASK293-01..11 in DECISIONS.md and closes the PR65-SEC-05 (d) routing item.
+5. DUE (D-ORCH-134): merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file.
