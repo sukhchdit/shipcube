@@ -129,3 +129,95 @@ The other review targets in the dispatch:
 6. Squash merge.
 
 Round 2: delta review of the fix commits, re-running probe0 to probe4 against the new head.
+
+---
+
+# Round 2: fix cycle 2 at `29be7be`
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-19 |
+| Reviewed range | `git diff bf53c46 29be7be` (13 files, +968 / -320) |
+| Head | `29be7be` (local, not pushed). It holds two commits on `bf53c46`: `bcb3082` (the r1 findings) and `29be7be` (D-ARCH-154..157, section 5 of `docs/03-architecture/rulings/wave-1-pr65-r1-rulings.md`). |
+| Main | `05de264`. It is ahead of the branch's last merge (`36bc841`) by 287-B (#68: `.github/workflows/ci.yml`, `tools/ci/*`) and docs commits. No file is shared with the PR, and `git merge-tree origin/main 29be7be` is clean. |
+
+## R2 verdict
+
+**VERDICT: APPROVED_WITH_NITS** (0 BLOCKER, 0 MAJOR, 0 MINOR, 5 NIT). The approval is **conditional on lane B passing on `29be7be`**. That run is queued and has not started, and it is the first time PostgreSQL 18 will execute this PR's database tests. If any database suite fails there, this review reopens.
+
+**SUMMARY**
+- All 14 r1 findings are closed or accepted.
+- The migration applies on PGlite 17.5, and so does up, down, down, up.
+- I replayed all 18 database cases of the PR's own `prisma/tests/organisations/cases.ts` on PGlite through a pg-like adapter. Every result matches the assertions in `organisations.int.test.ts`.
+- I ran 7 single-line mutants of the new SQL; all 7 are killed by those cases.
+- The architect's section 5 SQL is in the migration verbatim.
+
+## R2.1 What I verified myself
+
+Same host rule as round 1: a `git archive` extract of `29be7be` with a `node_modules` junction to the worktree. I did not modify the worktree. The scripts are in the session scratchpad under `pr65/probe/`: `r2-cases.mts`, `r2-c11.mts` and `r2-updown.mts`.
+
+| Check | Result |
+|---|---|
+| Migration on PGlite 17.5 (bootstrap 00-02 + all 6 migrations as `platform_migrator`) | Applies. R1-B1 is gone: the expected scope is now assigned to `v_expected` before the `IF`. |
+| Up, down, down, up (as the migrator, with `RESET ROLE` mapped to the migrator as on a migrator login) | All ok. `down.sql` drops both new functions. |
+| Replay of `cases.ts`, all 18 cases, each in a rolled-back transaction | Every result equals the test's expectation. Examples: T1 `23503 fk_membership_roles__membership_id` for both the foreign and the unknown id, and ok for its own membership. T2 23503, ok, ok. T3 P0001, P0001, ok, ok. T4/T5: the foreign member is refused, gets 0 profile rows, and their own membership is ok with 1 row. T6 to T8: the 4 lifecycle refusals, `ok,ok,ok`, 42501 for platform_app, and P0001 `org_id cannot change` as the superuser. Also: AT-US-061-03 (PARTNER and the reserved row give P0001; INDIVIDUAL gives 23514; without the trigger, ok), R1-m2 (four WITH CHECK refusals), R1-m3 (P0001 for re-point plus delete, and P0001 `PERSONAL_OWNER_IMMUTABLE`), R1-m1 lookup `{1, 0, 1}`, and C12 with forced OPERATOR equal to TENANT scope. |
+| Mutants of the migration, replayed through the same cases | **7 of 7 killed.** No lifecycle trigger: T4, T6 and T8 change. Single-column role FK: T1 foreign becomes ok. Single-column invitation FK: T2 foreign becomes ok. No BUSINESS_CUSTOMER check: T3 becomes ok, ok. No owner-immutability trigger: `repoint` becomes ok. Delete guard reading NEW: `repointAndDelete` gives the other message. No type trigger: the case throws. |
+| C11 helper query on the committed schema | Exactly the new expectation at `c01-c12.int.test.ts:936-954`, including `app_is_operator()` with `parallel: 'u'` and execute `[platform_app, platform_definer]`. This closes R1-M1. |
+| Triggers | Each BEFORE trigger sorts before `trg_<t>__std_columns` (C15 (b)). The three new or changed assertion triggers are AFTER triggers. |
+| Rulings section 5 | The added SQL blocks of 5.1 and 5.2 are contained verbatim (whitespace-normalised), and the two deleted single-column keys are absent. |
+| `tools/db/lint-migrations.ts` | No findings. The Prisma schema validates (composite relations included). |
+| Prettier on the changed files | Clean. |
+| Lane B | Queued for `29be7be` and not started. The latest `Shipqube-TASK-037.log` is still the `bf53c46` run that failed on R1-B1. |
+
+**Not re-run (host rule):** lint, typecheck, unit (including the new `organisations.test.ts` cases and the `TENANT_KEY_MODELS` parity test), build, and the integration, catalog and generated suites on PostgreSQL 18. PGlite is PostgreSQL 17.5, and the replay uses PGlite's driver, not `pg`. The developer's fix for multi-statement parameterised queries (round 1's `world()` would have failed on `pg`'s prepared statements) can only be confirmed by lane B.
+
+## R2.2 Closure of round 1
+
+| r1 ID | Status | Evidence |
+|---|---|---|
+| R1-B1 | Closed | `migration.sql` role-scope function uses `v_expected`, and the migration applies (D-TASK037-17). |
+| R1-M1 | Closed | The C11 expectation equals the probed catalog rows (D-TASK037-20). |
+| R1-M2 | Closed | PARTNER plus the reserved row prove the trigger; INDIVIDUAL is kept as a 23514 case; the case also includes a no-trigger control. |
+| R1-m1 | Closed | (a) `assignRole` takes the context organisation and refuses a foreign membership with `MembershipNotFoundError`, with unit cases for the service and the repository filter (D-TASK037-19). (b) Composite tenant-bound keys (D-ARCH-154); T1 and T2 kill the single-column mutants. |
+| R1-m2 | Closed | `withCheckGuardedTables`: four 42501 RLS refusals for the multi-org actor, plus a positive control. |
+| R1-m3 | Closed | The guard reads OLD, and `trg_organisations__personal_owner_immutable` is added (D-TASK037-18). |
+| R1-m4 | Closed in the PR | SEC-TC-74 moved to `catalog-c1-c14.required_cases` (D-TASK037-22). See R2-n4. |
+| R1-n1 | Closed | D-ARCH-155: invitations exist only in BUSINESS_CUSTOMER organisations (T3). |
+| R1-n2, R1-n4, R1-n5 | Closed | `organisationDisplayName` cuts by code points on both paths. C12 uses a real B-only customer. `TENANT_KEY_MODELS` is checked for parity against the manifests and the schema. |
+| R1-n3 | Open (routed, D-TASK037-23) | A role missing from the seed still maps to 422. Carried as R2-n3. |
+| R1-n6, R1-n7 | Accepted | Wording; the over-redaction fails closed. |
+| S1 | Closed at the table | D-ARCH-156 lifecycle guard; T4 and its mutant. |
+
+## R2.3 Rulings on D-TASK037-17..27
+
+| Decision | Ruling |
+|---|---|
+| 17 (a variable instead of parentheses) | **Accepted.** It is equivalent, and a `CASE` in an assignment is outside the PL/pgSQL `IF` reader. |
+| 18 (`personal_owner_user_id` immutable) | **Accepted**, with R2-n1 (data-model wording). |
+| 19 (context organisation in `assignRole`; `MembershipNotFoundError` is a 404) | **Accepted.** The route mapping lands with TASK-231. |
+| 20 (`app_is_operator()` in C11 with its definer shape) | **Accepted.** Verified against the catalog. |
+| 21 (the statements of `organisations.int` moved to `cases.ts`) | **Accepted, and recommended as a pattern.** It made this replay possible without Jest. |
+| 22 (SEC-TC-74 moved to required) | **Accepted**, with R2-n4. |
+| 23 (n1, n3 and n7 left routed) | **Accepted.** n1 is in fact closed by D-ARCH-155. |
+| 24 (the architect's patched migration taken verbatim) | **Accepted.** Containment check done. |
+| 25 (T8 uses the REMOVED membership) | **Accepted.** A live membership re-parented as the superuser would hit `ux_memberships__org_user_live` (userA is live in B) before the AFTER trigger runs. |
+| 26 (the rulings in a separate commit) | **Accepted.** |
+| 27 (rulings 5.5 not done) | **Accepted as routed** (R2-n2). |
+
+## R2.4 Findings
+
+| ID | Severity | File:line | Issue | Fix or route |
+|---|---|---|---|---|
+| R2-n1 | NIT | `migration.sql` (`trg_organisations__personal_owner_immutable`) vs data-model §3.2 | data-model §3.2 and ADR-0005 amendment 13 do not mention that `personal_owner_user_id` is immutable. | Architect, at the next fold: one line in the `organisations` table notes. |
+| R2-n2 | NIT | `service/organisation-service.ts` `createPersonalOrganisation` / `createOrganisation` | Both still take the member's user id from the caller (rulings 5.5). The lifecycle guard now refuses a mismatch with P0001, so a caller bug surfaces as a 500 and not as a typed error. TenantDb has `contextOrgId` but no actor accessor. | Route to TASK-049, the first caller, or to a platform task that adds `contextActorId` as a latch member. This is not a merge condition, per the rulings. |
+| R2-n3 | NIT | `service/organisation-service.ts:38` | Carry-over of R1-n3: a role key that is missing from the `roles` table (seed drift) becomes a 422. | Next change to the module. |
+| R2-n4 | NIT (process) | `tools/quality/required-suites.json:71` | The PR edits a code-owned tooling input (content owner: qa-lead). When it merges, the lane-B evidence of every open PR that needs evidence becomes stale. | qa-lead acknowledges the move. The orchestrator sequences the merge. |
+| R2-n5 | NIT (process) | the branch | The branch has not merged main since `36bc841`. Main now carries 287-B's lane-A tooling (`tools/ci/*`, `ci.yml`). There is no shared file and the merge-tree is clean. | The orchestrator applies P1 (tooling-path voiding) when it decides whether lane B must run on a merge commit. |
+
+## R2.5 Merge conditions
+
+1. Lane-B PASS on the final head: every integration, catalog-c1-c14 (now with SEC-TC-74 required), rls-cross-tenant and migrations suite. The architect's section 2.5 says that no generated-suite observation should change. If one does, report it and do not adapt it without a ruling.
+2. A full lane-A run on the pushed head, with lint, format, typecheck, unit and build actually executed.
+3. The security-analyst sign-off on the DR-A14 policies, the standard-columns guard and the D-ARCH-154..156 controls.
+4. The mutant checks of rulings 5.4 are reported in the PR body. This review supplies them: 7 of 7 killed (R2.1).
+5. Squash merge.
