@@ -9,6 +9,8 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
+import { closeLoopbackServer } from '../../../apps/api/src/platform/routing/tests/loopback.js';
+
 import { callsFor, distinctiveValues, fillPath, PRINCIPAL_HEADER, runApiCase } from './api-cases.js';
 import type { SeededRow, TablePlan } from './database.js';
 import { type ApiCrossTenantCase, isSuccessStatus, type RouteShape, routeCaseFindings, stableUuid } from './generator.js';
@@ -97,8 +99,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await new Promise<void>((done) => server.close(() => done()));
-  server.closeAllConnections();
+  await closeLoopbackServer(server);
 });
 
 const run = (next: Behaviour, route: RouteShape = DUAL, apiCase: ApiCrossTenantCase = CASE): Promise<string[]> => {

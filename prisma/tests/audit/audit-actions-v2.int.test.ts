@@ -43,7 +43,7 @@ import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
 import { DEFAULT_BOOTSTRAP_DIR, LEDGER_TABLE } from '../../../tools/db/bootstrap.js';
 import { quoteLiteral } from '../../../tools/db/sql-text.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -240,7 +240,7 @@ async function attempt(config: pg.ClientConfig, statements: readonly string[]): 
 beforeAll(async () => {
   workDir = mkdtempSync(join(tmpdir(), 'audit-actions-v2-'));
   pgh = await PlatformPostgres.start();
-  ({ PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
+  ({ PrismaClient: PrismaCtor } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
   fresh = await openStack(await pgh.clone(await pgh.template({ migrated: false })));
 }, 240_000);
 

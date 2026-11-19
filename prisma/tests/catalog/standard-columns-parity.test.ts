@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 import { withStandardColumns } from '../../../apps/api/src/platform/db/index.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type * as GeneratedClient from '../../generated/prisma/client.js';
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import {
@@ -93,7 +93,7 @@ describe('the generated Prisma client (no database)', () => {
 
   beforeAll(async () => {
     // The tree lock may be held by the deps rebuild suites running in parallel (they regenerate the client).
-    generated = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+    generated = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
     // The pool connects lazily: nothing is opened until the first query, and none runs here.
     client = new generated.PrismaClient({ adapter: new PrismaPg({ connectionString: 'postgres://platform_app@127.0.0.1:1/none' }) });
   }, 120_000);

@@ -26,7 +26,7 @@ import {
   type TenantContext,
   type WithTenantTxOptions,
 } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -196,7 +196,7 @@ beforeAll(async () => {
   } finally {
     await migrator.end();
   }
-  ({ PrismaClient: PrismaCtor, Prisma: PrismaNs } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
+  ({ PrismaClient: PrismaCtor, Prisma: PrismaNs } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js')));
   pooled = appClient(2, 'rls-pooled');
   single = appClient(1, 'rls-single');
 }, 300_000);

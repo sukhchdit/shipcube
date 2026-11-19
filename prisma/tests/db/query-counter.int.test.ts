@@ -14,7 +14,7 @@ import { assertQueryBudget, createQueryCounter, withQueryCounter } from '../../.
 import { withStandardColumns } from '../../../apps/api/src/platform/db/index.js';
 import { systemDelegates } from '../../../apps/api/src/platform/db/system-db.js';
 import { createWithTenantTx, type TenantContext, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -41,7 +41,7 @@ let runner: TenantTxRunner<Prisma.TransactionClient>;
 beforeAll(async () => {
   db = await PlatformPostgres.start();
   const database = await db.clone(await db.template({ migrated: true }));
-  const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient: PrismaCtor } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   client = createDatabaseClient(PrismaCtor, {
     connectionString: db.migratorUrl(database),
     poolMax: 3,

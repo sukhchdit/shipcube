@@ -17,7 +17,7 @@ import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.j
 import { type SystemDelegates, systemDelegates } from '../../../apps/api/src/platform/db/system-db.js';
 import { SYSTEM_MODEL_HINT, type TenantDb, TenantDbAccessError } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantContext } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -66,7 +66,7 @@ beforeAll(async () => {
   } finally {
     await migrator.end();
   }
-  const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient: PrismaCtor } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   single = createDatabaseClient(PrismaCtor, {
     connectionString: postgres.appUrl(database),
     poolMax: 1,

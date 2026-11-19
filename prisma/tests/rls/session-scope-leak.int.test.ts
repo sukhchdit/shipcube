@@ -17,7 +17,7 @@ import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.j
 import { DbError, type DbSecurityEvent } from '../../../apps/api/src/platform/db/map-db-error.js';
 import { createDatabaseRuntime } from '../../../apps/api/src/platform/db/runtime.js';
 import { createWithTenantTx, type SecurityEventDetail, type TenantContext } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -122,7 +122,7 @@ beforeAll(async () => {
   } finally {
     await migrator.end();
   }
-  const { PrismaClient } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   single = createDatabaseClient(PrismaClient, { connectionString: db.appUrl(database), poolMax: 1, applicationName: 'rls-leak' });
 }, 300_000);
 
@@ -214,7 +214,7 @@ describe('ADR-0005 am.10 items 4 and 16: session-scope leak (negative control) a
 
 describe('PR11-SEC-09 items 1-4: the composition root (platform/db/runtime.ts) wires the runner, the sinks and the latch', () => {
   it('fresh probe first at start-up; a session leak through TenantDb raises the security event, counts, and LATCHES the database not ready (no flap)', async () => {
-    const { PrismaClient } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+    const { PrismaClient } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
     const logged: Array<{ level: string; event: string; fields: Record<string, unknown> }> = [];
     const sink =
       (level: string) =>

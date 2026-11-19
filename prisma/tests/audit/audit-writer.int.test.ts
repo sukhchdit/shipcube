@@ -38,7 +38,7 @@ import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.j
 import { DbError } from '../../../apps/api/src/platform/db/map-db-error.js';
 import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -234,7 +234,7 @@ beforeAll(async () => {
     ]);
     subjects.set(`${kind}:${ref}`, id);
   }
-  const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient: PrismaCtor } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   client = createDatabaseClient(PrismaCtor, { connectionString: pgh.appUrl(database), poolMax: 6, applicationName: 'audit-writer-it' });
   runner = createWithTenantTx(
     client,

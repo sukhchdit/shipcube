@@ -1,0 +1,15 @@
+{
+  "$comment": "Ratchet (TASK-291, D-ORCH-113, D-ARCH-146): test files that still call the global fetch against a loopback server. The list may only shrink: a new user fails tests/generated/loopback-ratchet.test.ts, a converted file must be removed here. Convert with fetchOnce and closeLoopbackServer (apps/api/src/platform/routing/tests/loopback.ts) in the next task that holds the named folder lock. Holds no file of tests/generated. Owner: qa-lead.",
+  "entries": [
+    { "file": "apps/api/src/platform/audit/audit-failure.api.test.ts", "lock": "api-audit-mw" },
+    { "file": "apps/api/src/platform/audit/capture.api.test.ts", "lock": "api-audit-mw" },
+    { "file": "apps/api/src/platform/errors/problem-handler.api.test.ts", "lock": "api-platform-core" },
+    { "file": "apps/api/src/platform/http/json-body-text.api.test.ts", "lock": "api-platform-core" },
+    { "file": "apps/api/src/platform/openapi/serve.api.test.ts", "lock": "api-openapi" },
+    { "file": "apps/api/src/platform/tx/execute-phases.test.ts", "lock": "api-tx-execute" },
+    { "file": "apps/api/src/platform/tx/route-phases.int.test.ts", "lock": "api-tx-execute" },
+    { "file": "apps/api/src/platform/tx/runner-activation.int.test.ts", "lock": "api-tx-execute" },
+    { "file": "apps/worker/src/platform/health/server.test.ts", "lock": "worker-platform-core" },
+    { "file": "tests/contract-stubs/contract-stubs.api.test.ts", "lock": "contract-stubs" }
+  ]
+}
