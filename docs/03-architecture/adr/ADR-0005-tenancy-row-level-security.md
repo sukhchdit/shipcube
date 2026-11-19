@@ -155,6 +155,25 @@ A crafted foreign ID is invisible under RLS, so the API answers 404 `NOT_FOUND`;
     - Such a migration stays `data-changing: no` (data-model §8.3 rule 10): it touches no existing row. It writes no audit entry; its record is the migration ledger.
 26. **The first staff user in production is a separate, later step (M5; D-ARCH-153).** Item 23 gives production its operator organisation but no member, and the demo seed never runs there (REQ-DATA-001/002). The first Super Admin is created by a one-shot audited command, `ops:staff-bootstrap`, of the same family as `ops:staff-reactivate` (ADR-0006 amendment 14). It runs as `platform_app` through the identity and organisations services with a `SYSTEM_JOB` actor, as a pipeline task. It creates one user without credentials, an `ACTIVE` membership in the reserved organisation with `OPERATOR_SUPER_ADMIN`, and a `SET_PASSWORD` link. It refuses when the operator organisation already has a member, and it creates no organisation. It is a precondition of G4 for a production release (risks.md R-ARCH-33), not Run 1 work.
 
+## Amendment 13 (2026-11-19, PR #65 / TASK-037 code review round 1: R1-m1 (b), R1-n1, security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; D-ARCH-154..157)
+
+27. **References between organisation-keyed tables are bound to the tenant by a composite foreign key.** PostgreSQL runs referential-integrity checks without row security. A single-column foreign key therefore accepts another tenant's id, tells the writer whether an id exists anywhere, and lets a forged row occupy a unique index of the other tenant's data. Rule:
+    - A reference from a table with `org_id NOT NULL` to another table that carries `org_id` is `FOREIGN KEY (org_id, <x>_id) REFERENCES <parent> (org_id, id)`. It replaces the single-column key and keeps its name. The parent carries a unique index `ux_<parent>__org_id_id` on `(org_id, id)`.
+    - Where `org_id` is nullable on the referencing side (GUEST_CAPABLE), the single-column key stays and the composite key is added beside it, because `MATCH SIMPLE` checks nothing while `org_id` is NULL. The guest-side binding is ruled before the quotes migration is written (risks.md R-ARCH-34).
+    - References to GLOBAL tables, to `organisations` and to `users`, and the logical actor columns, are outside the rule.
+    - First instances, in the migration that creates the tables: `membership_roles (org_id, membership_id) → memberships` and `memberships (org_id, invitation_id) → invitations`.
+    - No policy, template or renderer rule changes. The service still resolves a foreign id as not found (the "Cross-tenant 404" section); the key is the control for the case where the service is wrong.
+28. **Catalog assertion C16** (data-model §4.6) checks item 27 on the migrated schema, with an exception map that starts empty. It is due before the next migration that adds such a reference merges.
+29. **A membership is created by its member.** A membership row makes its user's profile row readable by the organisation (`p_users__org_member_read`), and every session of the organisation may write `memberships`. The 2026-11-14 ruling (D-ARCH-123) removed `INVITED` from the policy list for that reason; the same reason holds for `ACTIVE`. The table therefore carries an `AFTER ROW` assertion trigger, `trg_memberships__lifecycle_guard`:
+    - on insert, `user_id = platform.app_actor_id()` and `status = 'ACTIVE'`;
+    - on update, `user_id` and `org_id` do not change, and a `REMOVED` row keeps that status.
+    - There is no exemption for the SYSTEM actor or for any role. Provisioning code (the demo seed, the first-staff command of item 26) runs the membership insert with the member as `app.actor_id`, as it already must for the `users` insert.
+    - A path in which an organisation enrols a user who is not the actor needs a new amendment and a migration that replaces the function. No definer function gains a write and the DR-A14 policy set is unchanged.
+    - It is `AFTER ROW` so that RLS `WITH CHECK` answers a cross-tenant write first. That is the default for a new assertion trigger on an RLS table from this amendment on. The standard-columns guard, the de-claim guard and the two role-scope triggers stay `BEFORE` as they are.
+30. **Invitations exist only in `BUSINESS_CUSTOMER` organisations** (REQ-ORG-010). `platform.role_scope_matches_org()` refuses an `invitations` row in any other organisation type, so an invited role is always a customer role. Reason: `OPERATOR_SUPER_ADMIN` holds `org:member:invite`, and an invitation with an operator role would create operator staff, with cross-tenant read, outside the staff controls of M2 and the first-staff command of item 26. Staff or partner onboarding by invitation needs a new amendment.
+
+Consequence for the 2026-11-14 ruling: at invitation acceptance the membership's `created_by` is the accepting user, as the standard-columns guard requires, not the inviter. The inviter is `invitations.created_by`, reached through `memberships.invitation_id` (D-ARCH-157).
+
 ## Reversibility
 
 Medium: policies and roles are migrations; the `withTenantTx` boundary is pervasive but mechanical.

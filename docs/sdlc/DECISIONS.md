@@ -3765,3 +3765,81 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   4. A lane-B `pr` run on `06f62ac`.
   5. Any `.github/workflows/**` or `tools/ci/**` change after `06f62ac` needs a delta security round.
 - **Reversibility:** High (record and routing only; the follow-ups are policy-first changes in 287-C).
+
+### D-ARCH-154 · 2026-11-19 · principal-architect · PR #65 R1-m1 (b): references between organisation-keyed tables are composite foreign keys through `org_id`, in the TASK-037 migration now; rule T1/T2 and catalog assertion C16 for every later table (ADR-0005 amendment 13 items 27 and 28)
+- **Decision:**
+  - In `20261117000000_organisations_identity`, before it merges: `membership_roles (org_id, membership_id) → memberships (org_id, id)` and `memberships (org_id, invitation_id) → invitations (org_id, id)` replace the two single-column keys and keep their names. `memberships` and `invitations` each gain a unique index `ux_<table>__org_id_id` on `(org_id, id)`.
+  - The service fix of R1-m1 (a) stays. The key is the control for the case where the service is wrong.
+  - Rule for every later table (data-model §4.7). T1: a reference from a table with `org_id NOT NULL` to another table that carries `org_id` is composite through `org_id`. T2: where `org_id` is nullable on the referencing side (GUEST_CAPABLE), the single-column key stays and the composite key is added beside it.
+  - Catalog assertion C16 (data-model §4.6) checks the rule, with an exception map that starts empty. Default owner TASK-293, fallback TASK-051. Due before the next migration that adds such a reference merges.
+  - Outside the rule: references to GLOBAL tables, to `organisations` and to `users`, and the logical actor columns.
+- **Why:**
+  - PostgreSQL runs referential-integrity checks without row security. Probed on the PR's migration: in the context of organisation A, a role row with `org_id = A` naming B's membership is accepted. B's own grant of that role to that member then fails with `23505` while B sees no role row. A can block a role grant in B, and the key and the index answer questions about B's data.
+  - RLS `WITH CHECK` cannot help, because the forged row carries A's own `org_id`.
+  - Now is the cheapest point: the tables are empty and the file is mutable. After the merge it is an expand migration per table pair (concurrent unique index in its own file, `NOT VALID`, `VALIDATE`).
+  - Cost: one unique index per referenced table (32-byte key, about 50 MB per million rows, estimated), one more index insertion per parent insert, nothing on the referencing table.
+  - No policy, template, manifest or renderer rule changes, so the DR-A14 sign-off is not reopened.
+- **Alternatives rejected:**
+  - Service-layer checks only: leaves the table open to exactly the defect class RLS exists for (NFR-SEC-011).
+  - A trigger that compares the parent's `org_id`: an invoker trigger cannot see the other tenant's row, a definer one adds a privileged read, and each reference needs its own.
+  - Later, in an expand migration: three files per table pair, and every table added meanwhile repeats the finding.
+- **Verified here:** single-process PGlite 17.5 probes on a patched scratch copy of the developer's migration, with the unpatched file as the negative control (cross-tenant reference `23503`, own reference ok, registration shape ok, the six generated-suite probe shapes unchanged against committed seed rows with dangling references, C16 sketch 0 rows against 2 unpatched). `prisma validate` and `prisma migrate diff --from-empty` accept the schema form and emit the same four statements. `tools/db/lint-migrations.ts` reports no findings on the patched file. Rule T2 was checked on a two-table probe only.
+- **Not verified here:** no Jest, type check or container run. PGlite is PostgreSQL 17. Lane B on the fix head is the evidence. The index cost is an estimate.
+- **Open:** binding guest rows of GUEST_CAPABLE tables through `guest_token_hash`. Ruled with database-engineer before TASK-051 writes the quotes migration (risks.md R-ARCH-34).
+- **Where:** `docs/03-architecture/rulings/wave-1-pr65-r1-rulings.md` §2 and §5 (exact statements, Prisma form, tests); ADR-0005 amendment 13 items 27 and 28; data-model §1.1 P12, §3.2, §4.6 C16, §4.7, A31; risks.md R-ARCH-34.
+- **Reversibility:** High until PR #65 merges. After that, dropping a composite key is a contract migration; the rule itself can be relaxed per table through the C16 exception map.
+
+### D-ARCH-155 · 2026-11-19 · principal-architect · PR #65 R1-n1: an invitation row exists only in a `BUSINESS_CUSTOMER` organisation; the trigger is made stricter and the data-model stands (ADR-0005 amendment 13 item 30)
+- **Decision:**
+  - `platform.role_scope_matches_org()` gains one check for the `invitations` table: the organisation's type is `BUSINESS_CUSTOMER`. With the existing scope mapping the invited role is then always a customer role.
+  - The function stays shared and takes no argument. Both triggers and the marker `ROLE_NOT_ALLOWED_FOR_ORG_TYPE` are unchanged, so `ROLE_SCOPE_GUARDS` and its text pin in the generated suite do not move.
+  - `membership_roles` is unaffected: operator roles in the operator organisation and the Owner link of a personal organisation still pass.
+  - The service answers first (TASK-227: 422 `ORG_TYPE_RESTRICTION` or `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`). The trigger is the backstop.
+- **Why:**
+  - REQ-ORG-010 invites into a `BUSINESS_CUSTOMER` organisation. REQ-ACCT-014 and A-082 exclude INDIVIDUAL organisations, and DR-A05 gives them exactly one member.
+  - `OPERATOR_SUPER_ADMIN` holds every role-assignable permission, `org:member:invite` included, with the operator organisation as its active organisation. Once the invitation route exists, the looser trigger admits an invitation for an operator role. Whoever accepts it becomes operator staff with cross-tenant read, outside the staff controls of M2 (EPIC-B-207) and the first-staff command of D-ARCH-153.
+  - Probed: on the unpatched file the operator-role invitation in the operator organisation and a customer-role invitation in a personal organisation are both accepted; with the check both raise `P0001`.
+- **Alternatives rejected:**
+  - Reword the data-model to the looser mapping: it would document a privilege path that no requirement asks for.
+  - A second trigger function, or a trigger argument: more objects or a changed text pin for the same effect.
+  - Leave it to TASK-227: the migration is immutable after the merge, and a later fix is a second migration for a rule that is known today.
+- **Later:** staff or partner onboarding by invitation (M2, M3) replaces the function in a new migration under an ADR-0005 amendment.
+- **Where:** rulings file §3 and §5.2 item 4; ADR-0005 amendment 13 item 30; data-model §3.2 `invitations`, `membership_roles`.
+- **Reversibility:** High (a function body; `CREATE OR REPLACE` by its owner in a later migration).
+
+### D-ARCH-156 · 2026-11-19 · principal-architect · PR #65 security flag S1: a database control is required in this migration, the `AFTER ROW` trigger `trg_memberships__lifecycle_guard`; the service rule alone does not stand (ADR-0005 amendment 13 item 29)
+- **Decision:**
+  - `memberships` carries an assertion trigger (`AFTER INSERT OR UPDATE OF user_id, org_id, status`, function `platform.memberships_lifecycle_guard()`, `SECURITY INVOKER`, fixed search path) that raises `P0001 MEMBERSHIP_LIFECYCLE_VIOLATION` unless:
+    1. on insert, `user_id = platform.app_actor_id()`;
+    2. on insert, `status = 'ACTIVE'`;
+    3. on update, `user_id` and `org_id` are unchanged;
+    4. on update, a `REMOVED` row keeps that status.
+  - No exemption for the SYSTEM actor or for any role.
+  - Provisioning code (demo seed, staff-provisioning function of TASK-089, `ops:staff-bootstrap` at M5) runs the membership insert with the member as `app.actor_id`, as it already must for the `users` insert. The audit actor type and run reference are fields of the audit entry, not `app.actor_id`.
+  - Default from now on: a new assertion trigger on an RLS table is `AFTER ROW` unless it has a stated reason to run earlier. The standard-columns guard, the de-claim guard and the two role-scope triggers stay `BEFORE`.
+- **Why:**
+  - `p_memberships__tenant` lets any session of an organisation write a membership row, and `p_users__org_member_read` shows the user of an ACTIVE or SUSPENDED membership to that organisation. Probed on the unpatched file: actor A in context A inserts an ACTIVE membership for user B and then reads B's `users` row.
+  - D-ARCH-123 removed `INVITED` from the policy list for this reason. The reason holds for ACTIVE as well; that ruling closed the design path and left the table open.
+  - In all three creating paths (registration, organisation creation, invitation acceptance) the new member is already the actor, so the rule costs the product nothing. DR-A05 and REQ-ORG-003 already state rules 2 to 4.
+  - It ships in this migration, although a trigger could be added later, because the security sign-off on `p_users__org_member_read` rests on who can create a membership, and because TASK-049, 089, 224, 227 and 231 all build fixtures on this table.
+  - `AFTER ROW` keeps RLS `WITH CHECK` first: a cross-tenant write still fails as `42501`, the generated suite keeps proving `WITH CHECK` on `memberships` without a new trait, and C15 (b) is not in play.
+- **Alternatives rejected:**
+  - Insert only through a definer function with `INSERT` revoked: a write-capable definer function and a write policy for `platform_definer`, against ADR-0005 amendments 6 and 12 item 25. It would test the same condition and would not cover updates.
+  - A restrictive `FOR INSERT` policy: a new policy kind in the DR-A14 memberships template (renderer allow-list, rule 9, C3, the §4.3 fence, the sign-off), and a policy cannot compare OLD and NEW.
+  - Require an accepted invitation: invitations are tenant-writable too, and two of the three creating paths have none.
+  - An exemption for the SYSTEM actor: it reopens the hole for every job context.
+  - Service rule with a tracked task: leaves the table open in the migration whose policies are being signed off.
+- **Verified here:** PGlite probes as in D-ARCH-154: the foreign-user insert is refused and the user's row stays invisible (unpatched: accepted, 1 row); own ACTIVE insert ok and visible to a fellow member; non-ACTIVE at creation, `user_id` change and leaving `REMOVED` refused; `ACTIVE ↔ SUSPENDED → REMOVED` ok; re-parenting refused by RLS as `platform_app` and by the guard as the superuser in origin mode; the SEC-TC-74 forged-creator case still answers `STD_COLUMNS_VIOLATION`.
+- **Consequence:** a path in which an organisation enrols a user who is not the actor (directory provisioning, staff management by an administrator) needs an ADR-0005 amendment and a migration that replaces the function.
+- **Where:** rulings file §4 and §5.2 item 5, §5.4; ADR-0005 amendment 13 item 29; data-model §1.7, §3.2 `memberships`, §4.3, §4.7, §9.1, §9.3.
+- **Reversibility:** High (a trigger and a function; replaceable in a later migration without touching data).
+
+### D-ARCH-157 · 2026-11-19 · principal-architect · Invitation acceptance: the membership's `created_by` is the accepting user; "`created_by` = the inviter" of D-ARCH-123 / D-067 is withdrawn (wording routed to product-manager)
+- **Decision:** at `POST /invitations/accept` the membership is inserted with `created_by` = the accepting user, who is the actor of the transaction. The inviter is `invitations.created_by`, reached through `memberships.invitation_id`, which D-ARCH-154 binds to the same organisation.
+- **Why:** `platform.std_columns_guard()` (D-ARCH-091, shipped by PR #65) refuses an insert whose `created_by` is not the transaction's actor. D-ARCH-123 was written after that guard and contradicts it. Running the acceptance as the inviter would misstate who acted and would fail rule 1 of D-ARCH-156. Found while ruling S1; no code exists yet (TASK-227).
+- **Alternatives rejected:** run the acceptance transaction as the inviter (a false actor on every stamped row and audit entry); an `invited_by` column on `memberships` (duplicates `invitations.created_by`).
+- **Routed (orchestrator to product-manager; story files are tooling inputs, so the edit is scheduled, and it is due before TASK-227 is dispatched):**
+  - REQ-ORG-011 note: "the membership is created as `ACTIVE` by the accepting user with `invitation_id` set; the inviter is the creator of the invitation".
+  - US-084: "created_by is the inviter" becomes "invitation_id names the invitation"; "record created_by the inviter" becomes "record created_by the accepting user, the invitation's created_by the inviter".
+- **Where:** rulings file §6; data-model §3.2 `memberships`, `invitations`; ADR-0005 amendment 13 (closing paragraph).
+- **Reversibility:** High (documents only until TASK-227).
