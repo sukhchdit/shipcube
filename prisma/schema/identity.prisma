@@ -1,0 +1,45 @@
+// Identity module (data-model.md §3.1; REQ-AUTH-001/004, REQ-ORG-002/005, DR-A04, DR-A14). TASK-037 creates `users`
+// (D-TASK037-01); credentials, sessions and the other identity tables arrive with TASK-049/052/055/057.
+//
+// Not expressible in Prisma and kept in the migration SQL (20261117000000_organisations_identity): the CHECK
+// constraints (`ck_users__*`, among them `ck_users__is_system` for the two reserved actors), the partial unique index
+// `ux_users__email` (WHERE deleted_at IS NULL), the DEFERRABLE INITIALLY DEFERRED foreign key
+// `fk_users__personal_org_id`, the RLS block (dr-a14-users) and the `trg_users__std_columns` guard.
+
+/// USER_OWNED (DR-A14 users set): the actor's own row, and the rows of fellow ACTIVE/SUSPENDED members of the active
+/// organisation. `isSystem` is true exactly for the SYSTEM and ANONYMOUS actors (data-model §1.6).
+model User {
+  id                    String    @id(map: "pk_users") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy             String    @map("created_by") @db.Uuid
+  updatedBy             String    @map("updated_by") @db.Uuid
+  version               Int       @default(1)
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy             String?   @map("deleted_by") @db.Uuid
+  email                 String
+  emailVerifiedAt       DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  displayName           String    @map("display_name")
+  /// user_status: PENDING_VERIFICATION | ACTIVE | SUSPENDED | DEACTIVATED.
+  status                String    @default("PENDING_VERIFICATION")
+  statusChangedAt       DateTime  @default(now()) @map("status_changed_at") @db.Timestamptz(6)
+  statusReason          String?   @map("status_reason")
+  firstSignedInAt       DateTime? @map("first_signed_in_at") @db.Timestamptz(6)
+  locale                String    @default("en")
+  timeZone              String?   @map("time_zone")
+  unitSystem            String?   @map("unit_system")
+  theme                 String?
+  adminSidebarCollapsed Boolean   @default(false) @map("admin_sidebar_collapsed")
+  tableDensity          String    @default("COMFORTABLE") @map("table_density")
+  personalOrgId         String?   @map("personal_org_id") @db.Uuid
+  lastActiveOrgId       String?   @map("last_active_org_id") @db.Uuid
+  isSystem              Boolean   @default(false) @map("is_system")
+  deletionRequestedAt   DateTime? @map("deletion_requested_at") @db.Timestamptz(6)
+
+  personalOrg       Organisation?  @relation("UserPersonalOrg", fields: [personalOrgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_users__personal_org_id")
+  lastActiveOrg     Organisation?  @relation("UserLastActiveOrg", fields: [lastActiveOrgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_users__last_active_org_id")
+  ownedPersonalOrgs Organisation[] @relation("OrganisationPersonalOwner")
+  memberships       Membership[]
+
+  @@map("users")
+}

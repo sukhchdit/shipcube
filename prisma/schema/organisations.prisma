@@ -1,0 +1,123 @@
+// Organisations module (data-model.md §3.2; REQ-ORG-001..004, DR-A05, DR-A06, DR-A14; TASK-037). TENANT tables.
+//
+// Not expressible in Prisma and kept in the migration SQL (20261117000000_organisations_identity): every CHECK
+// constraint (`ck_organisations__type`, `ck_organisations__personal_owner`, `ck_memberships__status`, ...), the
+// partial unique indexes (`ux_organisations__single_operator`, `ux_organisations__personal_owner`,
+// `ux_memberships__org_user_live`, `ux_membership_roles__membership_role_live`, `ux_invitations__org_email_pending`),
+// the partial index `ix_membership_roles__org_role_live`, the covering index `ix_memberships__user_status` (INCLUDE
+// org_id) and the descending `ix_invitations__org_status_created`, the domain triggers
+// (`trg_organisations__type_immutable`, `trg_organisations__personal_owner_immutable`,
+// `trg_organisations__personal_delete_guard`, `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`,
+// `trg_memberships__lifecycle_guard`), the RLS blocks and the std-columns guards. The tenant-bound composite keys
+// (`fk_membership_roles__membership_id`, `fk_memberships__invitation_id`, D-ARCH-154) are expressed below.
+
+/// The tenant itself (its `id` is the tenant key). `type` never changes; exactly one OPERATOR organisation exists.
+model Organisation {
+  id                  String    @id(map: "pk_organisations") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy           String    @map("created_by") @db.Uuid
+  updatedBy           String    @map("updated_by") @db.Uuid
+  version             Int       @default(1)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(6)
+  deletedBy           String?   @map("deleted_by") @db.Uuid
+  /// org_type: OPERATOR | BUSINESS_CUSTOMER | PARTNER | INDIVIDUAL (immutable).
+  type                String
+  displayName         String    @map("display_name")
+  legalName           String?   @map("legal_name")
+  contactEmail        String?   @map("contact_email")
+  contactPhoneE164    String?   @map("contact_phone_e164")
+  defaultLocale       String    @default("en") @map("default_locale")
+  personalOwnerUserId String?   @map("personal_owner_user_id") @db.Uuid
+
+  personalOwner   User?            @relation("OrganisationPersonalOwner", fields: [personalOwnerUserId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_organisations__personal_owner_user_id")
+  personalUsers   User[]           @relation("UserPersonalOrg")
+  lastActiveUsers User[]           @relation("UserLastActiveOrg")
+  memberships     Membership[]
+  membershipRoles MembershipRole[]
+  invitations     Invitation[]
+
+  @@map("organisations")
+}
+
+/// A user's membership of an organisation (DR-A05). One non-REMOVED row per (org, user); a REMOVED row stays.
+model Membership {
+  id           String    @id(map: "pk_memberships") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy    String    @map("created_by") @db.Uuid
+  updatedBy    String    @map("updated_by") @db.Uuid
+  version      Int       @default(1)
+  orgId        String    @map("org_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  /// membership_status: ACTIVE | SUSPENDED | REMOVED (INVITED is reserved, never written; D-ARCH-123).
+  status       String
+  invitationId String?   @map("invitation_id") @db.Uuid
+  activatedAt  DateTime? @map("activated_at") @db.Timestamptz(6)
+  suspendedAt  DateTime? @map("suspended_at") @db.Timestamptz(6)
+  removedAt    DateTime? @map("removed_at") @db.Timestamptz(6)
+  removedBy    String?   @map("removed_by") @db.Uuid
+
+  org        Organisation     @relation(fields: [orgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__org_id")
+  user       User             @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__user_id")
+  invitation Invitation?      @relation(fields: [orgId, invitationId], references: [orgId, id], onDelete: Restrict, onUpdate: Restrict, map: "fk_memberships__invitation_id")
+  roles      MembershipRole[]
+
+  @@unique([orgId, id], map: "ux_memberships__org_id_id")
+  @@index([orgId, status, createdAt, id], map: "ix_memberships__org_status_created")
+  @@map("memberships")
+}
+
+/// A role held through a membership; revoked by `revokedAt`, never deleted. The role's scope matches the org type.
+model MembershipRole {
+  id           String    @id(map: "pk_membership_roles") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy    String    @map("created_by") @db.Uuid
+  updatedBy    String    @map("updated_by") @db.Uuid
+  version      Int       @default(1)
+  orgId        String    @map("org_id") @db.Uuid
+  membershipId String    @map("membership_id") @db.Uuid
+  roleId       String    @map("role_id") @db.Uuid
+  grantedBy    String    @map("granted_by") @db.Uuid
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    String?   @map("revoked_by") @db.Uuid
+
+  org        Organisation @relation(fields: [orgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__org_id")
+  membership Membership   @relation(fields: [orgId, membershipId], references: [orgId, id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__membership_id")
+  role       Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_membership_roles__role_id")
+
+  @@map("membership_roles")
+}
+
+/// The whole pending state of an invitation (D-ARCH-123): no membership exists before acceptance.
+model Invitation {
+  id               String    @id(map: "pk_invitations") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy        String    @map("created_by") @db.Uuid
+  updatedBy        String    @map("updated_by") @db.Uuid
+  version          Int       @default(1)
+  orgId            String    @map("org_id") @db.Uuid
+  email            String
+  roleId           String    @map("role_id") @db.Uuid
+  locale           String
+  tokenHash        Bytes     @map("token_hash")
+  /// PENDING | ACCEPTED | REVOKED | EXPIRED.
+  status           String
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  sendCount        Int       @default(1) @map("send_count") @db.SmallInt
+  lastSentAt       DateTime  @map("last_sent_at") @db.Timestamptz(6)
+  acceptedAt       DateTime? @map("accepted_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  acceptedByUserId String?   @map("accepted_by_user_id") @db.Uuid
+  revokedBy        String?   @map("revoked_by") @db.Uuid
+
+  org         Organisation @relation(fields: [orgId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_invitations__org_id")
+  role        Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_invitations__role_id")
+  memberships Membership[]
+
+  @@unique([orgId, id], map: "ux_invitations__org_id_id")
+  @@unique([tokenHash], map: "ux_invitations__token_hash")
+  @@map("invitations")
+}

@@ -801,7 +801,7 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
     expect(findings.find((finding) => finding.file.includes('partial_changed') && finding.rule === '19')?.message).toMatch(
       /^partial-index predicate changed: review required/,
     );
-    expect(COVERING_INDEX_TOLERANCE).toEqual(['ix_role_permissions__role_id']);
+    expect(COVERING_INDEX_TOLERANCE).toEqual(['ix_role_permissions__role_id', 'ix_memberships__user_status']);
   });
 
   it('[D-ARCH-077] COVERING_INDEX_TOLERANCE lists every INCLUDE index of prisma/migrations', () => {

@@ -1,0 +1,5 @@
+{
+  "$comment": "Identity module (data-model §3.1; REQ-AUTH-001/004, REQ-ORG-002/005, DR-A04, DR-A14; TASK-037 creates users, D-TASK037-01). USER_OWNED with the DR-A14 users set (own row + fellow ACTIVE/SUSPENDED members of the active organisation), read by the §4.5 functions (definerRead). Full standard-column set, runtime-writable (stdColumns). The other identity tables arrive with TASK-049/052/055/057.",
+  "module": "identity",
+  "tables": [{ "name": "users", "class": "USER_OWNED", "policySet": "dr-a14-users", "definerRead": true, "stdColumns": true }]
+}

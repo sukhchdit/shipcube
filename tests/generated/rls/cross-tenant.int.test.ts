@@ -27,7 +27,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Config } from '@platform/config';
-import { AppError } from '@platform/shared';
+import { AppError, OPERATOR_ORG_ID } from '@platform/shared';
 import Joi from 'joi';
 import pg from 'pg';
 
@@ -55,7 +55,7 @@ import {
   TENANT_A,
   TENANT_B,
 } from './database.js';
-import { API_CASES } from './fixtures.js';
+import { API_CASES, ROLE_SCOPE_GUARDS } from './fixtures.js';
 import {
   type ApiCrossTenantCase,
   enumerationFindings,
@@ -263,6 +263,13 @@ describe('AT-US-077-03 a new tenant table is picked up automatically; CI fails i
     expect([...layers.committed.plans.keys()].sort()).toEqual(rlsNames(COMMITTED_ENTRIES));
   });
 
+  it('D-TASK037-14 committed: every ROLE_SCOPE_GUARDS entry names a live, enabled trigger of an RLS table (the roleScopeGuard expectation is not stale)', () => {
+    const stale = Object.entries(ROLE_SCOPE_GUARDS).filter(
+      ([table, trigger]) => !(layers.committed.plans.get(table)?.table.triggers.includes(trigger) ?? false),
+    );
+    expect(stale).toEqual([]);
+  });
+
   it('AT-US-077-03 probe: the planted tables are classified by their probe manifest and each has its generated cases', () => {
     expect(enumerationFindings(layers.probe.entries, layers.probe.live)).toEqual([]);
     expect([...layers.probe.plans.keys()].sort()).toEqual(rlsNames(layers.probe.entries));
@@ -427,18 +434,20 @@ describe('DR-A14 policy sets (PR11-SEC-10, D-ARCH-123): positive status lists, o
 
   it("memberships: the actor reads its own membership in another organisation (own_read) and no one else's there", async () => {
     expect(await visibleAs([membership(TENANT_B.org, TENANT_A.actor, 'ACTIVE', 3)], ownMemberships, [TENANT_B.org])).toBe(1);
-    expect(await visibleAs([membership(TENANT_B.org, TENANT_B.actor, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
+    // Another member of B (not TENANT_B.actor: the committed memberships table already holds the seeded live row
+    // (B, TENANT_B.actor), and ux_memberships__org_user_live refuses a second one; PR #65 lane B, fix cycle 3).
+    const otherMemberOfB = stableUuid('dr-a14:user:other-member-of-B');
+    expect(await visibleAs([membership(TENANT_B.org, otherMemberOfB, 'ACTIVE', 4)], ownMemberships, [TENANT_B.org])).toBe(0); // B's memberships in B stay invisible
   });
 
-  it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of an OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {
+  it("[SEC-TC-06] R1-n5 positive control: a genuine operator (ACTIVE member of the OPERATOR organisation, OPERATOR scope) reads B's row and still cannot write it; the same actor in TENANT scope sees nothing", async () => {
     const plan = layers.probe.plans.get('rls_probe_parcels');
     if (plan === undefined) throw new Error('probe plan missing');
-    const operatorOrg = stableUuid('rls-generator:org-OPERATOR');
+    // The reserved operator organisation of the migration (D-ARCH-151): no fixture plants an OPERATOR organisation any
+    // more (the occupied ux_organisations__single_operator would refuse it); the control adds only the membership.
+    const operatorOrg = OPERATOR_ORG_ID;
     const operator = stableUuid('rls-generator:user-OPERATOR');
-    const planted: PlantedRow[] = [
-      ['organisations', { id: operatorOrg, type: 'OPERATOR' }],
-      membership(operatorOrg, operator, 'ACTIVE', 5),
-    ];
+    const planted: PlantedRow[] = [membership(operatorOrg, operator, 'ACTIVE', 5)];
     const byId = 'SELECT count(*)::int AS n FROM public.rls_probe_parcels WHERE id = $1';
     const asOperator = (client: pg.Client): Promise<void> => setContextValues(client, operatorOrg, operator, 'OPERATOR');
     expect(await asAppAfter(planted, asOperator, (client) => count(client, byId, [plan.rowB]))).toBe(1);

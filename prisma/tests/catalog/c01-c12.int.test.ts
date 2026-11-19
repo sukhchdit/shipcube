@@ -57,7 +57,12 @@ const SYSTEM_ACTOR = '00000000-0000-7000-8000-000000000001';
 
 const ORG_A = randomUUID();
 const ORG_B = randomUUID();
-const OPERATOR_ORG = randomUUID();
+/**
+ * The reserved operator organisation (D-ARCH-151; `OPERATOR_ORG_ID`, repeated because prisma/tests may not import
+ * @platform/shared). The committed migration inserts it, so no fixture plants an OPERATOR organisation any more: the
+ * probe only adds the operator membership to it.
+ */
+const OPERATOR_ORG = '00000000-0000-7000-8000-000000000010';
 const OPERATOR_USER = randomUUID();
 const CUSTOMER_USER = randomUUID();
 const ROW_A = randomUUID();
@@ -296,6 +301,23 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_audit_entries__source_app: ['admin', 'api', 'web', 'worker'],
   ck_audit_pii_vault__classification: ['PERSONAL', 'SENSITIVE_PERSONAL'],
   ck_data_subjects__kind: ['CONTACT', 'USER'],
+  // Organisations and identity (TASK-037; data-model §1.7, §3.1, §3.2), pinned from the data model like the audit lists.
+  // The organisations module's ORG_TYPES and WRITABLE_MEMBERSHIP_STATUSES (+ the reserved INVITED, D-ARCH-123) are
+  // compared with the migration text by apps/api/src/modules/organisations/tests/organisations.test.ts, which may import
+  // them (prisma/tests may not). Locales: the three UI locales (REQ-I18N).
+  ck_invitations__locale: ['en', 'es', 'fr'],
+  ck_invitations__status: ['ACCEPTED', 'EXPIRED', 'PENDING', 'REVOKED'],
+  ck_memberships__status: ['ACTIVE', 'INVITED', 'REMOVED', 'SUSPENDED'],
+  ck_organisations__default_locale: ['en', 'es', 'fr'],
+  ck_organisations__type: ['BUSINESS_CUSTOMER', 'INDIVIDUAL', 'OPERATOR', 'PARTNER'],
+  // Not an enum but an IN list all the same: exactly the two reserved actors of §1.6 are system users (PR26-SEC-04).
+  ck_users__is_system: [SYSTEM_ACTOR, '00000000-0000-7000-8000-000000000002'],
+  ck_users__locale: ['en', 'es', 'fr'],
+  ck_users__status: ['ACTIVE', 'DEACTIVATED', 'PENDING_VERIFICATION', 'SUSPENDED'],
+  ck_users__status_reason_value: ['ADMIN_ACTION', 'MFA_ENROLMENT_OVERDUE', 'USER_REQUEST', 'VERIFICATION_EXPIRED'],
+  ck_users__table_density: ['COMFORTABLE', 'COMPACT'],
+  ck_users__theme: ['DARK', 'LIGHT', 'SYSTEM'],
+  ck_users__unit_system: ['IMPERIAL', 'METRIC'],
 };
 
 const names = (list: readonly { relname: string }[]): string[] => list.map((row) => row.relname);
@@ -324,8 +346,11 @@ async function committedTables(client: pg.Client, tables: readonly string[]): Pr
  * Inside the caller's transaction on a superuser session: as the migrator, plant minimal `memberships` /
  * `organisations` tables when the real ones are absent (TASK-037 creates them; R1-m3) and `platform.app_is_operator()`
  * from its template (lead decision 5), then the TENANT probe table with its leading-org_id index, seed rows (before
- * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When a real table exists, the seed rows go in as the
- * superuser (RLS bypassed) through the same columns; TASK-037 extends the column list if its table needs more.
+ * FORCE) and the RLS block rendered by tools/db/render-rls.ts. When the real tables exist (TASK-037), the seed rows go
+ * in as the superuser (RLS bypassed) with every NOT NULL column, under `session_replication_role = replica` so the
+ * foreign keys to users and the standard-columns guard do not fire for these synthetic, rolled-back rows; the
+ * committed `platform.app_is_operator()` is used as it is. The operator membership then goes into the reserved
+ * operator organisation of the migration (D-ARCH-151); no OPERATOR organisation is planted.
  */
 async function plantProbe(client: pg.Client): Promise<string> {
   const committed = await committedTables(client, ['memberships', 'organisations']);
@@ -340,18 +365,35 @@ async function plantProbe(client: pg.Client): Promise<string> {
       CREATE TABLE public.organisations (id uuid PRIMARY KEY, type text NOT NULL);
       GRANT SELECT ON public.organisations TO platform_definer;`);
   }
-  if (committed.size > 0) await client.query('RESET ROLE');
-  await client.query(`
-    INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'BUSINESS_CUSTOMER');
-    INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
-      ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');`);
+  if (committed.size > 0) {
+    await client.query('RESET ROLE');
+    await client.query(`
+      SET LOCAL session_replication_role = replica;
+      INSERT INTO public.organisations (id, type, display_name, created_by, updated_by) VALUES
+        ('${ORG_A}', 'BUSINESS_CUSTOMER', 'Org A', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}');
+      INSERT INTO public.memberships (id, org_id, user_id, status, created_by, updated_by) VALUES
+        ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}'),
+        ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE', '${SYSTEM_ACTOR}', '${SYSTEM_ACTOR}');
+      SET LOCAL session_replication_role = origin;`);
+  } else {
+    await client.query(`
+      INSERT INTO public.organisations (id, type) VALUES ('${OPERATOR_ORG}', 'OPERATOR'), ('${ORG_A}', 'BUSINESS_CUSTOMER');
+      INSERT INTO public.memberships (id, org_id, user_id, status) VALUES
+        ('${randomUUID()}', '${OPERATOR_ORG}', '${OPERATOR_USER}', 'ACTIVE'), ('${randomUUID()}', '${ORG_A}', '${CUSTOMER_USER}', 'ACTIVE');`);
+  }
   await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
   await client.query(`
     CREATE TABLE public.${PROBE} (id uuid PRIMARY KEY, org_id uuid NOT NULL, ref text NOT NULL);
     CREATE INDEX ix_${PROBE}__org_id ON public.${PROBE} (org_id);
     GRANT SELECT, INSERT, UPDATE ON public.${PROBE} TO platform_app;
     INSERT INTO public.${PROBE} (id, org_id, ref) VALUES ('${ROW_A}', '${ORG_A}', 'A1'), ('${ROW_B}', '${ORG_B}', 'B1');`);
-  await client.query(APP_IS_OPERATOR_TEMPLATE); // ends with RESET ROLE (to the session user)
+  // The template ends with RESET ROLE (to the session user); once TASK-037 committed the function it is used as it is.
+  const operatorFn = await rows<{ fn: string | null }>(
+    client,
+    "SELECT pg_catalog.to_regprocedure('platform.app_is_operator()')::text AS fn",
+  );
+  if (operatorFn[0]?.fn === null || operatorFn[0]?.fn === undefined) await client.query(APP_IS_OPERATOR_TEMPLATE);
+  else await client.query('RESET ROLE');
   await client.query(`SET LOCAL ROLE ${MIGRATOR}`);
   const rendered = renderRls({ module: 'probe', name: PROBE, class: 'TENANT' });
   await client.query(rendered);
@@ -910,8 +952,21 @@ describe('catalog-c1-c14: grants and functions (C5, C11; US-074)', () => {
     );
     const helper = { owner: MIGRATOR, prosecdef: false, proconfig: null, volatile: 's', parallel: 's', execute: [APP_ROLE, MIGRATOR] };
     expect(helpers).toEqual([
-      { fn: 'platform.app_actor_id()', ...helper },
+      // TASK-037 (card C11 adaptation; code review R1-M1): the migration grants app_actor_id() to platform_definer,
+      // because app_is_operator() runs as platform_definer and reads the actor through it.
+      { fn: 'platform.app_actor_id()', ...helper, execute: [APP_ROLE, 'platform_definer', MIGRATOR] },
       { fn: 'platform.app_guest_token_hash()', ...helper },
+      // The §4.2 operator helper (template app-is-operator.sql): SECURITY DEFINER owned by platform_definer, fixed
+      // search path, EXECUTE for platform_app (and its owner) only; its definer shape is also on DEFINER_ALLOWED.
+      {
+        fn: 'platform.app_is_operator()',
+        owner: 'platform_definer',
+        prosecdef: true,
+        proconfig: ['search_path=pg_catalog, pg_temp'],
+        volatile: 's',
+        parallel: 'u',
+        execute: [APP_ROLE, 'platform_definer'],
+      },
       { fn: 'platform.app_org_id()', ...helper },
     ]);
     // No platform-owned function outside extensions leaves EXECUTE to PUBLIC (a NULL proacl is the built-in default).

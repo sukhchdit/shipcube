@@ -1,0 +1,10 @@
+{
+  "$comment": "Organisations module (data-model §3.2; REQ-ORG-001..004, DR-A05/A06/A14; TASK-037). TENANT tables. organisations is keyed on id (its own tenant key, C2 special case) with the DR-A14 organisations set; memberships keeps the tenant block plus the DR-A14 own-read branch; both are read by the SECURITY DEFINER platform.app_is_operator() and the §4.5 functions (definerRead). invitations is the whole pending state of an invitation (D-ARCH-123), read by invitation_lookup (definerRead). Every table carries the full standard-column set and is runtime-writable (stdColumns: trg_<table>__std_columns, C15).",
+  "module": "organisations",
+  "tables": [
+    { "name": "invitations", "class": "TENANT", "definerRead": true, "stdColumns": true },
+    { "name": "membership_roles", "class": "TENANT", "stdColumns": true },
+    { "name": "memberships", "class": "TENANT", "policySet": "dr-a14-memberships", "definerRead": true, "stdColumns": true },
+    { "name": "organisations", "class": "TENANT", "policySet": "dr-a14-organisations", "definerRead": true, "stdColumns": true }
+  ]
+}

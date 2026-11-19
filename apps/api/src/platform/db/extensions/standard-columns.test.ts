@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 import { SYSTEM_ACTOR_ID as AUTHZ_SYSTEM_ACTOR_ID } from '@platform/authz';
@@ -22,6 +24,7 @@ import {
   stampArgs,
   standardColumnsExtension,
   type StandardColumnsModel,
+  TENANT_KEY_MODELS,
   withStandardColumns,
 } from './standard-columns.js';
 
@@ -102,6 +105,24 @@ describe('AT-US-064-01 server sets the standard columns on create (unit)', () =>
     // created_at / updated_at come from the column default now(): one value per transaction, so they are equal.
     expect(out.data).not.toHaveProperty('createdAt');
     expect(out.data).not.toHaveProperty('updatedAt');
+  });
+
+  it('[D-TASK037-05] a tenant-key model takes its id from the transaction: Organisation the org, User the actor; never a forged id', () => {
+    const catalogue = catalogueFromDataModel({
+      models: { Organisation: { fields: STD.map((name) => field(name)) }, User: { fields: STD.map((name) => field(name)) } },
+    });
+    const organisation = catalogue.get('Organisation');
+    const user = catalogue.get('User');
+    expect([organisation?.tenantKey, user?.tenantKey, model('Shipment').tenantKey]).toEqual(['org', 'actor', undefined]);
+    expect(stampArgs(organisation, 'create', { data: { displayName: 'A' } }, STAMP, NOW)).toMatchObject({
+      data: { id: ORG, createdBy: ACTOR },
+    });
+    expect(stampArgs(user, 'create', { data: { email: 'a@b.c' } }, STAMP, NOW)).toMatchObject({ data: { id: ACTOR, createdBy: ACTOR } });
+    // Without the context value the id is a fresh UUIDv7 (RLS then refuses the row: fail closed).
+    const anonymous = stampArgs(user, 'create', { data: {} }, { orgId: ORG, actorId: '' }, NOW) as { data: { id: string } };
+    const orgless = stampArgs(organisation, 'create', { data: {} }, { orgId: '', actorId: ACTOR }, NOW) as { data: { id: string } };
+    expect([anonymous.data.id, orgless.data.id].every((id) => id !== ACTOR && id !== ORG && isUuidV7(id))).toBe(true);
+    expect(thrown(() => stampArgs(organisation, 'create', { data: { id: ORG } }, STAMP, NOW))).toMatchObject({ code: 'VALIDATION_ERROR' });
   });
 
   it('createMany / createManyAndReturn stamp every row with a distinct, time-ordered id', () => {
@@ -499,5 +520,38 @@ describe('the Prisma extension object and per-transaction binding', () => {
     const read = { where: { id: 'x' } };
     await expect(run('Nope', 'findMany', read)).resolves.toBe(read);
     expect(calls).toBe(1);
+  });
+});
+
+describe('[R1-n5] TENANT_KEY_MODELS parity with the table-class manifests', () => {
+  const ROOT = join(import.meta.dirname, '..', '..', '..', '..', '..', '..');
+  /** The DR-A14 policy sets whose isolation key is the row's own `id` (tests/generated/rls/generator.ts isolationKey). */
+  const ID_KEYED: Readonly<Record<string, 'org' | 'actor'>> = { 'dr-a14-organisations': 'org', 'dr-a14-users': 'actor' };
+
+  it('every manifest table keyed on its id is a tenant-key model with the same scope, and nothing else is', () => {
+    const classesDir = join(ROOT, 'tools', 'db', 'table-classes');
+    const idKeyedTables = new Map<string, 'org' | 'actor'>();
+    for (const file of readdirSync(classesDir).filter((name) => name.endsWith('.json'))) {
+      const manifest = JSON.parse(readFileSync(join(classesDir, file), 'utf8')) as {
+        tables: readonly { name: string; policySet?: string }[];
+      };
+      for (const table of manifest.tables) {
+        const scope = table.policySet === undefined ? undefined : ID_KEYED[table.policySet];
+        if (scope !== undefined) idKeyedTables.set(table.name, scope);
+      }
+    }
+    const schemaDir = join(ROOT, 'prisma', 'schema');
+    const modelOfTable = new Map<string, string>();
+    for (const file of readdirSync(schemaDir).filter((name) => name.endsWith('.prisma'))) {
+      for (const match of readFileSync(join(schemaDir, file), 'utf8').matchAll(/^model (\w+) \{[^}]*?@@map\("(\w+)"\)/gm)) {
+        modelOfTable.set(match[2] ?? '', match[1] ?? '');
+      }
+    }
+    const expected = [...idKeyedTables].map(([table, scope]) => [modelOfTable.get(table), scope]).sort();
+    expect(expected).toEqual([
+      ['Organisation', 'org'],
+      ['User', 'actor'],
+    ]);
+    expect([...TENANT_KEY_MODELS].sort()).toEqual(expected);
   });
 });

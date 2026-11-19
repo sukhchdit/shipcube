@@ -197,6 +197,12 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
       'permission',
       'role',
       'rolePermission',
+      // TASK-037: the organisations and identity tenant/user-owned models (RLS tables, DR-A14).
+      'invitation',
+      'membership',
+      'membershipRole',
+      'organisation',
+      'user',
       '$queryRaw',
       '$executeRaw',
       'markRollbackOnly',

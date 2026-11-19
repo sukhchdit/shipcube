@@ -70,7 +70,19 @@ export interface StandardColumnsModel {
   readonly scalars: ReadonlySet<string>;
   /** Relation (object) field names. */
   readonly relations: ReadonlySet<string>;
+  /**
+   * The model whose `id` IS a tenant key (TASK-037, D-TASK037-05): `organisations.id` is the organisation the RLS
+   * `WITH CHECK id = app_org_id()` admits and `users.id` the actor `p_users__own` admits, so a create takes its id
+   * from the transaction's organisation or actor instead of a fresh UUIDv7.
+   */
+  readonly tenantKey?: 'org' | 'actor';
 }
+
+/** Models keyed by a tenant key (TASK-037): the id of a new row is the transaction's organisation / actor. */
+export const TENANT_KEY_MODELS: ReadonlyMap<string, 'org' | 'actor'> = new Map([
+  ['Organisation', 'org'],
+  ['User', 'actor'],
+]);
 
 /** Model name (PascalCase, as Prisma passes it to query extensions) → its fields. */
 export type StandardColumnsCatalogue = ReadonlyMap<string, StandardColumnsModel>;
@@ -96,7 +108,8 @@ export function catalogueFromDataModel(dataModel: unknown): StandardColumnsCatal
       if (field['kind'] === 'object') relations.add(field['name']);
       else scalars.add(field['name']);
     }
-    catalogue.set(name, Object.freeze({ scalars, relations }));
+    const tenantKey = TENANT_KEY_MODELS.get(name);
+    catalogue.set(name, Object.freeze(tenantKey === undefined ? { scalars, relations } : { scalars, relations, tenantKey }));
   }
   return catalogue;
 }
@@ -145,13 +158,20 @@ function assertPayloads(model: StandardColumnsModel, payloads: readonly unknown[
   }
 }
 
+/** The id of a new row: the transaction's organisation / actor for a tenant-key model, else a fresh UUIDv7. */
+function newId(model: StandardColumnsModel, stamp: TransactionStamp): string {
+  if (model.tenantKey === 'org' && stamp.orgId !== '') return stamp.orgId;
+  if (model.tenantKey === 'actor' && stamp.actorId !== '') return stamp.actorId;
+  return uuidv7();
+}
+
 function stampCreate(model: StandardColumnsModel, data: unknown, stamp: TransactionStamp): unknown {
   if (!isPlainObject(data)) return data;
   const has = (field: string): boolean => model.scalars.has(field);
   const actor = stampActor(stamp);
   return {
     ...data,
-    ...(has('id') ? { id: uuidv7() } : {}),
+    ...(has('id') ? { id: newId(model, stamp) } : {}),
     ...(has('createdBy') ? { createdBy: actor } : {}),
     ...(has('updatedBy') ? { updatedBy: actor } : {}),
     ...(has('version') ? { version: 1 } : {}),

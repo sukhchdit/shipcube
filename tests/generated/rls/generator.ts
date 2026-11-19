@@ -22,6 +22,7 @@
 import { createHash } from 'node:crypto';
 
 import { RLS_CLASSES, type TableClassEntry } from '../../../tools/db/table-classes.js';
+import { ROLE_SCOPE_GUARDS } from './fixtures.js';
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Isolation keys
@@ -148,21 +149,35 @@ export function generateCases(entries: readonly TableClassEntry[]): IsolationCas
  * BEFORE ROW guards fire before WITH CHECK is evaluated, so on a re-parent they refuse first:
  *  - `guestCapable`: the de-claim guard refuses any change of a non-NULL org_id (23514 GUEST_DECLAIM_FORBIDDEN);
  *  - `stdGuardOnKey`: the isolation key is `id` and the standard-columns guard is installed, which refuses an id change
- *    (P0001 STD_COLUMNS_VIOLATION).
+ *    (P0001 STD_COLUMNS_VIOLATION);
+ *  - `roleScopeGuard`: the table carries `platform.role_scope_matches_org()` (BEFORE INSERT OR UPDATE OF role_id,
+ *    org_id; `ROLE_SCOPE_GUARDS` in fixtures.ts, checked against the live triggers by the suite). The function is
+ *    SECURITY INVOKER and reads the row's organisation through the organisations RLS policies, so for B's org_id the
+ *    session of A sees no organisation and the guard refuses (P0001 ROLE_NOT_ALLOWED_FOR_ORG_TYPE) before WITH CHECK
+ *    can run. The refusal is itself an RLS outcome (B's organisation is invisible to A); the `update-blind` positive
+ *    control on the same table (A's org_id, a valid CUSTOMER role, 1 row) shows the guard passes when the organisation
+ *    is visible, so the refusal cannot come from bad fixture data (D-TASK037-14).
  */
 export interface CaseTraits {
   readonly guestCapable?: boolean;
   readonly stdGuardOnKey?: boolean;
+  readonly roleScopeGuard?: boolean;
 }
 
-export const caseTraits = (entry: Pick<TableClassEntry, 'name' | 'class' | 'policySet' | 'stdColumns'>): CaseTraits => ({
+export const caseTraits = (
+  entry: Pick<TableClassEntry, 'name' | 'class' | 'policySet' | 'stdColumns'>,
+  roleScopeGuards: Readonly<Record<string, string>> = ROLE_SCOPE_GUARDS,
+): CaseTraits => ({
   guestCapable: entry.class === 'GUEST_CAPABLE',
   stdGuardOnKey: entry.stdColumns === true && isolationKey(entry).column === 'id',
+  roleScopeGuard: Object.hasOwn(roleScopeGuards, entry.name),
 });
 
 /** The message marker of a refusal: the de-claim guard, the standard-columns guard, or a WITH CHECK violation. */
 export const DECLAIM_MARKER = 'GUEST_DECLAIM_FORBIDDEN';
 export const STD_GUARD_MARKER = 'STD_COLUMNS_VIOLATION';
+/** The refusal of `platform.role_scope_matches_org()` (migration 20261117000000_organisations_identity). */
+export const ROLE_SCOPE_MARKER = 'ROLE_NOT_ALLOWED_FOR_ORG_TYPE';
 export const RLS_MARKER = 'row-level security';
 
 /** What a probe observed: a row count (selected or affected), or the SQLSTATE (+ message marker) of a refusal. */
@@ -174,6 +189,7 @@ const REFUSED: Observation = { sqlState: '42501' };
 const WITH_CHECK_REFUSED: Observation = { sqlState: '42501', marker: RLS_MARKER };
 const DECLAIM_REFUSED: Observation = { sqlState: '23514', marker: DECLAIM_MARKER };
 const STD_GUARD_REFUSED: Observation = { sqlState: 'P0001', marker: STD_GUARD_MARKER };
+const ROLE_SCOPE_REFUSED: Observation = { sqlState: 'P0001', marker: ROLE_SCOPE_MARKER };
 
 /**
  * The expected observation of a probe given the table privileges of `platform_app`. A probe whose privilege is missing
@@ -197,8 +213,11 @@ export function expectedObservation(kind: ProbeKind, privileges: readonly TableP
     case 'reparent-own-row':
       if (!can('SELECT', 'UPDATE')) return REFUSED;
       if (traits.guestCapable === true) return DECLAIM_REFUSED;
-      return traits.stdGuardOnKey === true ? STD_GUARD_REFUSED : WITH_CHECK_REFUSED;
+      if (traits.stdGuardOnKey === true) return STD_GUARD_REFUSED;
+      return traits.roleScopeGuard === true ? ROLE_SCOPE_REFUSED : WITH_CHECK_REFUSED;
     case 'insert-foreign-key':
+      if (!can('INSERT')) return REFUSED;
+      return traits.roleScopeGuard === true ? ROLE_SCOPE_REFUSED : WITH_CHECK_REFUSED;
     case 'guest-insert-with-org':
       return can('INSERT') ? WITH_CHECK_REFUSED : REFUSED;
     case 'guest-update-other-hash':
@@ -456,7 +475,9 @@ function syntheticValue(table: string, column: ColumnInfo, tag: string): unknown
   if (/^(?:character\(3\)|character varying\(3\))$/.test(type) || /(?:^|_)currency$/.test(column.name)) return 'USD';
   const length = /^(?:character varying|character)\((\d+)\)$/.exec(type);
   if (type === 'text' || type === 'citext' || length !== null) {
-    const text = `rls-${column.name}-${tag}`;
+    // Lowercase (D-TASK037-13): normalised-text CHECKs such as `email = lower(email)` (users, invitations) accept it,
+    // and the tags (A, B, G, X, planted-n) stay distinct, so unique indexes do too.
+    const text = `rls-${column.name}-${tag}`.toLowerCase();
     return length === null ? text : text.slice(0, Number(length[1]));
   }
   return undefined;

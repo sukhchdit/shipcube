@@ -22,6 +22,7 @@ import {
   type Observation,
   type ProbeKind,
   RLS_MARKER,
+  ROLE_SCOPE_MARKER,
   STD_GUARD_MARKER,
   type SynthesisedRow,
   type TablePrivilege,
@@ -261,7 +262,7 @@ async function observe(client: pg.ClientBase, sql: string, params: readonly unkn
     await client.query('ROLLBACK TO SAVEPOINT probe');
     const { code, message } = error as { code?: unknown; message?: unknown };
     const text = typeof message === 'string' ? message : '';
-    const marker = [DECLAIM_MARKER, STD_GUARD_MARKER, RLS_MARKER].find((candidate) => text.includes(candidate));
+    const marker = [DECLAIM_MARKER, STD_GUARD_MARKER, ROLE_SCOPE_MARKER, RLS_MARKER].find((candidate) => text.includes(candidate));
     return { sqlState: String(code), ...(marker === undefined ? {} : { marker }) };
   }
 }

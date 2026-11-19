@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import fc from 'fast-check';
 
 import { isServerControlledField, SERVER_CONTROLLED_FIELDS, serverControlledFieldIssues } from './server-controlled.js';
-import { ANONYMOUS_ACTOR_ID, isUuidV7, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './uuidv7.js';
+import { ANONYMOUS_ACTOR_ID, isUuidV7, OPERATOR_ORG_ID, SYSTEM_ACTOR_ID, uuidv7, uuidV7Timestamp } from './uuidv7.js';
 
 describe('uuidv7 (ADR-0009, data-model P1; NFR-DATA-002)', () => {
   it('returns canonical lowercase UUIDv7 values whose embedded time is now', () => {
@@ -36,6 +36,13 @@ describe('uuidv7 (ADR-0009, data-model P1; NFR-DATA-002)', () => {
     expect(SYSTEM_ACTOR_ID).toBe('00000000-0000-7000-8000-000000000001');
     expect(ANONYMOUS_ACTOR_ID).toBe('00000000-0000-7000-8000-000000000002');
     expect([SYSTEM_ACTOR_ID, ANONYMOUS_ACTOR_ID].map(uuidV7Timestamp)).toEqual([0, 0]);
+  });
+
+  it('[D-ARCH-151] the reserved operator organisation id is a valid UUIDv7 with timestamp 0, distinct from the actors', () => {
+    expect(OPERATOR_ORG_ID).toBe('00000000-0000-7000-8000-000000000010');
+    expect(isUuidV7(OPERATOR_ORG_ID)).toBe(true);
+    expect(uuidV7Timestamp(OPERATOR_ORG_ID)).toBe(0);
+    expect(new Set([SYSTEM_ACTOR_ID, ANONYMOUS_ACTOR_ID, OPERATOR_ORG_ID]).size).toBe(3);
   });
 
   it('the timestamp round-trips for any millisecond (property)', () => {

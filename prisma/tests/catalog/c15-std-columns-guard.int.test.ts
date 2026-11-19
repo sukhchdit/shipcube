@@ -207,7 +207,8 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
       expect(guardShapeFindings(triggers)).toEqual([]);
       // PR43-SEC-05 (c): no enabled BEFORE INSERT/UPDATE ROW trigger sorts after a guard on its table.
       expect(await rows(client, AFTER_GUARD_SQL)).toEqual([]);
-      expect(scope).toEqual([]); // TASK-037 applies the guard to the first runtime-writable STD tables
+      // TASK-037 applied the guard to the first runtime-writable STD tables (the organisations and identity manifests).
+      expect(scope).toEqual(['invitations', 'membership_roles', 'memberships', 'organisations', 'users']);
       expect(READ_ONLY.length + AUDIT_TABLES.length).toBeGreaterThan(0);
     } finally {
       await client.end();
@@ -215,14 +216,20 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
   }, 60_000);
 
   it('[SEC-TC-74] C15 (a) probe: the rendered trigger is the one enabled (O) row-level BEFORE INSERT OR UPDATE trigger on the function; an unguarded STD table and a second trigger are named', async () => {
+    // The probe observes only the tables it plants. Since TASK-037 the committed schema has in-scope tables of its own,
+    // each with its guard; those are the committed test's subject (above), so including them here would make this
+    // probe depend on the committed state it is meant to be independent of (PR #65 lane B, fix cycle 3).
+    const PLANTED: ReadonlySet<string> = new Set([PROBE.name, 'c15_unguarded']);
     const result = await rolledBack(async (client) => {
       await plantGuard(client);
-      const guarded = await rows(client, GUARD_TRIGGERS_SQL);
-      const scope = (await rows<{ relname: string }>(client, SCOPE_SQL, [[...READ_ONLY]])).map((row) => row.relname);
+      const guarded = (await rows(client, GUARD_TRIGGERS_SQL)).filter((row) => PLANTED.has(String(row['table'])));
+      const scope = (await rows<{ relname: string }>(client, SCOPE_SQL, [[...READ_ONLY]]))
+        .map((row) => row.relname)
+        .filter((table) => PLANTED.has(table));
       await plantGuard(client, false, 'c15_unguarded');
       const unguarded = (await rows<{ relname: string }>(client, SCOPE_SQL, [[...READ_ONLY]]))
         .map((row) => row.relname)
-        .filter((table) => !guarded.some((row) => row['table'] === table));
+        .filter((table) => PLANTED.has(table) && !guarded.some((row) => row['table'] === table));
       await client.query(
         `CREATE TRIGGER trg_c15_probe__second BEFORE UPDATE ON public.c15_probe FOR EACH ROW EXECUTE FUNCTION platform.std_columns_guard()`,
       );

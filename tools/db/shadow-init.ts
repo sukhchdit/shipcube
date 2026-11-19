@@ -22,10 +22,12 @@
  *              CONSTRAINT ck_<…> CHECK (…)` (same `ck_` name, one statement, the CHECK's closing parenthesis ends the
  *              statement: isCheckReplacement; 91-audit-actions-v2.sql, TASK-285; PR52-SEC-01, TASK-290), COMMENT ON, and
  *              `SELECT <schema>.<function>(<args>)` (the first ensure_audit_partitions
- *              call, so the shadow holds partitions as a real database does).
+ *              call, so the shadow holds partitions as a real database does), and the schema-scoped grants
+ *              `GRANT USAGE[, CREATE] ON SCHEMA … TO …` (SCHEMA_GRANT: the migrator owns the shadow's schemas; a
+ *              migration running under SET ROLE platform_definer needs them; PR #65, TASK-037).
  *   stripped   (needs a role or privilege the migrator lacks, or is not diffed): CREATE/ALTER/DROP ROLE|USER|GROUP and a
  *              DO block that only creates roles; SET [SESSION|LOCAL] ROLE, RESET ROLE; a single-action `ALTER … OWNER
- *              TO <r>`; GRANT, REVOKE; ALTER DEFAULT PRIVILEGES; ALTER DATABASE; CREATE/ALTER/DROP EVENT TRIGGER
+ *              TO <r>`; every other GRANT and REVOKE; ALTER DEFAULT PRIVILEGES; ALTER DATABASE; CREATE/ALTER/DROP EVENT TRIGGER
  *              (superuser only); a function RETURNS event_trigger (it exists only to serve those event triggers, which the
  *              shadow cannot have; Prisma does not diff functions, so dropping it changes nothing the differ sees).
  *   refused    everything else (fail closed, ShadowInitError): an unknown statement form, a kept statement that still
@@ -122,6 +124,19 @@ export function statementCode(statement: string): string {
 const NAME = '(?:"[^"]+"|[a-z_][a-z0-9_$]*)';
 const QNAME = `${NAME}(?: ?\\. ?${NAME})?`;
 
+/**
+ * A schema-scoped privilege grant (`GRANT USAGE[, CREATE] ON SCHEMA <s>[, <s>] TO <role>[, <role>]`, no grant option,
+ * no GRANTED BY), KEPT although every other GRANT is stripped. In the shadow database the migrator owns every schema
+ * (`platform` is re-created by the rendering without AUTHORIZATION, `public` by Prisma's reset), so these grants need no
+ * privilege the migrator lacks, and a migration that runs a statement under `SET ROLE platform_definer` (ADR-0005
+ * am. 10 item 9: TASK-037's `platform.app_is_operator()`) needs the definer's USAGE and CREATE on `platform` exactly as
+ * in a real database (01-schemas.sql). Stripping them made `migrate diff --from-migrations` fail with 42501 "permission
+ * denied for schema platform" (PR #65 lane B, SPK-08 F-02).
+ */
+const SCHEMA_GRANT = new RegExp(
+  `^grant (?:usage|create)(?: ?, ?(?:usage|create))? on schema ${NAME}(?: ?, ?${NAME})* to ${NAME}(?: ?, ?${NAME})*$`,
+);
+
 /** Statements removed from the rendering, matched on `statementCode()`. Order matters only for the reason reported. */
 const STRIP: readonly (readonly [StripReason, RegExp])[] = [
   ['role', /^(?:create|alter|drop) (?:role|user|group)\b/],
@@ -142,6 +157,7 @@ const STRIP: readonly (readonly [StripReason, RegExp])[] = [
 
 /** Statements kept verbatim, matched on `statementCode()`. */
 const KEEP: readonly RegExp[] = [
+  SCHEMA_GRANT,
   /^set search_path (?:=|to) pg_catalog, ?pg_temp$/,
   /^create extension if not exists [a-z_][a-z0-9_]* with schema public$/,
   /^create (?:unlogged )?table /,
@@ -226,7 +242,9 @@ export function renderShadowInit(files: readonly BootstrapFile[], { dropSchemas 
       const text = statementCode(statement);
       // Previews come from statementCode(): string literals are blanked, so a refused statement never echoes a literal.
       const preview = text.slice(0, 100);
-      const strip = STRIP.find(([, pattern]) => pattern.test(text))?.[0] ?? (isRoleDoBlock(statement, text) ? 'role DO block' : undefined);
+      const strip = SCHEMA_GRANT.test(text)
+        ? undefined
+        : (STRIP.find(([, pattern]) => pattern.test(text))?.[0] ?? (isRoleDoBlock(statement, text) ? 'role DO block' : undefined));
       if (strip !== undefined) {
         stripped.push({ file: file.name, reason: strip, preview });
         continue;

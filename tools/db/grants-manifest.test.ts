@@ -6,7 +6,7 @@ import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
 
 describe('grant manifest (data-model §4.4, C5)', () => {
-  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, and agrees with the table classes', () => {
+  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
       'platform_app INSERT public.audit_anchors *',
@@ -17,6 +17,11 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app INSERT public.audit_pii_vault *',
       'platform_app INSERT public.audit_stream_heads *',
       'platform_app INSERT public.data_subjects *',
+      'platform_app INSERT public.invitations *',
+      'platform_app INSERT public.membership_roles *',
+      'platform_app INSERT public.memberships *',
+      'platform_app INSERT public.organisations *',
+      'platform_app INSERT public.users *',
       'platform_app SELECT public.audit_anchors *',
       'platform_app SELECT public.audit_chain_verifications *',
       'platform_app SELECT public.audit_checkpoint_heads *',
@@ -25,13 +30,27 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app SELECT public.audit_pii_vault *',
       'platform_app SELECT public.audit_stream_heads *',
       'platform_app SELECT public.data_subjects *',
+      'platform_app SELECT public.invitations *',
+      'platform_app SELECT public.membership_roles *',
+      'platform_app SELECT public.memberships *',
+      'platform_app SELECT public.organisations *',
       'platform_app SELECT public.permissions *',
       'platform_app SELECT public.reference_dataset_versions *',
       'platform_app SELECT public.role_permissions *',
       'platform_app SELECT public.roles *',
+      'platform_app SELECT public.users *',
       'platform_app UPDATE public.audit_chain_verifications *',
       'platform_app UPDATE public.audit_partitions *',
       'platform_app UPDATE public.audit_stream_heads *',
+      'platform_app UPDATE public.invitations *',
+      'platform_app UPDATE public.membership_roles *',
+      'platform_app UPDATE public.memberships *',
+      'platform_app UPDATE public.organisations *',
+      'platform_app UPDATE public.users *',
+      'platform_definer SELECT public.invitations *',
+      'platform_definer SELECT public.memberships *',
+      'platform_definer SELECT public.organisations *',
+      'platform_definer SELECT public.users *',
       'platform_erasure DELETE public.audit_pii_vault *',
       'platform_erasure SELECT public.audit_pii_vault *',
       'platform_erasure SELECT public.data_subjects *',

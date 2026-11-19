@@ -40,10 +40,13 @@ export type ClassificationRegistry = Readonly<Record<string, Readonly<Record<str
 
 const INT = 'INTERNAL';
 const PUB = 'PUBLIC';
+const PER = 'PERSONAL';
 const SEC = 'SECRET';
 
 /** The standard columns (data-model P2): always INTERNAL. */
 const STD = { id: INT, created_at: INT, updated_at: INT, created_by: INT, updated_by: INT, version: INT } as const;
+/** The soft-delete pair (data-model P2, "STD, SD"): INTERNAL. */
+const SD = { deleted_at: INT, deleted_by: INT } as const;
 
 const table = (columns: Readonly<Record<string, FieldClassification>>): Readonly<Record<string, FieldClassification>> =>
   Object.freeze({ ...columns });
@@ -183,6 +186,60 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
   bootstrap_migrations: table({ file_name: INT, sha256: INT, applied_at: INT, applied_by: INT }),
   // data-model §3.4: who a vault value belongs to (a user or a contact row id), never the value itself.
   data_subjects: table({ ...STD, kind: INT, ref_id: INT, erased_at: INT }),
+  // data-model §3.2 (TASK-037): the whole pending state of an invitation (D-ARCH-123). The invitee address is PER; the
+  // SHA-256 of the one-time invitation token is SEC (a credential verifier, never logged or audited in clear).
+  invitations: table({
+    ...STD,
+    org_id: INT,
+    email: PER,
+    role_id: INT,
+    locale: INT,
+    token_hash: SEC,
+    status: INT,
+    expires_at: INT,
+    send_count: INT,
+    last_sent_at: INT,
+    accepted_at: INT,
+    revoked_at: INT,
+    accepted_by_user_id: INT,
+    revoked_by: INT,
+  }),
+  // data-model §3.2 (TASK-037): role grants of a membership; ids and timestamps only.
+  membership_roles: table({
+    ...STD,
+    org_id: INT,
+    membership_id: INT,
+    role_id: INT,
+    granted_by: INT,
+    revoked_at: INT,
+    revoked_by: INT,
+  }),
+  // data-model §3.2 (TASK-037): ids, status and timestamps only.
+  memberships: table({
+    ...STD,
+    org_id: INT,
+    user_id: INT,
+    status: INT,
+    invitation_id: INT,
+    activated_at: INT,
+    suspended_at: INT,
+    removed_at: INT,
+    removed_by: INT,
+  }),
+  // data-model §3.2 (TASK-037): the profile columns that exist so far. display_name is PER because a personal
+  // organisation is named after its user (REQ-ORG-002); the address, country, region and currency columns arrive as
+  // expand columns with their reference tables and are classified then.
+  organisations: table({
+    ...STD,
+    ...SD,
+    type: INT,
+    display_name: PER,
+    legal_name: PER,
+    contact_email: PER,
+    contact_phone_e164: PER,
+    default_locale: INT,
+    personal_owner_user_id: INT,
+  }),
   // PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): INT except the PUB description and category.
   permissions: table({ ...STD, key: INT, description: PUB, category: PUB, operator_only: INT }),
   reference_dataset_versions: table({
@@ -196,6 +253,29 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
   role_permissions: table({ ...STD, role_id: INT, permission_id: INT }),
   // PR8-SEC-10: INT except the PUB i18n name key and description.
   roles: table({ ...STD, key: INT, name_key: PUB, scope: INT, is_system: INT, description: PUB }),
+  // data-model §3.1 (TASK-037, D-TASK037-01): the minimal users table. email, display_name and time_zone are PER (an
+  // IANA zone is a location hint); display_currency arrives with currencies and is classified then.
+  users: table({
+    ...STD,
+    ...SD,
+    email: PER,
+    email_verified_at: INT,
+    display_name: PER,
+    status: INT,
+    status_changed_at: INT,
+    status_reason: INT,
+    first_signed_in_at: INT,
+    locale: INT,
+    time_zone: PER,
+    unit_system: INT,
+    theme: INT,
+    admin_sidebar_collapsed: INT,
+    table_density: INT,
+    personal_org_id: INT,
+    last_active_org_id: INT,
+    is_system: INT,
+    deletion_requested_at: INT,
+  }),
 });
 
 /** Own-key lookup (a table or column named like an `Object.prototype` member is never classified by accident). */
