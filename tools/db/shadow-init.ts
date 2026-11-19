@@ -194,6 +194,13 @@ const CHECK_REPLACEMENT_HEAD = new RegExp(
  * statement. Nothing can follow it: no constraint attribute (`NOT VALID`, `NO INHERIT`, `NOT ENFORCED`), no second
  * action (`, DISABLE TRIGGER ALL`, `, DROP CONSTRAINT …`, `, ADD COLUMN …`), so the shadow ends with exactly the
  * constraint a real database holds. A quoted identifier that holds a parenthesis cannot fake the end of the expression.
+ *
+ * Stated basis (PR #66 code review R1-n2, D-SEC-PR66-02; TASK-293): "the dropped constraint is the CHECK being replaced"
+ * rests on the data-model P9 naming convention alone. This text check sees only the name `ck_…`, never the constraint
+ * kind, so a bootstrap file that named a primary, foreign or unique key `ck_…` would pass here. The database-side check
+ * is catalog assertion P9-CK (prisma/tests/catalog/c16-tenant-keys.int.test.ts): every `pg_constraint` whose name
+ * starts with `ck_` has `contype = 'c'`, on the bootstrapped and migrated schema, with a planted control. Bootstrap
+ * files are CODEOWNERS-reviewed as well.
  */
 export function isCheckReplacement(text: string): boolean {
   const head = CHECK_REPLACEMENT_HEAD.exec(text);
