@@ -548,6 +548,41 @@ const ENGINE_CACHE_WITH = Object.freeze({
   path: 'node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x',
   key: 'prisma-engines-${{ runner.os }}-${{ steps.engines.outputs.version }}',
 });
+/**
+ * PR62-SEC-01 (TASK-287 part 287-C1, policy first): the exact commit of each action the three stage-2 jobs use, each
+ * verified against its upstream release tag (checkout v7.0.1, setup-node v7.1.0, cache v6.1.0; GitHub API, 2026-11-19).
+ * Any other 40-hex commit (a fork-network commit resolves under the upstream name) is a finding. A version bump is a
+ * reviewed change of this table first, then of ci.yml (policy first).
+ */
+export const STAGE_2_ACTION_COMMITS = Object.freeze({
+  'actions/checkout': '3d3c42e5aac5ba805825da76410c181273ba90b1',
+  'actions/setup-node': '949feb2413d6458794dcd2491c4babbbce0c15c1',
+  'actions/cache': '55cc8345863c7cc4c66a329aec7e433d2d1c52a9',
+});
+/**
+ * PR62-SEC-01: the keys an action step of a stage-2 job may have, exactly `{name, uses, with}` (no `env:`, `id:`,
+ * `continue-on-error:`, `timeout-minutes:`, `shell:` or `working-directory:`), and `if:` only where ci.yml needs it:
+ * fast-lane's engine cache is CODE-gated with exactly this condition.
+ */
+export const STAGE_2_ACTION_STEP_KEYS = Object.freeze(['name', 'uses', 'with']);
+export const STAGE_2_ACTION_STEP_IFS = Object.freeze({ 'fast-lane:actions/cache': "env.CODE == 'true'" });
+/**
+ * PR287B-SEC-02: the exact key set and runner of the three stage-2 jobs (an allow-list replaces the deny-list of
+ * `defaults`/`container`/`services`/`strategy`/`continue-on-error`, so `environment:`, `concurrency:` at job level
+ * and any later GitHub key are findings too); `runs-on` is exactly the hosted `ubuntu-24.04` label (no self-hosted
+ * runner can keep state between a head-code job and ci-gate).
+ */
+export const STAGE_2_JOB_KEYS = Object.freeze({
+  'fast-lane': Object.freeze(['name', 'if', 'runs-on', 'timeout-minutes', 'permissions', 'outputs', 'env', 'steps']),
+  'security-integration': Object.freeze(['name', 'needs', 'if', 'runs-on', 'timeout-minutes', 'permissions', 'env', 'steps']),
+  'ci-gate': Object.freeze(['name', 'if', 'needs', 'runs-on', 'timeout-minutes', 'permissions', 'env', 'steps']),
+});
+export const STAGE_2_RUNS_ON = 'ubuntu-24.04';
+/**
+ * D-SEC-PR57-02 / D-TASK287A-03 (TASK-287 part 287-C1): TASK-288's test locks live under this directory; a CI cache that
+ * would restore it must exclude it (a restored stale lock would make a suite wait or take over a lock it does not own).
+ */
+export const TEST_LOCKS_DIR = 'node_modules/.cache/shipqube-test-locks';
 export const STAGE_2_ACTION_INPUTS = Object.freeze({
   'fast-lane': Object.freeze({
     'actions/checkout': CHECKOUT_WITH,
@@ -1129,6 +1164,50 @@ function envEntryFindings(name, value) {
 }
 
 /**
+ * D-SEC-PR57-02 / D-TASK287A-03 (`cache-hygiene`): the findings for one `actions/cache` `path:` input. A path line
+ * that would restore TEST_LOCKS_DIR (the directory itself, an ancestor such as `node_modules` or `node_modules/.cache`,
+ * or a glob matching one) needs a `!${TEST_LOCKS_DIR}` exclusion line. `./` and `${{ github.workspace }}/` prefixes are
+ * read as the workspace root.
+ * @param {string} pathText the `with.path` value (one path or glob per line)
+ * @returns {string[]}
+ */
+export function cacheHygieneFindings(pathText) {
+  const normalise = (/** @type {string} */ line) =>
+    line
+      .trim()
+      .replace(/^\$\{\{\s*github\.workspace\s*\}\}\//u, '')
+      .replace(/^\.\//u, '')
+      .replace(/\/+$/u, '');
+  const lines = pathText
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  const segments = TEST_LOCKS_DIR.split('/');
+  const targets = segments.map((_, index) => segments.slice(0, index + 1).join('/'));
+  /** @param {string} glob */
+  const toRegExp = (glob) =>
+    new RegExp(
+      `^${glob
+        .split('/')
+        .map((part) => (part === '**' ? '<GLOBSTAR>' : part.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '[^/]*')))
+        .join('/')
+        .replace(/<GLOBSTAR>\//gu, '(?:.*/)?')
+        .replace(/\/<GLOBSTAR>/gu, '(?:/.*)?')
+        .replace(/<GLOBSTAR>/gu, '.*')}$`,
+      'u',
+    );
+  const covered = lines.some((line) => !line.startsWith('!') && targets.some((target) => toRegExp(normalise(line)).test(target)));
+  const excluded = lines.some(
+    (line) => line.startsWith('!') && [TEST_LOCKS_DIR, `${TEST_LOCKS_DIR}/**`].includes(normalise(line.slice(1))),
+  );
+  return covered && !excluded
+    ? [
+        `an actions/cache path that restores ${TEST_LOCKS_DIR} must exclude it with a !${TEST_LOCKS_DIR} line (a restored stale test lock; D-SEC-PR57-02)`,
+      ]
+    : [];
+}
+
+/**
  * Findings for one shell script (`run:`).
  * @param {string} script
  * @param {boolean} isCi true for a NO_RELEASE_WORKFLOWS file (ci.yml, lane-c.yml, nightly.yml)
@@ -1495,13 +1574,17 @@ export function checkWorkflow(text, fileName, options = {}) {
       }
       const uses = asString(step.uses) ?? '';
       const withMap = asMap(step.with) ?? {};
+      // D-SEC-PR57-02: no cache in any workflow restores the test-lock directory.
+      if (/^actions\/cache(?:\/restore|\/save)?@/u.test(uses))
+        for (const message of cacheHygieneFindings(asString(withMap.path) ?? ''))
+          add('cache-hygiene', message, [...stepPath, 'with', 'path']);
       const script = asString(withMap.script);
       if (script !== undefined) {
         for (const f of untrustedExpressionFindings(script, 'with.script')) add(f.rule, f.message, [...stepPath, 'with', 'script']);
       }
       // ci-gate holds actions: read and runs the tested-base lane-scope and the scans, so it is isolated (RR-6).
       if (isCi && jobId === 'ci-gate') {
-        for (const message of scansStepViolations(step)) add('scans-isolation', message.replace('job scans', `job ${jobId}`), stepPath);
+        for (const message of scansStepViolations(step)) add('scans-isolation', message, stepPath);
       }
       if (noRelease && /^aws-actions\/configure-aws-credentials@/.test(uses))
         add('ci-no-release', `${fileName} must not assume an AWS role (AT-US-005-05)`, [...stepPath, 'uses']);
@@ -1571,13 +1654,14 @@ function scansStepViolations(step) {
   const run = asString(step.run) ?? '';
   const uses = asString(step.uses) ?? '';
   const withMap = asMap(step.with) ?? {};
-  if (/(?:^|[\s;&|(`])(?:npm|npx|pnpm|yarn|bun)(?:\s|$)/m.test(run)) out.push('job scans must not run a package manager');
-  if (/node_modules/.test(run)) out.push('job scans must not run anything from node_modules');
+  if (/(?:^|[\s;&|(`])(?:npm|npx|pnpm|yarn|bun)(?:\s|$)/m.test(run))
+    out.push('job ci-gate (the folded scans) must not run a package manager');
+  if (/node_modules/.test(run)) out.push('job ci-gate (the folded scans) must not run anything from node_modules');
   if (/\$\{?GITHUB_WORKSPACE\}?\/[^"'\s]*\.(?:[cm]?[jt]s|sh)\b|github\.workspace/.test(run))
-    out.push('job scans must not run a script from the workspace (head-controlled)');
-  if (uses.startsWith('./')) out.push('job scans must not use a local action');
+    out.push('job ci-gate (the folded scans) must not run a script from the workspace (head-controlled)');
+  if (uses.startsWith('./')) out.push('job ci-gate (the folded scans) must not use a local action');
   if (/^actions\/setup-node@/.test(uses) && (withMap.cache !== undefined || withMap['node-version-file'] !== undefined))
-    out.push('job scans: setup-node takes a literal node-version and no cache');
+    out.push('job ci-gate (the folded scans): setup-node takes a literal node-version and no cache');
   return out;
 }
 
@@ -1874,13 +1958,17 @@ export function stage2Findings(doc) {
     if (list.length !== expected.length || !expected.every((need) => list.includes(need)))
       add(`ci.yml job ${jobId} needs must be exactly [${expected.join(', ')}] (D-ARCH-128)`, ['jobs', jobId, 'needs']);
   }
+  // PR287B-SEC-02: the exact key set of each stage-2 job and its hosted runner.
   for (const [jobId, job] of /** @type {const} */ ([
     ['fast-lane', fastLane],
     ['security-integration', securityIntegration],
     ['ci-gate', ciGate],
   ])) {
-    for (const key of ['defaults', 'container', 'services', 'strategy', 'continue-on-error'])
-      if (job[key] !== undefined) add(`ci.yml job ${jobId} must not set ${key} (pinned job shape)`, ['jobs', jobId, key]);
+    const allowed = STAGE_2_JOB_KEYS[jobId];
+    for (const key of Object.keys(job).filter((name) => !allowed.includes(name)))
+      add(`ci.yml job ${jobId} must not set ${key} (pinned job shape: only ${allowed.join(', ')}; PR287B-SEC-02)`, ['jobs', jobId, key]);
+    if (asString(job['runs-on']) !== STAGE_2_RUNS_ON)
+      add(`ci.yml job ${jobId} runs-on must be exactly ${STAGE_2_RUNS_ON} (PR287B-SEC-02)`, ['jobs', jobId, 'runs-on']);
   }
   const stepsOf = (/** @type {YamlMap} */ job) => (Array.isArray(job.steps) ? job.steps : []);
   // PR55-SEC-02 item 5: no action that could export a variable, rewrite a file or reach the token runs in the jobs that
@@ -1912,8 +2000,30 @@ export function stage2Findings(doc) {
       const step = asMap(node) ?? {};
       const uses = asString(step.uses);
       if (uses === undefined) continue;
-      const action = uses.split('@')[0] ?? '';
+      const [action = '', commit = ''] = uses.split('#')[0]?.trim().split('@') ?? [];
       const expected = Object.hasOwn(inputs, action) ? inputs[action] : undefined;
+      // PR62-SEC-01: exactly {name, uses, with} (plus the one pinned if:), and the action's exact commit.
+      const ifKey = `${jobId}:${action}`;
+      const allowedIf = Object.hasOwn(STAGE_2_ACTION_STEP_IFS, ifKey)
+        ? STAGE_2_ACTION_STEP_IFS[/** @type {keyof typeof STAGE_2_ACTION_STEP_IFS} */ (ifKey)]
+        : undefined;
+      for (const key of Object.keys(step).filter(
+        (name) => !STAGE_2_ACTION_STEP_KEYS.includes(name) && !(name === 'if' && allowedIf !== undefined),
+      ))
+        add(`ci.yml ${jobId} ${action} step must have only the keys ${STAGE_2_ACTION_STEP_KEYS.join(', ')} (found ${key}; PR62-SEC-01)`, [
+          'jobs',
+          jobId,
+          'steps',
+          String(index),
+          key,
+        ]);
+      if (allowedIf !== undefined && asString(step.if) !== allowedIf)
+        add(`ci.yml ${jobId} ${action} step if: must be exactly ${allowedIf} (PR62-SEC-01)`, ['jobs', jobId, 'steps', String(index), 'if']);
+      const pinned = Object.hasOwn(STAGE_2_ACTION_COMMITS, action)
+        ? STAGE_2_ACTION_COMMITS[/** @type {keyof typeof STAGE_2_ACTION_COMMITS} */ (action)]
+        : undefined;
+      if (pinned !== undefined && commit !== pinned)
+        add(`ci.yml ${jobId} ${action} must be pinned to exactly ${pinned} (PR62-SEC-01)`, ['jobs', jobId, 'steps', String(index), 'uses']);
       if (expected === undefined)
         add(`ci.yml ${jobId} may not use ${action} (PR59-SEC-01: only ${Object.keys(inputs).join(', ')})`, [
           'jobs',

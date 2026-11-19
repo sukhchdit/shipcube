@@ -105,7 +105,7 @@ export const WORKFLOW_PATH = '.github/workflows/ci.yml';
 export const MAX_IDENTICAL = 50;
 /** At most this many API calls per lookup (a run list per commit and a job list per completed run). */
 export const MAX_API_CALLS = 40;
-/** The scans gates whose step conclusions belong to a code proof (by CI_REQUIRED_GATES `gate`). */
+/** The scans gates whose step conclusions belong to a code proof (by CI_REQUIRED_GATES_STAGE_2 `gate`). */
 export const PROOF_SCANS_GATES = Object.freeze(['gitleaks', 'semgrep', 'openapi-breaking']);
 /** Proof runs are runs against this base branch only (R2-M1, PR46-SEC-13; ci.yml `on.pull_request.branches`). */
 export const PROOF_BASE_REF = 'main';
@@ -577,6 +577,30 @@ export function fastLaneProblems(jobsJson, required, lintControls = false) {
 }
 
 /**
+ * PR #287-B code review R1-m1: true when the run actually ran code and failed on it: a CODE-gated fast-lane step or a
+ * scans step concluded `failure`. A cancelled, superseded or light run (steps cancelled or skipped), a missing job or
+ * an unreadable response is not red on code.
+ * @param {unknown} jobsJson
+ * @param {ProofSteps} steps
+ * @returns {boolean}
+ */
+export function failedOnCode(jobsJson, steps) {
+  /** @param {string} jobName @param {readonly string[]} names */
+  const failed = (jobName, names) => {
+    const job = oneJob(jobsJson, jobName);
+    if (typeof job === 'string') return false;
+    const list = Array.isArray(job.steps) ? job.steps.filter(isRecord) : [];
+    return list.some((step) => names.includes(String(step.name)) && step.conclusion === 'failure');
+  };
+  return (
+    failed(
+      'fast-lane',
+      steps.fastLane.map((step) => step.name),
+    ) || failed(steps.scansJob ?? SCANS_JOB, steps.scans)
+  );
+}
+
+/**
  * Problems that keep a run's scans (steps of job `ci-gate`) from proving the code (the job colour is
  * ignored; the record step may fail).
  * @param {unknown} jobsJson
@@ -722,7 +746,7 @@ export function lookupProofs({
   /** Bound runs of this PR refused only by the tested-base check, newest first after the loop. */
   /** @type {{ run: Record<string, any>, sha: string }[]} */
   const voided = [];
-  /** A bound, completed run of this PR on the identical code that the tested-base check did not void. */
+  /** A bound run of this PR on the identical code, not voided by the tested base, that failed on the code (R1-m1). */
   let nonVoidedSeen = false;
   if (baseChangedAt === null)
     return {
@@ -776,7 +800,6 @@ export function lookupProofs({
         );
       } else candidates.push(run);
     }
-    if (candidates.length > 0) nonVoidedSeen = true;
     candidates.sort((a, b) => Number(b.id) - Number(a.id));
     for (const run of candidates) {
       if (codeProof !== '' && securityProof !== '') break;
@@ -791,7 +814,12 @@ export function lookupProofs({
           ...scansProblems(jobs.json, steps.scans, steps.scansJob),
         ];
         if (problems.length === 0) codeProof = `${String(run.id)}:${sha}`;
-        else notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a code proof: ${problems.slice(0, 3).join('; ')}`);
+        else {
+          notes.push(`run ${String(run.id)} (${sha.slice(0, 7)}) is not a code proof: ${problems.slice(0, 3).join('; ')}`);
+          // R1-m1 (287-B review): only a run that failed on the code counts against run-full; a cancelled, superseded or
+          // light run says nothing about the code on the current base.
+          if (failedOnCode(jobs.json, steps)) nonVoidedSeen = true;
+        }
       }
       if (securityProof === '' && securityIntegrationPassed(jobs.json)) securityProof = `${String(run.id)}:${sha}`;
     }
@@ -807,10 +835,12 @@ export function lookupProofs({
         if (calls > MAX_API_CALLS) break;
         continue;
       }
+      // R1-n1 (287-B review): a step the current workflow requires but the voided run did not have (the base change that
+      // voided it may have added or renamed a gate step) does not disqualify it; a failed, cancelled or skipped step does.
       const problems = [
         ...fastLaneProblems(jobs.json, steps.fastLane, lintControls),
         ...scansProblems(jobs.json, steps.scans, steps.scansJob),
-      ];
+      ].filter((problem) => !/: missing$/u.test(problem));
       if (problems.length === 0) {
         voidedByBase = true;
         break;
@@ -924,6 +954,8 @@ export function parseClassification(text) {
  * @property {Partial<Record<FastLaneOutput, string>>} [fastLaneOutputs] PR55-SEC-05: fast-lane's separate outputs (mode,
  *   code_proof, security_integration_due, tools_ref) as passed into the aggregation step; each one present must equal
  *   the classification ci-gate computes itself
+ * @property {FastLaneOutput[]} [fastLaneOutputsMissing] PR287B-SEC-01: the outputs whose env entry is absent (each one
+ *   is BLOCKED as `fast-lane outputs missing`; the policy requires all four since TASK-287 part 287-B)
  * @property {(lintControls?: boolean) => string[]} thisRunCodeProblems problems of this run's CODE-gated fast-lane steps
  *   (jobs API); with lintControls the LINT_CONTROLS-gated steps must have succeeded too (PR #55 R1-n1)
  */
@@ -959,6 +991,8 @@ export function gateVerdictStage2(input) {
       .filter(([key, value]) => own[/** @type {FastLaneOutput} */ (key)] !== value)
       .map(([key]) => key);
     if (differing.length > 0) reasons.push(`fast-lane outputs mismatch (${differing.join(', ')})`);
+    const missing = input.fastLaneOutputsMissing ?? [];
+    if (missing.length > 0) reasons.push(`fast-lane outputs missing (${missing.join(', ')})`);
   }
   if (own !== null) {
     // (b)
@@ -1020,6 +1054,11 @@ export function gateInputStage2FromEnv({ root, env, api }) {
       Object.entries(FAST_LANE_OUTPUT_ENV)
         .filter(([, name]) => env[name] !== undefined)
         .map(([key, name]) => [key, get(name)]),
+    ),
+    fastLaneOutputsMissing: /** @type {FastLaneOutput[]} */ (
+      Object.entries(FAST_LANE_OUTPUT_ENV)
+        .filter(([, name]) => env[name] === undefined)
+        .map(([key]) => key)
     ),
     thisRunCodeProblems: (lintControls = false) => thisRunCodeProblems({ root, get, api }, lintControls),
   };
@@ -1210,12 +1249,11 @@ export function main(argv, deps = {}) {
     }
     out.code_proof = codeProof;
     out.security_proof = securityProof;
-    // D-TASK286-06a option (TASK-287, SPK-07 section 6.1): a docs push of a PR with code changes whose only proof
-    // candidates were voided by the tested base (PR46-SEC-16) runs the full lane at once: the code must run on the new
-    // base before the merge anyway, and the full run alone (8-10 billed minutes) is cheaper than the blocked light run
-    // (3-4) plus that re-push. Without any candidate (the code run is pending or red) the push stays light and ends
-    // `BLOCKED: no code proof`, because a full run there would usually be wasted. Both lane-scope instances decide it the
-    // same way, and rule (g) compares them.
+    // D-TASK286-06a option (TASK-287, SPK-07 section 6.1): a docs push of a PR with code changes runs the full lane at
+    // once only when no proof was found, no bound run on its code failed on the code since the tested base moved, and at
+    // least one run voided by the tested base would have been a proof (lookupProofs voidedByBase; 287-B review R1-m1).
+    // A red voided run or a newer run that failed on the code keeps it light and BLOCKED. Both lane-scope instances
+    // decide it the same way, and rule (g) compares them.
     if (event === 'pull_request' && out.code_changed === 'false' && out.pr_docs_only === 'false' && codeProof === '' && voidedByBase) {
       out.code_changed = 'true';
       out.mode = 'full';

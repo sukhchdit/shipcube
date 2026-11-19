@@ -657,6 +657,11 @@ describe('lane-scope CLI', () => {
       SECURITY_INTEGRATION: 'skipped',
       CLASSIFICATION: light,
       FAST_LANE_CLASSIFICATION: light,
+      // The four fast-lane outputs the aggregation carries (PR55-SEC-05; required since 287-B, PR287B-SEC-01).
+      FAST_LANE_MODE: 'light',
+      FAST_LANE_CODE_PROOF: `7:${PREV}`,
+      FAST_LANE_SECURITY_INTEGRATION_DUE: 'false',
+      FAST_LANE_TOOLS_REF: HEAD,
     };
     const api: Api = () => ({ ok: false, problem: 'not called' });
     const { root } = repo();
@@ -689,6 +694,10 @@ describe('[R2-m1] ci-gate reads this run attempt own CODE-gated step conclusions
     SECURITY_INTEGRATION: 'skipped',
     CLASSIFICATION: full,
     FAST_LANE_CLASSIFICATION: full,
+    FAST_LANE_MODE: 'full',
+    FAST_LANE_CODE_PROOF: '',
+    FAST_LANE_SECURITY_INTEGRATION_DUE: 'false',
+    FAST_LANE_TOOLS_REF: HEAD,
   };
   /** A clone whose HEAD has the real ci.yml (the step names ci-gate requires come from it). */
   function ciRoot(): string {

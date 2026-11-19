@@ -13,6 +13,10 @@ import { describe, expect, it } from '@jest/globals';
 import { findRepoRoot } from '../test-support/process.js';
 import {
   CHECKOUT_IS_EVENT_SHA,
+  STAGE_2_ACTION_COMMITS,
+  STAGE_2_ACTION_STEP_KEYS,
+  TEST_LOCKS_DIR,
+  cacheHygieneFindings,
   CI_GATE_ENV_FAST_LANE_OUTPUTS,
   CI_GATE_RUN_TESTED_BASE,
   CI_GATE_STEPS_STAGE_2,
@@ -826,5 +830,126 @@ describe('[PR55-SEC-05] [PR62-SEC-02] [TASK-287 part 287-B] the aggregation carr
     expect(findingsOf(stage2.replace(tools, `${tools}          FAST_LANE_EXTRA: \${{ needs.fast-lane.outputs.mode }}\n`))).toEqual([
       expect.stringContaining('required-gates: ci.yml ci-gate aggregate gate step must set no env but'),
     ]);
+  });
+});
+
+describe('[PR62-SEC-01] [PR287B-SEC-02] [TASK-287 part 287-C1] action steps and stage-2 jobs are allow-lists', () => {
+  const checkoutUses = `actions/checkout@${STAGE_2_ACTION_COMMITS['actions/checkout']}`;
+  const fastCheckout = '      - name: Checkout (full history for the base ref and the PR commit range)\n';
+  const gateSetupNode = '      - name: Set up Node (literal version, no cache)\n';
+  const engineCache = '      - name: Restore the Prisma schema engine (re-verified by deps:rebuild)\n';
+  const once = (from: string) => {
+    expect(stage2.split(from).length).toBeGreaterThan(1);
+    return from;
+  };
+
+  it('the committed ci.yml uses exactly the pinned commits, each also named by its upstream tag comment', () => {
+    for (const [action, commit] of Object.entries(STAGE_2_ACTION_COMMITS)) expect(stage2).toContain(`uses: ${action}@${commit}`);
+    expect(stage2).toContain(`uses: ${checkoutUses} # v7.0.1`);
+    expect(findingsOf(stage2)).toEqual([]);
+    expect(STAGE_2_ACTION_STEP_KEYS).toEqual(['name', 'uses', 'with']);
+  });
+
+  it.each<[string, string, string, RegExp]>([
+    [
+      'another 40-hex checkout commit (a fork-network commit resolves under the upstream name)',
+      `uses: ${checkoutUses}`,
+      `uses: actions/checkout@${'1'.repeat(40)}`,
+      /actions\/checkout must be pinned to exactly/u,
+    ],
+    [
+      'env: on a checkout step',
+      `${fastCheckout}        uses:`,
+      `${fastCheckout}        env:\n          GIT_DIR: /tmp/x\n        uses:`,
+      /step must have only the keys name, uses, with \(found env/u,
+    ],
+    [
+      'id: on a setup-node step',
+      `${gateSetupNode}        uses:`,
+      `${gateSetupNode}        id: node\n        uses:`,
+      /step must have only the keys name, uses, with \(found id/u,
+    ],
+    [
+      'if: on a checkout step',
+      `${fastCheckout}        uses:`,
+      `${fastCheckout}        if: always()\n        uses:`,
+      /step must have only the keys name, uses, with \(found if/u,
+    ],
+    [
+      'continue-on-error: on the engine cache',
+      `${engineCache}`,
+      `${engineCache}        continue-on-error: true\n`,
+      /found continue-on-error/u,
+    ],
+  ])('%s is a finding', (_title, from, to, message) => {
+    const mutated = stage2.replace(once(from), () => to);
+    expect(mutated).not.toBe(stage2);
+    expect(findingsOf(mutated)).toEqual(expect.arrayContaining([expect.stringMatching(message)]));
+  });
+
+  it("fast-lane's engine cache keeps exactly its CODE condition", () => {
+    const guard = `${engineCache}        if: env.CODE == 'true'\n`;
+    expect(stage2.split(guard)).toHaveLength(2);
+    expect(findingsOf(stage2.replace(guard, `${engineCache}        if: always()\n`))).toEqual(
+      expect.arrayContaining([expect.stringMatching(/fast-lane actions\/cache step if: must be exactly env\.CODE == 'true'/u)]),
+    );
+  });
+
+  it.each(['fast-lane', 'security-integration', 'ci-gate'])(
+    '%s: runs-on self-hosted, an environment: and a job concurrency: are findings',
+    (job) => {
+      const jobLine = `  ${job}:\n`;
+      const start = stage2.indexOf(jobLine);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const runsOn = '    runs-on: ubuntu-24.04\n';
+      const at = stage2.indexOf(runsOn, start);
+      const swapAt = (to: string) => stage2.slice(0, at) + to + stage2.slice(at + runsOn.length);
+      expect(findingsOf(swapAt('    runs-on: self-hosted\n'))).toEqual(
+        expect.arrayContaining([`required-gates: ci.yml job ${job} runs-on must be exactly ubuntu-24.04 (PR287B-SEC-02)`]),
+      );
+      expect(findingsOf(swapAt(`${runsOn}    environment: carrier-sandbox\n`))).toEqual(
+        expect.arrayContaining([expect.stringMatching(new RegExp(`^required-gates: ci\\.yml job ${job} must not set environment`, 'u'))]),
+      );
+      expect(findingsOf(swapAt(`${runsOn}    concurrency: x\n`))).toEqual(
+        expect.arrayContaining([expect.stringMatching(new RegExp(`^required-gates: ci\\.yml job ${job} must not set concurrency`, 'u'))]),
+      );
+    },
+  );
+});
+
+describe('[D-SEC-PR57-02] [D-TASK287A-03] cache-hygiene: no CI cache restores the test-lock directory', () => {
+  it.each<[string, number]>([
+    ['node_modules', 1],
+    ['./node_modules/**', 1],
+    ['node_modules/.cache', 1],
+    ['node_modules/.cache/**', 1],
+    ['**/node_modules', 1],
+    ['${{ github.workspace }}/node_modules', 1],
+    [`node_modules\n!${TEST_LOCKS_DIR}`, 0],
+    [`node_modules/.cache\n!${TEST_LOCKS_DIR}/**`, 0],
+    ['node_modules/.cache/eslint', 0],
+    ['node_modules/@prisma/engines/schema-engine-debian-openssl-3.0.x', 0],
+    ['~/.npm', 0],
+    ['apps/*/tsconfig.tsbuildinfo', 0],
+  ])('path %j: %i finding(s)', (path, count) => {
+    expect(cacheHygieneFindings(path)).toHaveLength(count);
+  });
+
+  it('the rule applies to any workflow (lane-c.yml here), on actions/cache, cache/restore and cache/save', () => {
+    const laneC = readFileSync(join(repoRoot, '.github', 'workflows', 'lane-c.yml'), 'utf8');
+    const install = '      - name: Install (npm ci --ignore-scripts)\n        run: npm ci --ignore-scripts --no-audit --no-fund\n';
+    expect(laneC.split(install).length).toBeGreaterThan(1);
+    for (const action of ['actions/cache', 'actions/cache/restore', 'actions/cache/save']) {
+      const step = (path: string) =>
+        `      - name: Cache\n        uses: ${action}@${STAGE_2_ACTION_COMMITS['actions/cache']} # v6.1.0\n        with:\n          path: ${path}\n          key: x\n\n`;
+      const rules = (path: string) =>
+        checkWorkflow(
+          laneC.replace(install, () => step(path) + install),
+          'lane-c.yml',
+        ).map((f) => f.rule);
+      expect([action, rules('node_modules')]).toEqual([action, ['cache-hygiene']]);
+      expect([action, rules('node_modules/.cache/eslint')]).toEqual([action, []]);
+    }
+    expect(TEST_LOCKS_DIR).toBe('node_modules/.cache/shipqube-test-locks');
   });
 });
