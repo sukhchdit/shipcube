@@ -69,7 +69,7 @@ interface Behaviour {
   /** Status of a visible row (default 200). */
   readonly okStatus?: number;
   /** Extra headers on a 404. */
-  readonly refusalHeaders?: (row: SeededRow | undefined) => Record<string, string>;
+  readonly refusalHeaders?: (row: SeededRow | undefined) => Record<string, string | string[]>;
 }
 
 const ISOLATED: Visible = (principal, row) => (principal === 'tenant-a' && row === 'A') || (principal === 'guest-h' && row === 'G');
@@ -162,6 +162,21 @@ describe('the API case runner (AT-US-077-02; R2-n2, PR43-SEC-12)', () => {
       "getOrder [tenant-a -> row B]: response header etag carries 1 value(s) of the other tenant's row",
       "getOrder [tenant-a -> row B]: response header location carries 1 value(s) of the other tenant's row",
     ]);
+  });
+
+  it("[PR291-SEC-01] a 404 that sends ETag and Location twice, the second copy carrying the other row's values, is named", async () => {
+    const refusalHeaders = (row: SeededRow | undefined): Record<string, string[]> =>
+      row === 'B' ? { etag: ['"x"', `"${String(ROW_VALUES.B[0])}"`], location: ['/x', `/orgs/${ORG_B}`] } : {};
+    expect(await run({ visible: ISOLATED, refusalHeaders }, SESSION_ONLY, { table: 'fake_quotes', params: { orderId: 'id' } })).toEqual([
+      "getOrder [tenant-a -> row B]: response header etag carries 1 value(s) of the other tenant's row",
+      "getOrder [tenant-a -> row B]: response header location carries 1 value(s) of the other tenant's row",
+    ]);
+  });
+
+  it('[PR291-SEC-01] control: a 404 that sends ETag and Location twice with no foreign value is not named', async () => {
+    const refusalHeaders = (row: SeededRow | undefined): Record<string, string[]> =>
+      row === 'B' ? { etag: ['"x"', '"y"'], location: ['/x', '/y'] } : {};
+    expect(await run({ visible: ISOLATED, refusalHeaders }, SESSION_ONLY, { table: 'fake_quotes', params: { orderId: 'id' } })).toEqual([]);
   });
 
   it('R2-n2 (c) a positive control that does not reach the own row is named (the check cannot be dropped)', async () => {

@@ -10,6 +10,6 @@
     { "file": "apps/api/src/platform/tx/route-phases.int.test.ts", "lock": "api-tx-execute" },
     { "file": "apps/api/src/platform/tx/runner-activation.int.test.ts", "lock": "api-tx-execute" },
     { "file": "apps/worker/src/platform/health/server.test.ts", "lock": "worker-platform-core" },
-    { "file": "tests/contract-stubs/contract-stubs.api.test.ts", "lock": "contract-stubs" }
+    { "file": "tests/contract-stubs/contract-stubs.api.test.ts", "lock": "api-openapi" }
   ]
 }

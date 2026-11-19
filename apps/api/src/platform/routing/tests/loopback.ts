@@ -86,6 +86,8 @@ export function fetchOnce(url: string, init: RequestInit = {}, options: FetchOnc
         method,
         headers,
         agent: false,
+        // Node keeps only the first copy of etag, location and 14 other headers a response sends twice; join them like fetch (PR291-SEC-01).
+        joinDuplicateHeaders: true,
       },
       (response) => {
         const chunks: Buffer[] = [];
