@@ -4242,3 +4242,90 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - principal-architect: the R-ARCH-34 ruling (gate on TASK-051), the OPERATOR-membership rule (gate on TASK-089), optionally the users transition guard (TASK-057), and PR65-SEC-04 (a)/(b).
   - orchestrator: the 287-B R1-n5 DECISIONS entry.
 - **Reversibility:** High (plan data only).
+
+### D-SECT39-01 · 2026-11-19 · security-analyst · T-39 / PR56-SEC-03 / D-ARCH-142: the aggregated-entry shape of the TASK-041 denial budget is confirmed, with precisions (closed `details` set, TTL-anchored window and atomic carry claim, actor segment for non-user principals, fallback event, composition); threat model v1.2 (§10.4 H); card lines for D-SD-002
+- **Confirmed as carded:**
+  - the budget is per actor, taken in the authorise slot before `capture.denied`;
+  - N individual entries a minute (default 20), one aggregated entry at the crossing, then 429 without a write;
+  - the suppressed count is carried lazily into a later entry;
+  - D-TASK029-06 is unchanged.
+  - My PR56-SEC-03 sketch (`details.count` written when the window closes) is superseded, because no request exists to close a window.
+- **1. Action registry.**
+  - Action `PERMISSION_DENIED`, outcome `DENIED` (`AUDIT_ENTRY_ACTIONS`; `DENIED_ONLY_ACTIONS` refuses any other outcome).
+  - No new action, actor type or CHECK value: no bootstrap SQL, and `actions.test.ts` and catalog C9 are unchanged. A new action such as `AUDIT_FLOOD_SUPPRESSED` is rejected: it would widen REQ-AUDIT-002's closed list for something a `details` flag already says.
+  - The aggregated entry is the crossing request's own denial entry, built by `capture.denied` (actor, organisation stream, `entity_name` = `route.audit.entity ?? 'request'`, `entity_id` null, method, route template, source app), plus the aggregation keys.
+- **2. `details` is a closed set.** It holds integers, one boolean and one timestamp, never a `PiiValue`.
+  - Every denial: `required_permission` (unchanged).
+  - The crossing denial (count N+1) only: `aggregated: true`, `threshold` (the N in force), `window_seconds: 60` and `window_ends_at` (the budget key's expiry, RFC 3339 UTC, rounded up to the second). There is no `count`.
+  - The denial that opens a window (count 1) only, and only when the carry it claimed is at least 1: `suppressed_in_previous_window`. This is a safe integer of at least 1 and is never written as 0. A Valkey value outside 1..2^31-1 is dropped and logged by class, never written. It counts the 429 answers given without an entry since the last claim, which is the actor's last aggregated window.
+  - Individual entries carry no `aggregated` key.
+  - `capture.denied` takes a closed typed mark from the slot (`{ kind: 'individual', suppressed?: number } | { kind: 'aggregated', threshold, windowSeconds, windowEndsAt }`) and maps it to these keys itself. The slot passes no free-form details.
+  - Probe at `5145d52` with the real `isSecretKey`, `isPiiKey` and `isOmittedKey`: none of the five key names is redacted, so the chain hashes them as written. If a later matcher change caught one, it would be redacted in the immutable trail. The SEC-TC-15 deep-equal on the stored `details` is the tripwire.
+- **3. Key and window.**
+  - The budget key is `rl:authz-denial:{org}:{actor}`:
+    - `{org}` is `principal.orgId`, or the literal `system` when it is empty;
+    - `{actor}` is `principal.actorId` for a user actor, else the credential kind (`signature`, the only non-user principal authorise can deny);
+    - no segment is ever empty.
+  - The carry key is `rl:authz-denial-carry:{org}:{actor}`, with a 24 h TTL refreshed on each increment.
+  - The window is a fixed 60 s, anchored at its first denial by the budget key's own TTL in Valkey, not by instance clocks, so two replicas never split a window.
+  - One atomic script per denial:
+    - `INCR`;
+    - on 1: `PEXPIRE 60000` and `GETDEL` of the carry;
+    - above N+1: `INCR` and `EXPIRE 86400` of the carry;
+    - it returns the count, `PTTL` and the claimed carry.
+  - A budget key without a TTL would silence the actor's denials for good, so the script never leaves one (test: `PTTL` in 1..60000 after the first take).
+  - Valkey calls are bounded by the limiter's command timeout. An error or a timeout uses the in-memory fallback for that request.
+  - Only the `AUTHZ_DENIED` path takes the budget. A permitted request never spends it or gets its 429, so there is no new oracle: 429 versus 2xx tells what 403 versus 2xx told.
+- **4. Per-request personal data.**
+  - A suppressed denial writes nothing: no tenant transaction, no vault row, no `ip_hash`. Its only traces are the request log line (status 429, existing policy) and the counter.
+  - The aggregated entry holds one request's personal values, the crossing request's IP and user agent. They take the writer's normal path: vault tokens (PERSONAL, subject = the actor), the keyed `ip_hash`, `ip_coarse` and `ua_parsed`.
+  - It never lists the IPs, user agents, routes, correlation ids or permissions of other requests. Such a list would put untokenised per-request data into the immutable trail.
+  - Valkey keys and values hold internal UUIDs and integers only: no IP, user agent, route, e-mail or correlation id. Nothing needs hashing.
+  - The counter's only label is the budget name `authz-denial`, never an organisation, actor or IP. `authz-denial` is not a route rate class: it is in neither `RateLimitClass` nor `x-rate-limit-class`, since the drift test would then demand it in the contract.
+- **5. Answers and failures.**
+  - The crossing and suppressed denials answer 429 `RATE_LIMITED` with these headers (REQ-API-014):
+    - `Retry-After` = ceil(`PTTL`/1000), at least 1;
+    - `RateLimit-Limit` N;
+    - `RateLimit-Remaining` 0;
+    - `RateLimit-Reset` equal to `Retry-After`.
+  - All 98 contract operations whose `x-error-codes` hold `AUTHZ_DENIED` already declare 429 and `RATE_LIMITED` (checked), so no contract change is needed.
+  - A failed write of an individual or crossing entry answers 500 or 503 (D-TASK029-06). The unit stays spent and nothing is carried.
+  - When the window-opening entry is not written, the claimed carry is restored (`INCRBY` + `EXPIRE`). A failed restore is logged by class only.
+  - **Valkey outage.** The in-memory fallback keeps the same threshold, shape and carry, per instance: K replicas allow at most K·(N+1) entries a minute per actor. Its state is discarded when Valkey returns.
+  - The ERROR event fires when an instance enters the fallback, at most once a minute, with allow-listed fields and no key.
+  - No catalogued event fits. TASK-041 adds one runtime event through an api-designer change request for the README §13 runtime table (the D-TASK010-01 pattern, outside the SEC-TC-63 parity):
+    - proposed name `rate_limit_store_unavailable`;
+    - level error;
+    - fields `store` and `scope`;
+    - it is shared with the auth-class fallback of ADR-0016 item 8.
+- **6. Composition.**
+  - The budget travels with the capture: `defaultPipelineSlots` builds it from the runtime's Valkey client whenever it builds the capture.
+  - A composition test proves that `startApi`'s authorise slot answers 429 at denial N+1.
+  - A composition without a capture writes no denial entry and needs no budget. The RBAC matrix app's plain `authorise` is unaffected.
+  - A test that needs other budget behaviour passes its own slots through `createApp`'s existing `pipeline` option, never through configuration or an environment variable.
+- **Residuals (threat model §10.4 H):**
+  - A carry not claimed within 24 h never reaches the trail (metric and request log only). D-ARCH-142 accepts this until a job can close windows.
+  - During an outage the fallback is per instance.
+  - The budget is per actor, so M accounts of one tenant multiply it, inside that tenant's bulkhead (T-86 growth alert).
+- **Card lines for D-SD-002 (TASK-041):**
+  1. **Files:** add `apps/api/src/platform/audit/capture.ts` (+ `capture.api.test.ts`), where `denied` takes the mark of item 2.
+  2. **Locks:** add `api-audit-mw` and `api-platform-core`. The second is needed because the AT-US-087-04 trust-proxy setting, the RBAC-matrix `createApp` seam and the `startApi` budget composition all edit `app.ts` / `start-api.ts` (D-ARCH-147 table). It is missing today whatever this ruling says.
+  3. **T-39 line (b):** "details: aggregated true, threshold, window_seconds, window_ends_at; no entity id" → "details: required_permission plus aggregated true, threshold, window_seconds, window_ends_at (closed set, D-SECT39-01 item 2; no count); no entity id".
+  4. **T-39 key and window:**
+     - after "a colon and the actor id" add ", or the credential kind for a principal without a user actor";
+     - after "window 60 s" add ", anchored by the Valkey key's TTL at the window's first denial, one atomic script per denial (D-SECT39-01 item 3)".
+  5. **T-39 (d):** add "claimed atomically by the denial that opens a window, restored when its entry is not written, omitted when 0".
+  6. **T-39 answer:** after "Retry-After = the rest of the window" add ", RateLimit-Limit N, RateLimit-Remaining 0, RateLimit-Reset".
+  7. **T-39 outage:** "with an ERROR security event" → "with the runtime security event of D-SECT39-01 item 5 (api-designer change request), at most once a minute per instance".
+  8. **T-39 tests:** add:
+     - the stored `details` deep-equal the closed sets (crossing; opener with carry; plain);
+     - N+K denials from K distinct IPs and user agents add vault and `ip_hash` rows for the N+1 entries only;
+     - every Valkey key under the two prefixes matches the item 3 grammar;
+     - budget-key `PTTL` in 1..60000;
+     - the carry is restored after a failed opener write;
+     - the `startApi` composition answers 429 at N+1;
+     - the counter has no organisation or actor label.
+- **Routed:**
+  - SEC-TC-15 wording in `docs/05-quality/tests/security-test-cases.md` → qa-lead (per D-ARCH-142), to match threat model §10.2;
+  - the README §13 runtime row → api-designer, through TASK-041's change request.
+- **Reversibility:** High (docs only).
