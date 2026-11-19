@@ -4044,3 +4044,21 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **TASK-293:** done locally at `3183525`. Lane B and both pre-push reviews are running. It merges after TASK-291, because its `required-suites.json` change would make other evidence stale.
 - **Infrastructure:** two network outages (ENOTFOUND) cut five agents and spoiled two lane-B runs. One left the 287-C1 worktree without its Prisma engine, which was rebuilt. The low-memory reaper also stopped the queue once; it was restarted on the user's go-ahead. None of these was a code finding.
 - **Reversibility:** High.
+
+### D-SECPR291-02 · 2026-11-19 · security-analyst · TASK-291 security round 2 (delta `f4f8a12..12d7873`, pre-push) = PASS_WITH_CONDITIONS at code head `12d7873` (round appended to `docs/05-quality/security/PR-pending-TASK-291-security-review.md` on main; rename per D-ORCH-136 unchanged)
+- **Decision:** PR291-SEC-01 (LOW) and PR291-SEC-03 (INFO) are closed. PR291-SEC-02 (INFO) stays open, routed to the next touch of the shim. Nothing Critical, High or Medium is open.
+- **PR291-SEC-01 closed.** `fetchOnce` passes `joinDuplicateHeaders: true` (`loopback.ts:90`).
+  - **Rerun differential.** Round 1's 27-behaviour harness on the `12d7873` transport, with the `api-cases.ts` runner text byte-identical to `1672070`: 0 rows narrower than base `fetch`, and 16 of 16 doubled-header leaks named (`etag` and `location` among them). 24 of 27 rows give identical problem lists in 3 of 3 runs; the other 3 are the intended stricter rows.
+  - **Mutant.** The same file with only the option removed misses the same 16 rows again.
+  - **The new tests, reproduced in scratch.** The `loopback.test.ts` tuple `writeHead` case gives `"e1", "e2"` and `/a, /b` on the head and `"e1"` and `/a` on the mutant. `api-cases.test.ts` case (a) names both headers on the head and gives `[]` on the mutant. Control (b) gives `[]` on both. This matches the developer's "2 tests fail without the option".
+  - **Existing expectations are unchanged.** In `api-cases.test.ts` only the `refusalHeaders` type is widened.
+  - **RBAC runner.** The fix also closes the same blind spot in the RBAC runner's header comparison (PR #60).
+- **PR291-SEC-03 closed.** The `contract-stubs` entry is now labelled `api-openapi`. The file list and `PINNED_CEILING` are unchanged.
+- **Binding.** The round-2 `Head` row is `12d7873`; round 1's `f4f8a12` row only produces a note, because owned paths changed after it. The PR now changes 22 owned paths.
+  - Merge-ref simulation against main `fd4cb4c` and again against `550544e`: 15 of 15 each as expected (5 pass, 10 controls fail).
+  - New control C10: the round-1 record alone does not cover `12d7873`.
+- **Conditions:**
+  - **C1.** Lane B at `12d7873`: `integration`, `catalog-c1-c14` and `rls-cross-tenant` 0/0/0, plus the hosted `security-integration` job. The `rls-cross-tenant` total is unchanged: `cross-tenant.int.test.ts` keeps 13 `it` and 6 `it.each`, and the 3 new cases are plain `*.test.ts` files, which run in `unit` per `jest.config.ts`.
+  - **C2.** Rename the record, then confirm the merge ref contains the renamed file (D-ORCH-138).
+  - Any later owned-path change needs another delta round.
+- **Reversibility:** High.

@@ -209,3 +209,92 @@ Simulation (`r291/probes/sim.mjs`). Setup:
 | Field | Value |
 |---|---|
 | Verdict | **PASS_WITH_CONDITIONS.** 0 Critical, 0 High, 0 Medium; PR291-SEC-01 LOW (fix preferred in this PR, otherwise before the first `API_CASES` registration or rbac-matrix activation, at the latest G3), PR291-SEC-02 INFO, PR291-SEC-03 INFO. Conditions C1 (lane B at the head: integration, catalog-c1-c14, rls-cross-tenant 0/0/0 with identical rls counts; hosted security-integration green) and C2 (rename). PR #57 R1-n4 and R1-n6 closed |
+
+## Round 2 (delta, pre-push): `f4f8a12..12d7873`
+
+| Field | Value |
+|---|---|
+| Head | 12d7873aa6f43f5a3ccb8be8852297fc495da525 |
+| Delta reviewed | `git diff f4f8a12 12d7873`, one commit (`12d7873`, "join duplicate response headers in fetchOnce and relabel the contract-stubs lock"), 4 files, +34 / -2: `apps/api/src/platform/routing/tests/loopback.ts` and `loopback.test.ts` (both owned through `/apps/api/src/platform/`), `tests/generated/rls/api-cases.test.ts` (owned), `tests/generated/loopback-fetch-allowlist.json` (owned through this PR's own CODEOWNERS line). The PR now changes 22 owned paths |
+| Reviewer / date | security-analyst, 2026-11-19, round 2, pre-push. Same host rule as round 1: static review plus single-process Node probes on `git show` extracts; nothing ran in the PR worktree. The coordinator reported the developer's mutation check (removing the option fails 2 tests). I reproduced its effect in scratch and did not run Jest |
+
+### R2.1 PR291-SEC-01: closed
+
+- **The fix.** `fetchOnce` now passes `joinDuplicateHeaders: true` to `http.request` (`loopback.ts:90`), with a comment naming PR291-SEC-01. Nothing else in `loopback.ts` changed.
+- **Transport differential, rerun on `12d7873`.**
+  - **Setup.** The round-1 harness unchanged: 27 behaviours, one fake server, random row ids. The runner text of `api-cases.ts` at `12d7873` is byte-identical to `1672070`'s; the build checks this. The head copy uses the `12d7873` `loopback.ts`. A mutant copy is the same file with only the option line removed.
+  - **Head against base `fetch`.** 0 rows narrower and 2 rows stricter (the 302 and 301 redirects). Across 3 runs, 24 of 27 rows give byte-identical problem lists. The other 3 are the redirect pair and unconditional gzip, which fails closed ("body is not JSON").
+  - **All 16 doubled-header rows** (the second copy carries B's id) are now named. That includes `etag` and `location`.
+  - **Mutant.** It misses the same 16 rows as `f4f8a12` did. So the probe sees the option, and the option is what closes the gap.
+- **The two new tests, reproduced in scratch.** I ran their exact shapes through the head transport and the mutant:
+
+  | Test shape | Head `12d7873` | Mutant (no option) |
+  |---|---|---|
+  | `loopback.test.ts`: `writeHead(200, [['etag','"e1"'],['etag','"e2"'],['location','/a'],['location','/b']])` | `etag` = `"e1", "e2"`, `location` = `/a, /b` (the test's expectations) | `"e1"`, `/a`: the test goes red |
+  | `api-cases.test.ts` case (a): a refusal for row B with `etag: ['"x"', '"<B id>"']` and `location: ['/x', '/orgs/<ORG_B>']` | both headers named, exactly the two problems the test expects | `[]`: the test goes red |
+  | `api-cases.test.ts` control (b): doubled `etag` and `location` with no foreign value | `[]` | `[]` |
+
+  This agrees with the developer's report: removing the option fails 2 tests, and the control (b) stays green.
+- **The existing tests are untouched.** In `api-cases.test.ts` the only removed line is the `refusalHeaders` type, which is widened to `string | string[]`. Every earlier expectation is unchanged; `it` went from 9 to 11 and `expect` from 23 to 25. `loopback.test.ts` went from 10 to 11 `it` and from 23 to 25 `expect`, with no edits to existing cases.
+- **Scope.** The same option also closes the blind spot in the RBAC runner's header comparison (`tests/generated/rbac/runner.ts`, since PR #60), because it uses the same `fetchOnce`.
+  - For the other `fetchOnce` users, the change is visible only when a server sends one of the 16 headers twice; they now see the joined value that `fetch` and browsers see.
+  - Lane B on `12d7873` covers them.
+- **Code review round 2 (main `550544e`, APPROVED_WITH_NITS).** Its R2-n3 notes that a doubled `content-type` is now joined too. `runApiCase`'s anchored `^application/problem+json` check still passes on the joined value, which is what `fetch` does as well. I agree: this is parity, and not a finding. Its R2.1 mutation reasoning matches R2.1 above.
+
+### R2.2 PR291-SEC-03: closed
+
+- `tests/contract-stubs/contract-stubs.api.test.ts` is now labelled `api-openapi`, a lock in `plan-data.mjs`. It is the lock of the task that lists `tests/contract-stubs/`.
+- The file list is unchanged, so `PINNED_CEILING` and the ratchet's sorting and uniqueness checks are unaffected.
+- The allow-list only changed a label. No entry was added.
+
+### R2.3 PR291-SEC-02: open
+
+The shim is unchanged since `f4f8a12`. PR291-SEC-02 stays INFO with the same route: the next touch of `tools/db/prisma-client-locked.cjs`, no gate.
+
+### R2.4 Lane B scope and counts (condition C1, restated for `12d7873`)
+
+- **Which project runs what.** `jest.config.ts` (lines 147-149) keeps a plain `*.test.ts` under `tests/generated/` in `unit`, not in `generated`.
+  - The two new `api-cases.test.ts` cases and the new `loopback.test.ts` case therefore run in `unit` (lane A and lane B).
+  - The `rls-cross-tenant` suite (`generated` project, `tests/generated/rls/`) runs `cross-tenant.int.test.ts`. Its case sites are unchanged: 13 `it`, 6 `it.each`, 38 `expect`, the same as the merge base.
+- **The rls total.** The C1 requirement that `rls-cross-tenant` total the same as main's for the same rls case set still holds as written. `unit` grows by 3 tests.
+- **security-integration.** It stays selected, now also through `apps/api/src/platform/**`.
+
+### R2.5 Record binding and simulation
+
+The record now has two `Head` rows: round 1's `f4f8a12` and this round's `12d7873`.
+- `f4f8a12` no longer satisfies rule (d), because `12d7873` changed owned paths after it, so the checker only notes it.
+- `12d7873` binds. Evidence-only commits after it keep the binding.
+
+Simulation (`r291/probes/sim-r2.mjs`). Setup:
+- main = `fd4cb4c` (D-ORCH-138), and again `550544e` (the code review round 2 commit, main's tip when this round was written), each with the same 15 of 15, plus this two-round record under `PR-9991-…` (stand-in number);
+- the same plumbing harness and merge-ref checkout as round 1.
+
+| Scenario | Base given to the checker | Head | Result | Expected |
+|---|---|---|---|---|
+| S1 two-round record on main under `PR-9991-…`, evidence tip | merge base `ca7e4b7` | evidence tip on `12d7873` | exit 0, pass (22 owned) | pass |
+| S2 same | main + record | evidence tip | exit 0, pass | pass |
+| S3 same | main before the record | evidence tip | exit 0, pass | pass |
+| S4 same, code head pushed alone | merge base | `12d7873` | exit 0, pass | pass |
+| S5 same, two evidence-only commits | merge base | second evidence commit | exit 0, pass | pass |
+| C1 record only under the placeholder name | merge base | evidence tip | exit 1, missing | fail |
+| C2 no record | merge base | evidence tip | exit 1, missing | fail |
+| C3 a later `FAIL` verdict row appended | merge base | evidence tip | exit 1, missing | fail |
+| C4 the round-2 `Head` row names the merge base (round 1's `f4f8a12` row stays) | merge base | evidence tip | exit 1, missing | fail |
+| C5 a `tests/generated/rls/api-cases.ts` change after `12d7873` | merge base | that commit | exit 1, missing | fail |
+| C6 a `loopback.ts` change after `12d7873` | merge base | that commit | exit 1, missing | fail |
+| C7 a `loopback-fetch-allowlist.json` change after `12d7873` | merge base | that commit | exit 1, missing | fail |
+| C8 the record named for another PR number | merge base | evidence tip | exit 1, missing | fail |
+| C9 the round-2 `Head` row names `f4f8a12` instead | merge base | evidence tip | exit 1, missing | fail |
+| C10 the round-1 record only (main before this round; `Head` `f4f8a12`) | merge base | evidence tip | exit 1, missing | fail |
+
+15 of 15 as expected. The record has two `Head` rows (one per round, full SHAs), no `Branch / head` row, and two `Verdict` rows. The last `Verdict` row is this round's and is the last table row of the file. C10 shows that the round-1 text on main does not cover `12d7873`, so this appended round is what binds the head.
+
+### R2.6 Conditions after this round
+
+- **C1** (lane B) now applies at `12d7873`, or at a later head that changes no owned path after it. Its contents are as in section 8, with the rls total as in R2.4. The orchestrator has queued that run.
+- **C2** (rename on main) is unchanged. D-ORCH-138 adds a check: after the rename, confirm that the PR's merge ref contains the `PR-<NNNN>-` file before marking the PR ready.
+- **Any later change to an owned path** needs another delta round: `loopback.*`, the allow-list, `tests/generated/rls/**`, `prisma/tests/**`, the shim or CODEOWNERS (sim C6, C7).
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 at `12d7873`: PR291-SEC-01 (LOW) closed, verified by the rerun differential (0 rows narrower, 16 of 16 doubled-header leaks named) and the mutant (16 missed again); PR291-SEC-03 (INFO) closed; PR291-SEC-02 INFO open (next shim touch). 0 Critical, 0 High, 0 Medium open. Conditions: C1 lane B at `12d7873` (integration, catalog-c1-c14, rls-cross-tenant 0/0/0 with an unchanged rls total; hosted security-integration green), C2 rename and merge-ref confirmation |
