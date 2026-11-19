@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from '@jest/globals';
 import { DbError } from '../../../apps/api/src/platform/db/map-db-error.js';
 import { type TenantDb, TenantDbAccessError } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { CONTEXT_STATEMENT_SQL, createWithTenantTx, type TenantContext } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type * as GeneratedClient from '../../generated/prisma/client.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 
@@ -115,7 +115,7 @@ let generated: Generated;
 
 beforeAll(async () => {
   // The tree lock may be held by the deps rebuild suites running in parallel (they regenerate the client).
-  generated = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  generated = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
 }, 120_000);
 
 function setup(): { log: Statement[]; client: PrismaClient; runner: ReturnType<typeof createWithTenantTx<Prisma.TransactionClient>> } {

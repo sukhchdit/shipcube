@@ -9,12 +9,14 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
+import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from '../../../apps/api/src/platform/routing/tests/loopback.js';
+
 import { callsFor, distinctiveValues, fillPath, PRINCIPAL_HEADER, runApiCase } from './api-cases.js';
 import type { SeededRow, TablePlan } from './database.js';
 import { type ApiCrossTenantCase, isSuccessStatus, type RouteShape, routeCaseFindings, stableUuid } from './generator.js';
 
 // Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
-jest.setTimeout(60_000);
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const ORG_A = stableUuid('fake:org:A');
 const ORG_B = stableUuid('fake:org:B');
@@ -67,7 +69,7 @@ interface Behaviour {
   /** Status of a visible row (default 200). */
   readonly okStatus?: number;
   /** Extra headers on a 404. */
-  readonly refusalHeaders?: (row: SeededRow | undefined) => Record<string, string>;
+  readonly refusalHeaders?: (row: SeededRow | undefined) => Record<string, string | string[]>;
 }
 
 const ISOLATED: Visible = (principal, row) => (principal === 'tenant-a' && row === 'A') || (principal === 'guest-h' && row === 'G');
@@ -97,8 +99,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await new Promise<void>((done) => server.close(() => done()));
-  server.closeAllConnections();
+  await closeLoopbackServer(server);
 });
 
 const run = (next: Behaviour, route: RouteShape = DUAL, apiCase: ApiCrossTenantCase = CASE): Promise<string[]> => {
@@ -161,6 +162,21 @@ describe('the API case runner (AT-US-077-02; R2-n2, PR43-SEC-12)', () => {
       "getOrder [tenant-a -> row B]: response header etag carries 1 value(s) of the other tenant's row",
       "getOrder [tenant-a -> row B]: response header location carries 1 value(s) of the other tenant's row",
     ]);
+  });
+
+  it("[PR291-SEC-01] a 404 that sends ETag and Location twice, the second copy carrying the other row's values, is named", async () => {
+    const refusalHeaders = (row: SeededRow | undefined): Record<string, string[]> =>
+      row === 'B' ? { etag: ['"x"', `"${String(ROW_VALUES.B[0])}"`], location: ['/x', `/orgs/${ORG_B}`] } : {};
+    expect(await run({ visible: ISOLATED, refusalHeaders }, SESSION_ONLY, { table: 'fake_quotes', params: { orderId: 'id' } })).toEqual([
+      "getOrder [tenant-a -> row B]: response header etag carries 1 value(s) of the other tenant's row",
+      "getOrder [tenant-a -> row B]: response header location carries 1 value(s) of the other tenant's row",
+    ]);
+  });
+
+  it('[PR291-SEC-01] control: a 404 that sends ETag and Location twice with no foreign value is not named', async () => {
+    const refusalHeaders = (row: SeededRow | undefined): Record<string, string[]> =>
+      row === 'B' ? { etag: ['"x"', '"y"'], location: ['/x', '/y'] } : {};
+    expect(await run({ visible: ISOLATED, refusalHeaders }, SESSION_ONLY, { table: 'fake_quotes', params: { orderId: 'id' } })).toEqual([]);
   });
 
   it('R2-n2 (c) a positive control that does not reach the own row is named (the check cannot be dropped)', async () => {

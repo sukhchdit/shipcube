@@ -20,6 +20,7 @@
  */
 import { PERMISSIONS } from '@platform/authz';
 
+import { fetchOnce } from '../../../apps/api/src/platform/routing/tests/loopback.js';
 import type { Principal } from '../../../apps/api/src/platform/routing/define-route.js';
 import { ANONYMOUS, markCredentialsRead, readonlySet, setPrincipal } from '../../../apps/api/src/platform/routing/route-state.js';
 import type { RouteSlot } from '../../../apps/api/src/platform/routing/slot.js';
@@ -126,7 +127,7 @@ export async function runApiCase(base: string, route: RouteShape, apiCase: ApiCr
     }
     const query = new URLSearchParams(apiCase.query ?? {}).toString();
     const url = `${base}${fillPath(route.path, apiCase.params, seededValues(plan, call.row))}${query === '' ? '' : `?${query}`}`;
-    const response = await fetch(url, {
+    const response = await fetchOnce(url, {
       method: route.method.toUpperCase(),
       headers: { [PRINCIPAL_HEADER]: call.principal, accept: 'application/json', 'content-type': 'application/json' },
       ...(apiCase.body === undefined ? {} : { body: JSON.stringify(apiCase.body) }),

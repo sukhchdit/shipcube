@@ -17,6 +17,7 @@ import { assertRouteBindings, ROUTE_PIPELINE, RouteBindingError } from '../../ap
 import { moduleRouteErrors } from '../../apps/api/src/modules/index.generated.js';
 import { descriptorOf } from '../../apps/api/src/platform/routing/route-registry.js';
 import { fixtureRoute } from '../../apps/api/src/platform/routing/tests/fixture-route.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from '../../apps/api/src/platform/routing/tests/loopback.js';
 import { preparedSchemasOf } from '../../apps/api/src/platform/validate/slot.js';
 import { SAFE_MESSAGES, VALUE_REFERENCE } from '../../apps/api/src/platform/validate/validate.js';
 import { type ContractOperation, listOperations, loadContract, type OpenApiDocument } from '../../tools/openapi/contract.js';
@@ -38,7 +39,7 @@ import {
 } from './route-metadata.js';
 
 // Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
-jest.setTimeout(60_000);
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 type Loose = Readonly<Record<string, unknown>>;
 
@@ -81,7 +82,7 @@ async function withServer<T>(app: Express, run: (base: string) => Promise<T>): P
   try {
     return await run(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}`);
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeLoopbackServer(server);
   }
 }
 
@@ -214,7 +215,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
 
   it('[AT-US-067-04] an undeclared query parameter is 400 VALIDATION_ERROR with sub-code UNKNOWN_FIELD', async () => {
     await withServer(api.app, async (base) => {
-      const response = await fetch(`${base}/health/live?debug=1`);
+      const response = await fetchOnce(`${base}/health/live?debug=1`);
       expect(response.status).toBe(400);
       const body = (await response.json()) as Loose;
       expect(body['code']).toBe('VALIDATION_ERROR');
@@ -551,7 +552,7 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     }
     expect(VALUE_REFERENCE.test(JSON.stringify(preparedSchemasOf(probe).query?.describe()))).toBe(true); // the walk sees a module's own message
     await withServer(withModule([probe]).app, async (base) => {
-      const response = await fetch(`${base}/api/v1/probe?q=zzSentinelValue`);
+      const response = await fetchOnce(`${base}/api/v1/probe?q=zzSentinelValue`);
       const text = await response.text();
       expect(response.status).toBe(400);
       expect(text).not.toContain('zzSentinelValue');
@@ -574,20 +575,20 @@ describe('build-time route test (US-067, api/README.md §15)', () => {
     }
     await withServer(api.app, async (base) => {
       for (const route of docsRoutes) {
-        const post = await fetch(`${base}${route.path}`, { method: 'POST' });
+        const post = await fetchOnce(`${base}${route.path}`, { method: 'POST' });
         expect({ path: route.path, status: post.status, allow: post.headers.get('allow') }).toEqual({
           path: route.path,
           status: 405,
           allow: 'GET, HEAD, OPTIONS',
         });
-        const options = await fetch(`${base}${route.path}`, { method: 'OPTIONS' });
+        const options = await fetchOnce(`${base}${route.path}`, { method: 'OPTIONS' });
         expect({ path: route.path, status: options.status, allow: options.headers.get('allow') }).toEqual({
           path: route.path,
           status: 204,
           allow: 'GET, HEAD, OPTIONS',
         });
       }
-      expect((await fetch(`${base}/api/docs/oauth2-redirect.html`)).status).toBe(404);
+      expect((await fetchOnce(`${base}/api/docs/oauth2-redirect.html`)).status).toBe(404);
     });
   });
 

@@ -36,6 +36,7 @@ import { moduleRegistry } from '../../../apps/api/src/modules/index.generated.js
 import type { AppDb, AppTransactionClient } from '../../../apps/api/src/platform/db/index.js';
 import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../../../apps/api/src/platform/db/runtime.js';
 import { defaultPipelineSlots } from '../../../apps/api/src/platform/routing/pipeline.js';
+import { closeLoopbackServer } from '../../../apps/api/src/platform/routing/tests/loopback.js';
 import { defineRoute, type RouteContext, type RouteDescriptor } from '../../../apps/api/src/platform/routing/define-route.js';
 import { createRuntimeLog } from '../../../apps/api/src/platform/runtime/log.js';
 import { TEST_LANE_TX_IDLE_TIMEOUT_MS } from '../../../apps/api/src/platform/tx/tests/runtime-twin.js';
@@ -574,7 +575,7 @@ async function serve(database: string, modules: readonly ModuleRegistration[]): 
   return {
     base: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/api/v1`,
     close: async () => {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await closeLoopbackServer(server);
       for (const resource of runtime.resources) await resource.close();
     },
   };

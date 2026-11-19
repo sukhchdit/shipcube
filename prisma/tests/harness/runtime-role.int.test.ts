@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import { APP_ROLE, MIGRATOR, PlatformPostgres } from './postgres.js';
 
 interface RawClient {
@@ -23,7 +23,7 @@ beforeAll(async () => {
   db = await PlatformPostgres.start();
   database = await db.clone(await db.template({ migrated: true }));
   // The generated client is loaded under the lock that the engine acceptance test holds while it regenerates it.
-  const { PrismaClient } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   client = createDatabaseClient(PrismaClient, {
     connectionString: db.appUrl(database),
     poolMax: 2,

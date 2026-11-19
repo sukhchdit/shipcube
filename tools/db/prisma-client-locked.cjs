@@ -9,4 +9,13 @@
  */
 const { PRISMA_TREE_LOCK, withReadLockSync } = require('../test-support/fs-lock.ts');
 
-module.exports = withReadLockSync(PRISMA_TREE_LOCK, () => require('../../prisma/generated/prisma/client.ts'));
+/** The `@platform/source` target of the `./client` export of prisma/package.json (PR #57 R1-n4), not a hard-coded path. */
+const exported = require('../../prisma/package.json').exports?.['./client'];
+const target = exported?.['@platform/source'];
+if (typeof target !== 'string') {
+  throw new Error('prisma/package.json: the ./client export has no @platform/source target; the locking shim cannot load the client');
+}
+
+const relative = target.startsWith('./') ? target.slice(2) : target;
+
+module.exports = withReadLockSync(PRISMA_TREE_LOCK, () => require(`../../prisma/${relative}`));

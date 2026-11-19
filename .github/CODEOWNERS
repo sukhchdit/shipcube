@@ -79,6 +79,8 @@
 # API cases) and the route enumeration source it reads.
 /tests/generated/rls/                   @sukhchdit
 /tests/generated/api-mounts.ts          @sukhchdit
+# The pooled-fetch ratchet (TASK-291, TASK-291 pre-push review R1-m1): its allow-list and pin may only shrink, a change is reviewed.
+/tests/generated/loopback-*             @sukhchdit
 
 # Authorisation, audit and the configuration key register
 /packages/authz/                        @sukhchdit

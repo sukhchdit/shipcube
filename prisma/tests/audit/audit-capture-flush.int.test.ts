@@ -28,7 +28,7 @@ import { createDatabaseClient } from '../../../apps/api/src/platform/db/client.j
 import { DbError } from '../../../apps/api/src/platform/db/map-db-error.js';
 import type { TenantDb } from '../../../apps/api/src/platform/db/tenant-db.js';
 import { createWithTenantTx, type TenantTxRunner } from '../../../apps/api/src/platform/db/with-tenant-tx.js';
-import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
+import { PRISMA_TREE_LOCK, withReadLock } from '../../../tools/test-support/fs-lock.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -170,7 +170,7 @@ beforeAll(async () => {
   await admin.query(`CREATE TABLE public.flush_it_addresses (id uuid PRIMARY KEY, org_id uuid NOT NULL, city text NOT NULL);
                      GRANT SELECT, INSERT ON public.flush_it_addresses TO platform_app;`);
   appUrl = pgh.appUrl(database);
-  const { PrismaClient: PrismaCtor } = await withFileLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
+  const { PrismaClient: PrismaCtor } = await withReadLock(PRISMA_TREE_LOCK, () => import('../../generated/prisma/client.js'));
   client = createDatabaseClient(PrismaCtor, { connectionString: appUrl, poolMax: 6, applicationName: 'audit-flush-it' });
   runner = runnerWith({ maxConcurrentTx: 4, waitMs: 250 });
 }, 240_000);

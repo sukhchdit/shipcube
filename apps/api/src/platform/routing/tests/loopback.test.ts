@@ -29,6 +29,21 @@ async function serve(handler: (request: IncomingMessage, response: ServerRespons
 }
 
 describe('fetchOnce (test helper)', () => {
+  it('[PR291-SEC-01] keeps both copies of a header the server sends twice, joined like fetch does', async () => {
+    const { url } = await serve((_request, response) => {
+      response.writeHead(200, [
+        ['etag', '"e1"'],
+        ['etag', '"e2"'],
+        ['location', '/a'],
+        ['location', '/b'],
+      ]);
+      response.end();
+    });
+    const response = await fetchOnce(`${url}/x`);
+    expect(response.headers.get('etag')).toBe('"e1", "e2"');
+    expect(response.headers.get('location')).toBe('/a, /b');
+  });
+
   it('returns status, every Set-Cookie value and the body', async () => {
     const { url } = await serve((_request, response) => {
       response.writeHead(201, { 'set-cookie': ['a=1', 'b=2'], 'content-type': 'text/plain' });
