@@ -17,7 +17,7 @@ import { assertRouteBindings, ROUTE_PIPELINE, RouteBindingError } from '../../ap
 import { moduleRouteErrors } from '../../apps/api/src/modules/index.generated.js';
 import { descriptorOf } from '../../apps/api/src/platform/routing/route-registry.js';
 import { fixtureRoute } from '../../apps/api/src/platform/routing/tests/fixture-route.js';
-import { closeLoopbackServer, fetchOnce } from '../../apps/api/src/platform/routing/tests/loopback.js';
+import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from '../../apps/api/src/platform/routing/tests/loopback.js';
 import { preparedSchemasOf } from '../../apps/api/src/platform/validate/slot.js';
 import { SAFE_MESSAGES, VALUE_REFERENCE } from '../../apps/api/src/platform/validate/validate.js';
 import { type ContractOperation, listOperations, loadContract, type OpenApiDocument } from '../../tools/openapi/contract.js';
@@ -39,7 +39,7 @@ import {
 } from './route-metadata.js';
 
 // Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
-jest.setTimeout(60_000);
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 type Loose = Readonly<Record<string, unknown>>;
 

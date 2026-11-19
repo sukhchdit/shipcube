@@ -23,6 +23,23 @@ const ALLOW_LIST = (
   JSON.parse(readFileSync(join(ROOT, 'tests/generated/loopback-fetch-allowlist.json'), 'utf8')) as { entries: AllowListEntry[] }
 ).entries;
 
+/**
+ * The ceiling of the allow-list (TASK-291 pre-push review R1-m1): every file that may be on it. The list may only shrink, so an entry that is
+ * not here fails; adding one is a deliberate edit of this pin in the same PR (CODEOWNERS covers this file), shown in review.
+ */
+const PINNED_CEILING: readonly string[] = [
+  'apps/api/src/platform/audit/audit-failure.api.test.ts',
+  'apps/api/src/platform/audit/capture.api.test.ts',
+  'apps/api/src/platform/errors/problem-handler.api.test.ts',
+  'apps/api/src/platform/http/json-body-text.api.test.ts',
+  'apps/api/src/platform/openapi/serve.api.test.ts',
+  'apps/api/src/platform/tx/execute-phases.test.ts',
+  'apps/api/src/platform/tx/route-phases.int.test.ts',
+  'apps/api/src/platform/tx/runner-activation.int.test.ts',
+  'apps/worker/src/platform/health/server.test.ts',
+  'tests/contract-stubs/contract-stubs.api.test.ts',
+];
+
 describe('pooled-fetch ratchet over the repository (TASK-291, D-ORCH-113 (a))', () => {
   it('[TASK-291] no file calls the global fetch against a loopback server unless it is on the allow-list, and no listed file is stale', () => {
     expect(ratchetFindings(scanLoopbackFetchUsers(ROOT), ALLOW_LIST)).toEqual([]);
@@ -30,6 +47,11 @@ describe('pooled-fetch ratchet over the repository (TASK-291, D-ORCH-113 (a))', 
 
   it('[TASK-291] the allow-list holds no file of tests/generated: the generated suites use fetchOnce', () => {
     expect(ALLOW_LIST.filter((entry) => entry.file.startsWith('tests/generated/'))).toEqual([]);
+  });
+
+  it('[TASK-291] the allow-list never grows beyond the pinned ceiling of 10 entries', () => {
+    expect(ALLOW_LIST.length).toBeLessThanOrEqual(PINNED_CEILING.length);
+    expect(ALLOW_LIST.map((entry) => entry.file).filter((file) => !PINNED_CEILING.includes(file))).toEqual([]);
   });
 
   it('[TASK-291] every entry names the folder lock of the task that converts it, with no duplicate and in sorted order', () => {

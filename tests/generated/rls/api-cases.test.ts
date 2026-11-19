@@ -9,14 +9,14 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
-import { closeLoopbackServer } from '../../../apps/api/src/platform/routing/tests/loopback.js';
+import { closeLoopbackServer, LOOPBACK_TEST_TIMEOUT_MS } from '../../../apps/api/src/platform/routing/tests/loopback.js';
 
 import { callsFor, distinctiveValues, fillPath, PRINCIPAL_HEADER, runApiCase } from './api-cases.js';
 import type { SeededRow, TablePlan } from './database.js';
 import { type ApiCrossTenantCase, isSuccessStatus, type RouteShape, routeCaseFindings, stableUuid } from './generator.js';
 
 // Composes the app (a cold module graph) and answers real requests: the 5 s Jest default timed out under parallel host load (W0-FLAKE, D-ORCH-097).
-jest.setTimeout(60_000);
+jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
 const ORG_A = stableUuid('fake:org:A');
 const ORG_B = stableUuid('fake:org:B');

@@ -37,6 +37,17 @@ export function inScanScope(path: string): boolean {
   return SCAN_ROOTS.some((root) => path.startsWith(root)) && SOURCE.test(path) && !EXCLUDED.some((pattern) => pattern.test(path));
 }
 
+/** The text of a listed file; a tracked file that is missing or unreadable fails with its path named. */
+function readSource(root: string, path: string): string {
+  try {
+    return readFileSync(join(root, path), 'utf8');
+  } catch (error) {
+    throw new Error(`loopback scan: cannot read ${path} (tracked but deleted, or the root is not the repository checkout)`, {
+      cause: error,
+    });
+  }
+}
+
 /** The sorted repo-relative paths under the roots that still call the global fetch against a loopback server. */
 export function scanLoopbackFetchUsers(root: string): string[] {
   const listing = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
@@ -47,7 +58,7 @@ export function scanLoopbackFetchUsers(root: string): string[] {
     windowsHide: true,
   });
   return [...new Set(listing.split('\0').filter((path) => path !== '' && inScanScope(path)))]
-    .filter((path) => callsGlobalFetchOnLoopback(readFileSync(join(root, path), 'utf8')))
+    .filter((path) => callsGlobalFetchOnLoopback(readSource(root, path)))
     .sort();
 }
 
