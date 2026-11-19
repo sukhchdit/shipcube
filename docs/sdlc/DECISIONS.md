@@ -4186,3 +4186,59 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Draft PRs may have no merge ref until GitHub builds one. Fetch merge refs with `-f`, because they are not fast-forwards. A missing merge ref is safe to mark ready, because GitHub then builds it from the current main.
   - The queue's orphan-wait and retry rules were tightened today (D-ORCH-136, D-ARCH-158).
 - **Reversibility:** High.
+
+### D-SD-002 · 2026-11-19 · senior-developer · Plan fold for the D-ORCH-136..139 routings, D-SEC-PR65-01/02, D-SECPR287B-01, D-SECPR287C1-01, D-SECPR291-01/02, D-SECPR293-01/02, D-ARCH-154..157 and rulings wave-1-pr65-r1 §7: twelve cards updated, TASK-049 gains lock `mod-organisations`, TASK-034 gains lock `prisma-core` and owns the open `tools/db` linter items (plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Why:** none of the items routed since D-SD-001 was on a card. A grep for PR65-SEC-0x, PR293-SEC, R-ARCH-34, PR287C1, PR291-SEC, D-ARCH-157 and D-ORCH-139 over `plan-data.mjs` and the WAVE files found 0 hits. TASK-227 even contradicted D-ARCH-157.
+- **Decision:** cards changed in `plan-data.mjs` and regenerated. Every new line names its source.
+  - **TASK-039 `jobs`:** the consumer.int [AT-US-009-04] race fix (D-ORCH-139): assert the dead-letter record only after `settledFailure`; assertions unchanged.
+  - **TASK-049 `register`:**
+    - PR65-SEC-02 (a): set `app.org_id` only after an ACTIVE-membership check, with an `OPERATOR_ORG_ID` abuse case.
+    - PR65-SEC-03: uniform answer on `ux_users__email`; no credential, token or session for `is_system` users.
+    - PR65-SEC-04 (c): server-controlled `users` columns, shared with TASK-057.
+    - Code review R2-n2 with rulings §5.5/§7: the member comes from the transaction actor or equality is asserted; a typed error replaces the P0001 → 500.
+    - **New lock `mod-organisations`** for `organisation-service.ts`. TASK-056, the next holder, depends on TASK-052 → TASK-049, so it is never concurrent.
+    - No TenantDb accessor here, because that would need `api-tenant-db` on a critical-path task. If one is needed, the developer asks the orchestrator for the lock.
+    - The TASK-292 merge prerequisite is marked MET (#69).
+  - **TASK-057 `totp`:** PR65-SEC-04 (c). The architect's optional users transition guard joins this task if it is ruled before dispatch.
+  - **TASK-051 `guestclaim`:** a DISPATCH GATE on the R-ARCH-34 ruling covering three questions: (1) guest-row binding, (2) GUEST_CAPABLE unique keys, (3) one error-mapper answer for a T2 pair (PR293-SEC-03).
+  - **TASK-089 `seeddemo`:**
+    - A DISPATCH GATE on the architect's OPERATOR-membership database rule (PR65-SEC-02 (b)).
+    - The rulings §7 line: member = actor in every seed transaction.
+  - **TASK-224 `orgswitch`:**
+    - PR65-SEC-02 (a): switch only into an ACTIVE membership, with an abuse case.
+    - `createOrganisation` is called with the creator as the actor.
+  - **TASK-227 `invite`:**
+    - `created_by = the inviter` is replaced by "the accepting user" (D-ARCH-157).
+    - A DISPATCH GATE on the product-manager REQ-ORG-011 / US-084 wording.
+    - PR65-SEC-02 (a): acceptance only from a PENDING, unexpired invitation of the context organisation, for the verified e-mail, granting exactly its role, with abuse cases.
+    - Rulings §7: 422 `ORG_TYPE_RESTRICTION`; `invitation_id` must name an invitation of the same organisation.
+  - **TASK-231 `members`:**
+    - PR65-SEC-04 (d): `granted_by`, `revoked_by`, `removed_by` and `accepted_by_user_id` come from the actor.
+    - Rulings §7: LAST_OWNER counts use `membership_roles.org_id`; a removed member is re-added as a new row.
+  - **TASK-287 `fastlaneinc`:** the state and the C1/C2/C3 split per D-TASK287C-01.
+    - 287-A, B and C1 are merged. The "287-C CONDITION" line is closed by C1, and so are 287-B code review R1-m1 and R1-n1..n4.
+    - 287-C2 is the incremental-lane policy PR and carries PR287C1-SEC-01 first, fail closed with no exclusion escape.
+    - 287-C3 is the workflow PR. It carries the Dependabot procedure (287-C1 R1-n4) and the ci.yml rewraps.
+    - The optional C1 NITs n1/n3/n5/n6/n7 are listed. 287-B R1-n5 (a D-TASK287 DECISIONS entry) stays the orchestrator's.
+  - **TASK-015 `lanec`:** PR287C1-SEC-02, one repository-wide action-commit table that also covers `lane-c.yml` and `nightly.yml`.
+  - **TASK-294 `flake3f`:**
+    - Part 294-B carries PR #71 code review R2-n1 (exact pin), R2-n2 = R1-m1 (ii) (name-based marker: detect the shapes or record the limit), R1-n1 (nested read stall), R1-n2 (`prisma/tests/` scan root) and R1-n3 (comment stripper).
+    - The consumer.int fallback (D-ORCH-139).
+  - **TASK-034 `backup`, the owner of the open `tools/db` linter items** (PR293-SEC-04, D-ORCH-139's "next holder"):
+    - It gains lock `prisma-core` and the `tools/db/{lint-migrations,sql-text}.ts` files. No remaining card held that lock after TASK-293.
+    - TASK-034 already works in `tools/db`, is a database-engineer task, and is still undispatched in batch 0.10.
+    - Code review R2-n1 of PR #72 (non-ASCII routine names) was closed in PR #72 round 3; the card says so and asks nothing.
+- **Check:** `gen.mjs` reports 0 errors and 0 warnings. `task-map.csv`: 294 rows, 12 changed (TASK-015, 034, 039, 049, 051, 057, 089, 224, 227, 231, 287, 294: refs, plus locks on 034/049), 0 branch changes. No batch shares a lock: 0.10 adds `prisma-core` beside `tests-gen-audit`, `quality-trace` and `tests-gen-abuse`; 1.4 adds `mod-organisations` beside `worker-ctx`/`worker-queues`, `api-csrf` and `i18n-format`.
+- **Dispatch effect:**
+  - TASK-034 now waits for PR #72 (`prisma-core`). It was not in the dispatch plan before #72 anyway.
+  - TASK-049, 051, 089 and 227 have explicit dispatch gates that the orchestrator checks.
+  - No change to TASK-039's ADR-0013 line. principal-architect may be editing TASK-039/TASK-214 for the retention amendment; this fold touched only TASK-039's acceptance list and refs, so a later architect edit of the same card merges as an append.
+- **Alternatives rejected:**
+  - A new late `tools/db` follow-up task for PR293-SEC-04: an INFO item with no due point, and another PR and its CI minutes while R-CI-MIN is HIGH.
+  - A `contextActorId` TenantDb accessor on TASK-049: it would add the `api-tenant-db` lock to the critical path.
+  - Rewriting the historic 287-B/287-C lines: they are kept and marked closed, so the routing trail stays readable.
+- **Owed by others:**
+  - product-manager: the REQ-ORG-011 / US-084 wording (gate on TASK-227).
+  - principal-architect: the R-ARCH-34 ruling (gate on TASK-051), the OPERATOR-membership rule (gate on TASK-089), optionally the users transition guard (TASK-057), and PR65-SEC-04 (a)/(b).
+  - orchestrator: the 287-B R1-n5 DECISIONS entry.
+- **Reversibility:** High (plan data only).
