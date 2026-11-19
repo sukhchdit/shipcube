@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-071.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-072.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -4242,6 +4242,34 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - principal-architect: the R-ARCH-34 ruling (gate on TASK-051), the OPERATOR-membership rule (gate on TASK-089), optionally the users transition guard (TASK-057), and PR65-SEC-04 (a)/(b).
   - orchestrator: the 287-B R1-n5 DECISIONS entry.
 - **Reversibility:** High (plan data only).
+
+### D-PM-071 · 2026-11-19 · product-manager · REQ-ORG-011 and US-084 wording: the membership created at invitation acceptance has `created_by` = the accepting user; the inviter is the creator of the invitation (D-ARCH-157)
+- **Input:** D-ARCH-157 and `docs/03-architecture/rulings/wave-1-pr65-r1-rulings.md` §6, routed by D-ORCH-136/137. It is the dispatch gate on the TASK-227 card (D-SD-002).
+- **Decision:**
+  - **REQ-ORG-011 note.** The acceptance transaction's actor is the accepting user. The membership is created as `ACTIVE` by that user (`created_by` = the accepting user) with `invitation_id` set to the accepted invitation of the same organisation. The inviter is the creator of the invitation (`invitations.created_by`), reached through `invitation_id`, and is not copied onto the membership. The 1.10 wording "`created_by` = the inviter (from the invitation row)" is withdrawn in a dated sentence. The shall-statement is unchanged.
+  - **US-084, three lines.** The two Gherkin steps named by D-ARCH-157 both stated `created_by` = the inviter, so each step is amended, and nothing else in its scenario:
+    - "Accept" (AT-US-084-01): "created_by is the inviter" becomes "created_by is the accepting user, invitation_id names the invitation".
+    - "Audit" (AT-US-084-08): "record created_by the inviter" becomes "record created_by the accepting user, the invitation's created_by the inviter".
+    - The Notes line carried the same statement and is corrected too. This is a third line beyond the two that were routed: left as it was, the story would contradict its own steps.
+  - **One addition to the architect's wording.** The "Accept" step keeps a `created_by` assertion (now the accepting user) next to "invitation_id names the invitation", instead of dropping it. The TASK-227 card already requires the tests to assert `memberships.created_by` = the accepting user, and a criterion that is silent on the column would let the withdrawn reading return.
+  - **Unchanged:** scenario titles, order and count (8), so AT-US-084-01..08 keep their numbers; REQ and US IDs, priorities, milestones, DC tags and counts (434 / 91 / 293 / DC 134); traceability. REQUIREMENTS.md → 1.12, PRD → 1.13 (§11 row, which also records that REQUIREMENTS 1.10 / D-067 had no row).
+  - **D-067 is corrected on this one point only.** The invitation row as the whole pending state, no membership before acceptance and the reserved `INVITED` status all stand.
+- **Why:**
+  - `platform.std_columns_guard()` (D-ARCH-091, merged with PR #65) refuses an insert whose `created_by` is not the transaction's actor. The old wording asked for a row the database refuses, so TASK-227 could not satisfy both the story and the schema.
+  - Nothing the user sees is lost. "Who invited this member" stays answerable from the invitation, and the API already exposes it there (`Invitation.invited_by`). No story or screen reads the inviter from the membership.
+  - The audit reads more truthfully: the person who joined is the actor and the creator of the membership, and the inviter is the creator of the invitation that the membership names.
+- **Alternatives:**
+  - Run the acceptance as the inviter, or add an `invited_by` column to `memberships`. Both rejected by D-ARCH-157 (a false actor on every stamped row and audit entry; a duplicate of `invitations.created_by`).
+  - Use the architect's "Accept" wording as given, with no `created_by` assertion. Rejected (see the addition above).
+  - Leave the Gherkin steps and explain only in the notes, as D-PM-069 did for US-061. Rejected: there the Then-clause still held as written; here both steps assert a value that is now false, and the tests are written from the steps.
+  - Leave the Notes line because only two lines were routed. Rejected: the story would contradict itself.
+- **Not applied here:**
+  - `docs/03-architecture/api/openapi.yaml`, `acceptInvitation` description (line 3849), still ends "The membership `created_by` is the inviter." It is api-designer's; due before TASK-227 implements the operation.
+  - `docs/03-architecture/rulings/wave-0-sheet-fold-7.md` line 20 and the D-067 / D-ARCH-123 entries keep the old statement as history. D-ARCH-157 and data-model §3.2 already mark it withdrawn.
+  - The TASK-227 card needs no change. Its DISPATCH GATE line is met once these files are on main.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.12 (REQ-ORG-011 note, version and date lines), `docs/01-requirements/stories/EPIC-03-organisations-rbac-tenancy.md` (US-084 notes and two Then-steps), `docs/01-requirements/PRD.md` 1.13 (header, §11).
+- **Validation:** the AT-US-084-01 and AT-US-084-08 tests of TASK-227 assert `memberships.created_by` = the accepting user and `invitations.created_by` = the inviter. The standard-columns guard refuses the opposite at the database.
+- **Reversibility:** High (wording only; no code exists until TASK-227).
 
 ### D-SECT39-01 · 2026-11-19 · security-analyst · T-39 / PR56-SEC-03 / D-ARCH-142: the aggregated-entry shape of the TASK-041 denial budget is confirmed, with precisions (closed `details` set, TTL-anchored window and atomic carry claim, actor segment for non-user principals, fallback event, composition); threat model v1.2 (§10.4 H); card lines for the next plan fold
 - **Confirmed as carded:**

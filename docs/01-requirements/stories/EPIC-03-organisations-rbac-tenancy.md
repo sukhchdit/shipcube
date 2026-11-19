@@ -759,13 +759,13 @@ Feature: Invitations
 - **Milestone:** M1 · **MoSCoW:** Should · **Size:** S · **Depends on:** US-083, EPIC-02
 - **Linked REQs:** REQ-ORG-011
 - **As an** invited colleague **I want** to accept with my verified email **so that** I join the team with the invited role.
-- **Notes:** EC-A16. Account is created first if none exists. Endpoint is `POST /api/v1/invitations/accept {token}` (ADR-0016 amendment 2, D-043): the invitation email link carries the token in the URL fragment (`#t=…`), the SPA reads it, posts it in the body and clears it with `replaceState` (D-UX-009); the token never appears in a path, query string, access log or Referer. Acceptance is the first moment a membership row exists: it is created directly as `ACTIVE` (`created_by` = the inviter from the invitation row, `invitation_id` set) and the invitation moves `PENDING` → `ACCEPTED` in the same transaction; the reserved `INVITED` membership status is never written (D-067, D-ARCH-123).
+- **Notes:** EC-A16. Account is created first if none exists. Endpoint is `POST /api/v1/invitations/accept {token}` (ADR-0016 amendment 2, D-043): the invitation email link carries the token in the URL fragment (`#t=…`), the SPA reads it, posts it in the body and clears it with `replaceState` (D-UX-009); the token never appears in a path, query string, access log or Referer. Acceptance is the first moment a membership row exists: it is created directly as `ACTIVE` by the accepting user, who is the actor of the transaction (`created_by` = the accepting user; `invitation_id` names the accepted invitation, whose `created_by` is the inviter), and the invitation moves `PENDING` → `ACCEPTED` in the same transaction; the reserved `INVITED` membership status is never written (D-067, D-ARCH-123). The earlier wording "`created_by` = the inviter" is withdrawn in these notes and in the Then-steps of the "Accept" and "Audit" scenarios (AT-US-084-01, AT-US-084-08); titles, order and scenario count are unchanged (D-PM-071, D-ARCH-157).
 
 #### Acceptance criteria
 ```gherkin
 Feature: Accept invitation
   Scenario: Accept
-    Given a signed-in user whose verified email matches When they POST /api/v1/invitations/accept with the token in the body Then an ACTIVE membership is created with the invited role, created_by is the inviter, and the invitation becomes ACCEPTED, in one transaction
+    Given a signed-in user whose verified email matches When they POST /api/v1/invitations/accept with the token in the body Then an ACTIVE membership is created with the invited role, created_by is the accepting user, invitation_id names the invitation, and the invitation becomes ACCEPTED, in one transaction
 
   Scenario: Token never travels in a URL
     When the invitation email link is opened
@@ -788,7 +788,7 @@ Feature: Accept invitation
     Then 401 "AUTH_REQUIRED" with the return URL preserved
 
   Scenario: Audit
-    Then a "CREATE" entry on entity "membership" (actor the accepting user, record created_by the inviter) and an "UPDATE" entry on entity "invitation" recording PENDING to ACCEPTED exist, neither containing a token value
+    Then a "CREATE" entry on entity "membership" (actor the accepting user, record created_by the accepting user, the invitation's created_by the inviter) and an "UPDATE" entry on entity "invitation" recording PENDING to ACCEPTED exist, neither containing a token value
 ```
 
 ### US-085 — Manage members, last-Owner and individual-organisation safeguards
