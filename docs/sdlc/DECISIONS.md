@@ -4528,3 +4528,123 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Orchestrator:** PR075-SEC-02 (c), ruling 3.
   - **TASK-128 and TASK-113:** PR075-SEC-09.
 - **Reversibility:** High (a review record; the rulings bind tasks that have not started).
+
+### D-ARCH-162 · 2026-11-19 · principal-architect · R-ARCH-34 (a), dispatch gate of TASK-051: on a GUEST_CAPABLE table a reference is a pair of composite keys, one through `org_id` and one through `guest_token_hash`, with no single-column key; the claim is one statement (ADR-0005 amendment 14 items 31 and 32)
+- **Trigger:** D-SD-002 dispatch gate on TASK-051; the open item of D-ARCH-154 and risks.md R-ARCH-34; PR-0072 security record PR293-SEC-03.
+- **Decision:**
+  1. **Rule T2 of data-model §4.7 is revised.** A reference from a GUEST_CAPABLE table to another organisation-keyed table is `fk_<child>__org_id_<x>_id (org_id, <x>_id) → <parent> (org_id, id)` plus `fk_<child>__guest_token_hash_<x>_id (guest_token_hash, <x>_id) → <parent> (guest_token_hash, id)`, and no single-column key. The parent carries `ux_<parent>__org_id_id` and `ux_<parent>__guest_token_hash_id` (T2-G).
+  2. **A reference that guest rows can never hold** has the key through `org_id` alone, a CHECK that the column is NULL on guest rows, and an entry in the C16 (a) exception map (T2-O). First instance: `quotes.requote_of_quote_id`, set only when the original quote belongs to the same organisation.
+  3. **A table with a nullable `org_id` and no `guest_token_hash`** keeps the D-ARCH-154 form (T2-N; no instance yet).
+  4. **The guest claim is one statement:** the child updates are data-modifying CTEs of the `UPDATE` of `quotes`. `expectAffected(result, 1)` reads the outer `UPDATE`. A claim that leaves a child table out fails with `23503`.
+  5. **C16 (a)** learns guest-bound keys (rulings file §2.6). Its exception map no longer has to be empty; every entry must be live. Owner TASK-051.
+  6. **The quote tables** (data-model §3.10) are amended accordingly; TASK-087 and TASK-237 create them.
+- **Why:**
+  - Nothing made a child's copy of the owner columns equal to its quote. A guest row could name another owner's quote: an existence channel for quote ids, which `quote_share_resolve` hands to every holder of a share link, and a forged row attached to someone else's quote.
+  - The owner CHECK leaves exactly one owner column set, so exactly one of the two keys is checked for every row. The single-column key adds nothing, and without it a foreign parent and an unknown id fail on the same constraint.
+  - With the pair no order of separate statements satisfies both keys, and one statement does, because PostgreSQL runs the referential checks at the end of the statement.
+- **Checked (PGlite 0.4.3 = PostgreSQL 17.5, single process, scratchpad; rulings file §2.7):**
+  - a guest or an organisation naming a foreign or unknown quote gets `23503` on the one constraint of its writer class;
+  - the one-statement claim succeeds with `RESTRICT` keys under the tenant and guest policies; both orders of separate statements fail; a statement without one child table fails;
+  - the control table with the D-ARCH-154 shape shows the three gaps (a forged guest row accepted, `23505` for another owner's value, two constraint names);
+  - `prisma validate` accepts two optional relations that share the referencing column, and the differ emits the indexes and keys under these names (7.10).
+- **Not verified:** PostgreSQL 18. Lane B of TASK-051 is the evidence; a differing observation comes back to me.
+- **Alternatives rejected:**
+  - **Accept the existence channel** (the other option on the card): the same shape lets a foreign row take a unique value of another owner, which D-ARCH-154 closed on the TASK-037 tables.
+  - **Keep the single-column key as a third key:** it adds nothing and brings back two constraint names.
+  - **A trigger that compares child and quote:** hand-written per table, and it does not catch a claim that leaves a child table behind.
+  - **A deferred guest key with the claim in separate statements:** the refusal would arrive at COMMIT through another error path, and the keys would need `NO ACTION` instead of the project's `RESTRICT`.
+- **Specialist:** database-engineer was not dispatched. The question was decidable from the constraint semantics and a probe; the database-engineer of TASK-051 implements it and proves it on PostgreSQL 18.
+- **Cost:** one more unique index on `quotes`, about 70 to 90 MB per million rows (estimate).
+- **Applied in:** ADR-0005 amendment 14 items 31 and 32; data-model §1.1 P12, §3.10, §4.3, §4.6 C16, §4.7, A32; risks.md R-ARCH-34; `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §2.
+- **Card lines:** rulings file §6 (TASK-051, TASK-087, TASK-146, TASK-194, TASK-237), for senior-developer's fold. The gate on TASK-051 is met by this entry and the next two.
+- **Reversibility:** High until TASK-087 creates the tables; afterwards a change of key shape is an expand migration per table.
+
+### D-ARCH-163 · 2026-11-19 · principal-architect · R-ARCH-34 (b) / PR293-SEC-03 (a) and (c): every unique key of a TENANT or GUEST_CAPABLE table holds an owner column; C16 arm (b) covers GUEST_CAPABLE tables and exclusion constraints (ADR-0005 amendment 14 item 33)
+- **Decision:**
+  1. **U1, the gate.** Every non-primary unique index and every exclusion constraint of a TENANT or GUEST_CAPABLE table has `org_id`, or on a GUEST_CAPABLE table `guest_token_hash`, among its key columns. Only globally unique secret digests are exceptions, each listed with its reason.
+  2. **U2, a design rule checked in review.** On a GUEST_CAPABLE table a uniqueness rule that must hold for guest rows and for organisation rows is two indexes, one per owner column.
+  3. **The quote tables:** `ux_quote_packages__org_quote_seq` and `ux_quote_packages__guest_quote_seq` replace `ux_quote_packages__quote_seq` and `ix_quote_packages__org_quote`; `ux_quote_shares__org_quote_active` and `ux_quote_shares__guest_quote_active` replace `ux_quote_shares__quote_active`; `ux_quote_shares__share_token_hash` is an exception entry.
+  4. **C16 (b):** scope TENANT plus GUEST_CAPABLE; the owner column is `org_id` or `guest_token_hash`; it reads `indisunique OR indisexclusion`. Owner TASK-051.
+  5. **Reads of a child carry the owner predicate** next to `quote_id`.
+- **Why:** a unique index is checked before the referential check, so a key without an owner column answers `23505` for a value another owner holds and lets a foreign row take it. For `ux_quote_shares__quote_active` that would have let one owner block another owner's share link. NULLs are distinct, so an index through `org_id` says nothing about guest rows.
+- **Narrower than the security note on one point:** it proposed "every class with `org_id`". USER_OWNED tables are left out: their isolation key is the user, and a rule for them is written when the first one carries a unique business key.
+- **Alternatives rejected:**
+  - **Only secret digests may be unique on a GUEST_CAPABLE table:** the package sequence and the one-active-share backstop are real rules.
+  - **One index over both owner columns with `NULLS NOT DISTINCT`:** not expressible in the Prisma schema as far as I know (not checked), and the key would be about 80 bytes wide.
+  - **U2 as a catalog finding:** a rule only organisation rows can break is legitimate, and predicates would have to be compared as text.
+- **Applied in:** ADR-0005 amendment 14 item 33; data-model §3.10, §4.6 C16, §4.7; rulings file §2.4 and §2.6. This also writes down C16 (b) and P9-CK in §4.6, routed to me by D-SECPR293-01 and D-ORCH-139.
+- **Still owed by me:** the §8.3 wording for the rule-10 call sites and the lone carriage return (D-ORCH-139). Not done here.
+- **Reversibility:** High (no GUEST_CAPABLE table exists yet).
+
+### D-ARCH-164 · 2026-11-19 · principal-architect · R-ARCH-34 (c) / PR293-SEC-03 (b): a refused reference has one answer — every `23503` maps to the same response and nothing branches on the constraint name (ADR-0005 amendment 14 item 34)
+- **Decision:**
+  1. `mapDbError` maps every `23503` to 500 `INTERNAL_ERROR` with reason `DB_ERROR`, and never reads the constraint name, the message or the detail. This is what the code at `29fe2a1` already does (read, not run); TASK-051 pins it with a test, and no product code changes.
+  2. No service, repository or module catalogue maps a foreign-key violation (`P2003`, or `23503` under a raw query) to a client-visible answer by constraint or field name. A repository test keeps those two tokens out of every file but the mapper and its test.
+  3. A reference that a client supplies is resolved by a read under RLS before the write. A row of another owner and an absent row are then the same miss.
+  4. A `23505` may be mapped by index name only for an index that C16 (b) passes or lists.
+- **Why:**
+  - With D-ARCH-162 the database already answers a foreign parent and an unknown id with one constraint on GUEST_CAPABLE tables. The rule covers what is left: a T2-N pair, should one arrive, and any later mapping by name.
+  - 500 and not 404: a `23503` that reaches the mapper means a service skipped the read. It should fail the abuse suite and not look like a clean miss. D-ARCH-156 read `MEMBERSHIP_LIFECYCLE_VIOLATION` the same way.
+- **Alternative rejected:** a table of T2 pairs in the mapper that gives both members a 404. It would make the mapper depend on constraint names, which is the thing to avoid, and it would hide service defects.
+- **Applied in:** ADR-0005 amendment 14 item 34; data-model §4.7; rulings file §2.5. Card line: TASK-051.
+- **Reversibility:** High.
+
+### D-ARCH-165 · 2026-11-19 · principal-architect · PR65-SEC-02 (b), dispatch gate of TASK-089: a database control is required — a membership of an OPERATOR organisation needs a row in `operator_staff_grants`, which `platform_app` can read and only the provisioning lane writes (ADR-0005 amendment 14 item 35; risks.md R-ARCH-35)
+- **Trigger:** D-SD-002 dispatch gate on TASK-089; PR-0065 security record PR65-SEC-02 (b) (LOW latent, CWE-269); D-ORCH-137.
+- **Decision:**
+  1. **New table `public.operator_staff_grants`** (GLOBAL, `runtimeReadOnly`; the standard columns and `user_id` with a unique index; no RLS; `SELECT` for `platform_app`; written by `platform_migrator` only).
+  2. **`platform.memberships_lifecycle_guard()` is replaced in place** by a later expand migration. New on INSERT: a membership of an organisation of type OPERATOR needs a grant for its `user_id`, and an organisation the session cannot see counts as OPERATOR. The member is still the actor.
+  3. **Who writes a grant:** the provisioning lane, between creating the user and adding the membership. The demo seed (TASK-089) uses the migrator connection the seed CLI already opens. `ops:staff-bootstrap` (M5) holds the migrator credential for this one row beside the runtime credential; this changes ADR-0005 amendment 12 item 26 and R-ARCH-33.
+  4. **The staff-provisioning function of the service layer** takes the grant step as a one-method port. Its only implementation is in the seed lane, because api and worker never hold the migrator credential (REQ-RLS-005).
+  5. **Implementing task:** recommended TASK-051, as a second migration directory in the same PR. senior-developer may place it elsewhere; it is merged before TASK-089 opens its PR. The exact change list, with the SQL, is rulings file §3.4.
+- **Why a database control and not the service rule alone:**
+  - The membership row is the only fact `app_is_operator()` reads, and it opens every tenant. D-ARCH-156 made every insert a self-insert, so the database could not tell staff provisioning from a user enrolling himself.
+  - The two service defects it takes are in code that TASK-049 and TASK-224 are about to write.
+  - D-ARCH-151 and D-ARCH-155 already closed the two neighbouring paths (creating a second operator organisation; an invitation into it) at the database, for the same outcome.
+  - No provisioning code exists yet, so the cost is one table and one clause.
+- **Checked (PGlite 17.5 with the real bootstrap files 00 to 02 and the six released migrations, statement by statement; rulings file §3.5):**
+  - without the migration, a user with no membership joins the operator organisation, links `OPERATOR_SUPER_ADMIN` and sees every organisation (PR65-SEC-02 reproduced);
+  - with it, the join is `P0001`; `platform_app` cannot insert a grant (`42501`) and can read the table; the migrator's grant makes the provisioned join work; customer organisations are unaffected;
+  - `down.sql` restores the function text exactly;
+  - the repository linter reports 0 findings on the migration with the manifest entry, and the rule-9 finding without it.
+- **Not verified:** PostgreSQL 18 and the suites. Lane B on the implementing PR is the evidence.
+- **Limits, stated:**
+  - A session that can set the context keys can name an existing staff member as its actor (T-35, accepted). The grant closes minting, not impersonation.
+  - A context that wrongly names the operator organisation still shows that organisation's own rows, as for any tenant. The route conditions of PR65-SEC-02 (a) stay binding.
+  - A granted user can re-add the own membership after removal until the grant is deleted. No Run 1 flow removes staff.
+- **Alternatives rejected:**
+  - **Service-layer control only:** no database control behind the one fact that opens every tenant.
+  - **Operator memberships only through a `SECURITY DEFINER` function:** a write-capable definer function and a write policy for `platform_definer`, against ADR-0005 amendments 6, 12 item 25 and 13 item 29; it stops only paths that do not call it.
+  - **A dedicated provisioning login role:** a new role, credential, policy set and grant set, and the audit entry of the membership would need it too.
+  - **A marker in the transaction context:** any session can set a context key.
+  - **A grant keyed by e-mail, written before the user exists:** an account registered earlier under that address would be covered by it.
+  - **A foreign key from the grant to `users`:** the Prisma relation needs a line in `identity.prisma`, which TASK-052 edits in the same batch, and a grant for an id that is no user grants nothing.
+- **Applied in:** ADR-0005 amendment 14 item 35 (and notes at items 26 and 29); data-model §1.5, §3.2, §4.4, §9.1, §9.3, A32; risks.md R-ARCH-33 and new R-ARCH-35; rulings file §3.
+- **Card lines:** rulings file §6 (the implementing task and TASK-089). The gate on TASK-089 is met by this entry.
+- **Owed by others:** security-analyst assigns the SEC-TC id and may cite the grant in T-35; product-manager may note on EPIC-B-207 that M2 staff management needs a runtime writer of grants and their removal, through an ADR-0005 amendment.
+- **Reversibility:** High until the migration merges. Afterwards the rule is removed by another function replacement; the table can stay unused.
+
+### D-ARCH-166 · 2026-11-19 · principal-architect · PR65-SEC-04: (a) `INVITED` by UPDATE closes with the function replacement of D-ARCH-165; (b) the PARTNER backstop is deferred to the M3 partner design; no users transition guard joins TASK-057 (ADR-0005 amendment 14 item 36)
+- **(a) Decision:** the replaced lifecycle guard also refuses an UPDATE that turns a status other than `INVITED` into `INVITED`. Until that migration merges, "no INVITED row is written" is a database property for INSERT only; data-model §3.2 now says so. The comment in the merged migration cannot be corrected, because an applied file is immutable. Nothing is exposed meanwhile: `INVITED` is in neither read list.
+- **(b) Deferred:** a PARTNER organisation with its own membership and a partner role link can be created below the service. In M1 no route or permission gives it anything. A CHECK that forbids the type until M3 would bind every role, change a merged case (the type-immutability control of `prisma/tests/organisations/cases.ts`) and need a contract step at M3. The M3 partner design decides how such an organisation is provisioned and owns the backstop.
+- **Users transition guard: not adopted.** The request was a trigger that lets a user do only `PENDING_VERIFICATION → ACTIVE` with verification and `ACTIVE → DEACTIVATED` on the own row.
+  - Every writer of a `users` row has `app.actor_id` = that user, because `p_users__own` is the only write policy. The verification flow, the housekeeping suspension for an overdue MFA enrolment, `ops:staff-reactivate` and the session worker of OI-25 all act as the user.
+  - A trigger therefore cannot tell a self-service request from a system flow, and an actor type carried in the context is a value any session can set.
+  - The bare transition graph would not stop the cases of the finding: `SUSPENDED → ACTIVE` is a legal edge.
+  - The control stays the closed request schemas and the T-33 fuzz cases already on the TASK-049 and TASK-057 cards (PR65-SEC-04 (c)).
+  - Revisit with M2 staff management, which adds an operator write branch on `users`.
+- **Card line:** TASK-057 drops its conditional sentence (rulings file §6).
+- **Applied in:** ADR-0005 amendment 14 item 36; data-model §3.2; rulings file §4.1 to §4.3.
+- **Reversibility:** High.
+
+### D-ARCH-167 · 2026-11-19 · principal-architect · Outbox purge horizon: 30 days — ADR-0004 item 6 stands and the data-model is corrected (the open item of D-ARCH-161)
+- **Decision:** published outbox events are deleted 30 days after publishing. data-model §3.5, §6.1, §10.1 and §10.5 said 7 days and are corrected; ADR-0004 item 6 and the note in ADR-0013 amendment 3 record that it is settled.
+- **Why:**
+  - ADR-0004 is the accepted decision, and no entry ever recorded a change to 7 days.
+  - A dead-letter record lives 14 days (D-ARCH-159). Redriving an `outbox_event` job needs its row, because `platform.job_context` reads it; at 7 days the row would be gone for the second half of the record's life.
+  - The horizons are then ordered: failed jobs 7 days, dead-letter records 14 days, outbox events 30 days, and `processed_events` 30 days after processing, which is never earlier than publishing. A replayed event still finds its `processed_events` row.
+- **Cost:** about 1.6 million resident rows instead of 0.4 million, about 1 GB with indexes (estimate from data-model §10.1).
+- **Alternative rejected:** amending ADR-0004 to 7 days. Smaller table, but it loses the redrive window and the "replayable for 30 days" consequence the ADR states, for about 1 GB.
+- **Found while ruling:** no card owns the outbox purge (nor the `processed_events` purge). senior-developer assigns it at the next fold; the card line is in rulings file §6.
+- **Applied in:** ADR-0004 item 6; ADR-0013 amendment 3 (one note); data-model §3.5, §6.1, §10.1, §10.5, A32.
+- **Reversibility:** High (one interval; nothing is built).
