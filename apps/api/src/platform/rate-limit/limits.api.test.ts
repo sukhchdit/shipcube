@@ -5,10 +5,9 @@
  */
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterAll, describe, expect, it, jest } from '@jest/globals';
 import { RATE_LIMIT_DEFAULTS } from '@platform/config';
 import type { NextFunction, Request, Response } from 'express';
-import request from 'supertest';
 
 import { createApp, type AppDependencies, type AppLogger } from '../../app.js';
 import type { Principal } from '../routing/define-route.js';
@@ -16,9 +15,12 @@ import type { RouteSlot } from '../routing/slot.js';
 import { ANONYMOUS, markPrivateResponse, readonlySet, setPrincipal } from '../routing/route-state.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import type { RateLimitDependencies } from './kit.js';
+import { closeServedApps, request } from './tests/serve.js';
 import { FakeValkey } from './tests/fake-valkey.js';
 
 jest.setTimeout(60_000);
+
+afterAll(closeServedApps);
 
 const SPEC = fileURLToPath(new URL('../../../../../docs/03-architecture/api/openapi.yaml', import.meta.url));
 

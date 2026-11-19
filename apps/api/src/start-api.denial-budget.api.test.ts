@@ -9,22 +9,24 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterAll, describe, expect, it, jest } from '@jest/globals';
 import { RATE_LIMIT_DEFAULTS, type Config } from '@platform/config';
 import type { NextFunction, Request, Response } from 'express';
 import Joi from 'joi';
-import request from 'supertest';
 
 import { createApp, type AppDependencies } from './app.js';
 import { createWithTenantTx } from './platform/db/with-tenant-tx.js';
 import { defineRoute, type Principal } from './platform/routing/define-route.js';
 import { ANONYMOUS, markPrivateResponse, readonlySet, setPrincipal } from './platform/routing/route-state.js';
+import { closeServedApps, request } from './platform/rate-limit/tests/serve.js';
 import { FakeValkey } from './platform/rate-limit/tests/fake-valkey.js';
 import type { RuntimeServices } from './platform/runtime/services.js';
 import type { RouteSlot } from './platform/routing/slot.js';
 import { startApi, type ApiServer } from './start-api.js';
 
 jest.setTimeout(60_000);
+
+afterAll(closeServedApps);
 
 const ORG = '0193a5b2-7c1e-7d4a-9f3b-0000000000b2';
 const VIEWER = '0193a5b2-7c1e-7d4a-9f3b-0000000000a2';

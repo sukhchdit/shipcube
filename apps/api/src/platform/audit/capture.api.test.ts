@@ -18,7 +18,6 @@ import { toAuditWriteError } from '@platform/audit';
 import { AppError, ERROR_CATALOGUE } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
 import Joi from 'joi';
-import request from 'supertest';
 
 import { createApp } from '../../app.js';
 import { DbError } from '../db/index.js';
@@ -27,6 +26,7 @@ import { createWithTenantTx } from '../db/with-tenant-tx.js';
 import { healthRoutes } from '../health/router.js';
 import { createRateLimitCounter, type RateLimitCounter } from '../rate-limit/counter.js';
 import { createDenialBudget } from '../rate-limit/denial-budget.js';
+import { closeServedApps, request } from '../rate-limit/tests/serve.js';
 import { FakeValkey } from '../rate-limit/tests/fake-valkey.js';
 import { defineRoute, type Principal, type RouteDescriptor, type RouteSpec } from '../routing/define-route.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
@@ -882,6 +882,8 @@ describe('[PR #42 R1-n5] the capture takes DB_AUDIT_LOCK_TIMEOUT_MS from the con
 
 describe('[T-39] [PR56-SEC-03] [D-SECT39-01] the per-actor denial budget through the real capture', () => {
   const THRESHOLD = 2;
+
+  afterAll(closeServedApps);
   const PERMISSION = 'address_book:read';
   const VAULT_ROWS_PER_ENTRY = 2;
   let valkey: FakeValkey;

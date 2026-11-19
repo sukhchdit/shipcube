@@ -129,13 +129,6 @@ const SUPERTEST_ALLOW_LIST = [
   'apps/api/src/platform/openapi/runtime-seams.api.test.ts',
   // US-035 Swagger UI at /api/docs: HTML, ETag and docs-path routes that are not contract operations.
   'apps/api/src/platform/openapi/serve.api.test.ts',
-  // TASK-041 rate limiting through createApp: fixture routes at the class limits, 429 problems and RateLimit-* headers,
-  // the step-0 limiter on /api/docs; routes that are not contract operations.
-  'apps/api/src/platform/rate-limit/limits.api.test.ts',
-  // TASK-041 T-39 describe: many denials from distinct client IPs through the real capture (fixture routes).
-  'apps/api/src/platform/audit/capture.api.test.ts',
-  // TASK-041 T-39 denial budget through the real capture and the startApi composition: fixture routes, headers of 429.
-  'apps/api/src/start-api.denial-budget.api.test.ts',
   // Health router unit test (unit lane): the router in isolation, no contract document loaded.
   'apps/api/src/platform/health/router.test.ts',
   // Health integration test (integration lane, Testcontainers): real dependencies; contract checks live in tests/api.
