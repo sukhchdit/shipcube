@@ -135,14 +135,11 @@ export function allocate(value: Money, weights: readonly number[]): Money[] {
   const magnitude = sign * amount;
   const shares = ws.map((weight) => (magnitude * weight) / total);
   const remainders = ws.map((weight, index) => ({ index, remainder: (magnitude * weight) % total }));
-  let left = magnitude - shares.reduce((acc, share) => acc + share, 0n);
+  // Fewer leftover units than parts: each part's truncation loses less than one unit.
+  const left = Number(magnitude - shares.reduce((acc, share) => acc + share, 0n));
   remainders.sort((a, b) => (a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1));
-  for (const { index } of remainders) {
-    if (left === 0n) break;
-    shares[index] = (shares[index] ?? 0n) + 1n;
-    left -= 1n;
-  }
-  return shares.map((share) => make(fromBigInt(sign * share), value.currency));
+  const bonus = new Set(remainders.slice(0, left).map(({ index }) => index));
+  return shares.map((share, index) => make(fromBigInt(sign * (bonus.has(index) ? share + 1n : share)), value.currency));
 }
 
 /**

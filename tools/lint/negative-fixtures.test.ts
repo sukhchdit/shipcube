@@ -47,6 +47,7 @@ const API = 'apps/api/src/modules';
 const BOUNDARIES = 'boundaries/dependencies';
 const TENANT_TX_IO = 'platform/no-external-calls-in-tenant-tx';
 const OUTBOUND_HTTP = 'platform/outbound-http-via-client';
+const PRICING_PURITY = 'platform/pricing-purity';
 
 const LAYERING: readonly Violation[] = [
   // The three Examples rows of the US-001 outline "Each layering rule is enforced by a seeded negative fixture".
@@ -118,11 +119,12 @@ const LAYERING: readonly Violation[] = [
     'only through its public index.ts',
   ],
   ['package imports an app', 'layering/package-imports-app/packages/shared/src/bad-leak.ts', BOUNDARIES, 'packages may not import apps'],
+  // Two independent controls: the ADR-0003 allow-list and platform/pricing-purity (AT-US-138-02, TASK-076).
   [
-    'packages/pricing imports node:fs (I/O)',
+    '[AT-US-138-02] packages/pricing imports node:fs (I/O)',
     'layering/pricing-io/packages/pricing/src/bad-price.ts',
-    BOUNDARIES,
-    'packages/pricing has no I/O imports',
+    [BOUNDARIES, PRICING_PURITY],
+    '',
   ],
   [
     'apps/web imports apps/api',
@@ -282,6 +284,33 @@ const RULES: readonly Violation[] = [
   ['import-x/no-cycle: a <-> b (a)', 'rules/import-cycle/packages/shared/src/bad-a.ts', 'import-x/no-cycle', ''],
   ['import-x/no-cycle: a <-> b (b)', 'rules/import-cycle/packages/shared/src/bad-b.ts', 'import-x/no-cycle', ''],
   ['platform/money-arith: `+` on minor units', 'rules/money-arith/packages/pricing/src/bad-total.ts', 'platform/money-arith', ''],
+  [
+    '[PR #2 m10] platform/money-arith (type-aware): `+` on two Minor-branded values whose names the heuristic misses',
+    'typed/money-arith/packages/pricing/src/bad-minor-brand.ts',
+    'platform/money-arith',
+    "'net'",
+  ],
+  ...(
+    [
+      ['Date.now()', 'bad-date-now', 'Date.now'],
+      ['new Date() without an argument', 'bad-new-date', 'new Date()'],
+      ['Math.random()', 'bad-math-random', 'Math.random'],
+      ['crypto.randomUUID()', 'bad-random-uuid', 'crypto.randomUUID'],
+      ['globalThis.crypto.getRandomValues()', 'bad-get-random-values', 'crypto.getRandomValues'],
+      ['process.env', 'bad-process-env', 'process.env'],
+    ] as const
+  ).map(([title, name, what]): Violation => [
+    `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
+    `rules/pricing-purity/packages/pricing/src/${name}.ts`,
+    PRICING_PURITY,
+    `'${what}' is not allowed in packages/pricing`,
+  ]),
+  [
+    '[AT-US-138-02] platform/pricing-purity, the boundaries allow-list and outbound-http-via-client: packages/pricing imports axios',
+    'rules/pricing-purity/packages/pricing/src/bad-axios.ts',
+    [BOUNDARIES, PRICING_PURITY, OUTBOUND_HTTP],
+    '',
+  ],
   ['platform/no-innerhtml: innerHTML assignment', 'rules/no-innerhtml/apps/web/app/bad-dom.ts', 'platform/no-innerhtml', ''],
   ['platform/no-innerhtml: dangerouslySetInnerHTML', 'rules/no-innerhtml/apps/web/app/components/bad-raw.tsx', 'platform/no-innerhtml', ''],
   ...['bad-to-fixed', 'bad-intl', 'bad-intl-call', 'bad-parse-float'].map((name): Violation => [
@@ -647,6 +676,18 @@ const RULES: readonly Violation[] = [
     `rules/s3-sdk-confinement/${path}`,
     'no-restricted-imports',
     'only apps/api/src/platform/storage imports the AWS SDK',
+  ]),
+  ...(
+    [
+      ['a value import', 'bad-carriers-deep-value'],
+      ['an import type', 'bad-carriers-deep-type'],
+      ['an export type … from', 'bad-carriers-deep-reexport'],
+    ] as const
+  ).map(([title, name]): Violation => [
+    `[AT-US-121-05] no-restricted-imports: a deep @platform/carriers/* specifier (${title})`,
+    `rules/carriers-deep-import/${API}/quotes/service/${name}.ts`,
+    'no-restricted-imports',
+    'import @platform/carriers from its package root only',
   ]),
   // Output folders are ignored only at the root and the workspace roots: a source folder named coverage/build/dist is linted.
   ...['packages/shared/src/coverage/bad-coverage.ts', `${API}/shipments/build/bad-build.ts`, 'packages/carriers/src/dist/bad-dist.ts'].map(
@@ -1562,6 +1603,15 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       'layering/audit-writer-composition/apps/api/src/platform/tx/execute.ts',
     ],
     ['platform/money-arith: the money helpers', 'rules/money-arith/packages/shared/src/money/add.ts'],
+    [
+      '[PR #2 m10] platform/money-arith (type-aware): comparisons on Minor and arithmetic on plain numbers',
+      'typed/money-arith/packages/pricing/src/ok-minor-compare.ts',
+    ],
+    ['[AT-US-138-02] platform/pricing-purity: new Date(input) and date arithmetic', 'rules/pricing-purity/packages/pricing/src/ok-pure.ts'],
+    [
+      '[AT-US-121-05] a module service imports @platform/carriers from its package root',
+      `rules/carriers-deep-import/${API}/quotes/service/ok-carriers-root.ts`,
+    ],
     ['platform/no-innerhtml: the sanitising component', 'rules/no-innerhtml/packages/ui/src/sanitised-html/sanitised-html.tsx'],
     ['platform/no-tofixed-tolocalestring: the Intl helpers', 'rules/no-tofixed-tolocalestring/packages/shared/src/intl/number.ts'],
     [

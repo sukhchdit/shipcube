@@ -3,9 +3,32 @@
  * Money helpers of `@platform/shared` (`add`, `sub`, `mulRatio`, `allocate`, `convert`). The eslint.config.mjs turns
  * the rule off for `packages/shared/src/money/**`.
  *
- * The rule is name-based: it recognises `amount`, `minor`, `<x>Amount`, `<x>Minor` and the snake-case column names
- * `<x>_amount`, `<x>_minor`, as identifiers or as member names. Comparisons are allowed; so is `+` on strings.
+ * Two branches (PR #2 code review m10, TASK-076):
+ *  - type-aware, when the file has type information: an operand whose type carries the `Minor` brand of
+ *    `@platform/shared` (`number & { readonly __brand: 'Minor' }`; through unions and intersections) is reported,
+ *    whatever its name;
+ *  - name-based, always (the fallback for untyped files): it recognises `amount`, `minor`, `<x>Amount`, `<x>Minor` and
+ *    the snake-case column names `<x>_amount`, `<x>_minor`, as identifiers or as member names.
+ * Comparisons are allowed; so is `+` on strings.
  */
+
+const MINOR_BRAND_PROPERTY = '__brand';
+const MINOR_BRAND_VALUE = 'Minor';
+
+/**
+ * True when the TypeScript type, or one of its union/intersection constituents, has `__brand: 'Minor'`.
+ * @param {import('typescript').Type} type
+ * @param {import('typescript').TypeChecker} checker
+ * @param {import('typescript').Node} location
+ * @returns {boolean}
+ */
+function carriesMinorBrand(type, checker, location) {
+  if (type.isUnionOrIntersection() && type.types.some((part) => carriesMinorBrand(part, checker, location))) return true;
+  const brand = type.getProperty(MINOR_BRAND_PROPERTY);
+  if (brand === undefined) return false;
+  const brandType = checker.getTypeOfSymbolAtLocation(brand, location);
+  return brandType.isStringLiteral() && brandType.value === MINOR_BRAND_VALUE;
+}
 
 const DEFAULT_NAME_PATTERN = '^(?:amount|minor|\\w+Amount|\\w+Minor|\\w+_amount|\\w+_minor)$';
 const ARITHMETIC = new Set(['+', '-', '*', '/', '%', '**']);
@@ -73,7 +96,26 @@ export default {
         if (!computed && property.type === 'Identifier') name = property.name;
         else if (computed && property.type === 'Literal' && typeof property.value === 'string') name = property.value;
       }
-      return name !== null && namePattern.test(name) ? name : null;
+      if (name !== null && namePattern.test(name)) return name;
+      return brandedName(inner);
+    }
+
+    // Type information exists only for TypeScript files linted through the project service (or a `project`).
+    const services = context.sourceCode.parserServices;
+    const program = services?.program ?? null;
+    const checker = program === null ? null : program.getTypeChecker();
+
+    /**
+     * The operand's source text when its type carries the `Minor` brand, else null (always null without types).
+     * @param {import('estree').Node} node
+     * @returns {string | null}
+     */
+    function brandedName(node) {
+      if (checker === null || services?.esTreeNodeToTSNodeMap === undefined) return null;
+      const tsNode = services.esTreeNodeToTSNodeMap.get(/** @type {never} */ (node));
+      if (tsNode === undefined) return null;
+      const type = checker.getTypeAtLocation(tsNode);
+      return carriesMinorBrand(type, checker, tsNode) ? context.sourceCode.getText(node).slice(0, 40) : null;
     }
 
     return {

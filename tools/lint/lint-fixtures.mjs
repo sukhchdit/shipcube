@@ -6,7 +6,9 @@
  * Every directory under `layering/` and `rules/`, plus `react/` and `resolution/`, is a miniature repository root: it
  * is both the ESLint `cwd` and the boundaries root path, so the path-based layering and allow-list globs apply to
  * fixture-relative paths. Overrides keep the run fast and hermetic, and leave every rule under test unchanged:
- *  - non-type-aware parsing (the fixtures belong to no tsconfig project);
+ *  - non-type-aware parsing (the fixtures belong to no tsconfig project), except under `typed/`: each `typed/<rule>`
+ *    root has its own tsconfig.json and is linted with type information, for the type-aware branch of that rule only
+ *    (PR #2 m10: `platform/money-arith` and the `Minor` brand; TASK-076), so the other roots stay as fast as before;
  *  - `import-x/no-extraneous-dependencies` off everywhere (fixture roots have no package.json);
  *  - `import-x/no-unresolved` off except under `resolution/`, which proves end to end that ESLint resolves
  *    `@platform/*` workspace imports and NodeNext `./x.js` specifiers, and reports a missing module.
@@ -62,18 +64,32 @@ const eslintRoots = () => [
   join(FIXTURES, 'react'),
 ];
 
+/** @returns {string[]} The `typed/<rule>` roots (each with its own tsconfig.json). */
+const typedRoots = () =>
+  readdirSync(join(FIXTURES, 'typed'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(FIXTURES, 'typed', entry.name));
+
 /**
  * @param {string} root
- * @param {{ resolution?: boolean }} [options] `resolution: true` keeps `import-x/no-unresolved` on.
+ * @param {{ resolution?: boolean; typed?: boolean }} [options] `resolution: true` keeps `import-x/no-unresolved` on;
+ *   `typed: true` parses with the root's tsconfig.json (type-aware rules see types).
  * @returns {Promise<Report>}
  */
-async function lintRoot(root, { resolution = false } = {}) {
+async function lintRoot(root, { resolution = false, typed = false } = {}) {
+  const parsing = typed
+    ? [
+        {
+          files: ['**/*.{ts,tsx}'],
+          languageOptions: { parserOptions: { projectService: false, project: join(root, 'tsconfig.json'), tsconfigRootDir: root } },
+        },
+      ]
+    : [tseslint.configs.disableTypeChecked, { files: ['**/*.{ts,tsx}'], languageOptions: { parserOptions: { projectService: false } } }];
   const eslint = new ESLint({
     cwd: root,
     overrideConfigFile: ESLINT_CONFIG,
     overrideConfig: [
-      tseslint.configs.disableTypeChecked,
-      { files: ['**/*.{ts,tsx}'], languageOptions: { parserOptions: { projectService: false } } },
+      ...parsing,
       {
         rules: {
           'import-x/no-extraneous-dependencies': 'off',
@@ -352,6 +368,7 @@ async function lintRepoProbes() {
 
 const reports = await Promise.all([
   ...eslintRoots().map((root) => lintRoot(root)),
+  ...typedRoots().map((root) => lintRoot(root, { typed: true })),
   lintRoot(join(FIXTURES, 'resolution'), { resolution: true }),
 ]);
 const importer = join(REPO_ROOT, 'packages', 'pricing', 'src', 'index.ts');
