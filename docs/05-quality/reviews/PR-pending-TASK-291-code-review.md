@@ -127,3 +127,81 @@ The only blocking item is R1-M1. It closes without a code fix cycle, in one of t
 - **C3.** A security record on the head.
 - **C4.** The PR body carries the D-ORCH-118 statement (section 5, item 05) and does not claim the prerender item.
 - **Recommended in the same push** (not blocking): R1-m2 (two one-line edits) and R1-m1 (i) (the ceiling pin and the CODEOWNERS line).
+
+---
+
+# Round 2 (delta): `1672070..12d7873` and the C1 record
+
+| Field | Value |
+|---|---|
+| Delta | `f4f8a12` (review r1 fixes) and `12d7873` (security r1: PR291-SEC-01 `joinDuplicateHeaders`, PR291-SEC-03 lock label). 9 files, +79 / -8 |
+| C1 record | `f193784` on main: D-ARCH-158, ADR-0023 amendment O, `docs/07-ops/CI-CD.md` section 1, the narrowed TASK-291 card, the new TASK-294 (WAVE-07). D-ORCH-138 records D-TASK291-04 as not accepted |
+| Reviewer | code-reviewer, 2026-11-19 |
+
+## R2.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 is closed by a proper section 7 re-specification (D-ARCH-158 / TASK-294), and the TASK-291 card no longer claims
+         the prerender item. R1-m2, R1-m1 (i), R1-n4 and R1-n5 are fixed. The security fix is correct and is pinned in
+         both directions. Conditional on lane B PASS at 12d7873 (C2), the security delta (C3) and the PR body (C4).
+```
+
+## R2.2 Verification (HOST RULE: no npm, no Jest, no Docker)
+
+- I read the full delta and the C1 record commit `f193784`: the DECISIONS entries D-ARCH-158 and D-ORCH-138, the ADR-0023 amendment O text, the CI-CD.md section 1 text, the TASK-291 card on `origin/main` (locks are now `tests-harness, api-routing, tests-gen-rls`, and there is a "NOT HERE — WEB PRERENDER" line), and the TASK-294 heading in WAVE-07.
+- I ran a probe in one Node 24 process on a `git archive 12d7873` extract (`loopback.ts`, `timing.ts`, `loopback-scan.ts`, allow-list):
+  - The loopback server sends `etag`, `location`, `content-type` and `x-c` twice each, plus two `set-cookie` headers.
+  - `fetchOnce` returns `etag: "a", "b"`, `location: /x, /y`, `content-type: x/a, x/b` and `x-c: 1, 2`, and keeps the two `set-cookie` values separate. That is the same shape `fetch` gives. Without the option, Node keeps only the first copy of etag, location and content-type.
+  - `ratchetFindings(scanLoopbackFetchUsers(worktree), allow-list)` returns `[]` at the head.
+- Mutation reasoning for PR291-SEC-01: if `joinDuplicateHeaders` is removed, the new `api-cases.test.ts` case loses the second `etag`/`location` copy, which is the one with the foreign value. Its two expected findings disappear and the case fails. The control case passes either way. `loopback.test.ts` pins the same option directly. So the fix is pinned on both sides.
+- I did not re-run lint, typecheck or Jest. Lane B at `f4f8a12` passed (orchestrator report). Lane B at `12d7873` is still queued (C2).
+
+## R2.3 C1: the re-specification record
+
+C1 is **closed**. The record is what option (b) of R1-M1 asked for, and it is better than the minimum:
+- It is a section 7 rung-2 re-specification by principal-architect, not a developer waiver. D-TASK291-04 is recorded as not accepted (D-ORCH-138).
+- The card is narrowed: the `quality-tools` lock is released, `heavy.mjs` is no longer in the files list, and a NOT HERE line says the PR body must state the item is not delivered.
+- TASK-294 owns the open question and is due before G3. Part 294-A has a method that can actually be run (one serial-queue job on an idle host under a bounded synthetic load), and its outcome is decidable. Root cause 4 is correct: 0 failures in 20 builds still leaves a 95 % upper bound near 14 %, so a "< 1 %" target needs the decision rule the record gives.
+- The interim rule now lives in one place (CI-CD.md section 1). It is tighter than the card's sentence:
+  - the signature is read from the run log, not `summary.md`;
+  - the first attempt is moved aside and never committed;
+  - every use is recorded;
+  - one re-run per commit;
+  - a trip condition: a failed re-run, or a second use within 20 consecutive runs;
+  - a change that touches `apps/web`, `packages/ui` or the react-router/vite lock entries must also be named in its own code review.
+- The 20/20-under-load tables (old C2 tail) are routed to 294-A when they are not taken at the PR head. The five orphaned W0-FLAKE-3 routings are in 294-B, which closes a gap my r1 closure table missed.
+
+One residual is accepted. The signature wording comes from the plugin source and has not been confirmed against a real failing log. The rule accepts both wordings and makes the first use quote the real line, which is the right control.
+
+## R2.4 Round 1 finding closure
+
+| ID | Status at `12d7873` |
+|---|---|
+| R1-M1 | **Closed** by D-ARCH-158 (section R2.3). |
+| R1-m1 (i) growth | **Closed.** `PINNED_CEILING` (10 files) plus the test "never grows beyond the pinned ceiling" (length and membership), and the CODEOWNERS line `/tests/generated/loopback-*`. Growth now needs an edit of the pinned test file in the same diff, and that file is code-owned. Residual: R2-n1. |
+| R1-m1 (ii) name-based marker | **Open, downgraded to NIT (R2-n2).** Not addressed and no decision records it. The ceiling bounds the damage: a file the marker misses is not listed at all. The bypass shapes of r1 still pass unflagged. |
+| R1-m2 timeouts | **Closed.** Both files use `LOOPBACK_TEST_TIMEOUT_MS` (180 s), so the 60 s `FetchOnceTimeoutError` fires first. |
+| R1-n1 nested read stall | Open NIT (unchanged, unreachable today). |
+| R1-n2 prisma/ not scanned | Open NIT. |
+| R1-n3 regex comment stripper | Open NIT. |
+| R1-n4 ENOENT | **Closed** in the "named failure" form (`readSource` names the path and keeps the cause). That is acceptable: a tracked-but-deleted file is a dirty tree, and failing loudly is better than skipping. |
+| R1-n5 named error | **Closed.** The shim checks `typeof target !== 'string'` and throws a named error. The test keeps `?? ''`, but it imports through the shim first, so the named error is reported before the obscure directory import is reached. |
+
+## R2.5 New findings
+
+| ID | Severity | File:line | Issue | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `tests/generated/loopback-ratchet.test.ts:30-41,52-55` | The ceiling does not follow the list down. When a lock holder converts a file and removes it from the JSON (the stale-entry check forces that), the file stays in `PINNED_CEILING`. A later PR can then put it back on the JSON without touching the pin, so the "may only shrink" property is lost for converted files. | Pin the list exactly: `expect(ALLOW_LIST.map((e) => e.file)).toEqual(PINNED_CEILING)`. Every conversion then edits both files, and any re-add shows up as a pinned-test edit. |
+| R2-n2 | NIT | `tests/generated/loopback-scan.ts:22` | This is R1-m1 (ii) carried over: the loopback marker is name-based (`${origin}`, `${url}`, `${baseUrl}`, `base + '/x'`, `[::1]` without `.listen(`, destructured or bracket `fetch`). | Route it with the open NITs to the next holder of the ratchet (TASK-294 part 294-B is the natural home, test-engineer), or record it as accepted in DECISIONS. |
+| R2-n3 | NIT | `apps/api/src/platform/routing/tests/loopback.ts:89` | `joinDuplicateHeaders` also joins a duplicated `content-type` (`application/problem+json, text/html`). `runApiCase` checks it with an anchored `application/problem+json` regex, which still passes on the joined value. That is the same as `fetch`, so this is parity and not a regression. | None needed; noted for security's oracle reading. |
+
+PR291-SEC-03 (the `contract-stubs.api.test.ts` lock relabelled `api-openapi`) is correct: TASK-017 `openapi` owns `tests/contract-stubs/` and holds the `api-openapi` lock, and `contract-stubs` is not a lock name in `plan-data.mjs`.
+
+## R2.6 Merge conditions (replace section 9)
+
+- **C1:** closed (section R2.3).
+- **C2:** lane B at `12d7873` (or at the final head if it moves) must PASS with 0 failures, 0 errors and 0 skips in `unit`, `integration`, `catalog-c1-c14` and `rls-cross-tenant`, with the same rls case count as the last main run. The r1 tail about under-load tables is now owed by TASK-294 part 294-A unless the table was taken at the head.
+- **C3:** a security delta record on the head (security r1 is `ccc38a5`, PASS_WITH_CONDITIONS at `f4f8a12`; `12d7873` is its fix).
+- **C4:** orchestrator at PR creation. The PR body names TASK-294 for the prerender item and carries the D-ORCH-118 statement for the 11 `prisma/tests` files (prisma-core is held by TASK-293, with no overlapping file).
+- R2-n1, R2-n2 and R1-n1..n3 do not block. They should be routed or accepted in the orchestrator's next record.
