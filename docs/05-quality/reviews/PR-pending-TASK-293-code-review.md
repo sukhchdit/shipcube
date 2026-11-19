@@ -119,3 +119,78 @@ Developer decisions: all accepted.
 4. The orchestrator routes PR65-SEC-05 (d) and logs D-TASK293-01..06 in DECISIONS.md.
 5. Recommended but not blocking: fix R1-m1 and R1-m2 (code or stated limit) before the first push. They are cheap now and would stale lane-B evidence later. If they are fixed, a delta re-check of `lint-migrations.ts` and its test is enough.
 6. Merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file (DUE, D-ORCH-134).
+
+---
+
+# Round 2 (delta): `3183525` → `85afc70`
+
+| Field | Value |
+|---|---|
+| Head | `85afc70` (one commit on `3183525`; still not pushed) |
+| Diff reviewed | `git diff 3183525 85afc70`: 5 files, +226 / -39 (`lint-migrations.ts` and its test, `tenant-keys.ts` JSDoc, `security-test-cases.md`, `test-ids.test.ts`) |
+| Developer decisions | D-TASK293-07 replaces the regex matching of D-TASK293-03 (RoutineRegistry) |
+| Reviewer | code-reviewer, 2026-11-19 |
+
+## R2.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-m1, R1-m2 and R1-m3 are closed, and so are R1-n1..n4. No regex is built from SQL text any more, writers are
+         resolved order-independently at the call, and the body scan is linear. On a 400k-text fuzz it is equivalent to
+         the old pattern (0 mismatches). SEC-TC-76..78 are known to quality:trace. No BLOCKER, MAJOR or MINOR. One NIT:
+         a non-ASCII routine name is still skipped, a residual of the lint-wide ASCII IDENT class that r1 missed.
+```
+
+## R2.2 Verification performed (same host rule: `git archive 85afc70` extract with a node_modules junction; tsx/Node single process; no npm, Jest or Docker; nothing ran in the worktree)
+
+- **Scope of the delta.** `sql-text.ts`, the lexer cases, C16 SQL, the int tests and the manifest are unchanged since `3183525` (`git diff --quiet` on `sql-text.ts`). So the round-1 corpus, scan.l and C16 results still hold.
+- **Call-site rule (`probes/r2.ts`, 18 shapes on the head linter):**
+  - `public."f("` is a rule-10 finding at its call, and `"g["` with no call lints the next file. No crash. (R1-m1)
+  - A forward reference is found, and so is a reversed 3-level chain (`a1 → a2 → a3`, the writer defined last), each at its call. Mutual recursion with no writer stays clean. (R1-m2)
+  - Calls now matched (R1-n1):
+    - an unqualified creation under `SET search_path = platform`, called as `platform.purge_x()`;
+    - `"my purge"` with a space;
+    - a qualified caller of an unqualified writer.
+  - Controls: `other.qq()` against `public.qq` and a caller naming `other.wz` stay clean.
+  - Still fail closed: `CREATE OR REPLACE` with a reader body keeps the writer status, and a DO `PERFORM` of a writer counts.
+  - New finding R2-n1: a non-ASCII routine name is not seen.
+- **Equivalence of the new body scan.** I fuzzed the replaced nested regex (copied from `3183525`) against the exported `bodyDataChanging`. I used both anchor sets (DO and routine), 400,000 random normalised texts over a 41-token vocabulary (keywords, near-miss words like `selection` and `forupdate`, `;`, `'`, quoted names) with joined and unjoined forms. Result: **0 mismatches**, with 4,489 positives. The "earliest start, then plain search" argument is sound: for a fixed segment, the rest after the earliest qualifying start contains the rest after every later start, so existence is preserved for INSERT … SELECT, ON CONFLICT … DO UPDATE and WITH … writes.
+- **Cost.**
+  - Bodies that took 20.9 s / 26 s in round 1 now take: 60 KB routine body (insert / on conflict) 27 ms, 60 KB DO block 31 ms, 60 KB `with` body 24 ms.
+  - 600 chained routines plus 300 calls take 100 ms, with all 300 calls found through the chain.
+- **Repository lanes** with the head linter: `prisma/migrations` 0 findings; `prisma/bootstrap` (real reviewers file) 0.
+- **R1-m3.** `parseSecurityCases` on the head registry gives 67 adopted (01..64 and 76..78) and 7 proposed, with no duplicate. `trace.mjs isKnown()` is now `true` for SEC-TC-76, -77 and -78. The rows match D-SEC-PR65-01 (a) and the threat-model §10.4 F text.
+- **Gates I could run:** `prettier --check` on the 5 files is clean; typed ESLint on the 3 changed TS files gives 0 problems; the commit header is 94 characters.
+- **Not re-run:**
+  - Jest unit and `tsc -b`: I rely on the developer's 17/17 mutants.
+  - Lane B on `85afc70`, which is queued. The coordinator reports that lane B on `3183525` passed every TASK-293 check on PostgreSQL 18: catalog 113, the 8 lexer rows, C16 7, SEC-TC-76..78. Its only failure was the unrelated `consumer.int` AT-US-009-04 race. That run's evidence is not committed on main, so I could not read it myself.
+
+## R2.3 Round-1 closure
+
+| R1 item | Status | Evidence |
+|---|---|---|
+| R1-m1 regex from SQL text | **Closed** | `CALL_IDENT` / `NAMED_CALL` / `DEFINED_NAME` are fixed patterns, names compare as parsed identifier values (`identifierValue`, `""` unescaped). 7 metacharacter and quote rows in the test, plus my probe |
+| R1-m2 order-dependent transitivity | **Closed** | `RoutineRegistry` keeps every definition with its callees; `writingRoutines()` runs a BFS over callers on demand, with the cache cleared by every `define`. The test covers forward, "judged between the two definitions" and cross-file cases plus a control; my probe adds a reversed 3-level chain and mutual recursion |
+| R1-m3 trace orphans | **Closed** | New "Adopted cases SEC-TC-76..78" section; `test-ids.test.ts` pin is 67 |
+| R1-n1 names | **Closed** (RENAME and three-part names documented) | Unqualified definition is `schema: null` and matches any schema; spaces kept |
+| R1-n2 trigger wording | **Closed** | JSDoc now says "except a plain `INSERT … VALUES` … not seen" |
+| R1-n3 backtracking | **Closed** | Segment-wise linear scan, also for DO blocks (it fixes the base twin as well); test bound < 5 s |
+| R1-n4 C16 limits | **Closed** (stated) | `tenant-keys.ts` JSDoc; data-model §4.6 (b)/P9-CK stays with the architect |
+
+D-TASK293-07 is accepted. A fixed identifier grammar plus a call-time fixpoint is the right shape, and the registry is cohesive and exported for tests only through the history type.
+
+## R2.4 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `tools/db/lint-migrations.ts` `CALL_IDENT` (plain branch `[a-z_][a-z0-9_$]*`), `NAMED_CALL` lookbehind, `DEFINED_NAME` | **Non-ASCII routine names are not seen.** PostgreSQL accepts `public.purgé()` and `public.é()` as plain identifiers (scan.l `ident_start`/`ident_cont` include `\200-\377`, which is this task's own point (b)). `DEFINED_NAME` then fails to match, so the definition is silently not registered, and the call `SELECT public.purgé()` gives `[]` (probe). It fails open, but only for the backup prompt. The same ASCII-only `IDENT` exists in `ROUTINE_NAME` and the other name-based rules on base, so this is a residual class that round 1 missed, not a regression. | In-PR is optional: add `\u0080-￿` to both ranges of the plain branch (as `CODE_PIECE` does) and to the lookbehind, and when `ROUTINE_DEFINITION` matches but `DEFINED_NAME` does not, record the definition as a writer under its masked text or report it (fail closed). Otherwise route the lint-wide IDENT class to the next tools/db card. |
+| R2-n2 | NIT | `lint-migrations.ts` JSDoc "Not seen … a call written with a three-part name" | Conservative: `SELECT mydb.public.t3()` **is** found today (the `.` is not in the lookbehind, so `public.t3(` matches). It does no harm. | Drop it from the "not seen" list, or leave it as is. |
+| R2-n3 | NIT | `docs/05-quality/TEST-STRATEGY.md:192,599` | The adopted set is now 67, but the G3 line still reads "SEC-TC-01..64, 64/64". The registry amendment explains that the "64" counts describe the 2026-11-12 set, but the G3 checklist is what the gatekeeper reads. | qa-lead: change both lines (192, and 599 = §15 item 6) to "01..64 and 76..78 (67)" in the qa-lead acknowledgement commit (merge condition 3). |
+
+## R2.5 Merge conditions (replace §7)
+
+1. A lane-B PASS on `85afc70` (queued). It must observe `catalog-c1-c14` = 113 with 0 failures and 0 skips; the 8 `[PR66-SEC-01]` rows; the 7 C16 / P9-CK cases; SEC-TC-76..78 passing; and the unit `lint-migrations` / `test-ids` suites. An unrelated `consumer.int` AT-US-009-04 failure needs the orchestrator's usual flake ruling (TASK-W0-FLAKE line), not a code change here.
+2. A security record on `85afc70` (tools/db is security-owned).
+3. qa-lead acknowledges the `required-suites.json` and `security-test-cases.md` edits (owned paths, adopted 64 → 67), with R2-n3.
+4. The orchestrator routes PR65-SEC-05 (d), which is still unowned (§4), and logs D-TASK293-01..07 in DECISIONS.md.
+5. DUE (D-ORCH-134): merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file.
