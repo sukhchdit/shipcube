@@ -194,3 +194,81 @@ D-TASK293-07 is accepted. A fixed identifier grammar plus a call-time fixpoint i
 3. qa-lead acknowledges the `required-suites.json` and `security-test-cases.md` edits (owned paths, adopted 64 → 67), with R2-n3.
 4. The orchestrator routes PR65-SEC-05 (d), which is still unowned (§4), and logs D-TASK293-01..07 in DECISIONS.md.
 5. DUE (D-ORCH-134): merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file.
+
+---
+
+# Round 3 (delta, fix cycle 2): `85afc70` → `06270ba`
+
+| Field | Value |
+|---|---|
+| Head | `06270ba` (one commit on `85afc70`; still not pushed) |
+| Diff reviewed | `git diff 85afc70 06270ba`: 6 files, +383 / -33 (`sql-text.ts` and test, `lint-migrations.ts` and test, `prisma/tests/organisations/cases.ts`, `organisations.int.test.ts`) |
+| Drivers | security PR293-SEC-01 (rule-10 misses, including the `UPDATE "x;y"` regression against main) and PR293-SEC-02 (continued E-strings); code review R2-n1/R2-n2; PR65-SEC-05 (d); D-TASK293-08..10 |
+| Reviewer | code-reviewer, 2026-11-19 |
+
+## R3.1 Verdict
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: The rule-10 work is right (segments cut at code `;` only, FOR … IN / OPEN … FOR anchors, rename / set-schema,
+         non-ASCII names), the corpus is unchanged, and the new [SEC-TC-74] remainder case is sound. One MAJOR: the
+         PR293-SEC-02 fix makes sqlText drop the escape-string mark when a dollar body holds a continued E-string, so a DO
+         block that main and 85afc70 refuse under rule 16 now lints clean. The fix is one line plus a test.
+```
+
+## R3.2 Verification performed (same host rule: `git archive` extracts of `ca7e4b7` (main), `85afc70` (r2) and `06270ba` (head), a node_modules junction on the head copy, tsx and Node single process; nothing ran in the worktree, whose `git status` is clean)
+
+- **Corpus.** Comparing `06270ba` against `85afc70` `sql-text.ts` on all 534 tracked `.sql` files, with every helper (`tokenize`, `splitStatements`, `stripComments`, `sqlText` in both modes, `containsEscapeString`, `referencedVariables`): **534/534 identical as committed, and 534/534 identical with CRLF.** No file has a CR or a continued E-string. `85afc70` equals `3183525` for `sql-text.ts`, so round 1's main-vs-head result still holds.
+- **Three-way linter probe (`probes/r3.ts`; main / r2 / head):**
+
+| Shape | main | r2 | head |
+|---|---|---|---|
+| DO, `EXECUTE E'SELECT s\x65t_config(\x27\x61pp.org_id\x27, …)'` + LF + `''` (continued) | 16 | 16 | **clean** |
+| the same E-string, not continued (control) | 16 | 16 | 16 |
+| DO, `EXECUTE E'D\x45LETE FROM …'` + LF + `''` | 16 | 16 | **clean** |
+| top-level `SELECT E'x'` LF `'y'` | 16 | 16 | L (refused) |
+| DO `UPDATE "x;y" SET …` (PR293-SEC-01 regression) | 10 | clean | 10 |
+| DO `FOR r IN DELETE … RETURNING` | clean | clean | 10 |
+| DO `FOR r IN SELECT … FOR UPDATE` (control) | clean | clean | clean |
+| DO `FOR r IN WITH x AS (…) SELECT … FOR UPDATE LOOP` | clean | clean | 10 (false positive, R3-n1) |
+| DO `EXECUTE 'SELECT 1; DELETE …'` | 10 | 10 | 10 |
+| writer, `ALTER FUNCTION … RENAME TO w3`, call `w3()` | clean | clean | 10 |
+| writer, `SET SCHEMA platform`, call `platform.w()` | clean | clean | 10 |
+| writer `public.purgé()`, called (R2-n1) | clean | clean | 10 |
+| writer with argument type `numeric(10,2)`, renamed, called | clean | clean | **clean** (R3-n2) |
+
+- **Dynamic-SQL depth reading (the brief's question).**
+  - Fail closed: each string literal and dollar body is read again as a body down to `MAX_DYNAMIC_DEPTH = 4`. A string at the cap is not recursed into, but its text stays in the enclosing segment, quotes included, so the `'` anchor still matches a DML form at its start. That is no weaker than r2, which never recursed. Text that does not lex is read both whole and split at `;`.
+  - Cost: depth-4 nested `EXECUTE` of 1k / 4k / 16k statements (42 / 171 / 692 KB) takes 67 / 216 / 853 ms on head against 91 / 173 / 658 ms on r2, which is linear. 2k / 8k strings in one DO body take 92 / 325 ms.
+  - `continuesString` is a linear scan: the test's 50k-repeat `\n--` run passes.
+  - `containsEscapeString` at depth ≥ 1 now returns `true` on EscapeContinuationError (fail closed, tested). **But `sqlText`'s dollar-body fallback does not do the same: see R3-M1.**
+- **scan.l `quotecontinue`.** Its definition is `{horiz_whitespace}*{newline}{special_whitespace}*{quote}`, where `horiz_whitespace` is `[ \t\f]` or a `--` comment and `special_whitespace` is `{space}+` or `{comment}{newline}`. `continuesString` matches it, except that it also accepts `\v` before the newline. That only over-refuses (fail closed). Block comments correctly do not continue.
+- **New int case `[SEC-TC-74] [PR43-SEC-07] remainder`** (`cases.ts stdColumnsRemainder`, `organisations.int.test.ts:287`).
+  - It covers all four remainder items of PR65-SEC-05 (d): reset to 1 after a real bump (precondition asserted), back-dated `updated_at` on UPDATE and INSERT (RR-18: they pass), the wrong-stamps-plus-foreign-org order (guard `P0001` first) against right stamps plus a foreign org (RLS), and both MERGE forms.
+  - Inserts that create a membership act as a fresh user, as D-ARCH-156 requires, and everything runs inside `rolledBack`.
+  - I did not replay it. The developer replayed it on PGlite, and lane B on PostgreSQL 18 must observe it.
+- **Repository lanes** with the head linter: `prisma/migrations` 0 findings, `prisma/bootstrap` 0.
+- **Gates I could run:** `prettier --check` on the 6 files is clean; typed ESLint on the 5 TS files (full-tree extract) is clean; the commit header is 98 characters.
+- **Not re-run:** Jest and `tsc -b`. The developer reports 27/27 mutants killed; none of them covers R3-M1.
+
+## R3.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-M1 | **MAJOR** | `tools/db/sql-text.ts` `sqlText` dollar branch (`try { sqlText(body) } catch { return body }`); also `prisma/tests/catalog/scans.ts` `bodyText` | **A no-weakening regression in rule 16 (PR11-SEC-16).** A continued E-string inside a dollar body now makes the nested `tokenize` throw `EscapeContinuationError`. `sqlText` catches it like any prose that does not lex and returns the raw body **without `ESCAPE_STRING_MARK`**, so the "E-prefixed escape string" form of `CONTEXT_WRITE_FORMS` no longer matches. Probe: `DO $$ BEGIN EXECUTE E'SELECT s\x65t_config(\x27\x61pp.org_id\x27, …)'` + LF + `''; END $$;` gives rule 16 on main and on `85afc70`, and **no finding at all** on `06270ba`. The uncontinued control still gives 16, and `sqlText(…).includes(mark)` is true on main and false on head. A DO block is checked only by the linter: no catalog scan sees it, and the dynamic-SQL rule covers routine definitions only. The catalog `bodyText` has the same fallback, though routines with `EXECUTE` are also caught by the dynamic-SQL checks. The lane-A no-weakening run (base-ref linter on head files) does not catch this, because it judges files, not the linter. This is the class PR293-SEC-02 set out to close, and it is open again one level down. | In `sqlText`'s dollar catch: `catch (error) { return error instanceof EscapeContinuationError ? \` ${ESCAPE_STRING_MARK}${body} \` : \` ${body} \`; }`. Do the same in `scans.ts bodyText`, or let it rethrow to its caller's fail-closed path. Add linter tests for a DO block and a PL/pgSQL `CREATE FUNCTION` body holding a continued E-string (expect rule 16 and, for the routine, the dynamic-SQL finding as well), plus a `bodyText` unit row. Add the mutant "drop the mark in the fallback" to the mutation list. |
+| R3-n1 | NIT | `tools/db/lint-migrations.ts` `bodyDataChanging` with the new `in` anchor | `FOR r IN WITH x AS (SELECT 1) SELECT … FOR UPDATE LOOP` is reported as data-changing: `in with` opens the WITH form, and `update loop` then satisfies `update QNAME`. This false positive fails closed and has been possible since the `with` form existed, but the new `in` anchor makes it reachable from an ordinary cursor loop. | Optional: exclude `for update` / `for no key update` before the WITH-write search, or add a control row stating the false positive. |
+| R3-n2 | NIT | `tools/db/lint-migrations.ts` `ALTERED_NAME` (`(?: ?\([^)]*\))?`) | A rename is not tracked when the argument list holds a parenthesised type (`numeric(10,2)`, `varchar(20)`): `[^)]*` stops at the inner `)`. The call under the new name is missed (probe: clean on all three). | Skip balanced parentheses (a small depth loop over masked text, as `splitStatements` does), or list this as a stated limit. |
+| R3-n3 | NIT | `prisma/tests/organisations/cases.ts:588,596,662` | The new function was inserted between the existing JSDoc `/** [SEC-TC-74] [PR26-SEC-03] the standard-columns guard … */` and `stdColumns`. That doc now sits above `stdColumnsRemainder`, and `stdColumns` has none. | Move the old one-line JSDoc back above `stdColumns`. |
+
+Round-2 closure: R2-n1 (non-ASCII names) is **closed**: `CALL_IDENT` includes `\u0080-￿`, the lookbehind too, and a writing definition whose name cannot be read is reported. R2-n2 (three-part JSDoc) is **closed**. R2-n3 (TEST-STRATEGY 64/64) is unchanged and stays with qa-lead. PR293-SEC-01 rows I probed: the `"x;y"` regression, FOR … IN, rename and set schema are fixed; rows 3-5 (attribute notation, cast, aggregate support) are stated limits, pinned by tests. PR65-SEC-05 (d) is **delivered**: the orchestrator can close the routing item from round 1 §4 once lane B observes the case.
+
+D-TASK293-08..10 are not in the repository; I judged them through the code. They are accepted subject to R3-M1.
+
+## R3.4 Merge conditions (replace R2.5)
+
+1. Fix R3-M1, then a delta re-check: `sql-text.ts`, `scans.ts` and the new tests only.
+2. A lane-B PASS on the fixed head. It must observe `catalog-c1-c14` = 113 with 0 skips, the 8 `[PR66-SEC-01]` rows, the 7 C16 / P9-CK cases, SEC-TC-76..78, and the new `[SEC-TC-74] [PR43-SEC-07] remainder` case. `organisations.int` gains one test; `integration` has no count floor, so no ratchet change is needed. The unrelated `consumer.int` AT-US-009-04 race is the orchestrator's usual flake ruling.
+3. A security record on the fixed head, closing PR293-SEC-01/02 against it.
+4. qa-lead acknowledges `required-suites.json` and `security-test-cases.md` (adopted 67), with R2-n3.
+5. The orchestrator logs D-TASK293-01..10 in DECISIONS.md.
+6. DUE (D-ORCH-134): merge before the next PR after TASK-037 that adds or changes a migration or bootstrap file.
