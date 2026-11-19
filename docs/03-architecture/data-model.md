@@ -47,7 +47,7 @@ Conventions in this document: requirement IDs (`REQ-*`), domain rules (`DR-*`), 
 | P9 | Naming | `snake_case`, plural table names, singular column names, FK columns `<entity>_id`. Constraint names: `pk_<table>`, `fk_<table>__<column>`, `ux_<table>__<cols>` (unique index), `ix_<table>__<cols>` (index), `ck_<table>__<rule>`, `ex_<table>__<rule>` (exclusion). Prisma models are PascalCase singular mapped with `@@map`/`@map` (§7.4). | Brief |
 | P10 | Tenancy | Tenant-owned rows carry `org_id uuid NOT NULL` (nullable only on guest-capable tables) with RLS `ENABLE` + `FORCE` and a composite index leading with `org_id`. Every table belongs to exactly one class (§1.5). | ADR-0005, REQ-RLS-001/002/013, NFR-TENANT-001 |
 | P11 | Optimistic locking | Updates are `UPDATE … SET …, version = version + 1 WHERE id = $id AND version = $expected`; zero rows ⇒ 412 `CONCURRENCY_CONFLICT` (If-Match) or 409 `CONFLICT` (internal). A no-op update issues no statement, no version bump and no audit entry. | REQ-RLS-011, REQ-API-013, DR-A16, EC-A25/A26 |
-| P12 | Integrity in the database | Business invariants that are cheap to state declaratively are enforced in the database too (CHECK, partial UNIQUE, composite FK, exclusion constraints, immutability triggers); state machines and cross-row rules stay in the service layer, with the database holding the last line of defence where noted. | §4.10, NFR-DATA-001..004 |
+| P12 | Integrity in the database | Business invariants that are cheap to state declaratively are enforced in the database too (CHECK, partial UNIQUE, composite FK, exclusion constraints, immutability triggers); state machines and cross-row rules stay in the service layer, with the database holding the last line of defence where noted. *2026-11-19 (D-ARCH-154):* a reference between two organisation-keyed tables is always a composite foreign key through `org_id` (§4.7). | §4.10, NFR-DATA-001..004 |
 | P13 | Files out of row | Documents, raw carrier payloads and gateway webhook payloads live in object storage; rows hold bucket, key (UUIDs only, no personal data), size, media type and SHA-256. | §4.10, REQ-DOC-006, REQ-CARR-018, REQ-PAY-003 |
 
 ### 1.2 Column classification vocabulary (classification registry)
@@ -176,7 +176,7 @@ The two actor IDs and the operator organisation ID are syntactically valid UUIDv
 |---|---|---|
 | `org_type` | `OPERATOR`, `BUSINESS_CUSTOMER`, `PARTNER`, `INDIVIDUAL` | REQ-ORG-001 |
 | `user_status` | `PENDING_VERIFICATION`, `ACTIVE`, `SUSPENDED`, `DEACTIVATED` | DR-A04 |
-| `membership_status` | `INVITED`, `ACTIVE`, `SUSPENDED`, `REMOVED` | DR-A05. *2026-11-14 (D-ARCH-123, PR43-SEC-09 (a)):* `INVITED` is **reserved** — no M0/M1 code writes it; the pending state of an invitation is the `invitations` row, and acceptance inserts the membership as `ACTIVE`. A future writer of `INVITED` needs an ADR amendment (it re-opens the pre-consent visibility this ruling closed) |
+| `membership_status` | `INVITED`, `ACTIVE`, `SUSPENDED`, `REMOVED` | DR-A05. *2026-11-14 (D-ARCH-123, PR43-SEC-09 (a)):* `INVITED` is **reserved** — no M0/M1 code writes it; the pending state of an invitation is the `invitations` row, and acceptance inserts the membership as `ACTIVE`. A future writer of `INVITED` needs an ADR amendment (it re-opens the pre-consent visibility this ruling closed). *2026-11-19 (D-ARCH-156):* the database refuses it: `trg_memberships__lifecycle_guard` admits only `ACTIVE` at insert (§3.2) |
 | `role_scope` | `OPERATOR`, `CUSTOMER`, `PARTNER` | REQ-ORG-004. *2026-11-12 (D-T013-11, ADR-0008 am. 2):* defined as `RoleScope` in `packages/authz/src/roles.ts` until the shared enum module exists, then moved here |
 | `refresh_token_status` | `ACTIVE`, `ROTATED`, `REVOKED` | DR-A03 |
 | `session_status` | `ACTIVE`, `REVOKED`, `EXPIRED` | REQ-AUTH-009 |
@@ -1227,13 +1227,24 @@ REQ-ORG-003/005/011/012/013, DR-A05, EC-A15/A17.
 
 *2026-11-14 (D-ARCH-123; PR #43 security review PR43-SEC-09 (a); `rulings/wave-0-sheet-fold-7.md`):* **no row is written with status `INVITED` in M0/M1.** An invitation is the `invitations` row until it is accepted; acceptance (`POST /invitations/accept`) inserts the membership directly as `ACTIVE` with the invited role, `created_by` = the inviter and `invitation_id` set, in the same transaction that marks the invitation `ACCEPTED`. Reasons: a membership row is tenant-writable and, through `p_users__org_member_read`, would have let an organisation read a user's profile row before the invitee consented; and `user_id NOT NULL` already makes an INVITED row impossible for an address without an account, so creating one at invite time would have required resolving e-mail → user id — an account-existence oracle for the inviter. The `INVITED` CHECK value stays reserved (§1.7).
 
+*2026-11-19 (D-ARCH-157; `rulings/wave-1-pr65-r1-rulings.md` §6):* "`created_by` = the inviter" above is **withdrawn**. The standard-columns guard (§7.6) refuses an insert whose `created_by` is not the transaction's actor, and the actor of an acceptance is the accepting user. At acceptance `created_by` = the accepting user; the inviter is `invitations.created_by`, reached through `invitation_id`.
+
+*2026-11-19 (D-ARCH-156; code review PR #65 S1; ADR-0005 amendment 13 item 29):* **lifecycle guard.** A membership row makes its user's profile row readable by the organisation (`p_users__org_member_read`, §4.3), and every session of the organisation may write this table. The 2026-11-14 ruling closed that for `INVITED` only. Trigger `trg_memberships__lifecycle_guard` (`AFTER INSERT OR UPDATE OF user_id, org_id, status`, row level, function `platform.memberships_lifecycle_guard()`: `SECURITY INVOKER`, fixed search path, assertion only) raises `P0001 MEMBERSHIP_LIFECYCLE_VIOLATION` unless:
+
+1. on insert, `user_id = platform.app_actor_id()` (the member is the actor of the transaction; no actor means refused);
+2. on insert, `status = 'ACTIVE'` (DR-A05; this is what keeps `INVITED` unwritten);
+3. on update, `user_id` and `org_id` are unchanged;
+4. on update, a `REMOVED` row keeps that status (DR-A05 "terminal"; REQ-ORG-003: re-adding a member is a new row).
+
+There is no exemption for the SYSTEM actor or for any role. `ACTIVE ↔ SUSPENDED` and the move to `REMOVED` stay service rules (REQ-ORG-012/013). It is an `AFTER` trigger so that RLS `WITH CHECK` answers a cross-tenant write first (§4.7).
+
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
 | STD | | | | INT |
-| `org_id` | `uuid` | N | FK `organisations(id)` | INT |
-| `user_id` | `uuid` | N | FK `users(id)` | INT |
-| `status` | `text` | N | CHECK `membership_status` | INT |
-| `invitation_id` | `uuid` | Y | FK `invitations(id)` | INT |
+| `org_id` | `uuid` | N | FK `organisations(id)`; immutable (lifecycle guard) | INT |
+| `user_id` | `uuid` | N | FK `users(id)`; immutable, and equal to the actor at insert (lifecycle guard) | INT |
+| `status` | `text` | N | CHECK `membership_status`; `ACTIVE` at insert, `REMOVED` terminal (lifecycle guard) | INT |
+| `invitation_id` | `uuid` | Y | ~~FK `invitations(id)`~~ *2026-11-19 (D-ARCH-154):* composite FK `(org_id, invitation_id) → invitations (org_id, id)`, name `fk_memberships__invitation_id` (§4.7): only an invitation of the same organisation | INT |
 | `activated_at`, `suspended_at`, `removed_at` | `timestamptz` | Y | | INT |
 | `removed_by` | `uuid` | Y | | INT |
 | `last_owner_guard` | — | — | not a column: the LAST_OWNER rule (REQ-ORG-013) is enforced by the service under `SELECT … FOR UPDATE` of the org's ACTIVE Owner membership rows inside the changing transaction | — |
@@ -1243,10 +1254,13 @@ REQ-ORG-003/005/011/012/013, DR-A05, EC-A15/A17.
 | AP-ORG-06 | Unique non-removed membership per (user, org) | `ux_memberships__org_user_live ON (org_id, user_id) WHERE status <> 'REMOVED'` |
 | AP-ORG-07 | Member list of an org (status filter, keyset by `created_at, id`) | `ix_memberships__org_status_created ON (org_id, status, created_at, id)` |
 | AP-ORG-08 | A user's memberships across orgs (`GET /me/organisations`, permission resolution per request, REQ-RBAC-008) | `ix_memberships__user_status ON (user_id, status) INCLUDE (org_id)` |
+| — | Target of the tenant-bound reference from `membership_roles` (§4.7, D-ARCH-154); also serves "membership by id within the organisation" | `ux_memberships__org_id_id ON (org_id, id)` |
 
 #### `membership_roles` · TENANT · SD: no (revocation via `revoked_at`) · mutable
 
-REQ-ORG-003/004/012, REQ-ACCT-015. Columns: STD; `org_id uuid N FK`; `membership_id uuid N FK memberships`; `role_id uuid N FK roles`; `granted_by uuid N`; `revoked_at timestamptz Y`; `revoked_by uuid Y`. Trigger `trg_membership_roles__scope_matches_org` (BEFORE INSERT) raises `ROLE_NOT_ALLOWED_FOR_ORG_TYPE` when `roles.scope` does not match the org type mapping (`OPERATOR→OPERATOR`, `BUSINESS_CUSTOMER|INDIVIDUAL→CUSTOMER`, `PARTNER→PARTNER`) as the database backstop of REQ-ORG-004.
+REQ-ORG-003/004/012, REQ-ACCT-015. Columns: STD; `org_id uuid N FK`; `membership_id uuid N FK memberships`; `role_id uuid N FK roles`; `granted_by uuid N`; `revoked_at timestamptz Y`; `revoked_by uuid Y`. Trigger `trg_membership_roles__scope_matches_org` (BEFORE INSERT *or UPDATE OF `role_id`, `org_id`, as PR #65 ships it*) raises `ROLE_NOT_ALLOWED_FOR_ORG_TYPE` when `roles.scope` does not match the org type mapping (`OPERATOR→OPERATOR`, `BUSINESS_CUSTOMER|INDIVIDUAL→CUSTOMER`, `PARTNER→PARTNER`) as the database backstop of REQ-ORG-004.
+
+*2026-11-19 (D-ARCH-154; code review PR #65 R1-m1 (b)):* the membership reference is the composite FK `(org_id, membership_id) → memberships (org_id, id)`, name `fk_membership_roles__membership_id` (§4.7). A role row of one organisation cannot name a membership of another, so a count of role rows by `org_id` (AP-ORG-10, AP-ORG-04) counts memberships of that organisation only, and a foreign row can no longer occupy `ux_membership_roles__membership_role_live`.
 
 | AP | Query | Index |
 |---|---|---|
@@ -1257,14 +1271,16 @@ REQ-ORG-003/004/012, REQ-ACCT-015. Columns: STD; `org_id uuid N FK`; `membership
 
 REQ-ORG-010/011, REQ-ACCT-014, A-082, DR-A01, EC-A16.
 
-*2026-11-14 (D-ARCH-123):* this row is the **whole pending state** of an invitation (`PENDING` → `ACCEPTED` | `REVOKED` | `EXPIRED`); no membership exists before acceptance (see `memberships`). The organisation lists its pending invitations (by e-mail and role) next to its members; the inviter is `created_by` of both the invitation and, at acceptance, the membership.
+*2026-11-14 (D-ARCH-123):* this row is the **whole pending state** of an invitation (`PENDING` → `ACCEPTED` | `REVOKED` | `EXPIRED`); no membership exists before acceptance (see `memberships`). The organisation lists its pending invitations (by e-mail and role) next to its members; the inviter is `created_by` of ~~both the invitation and, at acceptance, the membership~~ the invitation. *2026-11-19 (D-ARCH-157):* the membership's `created_by` is the accepting user (see `memberships`).
+
+*2026-11-19 (D-ARCH-155; code review PR #65 R1-n1; ADR-0005 amendment 13 item 30):* **an invitation row exists only in a `BUSINESS_CUSTOMER` organisation** (REQ-ORG-010; REQ-ACCT-014 and A-082 exclude INDIVIDUAL). `trg_invitations__role_scope` runs the shared function `platform.role_scope_matches_org()`, which for this table also refuses any other organisation type; with the scope mapping the invited role is then always a customer role. The refusal keeps the marker `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`. The service answers first (422 `ORG_TYPE_RESTRICTION` or `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`, TASK-227). Staff or partner onboarding by invitation needs an ADR-0005 amendment and a migration that replaces the function.
 
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
 | STD | | | | INT |
 | `org_id` | `uuid` | N | FK | INT |
 | `email` | `text` | N | lower-case | PER |
-| `role_id` | `uuid` | N | FK `roles(id)` (customer roles only; trigger as on `membership_roles`) | INT |
+| `role_id` | `uuid` | N | FK `roles(id)` (customer roles only: the trigger of `membership_roles` plus the BUSINESS_CUSTOMER rule above) | INT |
 | `locale` | `text` | N | CHECK en/es/fr (inviter's selection, REQ-NOTIF-006) | INT |
 | `token_hash` | `bytea` | N | 32 bytes, `UNIQUE` | SEC |
 | `status` | `text` | N | `CHECK (status IN ('PENDING','ACCEPTED','REVOKED','EXPIRED'))` | INT |
@@ -1274,7 +1290,7 @@ REQ-ORG-010/011, REQ-ACCT-014, A-082, DR-A01, EC-A16.
 | `accepted_at`, `revoked_at` | `timestamptz` | Y | | INT |
 | `accepted_by_user_id`, `revoked_by` | `uuid` | Y | | INT |
 
-AP-ORG-11 pending invitation per (org, email): `ux_invitations__org_email_pending ON (org_id, email) WHERE status = 'PENDING'`; AP-ORG-12 list per org: `ix_invitations__org_status_created ON (org_id, status, created_at DESC, id DESC)`; AP-ORG-13 redeem by token: `ux_invitations__token_hash` (via `invitation_lookup`, §4.5).
+AP-ORG-11 pending invitation per (org, email): `ux_invitations__org_email_pending ON (org_id, email) WHERE status = 'PENDING'`; AP-ORG-12 list per org: `ix_invitations__org_status_created ON (org_id, status, created_at DESC, id DESC)`; AP-ORG-13 redeem by token: `ux_invitations__token_hash` (via `invitation_lookup`, §4.5). *2026-11-19 (D-ARCH-154):* `ux_invitations__org_id_id ON (org_id, id)` is the target of the tenant-bound reference from `memberships.invitation_id` (§4.7).
 
 #### `address_book_entries` · TENANT · SD: yes · mutable
 
@@ -2593,7 +2609,7 @@ CREATE POLICY p_organisations__operator ON public.organisations FOR SELECT TO pl
   USING (current_setting('app.actor_scope', true) = 'OPERATOR' AND platform.app_is_operator());
 ```
 
-The `memberships` policies reference no other RLS table (no subquery), so policy evaluation cannot recurse (`42P17`); the `users` and `organisations` subqueries reference `public.memberships` only. *C3 asserts both invariants (2026-11-13, PR11-SEC-10 requirement 5).* Registration (REQ-AUTH-001) generates the user and personal-org IDs in the service, sets `app.actor_id = user id` and `app.org_id = org id`, then inserts user, credentials, organisation, membership, role link and terms acceptance in one transaction; each insert passes its own `WITH CHECK`. Creating a business organisation (REQ-ORG-009) and accepting an invitation (REQ-ORG-011, after `invitation_lookup`) set `app.org_id` to the target organisation the same way; the service is the only party that chooses it. *2026-11-18 (D-ARCH-151):* none of these paths can create an `OPERATOR` organisation. `p_organisations__active` does not look at `type`, so the database control is the reserved row of §3.2, which occupies `ux_organisations__single_operator`; the service rule (`ORG_TYPE_NOT_ALLOWED`) stands in front of it.
+The `memberships` policies reference no other RLS table (no subquery), so policy evaluation cannot recurse (`42P17`); the `users` and `organisations` subqueries reference `public.memberships` only. *C3 asserts both invariants (2026-11-13, PR11-SEC-10 requirement 5).* Registration (REQ-AUTH-001) generates the user and personal-org IDs in the service, sets `app.actor_id = user id` and `app.org_id = org id`, then inserts user, credentials, organisation, membership, role link and terms acceptance in one transaction; each insert passes its own `WITH CHECK`. Creating a business organisation (REQ-ORG-009) and accepting an invitation (REQ-ORG-011, after `invitation_lookup`) set `app.org_id` to the target organisation the same way; the service is the only party that chooses it. *2026-11-18 (D-ARCH-151):* none of these paths can create an `OPERATOR` organisation. `p_organisations__active` does not look at `type`, so the database control is the reserved row of §3.2, which occupies `ux_organisations__single_operator`; the service rule (`ORG_TYPE_NOT_ALLOWED`) stands in front of it. *2026-11-19 (D-ARCH-156):* in each of these paths the new member is the actor of the transaction, and the database now requires it: `p_memberships__tenant` lets any session of an organisation write a membership row, and `p_users__org_member_read` reads those rows, so `trg_memberships__lifecycle_guard` (§3.2 `memberships`) refuses a membership whose user is not the actor. The policies themselves are unchanged.
 
 **Definer-read policies** (only on the tables the §4.5 functions read; SELECT only, plus DELETE with an expiry predicate on purge tables):
 
@@ -2951,6 +2967,7 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | C13 | (2026-11-12, SEC-P3-03) Every audit object (the eight tables of §4.4, every `audit_entries_%` partition, the three audit functions) has owner `platform_audit_owner`. `platform_audit_owner` has `rolcanlogin = false` and **no row in `pg_auth_members`**, neither as a role granted to others nor as a member. `platform_migrator` owns no audit object. *Amended 2026-11-12 (SEC-P3-27 item 6, SEC-P3-33 item 10):* (a) schemas `public` and `platform` have owner `platform_schema_owner`, which has `rolcanlogin = false`; `platform_migrator` owns no schema. (b) The `pg_auth_members` rule for **both** `platform_audit_owner` and `platform_schema_owner` depends on who ran the bootstrap. **Locally** (superuser bootstrap): **no row**, neither as granted role nor as member. **On RDS (M5)**: the bootstrap master is not a superuser, and PostgreSQL 16+ automatically grants a role created by a `CREATEROLE` role to its creator with `admin_option = true`. So for each role there is **exactly one** row, with `roleid` = the role, `member` = the RDS master role, `admin_option = true`, `set_option = false`, `inherit_option = false`, and no other row in which the role is `roleid` or `member`. The master is passed to the test as `CATALOG_BOOTSTRAP_MASTER_ROLE`, empty locally. That row is break-glass, like the master credential itself (platform.md §4.3). SPK-08 verifies this RDS-parity assumption. *Amended 2026-11-12 (batch 0.2, SEC-P3-34 items 3 and 5, D-ARCH-045):* (c) `pg_database.datdba` for the current database is **not** `platform_migrator` (locally it is the bootstrap superuser; on RDS the master, passed as `CATALOG_BOOTSTRAP_MASTER_ROLE`); `platform_migrator` has `has_database_privilege(…, 'CREATE') = false` and `'CONNECT') = true`. (d) `pg_db_role_setting` for the current database has **no** database-wide row (`setrole = 0`) and exactly one row for the bootstrap role whose `setconfig` contains `search_path=pg_catalog, pg_temp`. The TASK-003 bootstrap suite asserts (c) and (d) at bootstrap time; C13 re-asserts them after every migration and in the restore rehearsal (§8.6 step 5) | `pg_class.relowner`, `pg_proc.proowner`, `pg_namespace.nspowner`, `pg_roles`, `pg_auth_members (roleid, member, admin_option, set_option, inherit_option)`, `pg_database.datdba`, `has_database_privilege`, `pg_db_role_setting (setdatabase, setrole, setconfig)` |
 | C14 | (2026-11-12, SEC-P3-03) Event triggers `platform_audit_ddl_guard_end` (`ddl_command_end`) and `platform_audit_ddl_guard_drop` (`sql_drop`) exist with `evtenabled = 'O'` and call `platform.audit_ddl_guard()`, which is **not** `SECURITY DEFINER`. `audit_anchors` has the UPDATE/DELETE row trigger and the TRUNCATE trigger. *Amended 2026-11-12 (SEC-P3-27):* (a) `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()` and `platform.audit_ddl_guard()` have `prosecdef = false`, and `proconfig` holds exactly one `search_path` entry equal to **`search_path=pg_catalog, pg_temp`**. (b) The guard matches the schemas by OID. In a transaction that is rolled back, the test superuser runs `ALTER SCHEMA public RENAME TO c14_x` and then `ALTER SCHEMA platform RENAME TO c14_y`, each in its own savepoint. Each raises SQLSTATE `42501` with the guard's message. Privilege does not stop a superuser, so this proves the guard itself. The migrator-side negative test is SEC-TC-61 | `pg_event_trigger`, `pg_proc.prosecdef`, `pg_proc.proconfig` (same query as C11 with `p.oid IN (…three functions…)` in place of `p.prosecdef`), `pg_trigger`, rename probe |
 | C15 | (2026-11-13, PR26-SEC-03, D-ARCH-091; owner TASK-024, first instances TASK-037) **Standard-columns guard.** Every table that carries the full STD set (`id`, `created_at`, `updated_at`, `created_by`, `updated_by`, `version`), is not `runtimeReadOnly` in the table-class manifest and is not owned by `platform_audit_owner` has exactly one enabled (`tgenabled = 'O'`) row-level `BEFORE INSERT OR UPDATE` trigger `trg_<table>__std_columns` on `platform.std_columns_guard()`, and no other table has one. The function is owned by `platform_migrator`, is not `SECURITY DEFINER`, carries `proconfig` `{search_path=pg_catalog, pg_temp}` and a body without `current_setting(` / `set_config(`; no other trigger function assigns `NEW.id`, `created_at`, `created_by`, `updated_by` or `version`. A planted-forgery matrix as `platform_app` (forged `created_by`, `updated_by`, `version` on INSERT; `version` 1, `version + 2`, forged `updated_by`, changed `created_by`, changed `id` on UPDATE) raises `STD_COLUMNS_VIOLATION`, while the positive controls pass (§7.6) | `pg_trigger` (`tgfoid`, `tgtype`, `tgenabled`), `pg_proc`, rolled-back probes |
+| C16 | (2026-11-19, code review PR #65 R1-m1 (b), D-ARCH-154; default owner TASK-293, first instances TASK-037) **Tenant-bound references (§4.7).** Every foreign key in `public` whose referencing table and referenced table both carry an `org_id` column includes `org_id` on both sides at the same key position; or, where the referencing `org_id` is nullable, a second foreign key of the same pair of tables does. The exception map (exact constraint name → stated reason, looked up with a `Map`) starts empty. A planted, rolled-back single-column key between two probe tables is reported | `pg_constraint` (`contype = 'f'`) joined to `pg_attribute` on `org_id` for `conrelid` and `confrelid`; report when `array_position(conkey, child org_id attnum)` is NULL or differs from `array_position(confkey, parent org_id attnum)` → 0 rows |
 
 Amended 2026-11-12 (SEC-P3-03, SEC-P3-25, SEC-P3-26):
 - **C3.** The row was changed from "`TO platform_migrator` policies exist only on the tables in §4.5" to the `platform_definer` wording above.
@@ -2984,6 +3001,49 @@ Amended 2026-11-13 (PR #11 code review m2/m4/n1/n2, security review PR11-SEC-03/
 - **C13 — case folding and `proconfig` (TASK-016 fix cycle; PR11-SEC-11 b).** GUC names are case-insensitive: the `app.%` assertions use `lower(…) LIKE 'app.%'` on `pg_db_role_setting.setconfig` and `pg_parameter_acl.parname`, and additionally assert no `pg_proc.proconfig` entry `ILIKE 'app.%'` in any non-system schema (a function-level `SET app.* = …` needs superuser or `SET` on the parameter, so only the bootstrap lane could add one). The `platform_app` row set is five rows once `lc_messages = 'C'` ships (§4.1).
 - **C1 and rule 9 scope (owner TASK-024; PR11-SEC-11 e).** C1 covers every non-system schema, or asserts that `platform` holds no table; rule 9 likewise.
 - **Grant manifest (owner TASK-024; PR11-SEC-11 g).** A `runtimeReadOnly` flag on GLOBAL manifest entries makes `validateGrants` refuse any write line at parse time, so the SELECT-only guarantee of the authz catalogue no longer rests on C5 equality alone.
+
+### 4.7 Tenant-bound references and assertion triggers (2026-11-19)
+
+Added after the PR #65 / TASK-037 code review, round 1 (R1-m1 (b), security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; ADR-0005 amendment 13; D-ARCH-154, D-ARCH-156).
+
+**Why.** PostgreSQL runs referential-integrity checks without row security, so that integrity holds whatever the policies say. A single-column foreign key between two tenant tables therefore:
+
+- accepts a row of organisation A that names a row of organisation B;
+- answers "does this id exist in any tenant" (`23503` or not);
+- lets the forged row occupy a unique index of B's data. On the TASK-037 tables, a role row of A naming B's membership made B's own grant of that role fail with `23505` on a row B could not see (probed on PGlite, 2026-11-19).
+
+RLS `WITH CHECK` does not help: the forged row carries A's own `org_id`.
+
+**Rule T1: both sides organisation-keyed, `org_id NOT NULL` on the referencing side.**
+
+```sql
+CREATE UNIQUE INDEX ux_<parent>__org_id_id ON public.<parent> (org_id, id);
+ALTER TABLE public.<child> ADD CONSTRAINT fk_<child>__<x>_id
+  FOREIGN KEY (org_id, <x>_id) REFERENCES public.<parent> (org_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT;
+```
+
+- The composite key **replaces** the single-column key and keeps its name (P9).
+- `id` is already unique; the extra index exists because PostgreSQL needs a unique index on exactly the referenced columns.
+- A nullable `<x>_id` needs nothing more: `MATCH SIMPLE` skips the check while it is NULL.
+- Prisma: `@@unique([orgId, id], map: "ux_<parent>__org_id_id")` on the parent and `@relation(fields: [orgId, <x>Id], references: [orgId, id], …)` on the child. `orgId` may be shared with the relation to `organisations`. The differ emits the two statements above (checked on 7.10 with `migrate diff --from-empty`).
+- In the migration that creates both tables the statements go after the indexes and before the RLS blocks. On existing tables it is an expand migration: the unique index `CONCURRENTLY` in its own file, then the key `NOT VALID`, then `VALIDATE` (§8.3 rules 5 and 6).
+
+**Rule T2: `org_id` nullable on the referencing side (GUEST_CAPABLE).** The single-column key stays, because with `org_id` NULL a composite key checks nothing, not even existence. The composite key is added beside it under the name `fk_<child>__org_id_<x>_id` and binds the row from the moment `org_id` is set. The claim of §4.3 updates the parent first and the children after it, which satisfies both keys (checked on a two-table probe on PGlite, 2026-11-19; the quote tables themselves are TASK-051). **Open:** binding guest rows through `guest_token_hash`. A guest row can today name a quote of another owner; it stays invisible to that owner and the claim does not touch it. Ruled before the quotes migration is written (risks.md R-ARCH-34).
+
+**Outside the rule.** References to GLOBAL tables (`roles`, reference data), to `organisations` (the tenant key itself), to `users` (not tenant-owned; `memberships` has its own guard, §3.2), and the logical actor columns of P2.
+
+**Instances.**
+
+| Referencing | Referenced | Since |
+|---|---|---|
+| `membership_roles (org_id, membership_id)` | `memberships (org_id, id)` | TASK-037 migration |
+| `memberships (org_id, invitation_id)` | `invitations (org_id, id)` | TASK-037 migration |
+
+Every later table of §3 that references another organisation-keyed table follows T1 or T2 when its migration is written. Catalog test C16 (§4.6) is the gate.
+
+**Cost.** One unique index per referenced table: a 32-byte key, about 50 MB per million rows (estimate, not measured), and one more index insertion per parent insert. Nothing is added on the referencing table, and the referential check probes the composite index instead of the primary key.
+
+**Assertion triggers on RLS tables.** `BEFORE ROW` triggers run before RLS `WITH CHECK`; `AFTER ROW` triggers run after it. A new trigger that only raises is therefore `AFTER ROW` unless it has a stated reason to run earlier: a cross-tenant write then fails as `42501` whatever the actor can see, and the generated isolation suite (C12) keeps proving `WITH CHECK` on the table. An `AFTER` trigger cannot change the row, so C15 (b) does not concern it. First instance: `trg_memberships__lifecycle_guard`; precedent: `trg_organisations__type_immutable`. The standard-columns guard (C15 fixes its shape), the de-claim guard and the two role-scope triggers stay `BEFORE`; the generated suite models them with traits.
 
 ---
 
@@ -4232,6 +4292,7 @@ REQ-DATA-001..017, REQ-RBAC-002/003/013, REQ-COMP-003/008, REQ-PRICE-020, REQ-NO
 - Demo passwords come from `SEED_*` environment variables; the seed aborts before writing any user when `NODE_ENV=production` or when a password equals its local-only default outside local/test (REQ-DATA-002); passwords are never printed.
 - No legacy data is used anywhere; all demo data is synthetic (product brief §13 rule 9).
 - *Added 2026-11-18 (D-ARCH-151; ADR-0005 amendment 12 item 25):* the reference seed writes GLOBAL tables only. As `platform_migrator` it has no policy on an RLS table after `FORCE`: its insert into `users`, `organisations` or `memberships` is refused and its reads return no rows. The reserved rows of §1.6 come from the migration that creates their tables; every other row of an RLS table is written as `platform_app` through the services.
+- *Added 2026-11-19 (D-ARCH-156; ADR-0005 amendment 13 item 29):* "Seed actor = SYSTEM actor" above holds for the reference seed and for configuration changes. A transaction of the demo seed that inserts a `users` row or a `memberships` row runs with `app.actor_id` = that user: `p_users__own` requires it for the user, and `trg_memberships__lifecycle_guard` (§3.2) requires it for the membership. The seed never inserts a membership for a user under another actor.
 
 ### 9.2 Reference seed
 
@@ -4271,7 +4332,7 @@ REQ-DATA-001..017, REQ-RBAC-002/003/013, REQ-COMP-003/008, REQ-PRICE-020, REQ-NO
 
 Users are created through the identity service (bcrypt cost from config) so that credentials, memberships, roles, audit entries and outbox events (`auth.email_verification` is suppressed for seeded verified users) are produced exactly as in production. Re-running finds users by email and orgs by seed id and changes nothing.
 
-*Added 2026-11-18 (D-ARCH-151).* A staff user takes two tenant transactions, because a transaction has one `app.org_id` (§4.1): the registration path in the context of the personal organisation, then the `ACTIVE` membership and the operator role in the context of `OPERATOR_ORG_ID`. A re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function lives in the service layer, not in `prisma/seed/demo`, because the first-staff command for production reuses it (ADR-0005 amendment 12 item 26, D-ARCH-153).
+*Added 2026-11-18 (D-ARCH-151).* A staff user takes two tenant transactions, because a transaction has one `app.org_id` (§4.1): the registration path in the context of the personal organisation, then the `ACTIVE` membership and the operator role in the context of `OPERATOR_ORG_ID`. A re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function lives in the service layer, not in `prisma/seed/demo`, because the first-staff command for production reuses it (ADR-0005 amendment 12 item 26, D-ARCH-153). *2026-11-19 (D-ARCH-156):* both transactions run with the staff user as `app.actor_id`, and so do the transactions that add the four further Acme users to Acme Exports (context = the organisation, actor = the member). The audit actor type and the run reference of a provisioning job are fields of the audit entry, not `app.actor_id`.
 
 ---
 
@@ -4481,6 +4542,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A28 | Wave-0 sheet-fold-8 rulings (PR #52 TASK-285 D-TASK285-01/02, code review R1-m1/m2, PR52-SEC-01; PR #43 D-TASK024-13, PR43-SEC-06/-11; `rulings/wave-0-sheet-fold-8.md`; ADR-0007 amendment 12; D-ARCH-135) | **Audit actions (§1.7):** 20 values; the widening file is `91-audit-actions-v2.sql` (`9N` numbering after the guard). **§8.3:** rules 18, 19, 20 and L written down; the PR43-SEC-11 residual and its owner TASK-290; the PR52-SEC-01 shadow-init KEEP fix with the same owner, a prerequisite of every later bootstrap file. The contract enums gain the two actions with TASK-073. |
 | A29 | PR #61 / TASK-028 rulings (code review R1-m3 (a)–(c), PR61-SEC-03/-07, D-TASK028-01/03/04; ADR-0007 amendment 13; D-ARCH-148..150) | **§3.4:** the three vault token columns of `audit_entries` are `INT (token)`; C10 unchanged. **§1.2, §10.4:** the registry lives in `packages/shared/src/classification`; the log redaction is tied to it by a coverage test. **§1.6, §3.4 `data_subjects`, §5.7, §10.5:** unattributed data subjects, one per UTC month, erased 12 months after the month ends by the EPIC-B-413 retention job; no revival of an erased subject; erasure by value. |
 | A30 | Wave-1 batch 1.1 rulings (PR #65 / TASK-037: D-TASK037-03/-04, D-ORCH-COORD-03 item 1; `rulings/wave-1-batch-1.1-rulings.md`; ADR-0005 amendment 12; D-ARCH-151, D-ARCH-153) | **§1.6, §3.2:** the operator organisation is a reserved row (`OPERATOR_ORG_ID` = `00000000-0000-7000-8000-000000000010`) of the migration that creates `organisations`, inserted before `FORCE`; it occupies `ux_organisations__single_operator`, so no runtime path, seed or fixture creates an OPERATOR organisation. **§4.3:** the creating paths cannot produce one. **§8.3 rule 10:** reserved rows of a table that the same file creates are `data-changing: no`. **§9:** the reference seed writes GLOBAL tables only; the reserved users and the operator organisation come from the migration; the demo seed adds staff memberships to the reserved organisation, two tenant transactions per staff user; `seedId('org:operator')` is withdrawn. The first staff user in production is a separate M5 command (risks.md R-ARCH-33). |
+| A31 | PR #65 / TASK-037 code review round 1 (R1-m1 (b), R1-n1, security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; ADR-0005 amendment 13; D-ARCH-154..157) | **§4.7 (new), §1.1 P12, §4.6 C16:** a reference between two organisation-keyed tables is a composite foreign key through `org_id` (rule T1; T2 where `org_id` is nullable); first instances `membership_roles → memberships` and `memberships → invitations`, each with `ux_<parent>__org_id_id`; new assertion triggers on RLS tables are `AFTER ROW`. **§3.2 `memberships`, §1.7, §4.3:** `trg_memberships__lifecycle_guard` (member = actor and `ACTIVE` at insert; `user_id` and `org_id` immutable; `REMOVED` terminal); "`created_by` = the inviter" at acceptance withdrawn (D-ARCH-157). **§3.2 `invitations`:** rows only in `BUSINESS_CUSTOMER` organisations. **§9.1, §9.3:** a seed transaction that inserts a user or a membership runs with that user as actor. Open: guest-side binding of GUEST_CAPABLE rows (risks.md R-ARCH-34). |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:

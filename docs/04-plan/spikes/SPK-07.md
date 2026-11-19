@@ -260,8 +260,11 @@ as in the re-forecast above, until more runs are in.
 | Every proof candidate was **voided by the tested base** (PR46-SEC-16): the code must run on the new base before the merge | light 3–4 + the re-push or reopen 8–10 = 11–14, plus a round trip | **8–10** |
 | No candidate: the code run is pending, or its fast-lane or scans were red | 3–4 (the next code push is needed anyway) | 8–10, usually wasted |
 
-TASK-287 takes the option only for the first case. `lookupProofs` reports `voidedByBase`, and only then does the classify
-step set `code_changed=true` / `mode=full`. `push_scope` stays `docs`, so the summary still shows a docs push.
+TASK-287 takes the option only for the first case. `lookupProofs` reports `voidedByBase` only when no bound run on the
+code survived the tested-base check and at least one voided run would have been a proof (its fast-lane and scans steps
+passed; one jobs call per voided run, PR #62 code review R1-m1, TASK-287 part 287-B); only then does the classify step
+set `code_changed=true` / `mode=full`. A red voided run, or a newer non-voided run, keeps the push light and BLOCKED.
+`push_scope` stays `docs`, so the summary still shows a docs push.
 
 **Live forecast** (`ci:minutes --forecast`, 2026-11-17T07:31Z): 1,269 billed (63.5 %), 77.8 min/day, forecast
 2,334 (116.7 %).

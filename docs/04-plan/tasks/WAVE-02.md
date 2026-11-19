@@ -4,7 +4,7 @@ Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Pr
 
 Tasks: **22** (S 3 / M 19; opus 8 / sonnet 14; demo-critical 20) in **6** batches of ≤ 4 parallel tasks. Estimated effort ≈ 61.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** All 74 M0 DC stories merged; PRD §6.1 steps executable manually in compose; lane B `wave` evidence; lane C `wave-end` run #2 green.
+**Exit check:** 72 of the 74 M0 DC stories complete and US-061 and US-062 partial (their demo-critical part, TASK-037, merged; completed by TASK-224 and TASK-231 in Wave 7, D-PM-068); PRD §6.1 steps executable manually in compose; lane B `wave` evidence; lane C `wave-end` run #2 green.
 
 **Stories completed in this wave (30):** US-003 (DC), US-008, US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
 
@@ -449,7 +449,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-050 **DC** (M0 Must) Seed demo organisations, users and Mock configuration<br>US-003 **DC** (M0 Must) One-command local environment<br>US-049 **DC** (M0 Must) Idempotent reference and demo seed framework |
 | REQs | REQ-DATA-003, REQ-PLAT-005, REQ-DATA-001, REQ-DATA-002 |
 | NFRs | NFR-OPS-001 |
-| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153 |
+| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153, D-PM-070 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014 |

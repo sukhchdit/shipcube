@@ -1,5 +1,5 @@
 # SDLC Status
-- **Product:** the Platform (multi-carrier shipping platform, repo `sukhchdit/shipcube`)    **Updated:** 2026-11-17 (resume D-ORCH-126)
+- **Product:** the Platform (multi-carrier shipping platform, repo `sukhchdit/shipcube`)    **Updated:** 2026-11-18 (plan fold D-SD-001)
 - **Run scope:** M0 Foundation + M1 Customer MVP (brief §12). M2–M5 = backlog.
 - **Current phase:** P5 Build — Wave 0 (Foundation) closing + Wave 1 batch 1.1 started: Wave 0 = 31 of 46 tasks merged (TASK-020 complete incl. 020-D; TASK-015 partial: 015-A, 015-B, coverage hook merged, 015-C open)    **State:** IN_PROGRESS
 - **Human priority (D-ORCH-126):** demo users real (TASK-089: 14 open tasks on its closure) → staff + customer sign-in screens (TASK-071/072: 39) → M0 exit demo (TASK-121: 62). Longest chain TASK-035 → 039 → 043 → 049 → 052.
@@ -56,14 +56,17 @@
 | 0.x | TASK-015 part 015-B: lane C, nightly, security-integration + C-1, ci:minutes, SPK-07, COND-E2E-FF (local), gitleaks-full runner + CI-minutes stage 1 (PR #46) | devops-engineer | merged e6b1b3d (PR #46 squash @30e593b) | ✅ | ✅ r3 APPROVED_WITH_NITS | ✅ merge-only PASS_WITH_FOLLOW-UPS (0230e50; D-SEC-PR46-04) | ✅ evidence 20261115T1431Z_f981713; first live light run 43734988926 ✅ (proof inherited) | ✅ merged; 015-C remains; TASK-286 ▶ |
 | 0.x | TASK-286 cigatefold: CI-minutes stage 2 (scans → ci-gate fold, code-gated steps) + PR46-SEC-11/12/15/16/17, PR42-SEC-18 (D-ARCH-128, D-ORCH-100) | devops-engineer | policy PR #55 merged 11e2158; workflow PR #59 merged 29318c3 — TASK-286 complete | ✅ policy | ✅ r2 AWN | ✅ r2 PWF | ✅ evidence 20261116T0422Z_71d2980; lane A 43805155599 (gate waits on sec record) | must land in November |
 | 0.8 | TASK-029 automatic audit capture (+ D-ARCH-122 writeAll, PR42-SEC-17/19, R3-m1/n1, D-TASK025-27 boundary rules) | senior-developer → backend-developer (opus) | merged 27f0189 (PR #56 squash @99f3025) | ✅ | ✅ r3 AWN | ✅ r4 PWF | ✅ evidence 20261116T0436Z_8b854ce (audit 100 %); lane A 43806951976 (gate waits on sec record) | fc 0; TASK-028 wiring follow-up; unblocks TASK-033/040 |
-| 0.12 | TASK-290 rlsfu (= TASK-024-F): PR43-SEC-11 splitter, R2-n1/n3, PR52-SEC-01 KEEP fix | senior-developer → database-engineer (opus) | feat/TASK-290-task-024-f-sql-splitter @ba921da (unpushed) | ✅ | – | – | lane B re-run by orchestrator (1223Z env fail, 1314Z inventory-test pollution; D-ORCH-126) | | 0 | prereq of TASK-037 merge |
-| 0.12 | TASK-289 rbacfu (= TASK-027-F): PR48-SEC-01/03, R1-m1/m2/m4, n1/n3 | backend-developer (opus) | PR #60 @c912a0a (code f2a7411) | ✅ fc1 | r1 AWN; r2 ▶ | r1 PWF (D-SEC-PR60-01); delta r2 ▶ | ✅ evidence 20261117T1247Z_f2a7411; lane A 44093161786 fast-lane ✅ (gate waits on record) | | 1 | |
-| 0.8 | TASK-028 audit redaction + classification registry + capture composition (D-ARCH-141) | senior-developer → backend-developer | PR #61 @57faf1f (code e526b11) | ✅ | r1 ▶ | r1 ▶ | ✅ evidence 20261117T1302Z_e526b11; lane A 44093229169 fast-lane ✅ (gate waits on record) | | 0 | critical path → TASK-049 |
-| 0.12 | TASK-287 part 287-A policy PR (D-ARCH-140) | devops-engineer | ci/TASK-287A-policy @a85234a (pushed, no PR) | ✅ | – | – | lane B queued (orchestrator) | | 0 | |
-| 1.1 | TASK-035 named BullMQ queues + DLQ + payload v2 + worker entry point | senior-developer → backend-developer | – | ▶ | – | – | – | | 0 | critical path |
-| 1.1 | TASK-036 error catalogue + validation error format | senior-developer → backend-developer | – | ▶ | – | – | – | | 0 | critical path |
-| 1.1 | TASK-037 organisation types, operator org, personal org, memberships (DR-A14 RLS) | senior-developer → backend/database (opus) | – | ▶ | – | – | – | | 0 | critical path; merges after TASK-290 |
+| 0.12 | TASK-290 rlsfu (= TASK-024-F): PR43-SEC-11 splitter, R2-n1/n3, PR52-SEC-01 KEEP fix (PR #66) | senior-developer → database-engineer (opus) | merged 9874f6d (PR #66 squash) | ✅ | ✅ r1 APPROVED_WITH_NITS (fdb33ee) | ✅ r1 PASS_WITH_FOLLOW-UPS (D-SEC-PR66-01/02) | ✅ evidence 20261118T1029Z_ba921da; full lane A MERGE-READY (D-ORCH-135) | ✅ | 0 | follow-up TASK-293 (= TASK-290-F, D-SD-001) |
+| 0.12 | TASK-289 rbacfu (= TASK-027-F): PR48-SEC-01/03, R1-m1/m2/m4, n1/n3 (PR #60) | backend-developer (opus) | merged 96c2c7a (PR #60 squash) | ✅ fc1 | ✅ r2 | ✅ delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR60-02) | ✅ evidence 20261117T1247Z_f2a7411 | ✅ | 1 | PR60-SEC-01 → TASK-283 before TASK-060 (edge added, D-SD-001); PR60-SEC-06 → TASK-060 |
+| 0.8 | TASK-028 audit redaction + classification registry + capture composition (D-ARCH-141) (PR #61) | senior-developer → backend-developer | merged 34c7381 (PR #61 squash; fc1 code d51b42b) | ✅ fc1 | ✅ r2 APPROVED_WITH_NITS (fa5432b) | ✅ r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR61-03) | ✅ lane B on d51b42b; full lane A MERGE-READY (D-ORCH-135) | ✅ | 1 | follow-ups: R2-m1 + PR61-SEC-11 → TASK-031; PR61-SEC-12 → TASK-041; R2-n4/n5 → TASK-073 (cards, D-SD-001) |
+| 0.12 | TASK-287 part 287-A policy PR (D-ARCH-140) (PR #62) | devops-engineer | merged 7109563 (PR #62 squash) | ✅ | ✅ r1 APPROVED_WITH_NITS (d76ac9e) | ✅ r1 PASS_WITH_FOLLOW-UPS (D-SEC-PR62-01) | ✅ lane B on 5d86412; full lane A MERGE-READY (D-ORCH-135) | ✅ | 0 | R1-m1/m2, R1-n1..n5, PR62-SEC-02 → 287-B; PR62-SEC-01 → 287-C (card, D-SD-001) |
+| 0.12 | TASK-287 part 287-B workflow PR (`HEAD == GITHUB_SHA` line in ci.yml) + PR #62 follow-ups (D-ORCH-135) | devops-engineer | – | ▶ (dispatched D-ORCH-135) | – | – | – | | 0 | due before any other `.github/workflows/**` PR; then 287-C |
+| 1.1 | TASK-035 named BullMQ queues + DLQ + payload v2 + worker entry point (PR #64) | senior-developer → backend-developer | merged b9bd6e3 (PR #64 squash; fc1 code 266abb6) | ✅ fc1 | ✅ r2 APPROVED_WITH_NITS (76d5e4e) | ✅ r2 PASS_WITH_FOLLOW-UPS, C1 discharged (D-SEC-PR64-02) | ✅ evidence 20261118T1229Z_266abb6; full lane A MERGE-READY (D-ORCH-135) | ✅ | 1 | follow-ups: PR64-SEC-04/06/07/08/11/12 → TASK-039; 06/07 → TASK-047; R2-n3, R2-n5/SEC-13 → TASK-043 (cards, D-SD-001) |
+| 1.1 | TASK-036 error catalogue + validation error format (PR #63) | senior-developer → backend-developer | merged 783522a (PR #63 squash) | ✅ | ✅ r1 APPROVED_WITH_NITS (0f3528e) | ✅ r1 PASS_WITH_FOLLOW-UPS (D-SEC-PR63-01) | ✅ evidence 20261118T1201Z_fcdb7ac; full lane A MERGE-READY (D-ORCH-134/135) | ✅ | 0 | follow-up TASK-292 (= TASK-036-F1, D-SD-001); PR63-SEC-01 before TASK-052 |
+| 1.1 | TASK-037 organisation types, operator org, personal org, memberships (DR-A14 RLS) (PR #65) | senior-developer → backend/database (opus) | PR #65; fc1 on `task-037-fc1` @fdfbbd8 (PR branch to be fast-forwarded by the orchestrator) | ▶ fc1 | – (after merge-main) | – (after merge-main) | lane B pending | | 1 | critical path; US-061/US-062 partial here (D-PM-068), completed by TASK-224/TASK-231 |
 | 0.13 | TASK-291 flake3 (= W0-FLAKE-3; D-ARCH-146): one loopback transport, pooled-fetch ratchet, PR #57 R1-n4/n6 | test-engineer (opus) | – | ⏳ queued (deps TASK-288, TASK-289) | – | – | – | |
+| 0.13 | TASK-293 lexfu (= TASK-290-F; D-ORCH-134, D-SD-001): tokenizer parity with the PostgreSQL lexer, ASCII white space, ck_ JSDoc, rule 10 limit | database-engineer (opus) | – | ⏳ ready (dep TASK-290 merged; lock prisma-core) | – | – | – | | 0 | merge before the next migration/bootstrap PR after TASK-037 |
+| 1.11 | TASK-292 errfu (= TASK-036-F1; D-ORCH-132, D-SD-001): README §11 table arm + domain-error-class scan in the error-catalogue parity test | backend-developer (sonnet) | – | ⏳ ready (dep TASK-036 merged; lock shared-errors) | – | – | – | | 0 | merge before TASK-049 |
 | 0.12 | TASK-288 flake2 (= W0-FLAKE-2): prisma/generated reader lock | test-engineer (opus) | merged (PR #57 squash @af219c6) | ✅ code r3 AWN; security r3 PWF; C1 verified | – | – | – | |
 | 0.x | TASK-W0-FLAKE: deterministic timing under host load (PR #53) | test-engineer | merged ae1e38b (PR #53 squash @8fe8bfb; fc1 + fc2 + union) | ✅ | ✅ r3 APPROVED_WITH_NITS (378af72) | ✅ delta r2 PASS_WITH_FOLLOW-UPS (D-SEC-PR53-02) | ✅ evidence 20261115T1711Z_60a1659; lane A ✅ run 43745472339 (security-integration ran) | ✅ merged; follow-up TASK-W0-FLAKE-2: prisma/generated reader lock, PR #48 R1-m4 observe() deadline, PR53-SEC-05/06 (or TASK-283) |
 | 0.7 | TASK-015 split: merged-coverage hook (D-ORCH-047) (PR #40) | devops-engineer | merged 74385a1 (PR #40 squash @6e1594c; fc1 + union with #38) | ✅ | ✅ r2 APPROVED_WITH_NITS (e8f4461; D-ORCH-066) | ✅ delta r2 PASS_WITH_FOLLOW-UPS (e8f4461; D-SEC-PR40-02) | ✅ evidence 20261114T0437Z_bc97720 (merged 98.24 % L / 96.45 % B); lane A ✅ run 43562107202 | ✅ merged; 015-C: header wording + R2-m1 (b) fixtures, R2-n1/n2, PR40-SEC-07/-08; qa-lead: R1-m3, R2-m1 (c), R2-m2, PR40-SEC-05/-06/-09 |
@@ -141,15 +144,15 @@ _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuati
 ## Wave plan (docs/04-plan/PLAN.md)
 | Wave | Goal | Tasks | Batches | State |
 |---|---|---|---|---|
-| 0 | Foundation: skeleton, CI lanes, generators, SPK-01..08 | 37 | 10 | ▶ IN_PROGRESS |
-| 1 | M0 DC I | 40 | 10 | ⏳ |
+| 0 | Foundation: skeleton, CI lanes, generators, SPK-01..08 | 47 | 13 | ▶ IN_PROGRESS |
+| 1 | M0 DC I | 41 | 11 | ⏳ |
 | 2 | M0 DC II | 22 | 6 | ⏳ |
 | 3 | M0 non-DC Must → ★ v0.1.0-m0 | 28 | 7 | ⏳ |
 | 4 | M1 DC I | 24 | 7 | ⏳ |
 | 5 | M1 DC II | 20 | 6 | ⏳ |
 | 6 | M1 DC III | 20 | 6 | ⏳ |
-| 7 | M1 non-DC Must + NFR → G3-ready | 33 | 9 | ⏳ |
-| 8 | Should (cuttable, ladder rung 2) | 50 | 13 | ⏳ |
+| 7 | M1 non-DC Must + NFR → G3-ready | 37 (incl. TASK-224/227/231, D-PM-068) | 11 | ⏳ |
+| 8 | Should (cuttable, ladder rung 2) | 47 | 13 | ⏳ |
 | 9 | Could (cuttable, ladder rung 1) | 7 | 2 | ⏳ |
 
 ## Next Actions

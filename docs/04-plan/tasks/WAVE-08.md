@@ -2,20 +2,20 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0+M1** · Priority band: **Should** · **CUTTABLE** (PRD §7.1 ladder rung 2)
 
-Tasks: **50** (S 17 / M 33; opus 11 / sonnet 39; demo-critical 0) in **13** batches of ≤ 4 parallel tasks. Estimated effort ≈ 124.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **47** (S 17 / M 30; opus 10 / sonnet 37; demo-critical 0) in **13** batches of ≤ 4 parallel tasks. Estimated effort ≈ 115.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Each merged Should passes regression; unfinished ones are deferred by product-manager (rung 2) without blocking G3.
 
-**Stories completed in this wave (65):** US-014, US-026, US-028, US-029, US-033, US-060, US-073, US-081, US-082, US-083, US-084, US-085, US-099, US-100, US-111, US-114, US-118, US-144, US-145, US-162, US-163, US-164, US-165, US-169, US-170, US-178, US-179, US-185, US-188, US-190, US-193, US-194, US-196, US-215, US-216, US-217, US-218, US-219, US-227, US-228, US-229, US-230, US-238, US-239, US-246, US-250, US-252, US-258, US-259, US-260, US-261, US-262, US-263, US-265, US-266, US-267, US-268, US-269, US-272, US-273, US-275, US-286, US-287, US-288, US-289.
+**Stories completed in this wave (60):** US-014, US-026, US-028, US-029, US-033, US-060, US-073, US-099, US-100, US-111, US-114, US-118, US-144, US-145, US-162, US-163, US-164, US-165, US-169, US-170, US-178, US-179, US-185, US-188, US-190, US-193, US-194, US-196, US-215, US-216, US-217, US-218, US-219, US-227, US-228, US-229, US-230, US-238, US-239, US-246, US-250, US-252, US-258, US-259, US-260, US-261, US-262, US-263, US-265, US-266, US-267, US-268, US-269, US-272, US-273, US-275, US-286, US-287, US-288, US-289.
 
 ## Batches
 
 | Batch | Tasks (parallel) | Locks held |
 |---|---|---|
 | 8.1 | TASK-219 Feature-flag evaluation and audited changes<br>TASK-220 Refuse sign-in for suspended/deactivated users; admin session lifetime and crawler exclusion<br>TASK-221 Role definitions change only via versioned migration<br>TASK-222 Reason-required mechanism and audit archiver seam | mod-admin-settings-flags<br>identity-core, admin-core<br>pkg-authz<br>pkg-audit-core |
-| 8.2 | TASK-223 Customer TOTP settings, staff recovery-code regeneration and change password<br>TASK-224 Switch active organisation; organisation profile and creating a business organisation<br>TASK-225 Entity history view and panel<br>TASK-226 Table density and route-level code splitting | identity-mfa<br>mod-organisations<br>admin-audit<br>ui-layout |
-| 8.3 | TASK-227 Invite members into a business organisation; accept an invitation<br>TASK-228 Security settings screen<br>TASK-229 Privacy notice and consent-rule endpoint; cookie consent banner<br>TASK-230 Display currency switcher and indicative converter | mod-organisations<br>web-account-security<br>mod-compliance-consent, web-consent<br>web-currency |
-| 8.4 | TASK-231 Manage members with last-Owner and individual-organisation safeguards<br>TASK-232 Optional protection cover and price floor<br>TASK-233 Filter results with URL state; compare up to three options<br>TASK-234 Save a quote and reopen it; saved quotes list | mod-organisations<br>pkg-pricing<br>web-quote-results<br>mod-quotes, web-account-quotes |
+| 8.2 | TASK-223 Customer TOTP settings, staff recovery-code regeneration and change password<br>TASK-225 Entity history view and panel<br>TASK-226 Table density and route-level code splitting | identity-mfa<br>admin-audit<br>ui-layout |
+| 8.3 | TASK-228 Security settings screen<br>TASK-229 Privacy notice and consent-rule endpoint; cookie consent banner<br>TASK-230 Display currency switcher and indicative converter | web-account-security<br>mod-compliance-consent, web-consent<br>web-currency |
+| 8.4 | TASK-232 Optional protection cover and price floor<br>TASK-233 Filter results with URL state; compare up to three options<br>TASK-234 Save a quote and reopen it; saved quotes list | pkg-pricing<br>web-quote-results<br>mod-quotes, web-account-quotes |
 | 8.5 | TASK-235 Organisation profile and team invitations UI; protect last Owner and block self role change<br>TASK-236 Customer discounts and coupons; coupon entry on the review step<br>TASK-237 Share a quote by link<br>TASK-238 Public prohibited-items lookup page and volumetric calculator | web-account-org<br>pkg-pricing, mod-orders-coupon, web-wizard-review<br>mod-quotes<br>web-public-tools |
 | 8.6 | TASK-239 Carrier address suggestions; Incoterm choice and de-minimis hint<br>TASK-240 Wizard autosave and offline edit queue<br>TASK-241 Paperless customs upload with printed-copy fallback<br>TASK-242 Wizard step 4 | mod-shipments-validation, mod-customs<br>web-wizard-shell<br>mod-customs-docs<br>web-wizard-extras |
 | 8.7 | TASK-243 Add and remove shipments in the open order<br>TASK-244 EXCEPTION handling and automatic void retry<br>TASK-245 Drop-off service points list and drop-off confirmation<br>TASK-246 Authorisation and capture sweeper | mod-orders<br>mod-orders-saga<br>mod-pickups, web-wizard-step3<br>mod-payments-sweeper |
@@ -179,35 +179,6 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`apps/api/src/modules/identity/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
-### TASK-224 — Switch active organisation; organisation profile and creating a business organisation
-
-| Field | Value |
-|---|---|
-| Stories (completes) | US-081 (M1 Should) Switch active organisation<br>US-082 (M1 Should) Organisation profile and creating a business organisation |
-| REQs | REQ-ORG-006, REQ-ORG-008, REQ-ORG-009 |
-| NFRs | — |
-| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131 |
-| Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
-| Complexity | M |
-| Depends on | TASK-056, TASK-100 |
-| Batch · locks | 8.2 · mod-organisations |
-| Branch | `feat/TASK-224-switch-active-organisation-organisation-profile` |
-| Priority | Should · cuttable |
-
-**Files / modules**
-- apps/api/src/modules/organisations/{switch,profile}/**
-
-**Acceptance tests to write**
-- All US-081 and US-082 scenarios
-- CONTRACT CHANGE FOR createOrganisation (D-ARCH-152: approved change request, exact YAML in rulings/wave-1-batch-1.1-rulings.md section 3.3, applied verbatim; api/README section 18 item 1: the contract changes in this PR, with the route): OrganisationCreateRequest gains the OPTIONAL property type - string, enum OPERATOR, BUSINESS_CUSTOMER, PARTNER, INDIVIDUAL, default BUSINESS_CUSTOMER; required and additionalProperties false do not change; OrganisationPatch stays without type; one more request example, type_refused; in api/README.md one line in the amendments list and the ORG_TYPE_NOT_ALLOWED row of section 11 reworded (a createOrganisation request for a type other than BUSINESS_CUSTOMER); npm run openapi:lint with 0 errors and npm run openapi:types, with the regenerated packages/shared/src/api/types.gen.ts in the same commit; the Joi schema mirrors the property (valid over the four values, default BUSINESS_CUSTOMER) and the handler passes the validated value to createOrganisation of TASK-037, which refuses everything but BUSINESS_CUSTOMER; the web form and its Zod schema never send type
-- US-061 SCENARIOS THAT NEED THE ROUTES (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152), with the IDs in the test titles: AT-US-061-02 at the response - POST with type PARTNER, OPERATOR and INDIVIDUAL each answers 422 ORG_TYPE_NOT_ALLOWED and the organisations row count is unchanged, a value outside the enum answers 400 VALIDATION_ERROR, a request without type creates a BUSINESS_CUSTOMER organisation; AT-US-061-03 at the response - PATCH with type answers 400 VALIDATION_ERROR with sub-code UNKNOWN_FIELD; AT-US-061-04 - an anonymous POST answers 401 AUTH_REQUIRED; AT-US-061-05 - the refused PARTNER attempt leaves one audit entry with outcome FAILED, action CREATE and entity organisation, written outside the rolled-back transaction (REQ-AUDIT-010 writes no entry for a 400, which is why type must pass the schema). PLANNING FLAG: US-061 is M0 Must and demo-critical while this card is Should and cuttable; the two routes are not cut while these IDs are owned here, unless product-manager moves the scenarios (rulings section 4)
-- AT-US-081-01 … AT-US-081-05: all 5 scenarios of US-081, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-- AT-US-082-01 … AT-US-082-07: all 7 scenarios of US-082, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-
-**DoD notes**
-- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
-- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
-
 ### TASK-225 — Entity history view and panel (admin)
 
 | Field | Value |
@@ -259,34 +230,6 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - All strings in en/es/fr (no literals; ICU), six screen states where applicable, 360 px and 1280 px layouts, tokens only, axe 0 serious/critical in every state, keyboard path and visible focus, Playwright spec (Chromium on `pr`; three engines at wave end), `can()` gating for permissioned actions.
-- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
-
-### TASK-227 — Invite members into a business organisation; accept an invitation
-
-| Field | Value |
-|---|---|
-| Stories (completes) | US-083 (M1 Should) Invite members into a business organisation<br>US-084 (M1 Should) Accept an invitation |
-| REQs | REQ-ORG-010, REQ-ORG-011 |
-| NFRs | — |
-| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067 |
-| Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
-| Complexity | M |
-| Depends on | TASK-224, TASK-169, TASK-187 |
-| Batch · locks | 8.3 · mod-organisations |
-| Branch | `feat/TASK-227-invite-members-into-business-organisation` |
-| Priority | Should · cuttable |
-
-**Files / modules**
-- apps/api/src/modules/organisations/invitations/**
-
-**Acceptance tests to write**
-- All US-083 and US-084 scenarios
-- INVITATION IS THE PENDING STATE (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a)): inviting writes only the invitations row (PENDING, token hash, expires_at, role, locale) and never a memberships row nor a lookup of the address against users; 409 ALREADY_MEMBER compares the lower-cased address with the ACTIVE or SUSPENDED members of the inviting organisation only; acceptance creates the membership directly as ACTIVE with created_by = the inviter and invitation_id set and marks the invitation ACCEPTED in one transaction (audit: CREATE membership + UPDATE invitation, no token value); the pending-invitation list is served to holders of org:member:invite only (not org:read); api tests: after an invite no memberships row exists for the address, an organisation member cannot read the users row of the invitee before acceptance (RLS probe) and can after it
-- AT-US-083-01 … AT-US-083-12: all 12 scenarios of US-083, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-- AT-US-084-01 … AT-US-084-08: all 8 scenarios of US-084, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-
-**DoD notes**
-- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-228 — Security settings screen (TOTP, recovery codes, change password)
@@ -371,37 +314,6 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - All strings in en/es/fr (no literals; ICU), six screen states where applicable, 360 px and 1280 px layouts, tokens only, axe 0 serious/critical in every state, keyboard path and visible focus, Playwright spec (Chromium on `pr`; three engines at wave end), `can()` gating for permissioned actions.
-- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
-
-### TASK-231 — Manage members with last-Owner and individual-organisation safeguards
-
-| Field | Value |
-|---|---|
-| Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards |
-| REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014 |
-| NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131 |
-| Specialist · model | backend-developer · opus |
-| Complexity | M |
-| Depends on | TASK-227, TASK-187 |
-| Batch · locks | 8.4 · mod-organisations |
-| Branch | `feat/TASK-231-manage-members-last-owner-individual` |
-| Priority | Should · cuttable |
-
-**Files / modules**
-- apps/api/src/modules/organisations/members/**
-- apps/api/src/modules/organisations/members/assign-rank.property.test.ts (ASSIGNABLE_BY vs grants, fast-check)
-
-**Acceptance tests to write**
-- All US-085 scenarios
-- PR8-SEC-06 consumer conditions (i)-(iv) (ADR-0008 am. 3 item 4; D-ARCH-069): a modify, suspend or remove passes `canAssignRole` for EVERY role the target member currently holds AND every role in the requested set (an Admin cannot act on an Owner+Viewer member through the Viewer role); `assignerRoleKeys` come from the actor ACTIVE membership in the TARGET organisation, read from the database, never from the token; the rank check is in addition to `org:member:invite`/`org:member:manage` and the 12 h step-up, never instead of them; self role change (REQ-ACCT-015) and LAST_OWNER (REQ-ORG-013) stay separate checks; AC-05 threat-model cases (Admin assigns Owner, Admin modifies an Owner, self role change) → 403/422
-- PR #8 code review R2-n2: property test — for every allowed (assigner, target) pair in ASSIGNABLE_BY, `target.permissions ⊆ assigner.permissions` on the shipped catalogue; a mutated catalogue where the Admin loses a permission the Viewer keeps fails the property
-- MEMBER LIST (D-ARCH-123; D-067): the member list holds ACTIVE and SUSPENDED memberships only (INVITED is reserved and never written); pending invitations are a separate list keyed by invitee e-mail (TASK-227), rendered only when the /me permissions include org:member:invite
-- US-062 SCENARIOS DEFERRED FROM TASK-037 (D-ORCH-COORD-03 item 3, accepted in D-ORCH-131): AT-US-062-05 (permission denied on assigning roles) and AT-US-062-06 (audit of a membership change) need mounted member routes and are proven here, with the IDs in the test titles. PLANNING FLAG: US-062 is M0 Must and demo-critical while these scenarios close in Wave 8; the delivery split is with product-manager (rulings/wave-1-batch-1.1-rulings.md section 4)
-- AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
-
-**DoD notes**
-- Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-232 — Optional protection cover and price floor

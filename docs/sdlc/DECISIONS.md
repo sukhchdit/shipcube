@@ -3703,3 +3703,191 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - A plan fold (senior-developer) for the D-PM-068 card and `gen.mjs` changes, `gen.mjs --write` after #62 (D-ARCH-139), and the pending sheet-fold items: TASK-036-F1, TASK-290-F, TASK-283 → TASK-060, PR60-SEC-06 → TASK-060, R2-n4.
   - TASK-291 after #65 merges (the `tests-gen-rls` lock).
 - **Reversibility:** High.
+
+### D-SD-001 · 2026-11-18 · senior-developer · Plan fold for D-PM-068 and the D-ORCH-132..135 routings: TASK-224/227/231 into Wave 7 with their IDs kept (`idAt`), a recorded wave exception for US-061/US-062, follow-ups TASK-292 (= TASK-036-F1) and TASK-293 (= TASK-290-F), pending sheet-fold lines (plan regenerated: 293 tasks, 82 batches, 0 errors, 0 warnings; IDs, branches and titles of TASK-001..291 unchanged)
+- **Numbering:** `D-SD-` starts here at the orchestrator's request (senior-developer's P4 series was D-PLAN-001..010). The next entry is D-SD-002.
+- **Decision:**
+  1. **Wave 7, not a cuttable override (the PM preference, adopted).** TASK-224 → batch 7.9, TASK-227 → 7.10, TASK-231 → 7.11: after TASK-187 (7.1) and serial on `mod-organisations`. Why: the Wave 7 exit is the G3-ready checkpoint, and D-PM-068 makes the three tasks due before G3. `cuttable`, the Wave 8 "CUTTABLE" header and PLAN.md §12 rung 2 all key off the wave, so an override would leave three non-cuttable tasks inside a wave labelled cuttable. No critical-path cost: every dependency (TASK-056, 100, 169, 187) is in an earlier batch, and the back-fill rule (PLAN.md §6 rule 3) lets TASK-224 start as soon as its dependencies are merged and `mod-organisations` is free. Wave 7 is now 37 tasks in 11 batches, Wave 8 47 in 13.
+  2. **ID stability through `idAt:[wave, batch]`.** gen.mjs numbers a planned task by the slot it was numbered in (`idAt`) and schedules it by `w`/`b`; the three cards keep their array position, so they keep their rank inside the old slot. Checked: the generated branch name of every existing ID is identical before and after (task-map.csv diff: 0 changed, TASK-292/293 new).
+  3. **Recorded wave exception.** `waveExceptions` in plan-data.mjs: US-061 `{through: 7, dcBy: ['orgs']}`, US-062 `{through: 7, dcBy: ['orgs', 'register']}`, both `decision: 'D-PM-068'`. gen.mjs accepts a late completion only through such an entry, and validates the decision ID and that every `dcBy` task holds the story as partial inside the original band (Waves 0–2). It lists the exceptions in its output. `dc` is derived through the `dcBy` tasks only, so TASK-224 and TASK-231 print "Must" and not "demo-critical", and TASK-037 stays demo-critical. For an exception story, the completing task's generated acceptance line says that it proves the scenarios its card lines assign to it and that the partial owners prove the rest.
+  4. **D-PM-068 cards as listed there:**
+     - `orgs` (TASK-037): `us: []`, `part: [US-061, US-062]`. The SCENARIO OWNERSHIP line cites D-PM-068 and adds the US-062 split (AT-US-062-01..04 and the change record of -06 here; the creation clause of -06 in TASK-049; -05/-06 through the member routes in TASK-231) and the R0 dossier note.
+     - `orgswitch` (TASK-224): completes US-061. `members` (TASK-231): completes US-062. On both, the PLANNING FLAG sentence is replaced by "completes …; not cuttable; due before G3" and the rung-4 fallback.
+     - `invite` (TASK-227): the non-cuttable-by-dependency line.
+     - `register` (TASK-049): `part: [US-062]` plus the AT-US-062-06 creation-clause line.
+     - Wave 2, 3 and 7 exit texts follow item 7 of D-PM-068. PLAN.md §3, the checkpoint paragraph, §10 (split stories, exception paragraph), §12 tier A (26 tasks, 32 stories, 61.5 days) and §14 are updated.
+  5. **Follow-up IDs (late tasks, numbered last).**
+     - TASK-036-F1 = **TASK-292** `errfu`: backend-developer, S, lock `shared-errors`, depends on TASK-036; PR63 R1-m1 and R1-m2 option (a). It sits in the new batch 1.11, because every Wave 1 batch holds 4 tasks (same reason as batch 0.11, D-ARCH-125). Due before TASK-049 merges.
+     - TASK-290-F = **TASK-293** `lexfu`: database-engineer, opus, S, batch 0.13, depends on TASK-290. Lock `prisma-core`, the lock that TASK-016/024/290 held over `tools/db` (the "tools/db lock" of D-ORCH-134). Scope: PR66-SEC-01 (a)–(c), R1-m1/n1/n2 and PR66-SEC-02's call-site rule or stated limit.
+  6. **Merge-prerequisite lines, not dependency edges, for the due points.**
+     - A "MERGE PREREQUISITE TASK-293" line goes on the Wave 1 cards that add migrations: TASK-039, 040, 043, 047, 049, 051, 052, 055, 057 and 066.
+     - A "MERGE PREREQUISITE TASK-292" line goes on TASK-049.
+     - Why: both due points are merge points. A dependency edge would gate the start of TASK-039 and TASK-049, which are on the critical path 035 → 039 → 043 → 049 → 052.
+     - Later migration PRs fall under the same rule, which the orchestrator checks while TASK-293 is open.
+  7. **Sheet-fold lines and the locks they bring:**
+     - TASK-060: dependency TASK-283 (PR60-SEC-01) and PR60-SEC-06; adds lock `tests-gen-rbac` for `tests/generated/rbac/runner.ts`.
+     - TASK-073: AT-US-091-06 viewer half (R2-n4) and the decrypt-pair re-export ban (R2-n5); adds lock `lint` for `eslint.config.mjs`.
+     - TASK-031: R2-m1 + PR61-SEC-11 as one predicate change; adds lock `pkg-audit-redaction`.
+     - TASK-041: PR61-SEC-12; adds lock `pkg-audit-redaction` for `packages/audit/src/network.ts`.
+     - TASK-043: R2-n3 (drop an invalid `tracestate` at the producer) and R2-n5/PR64-SEC-13 (api producer queue factory with a class-only listener and its own refusal test).
+     - TASK-039: PR64-SEC-04 (bounds from the ADR-0013 retention amendment, which the orchestrator confirms before dispatch), -06 (shared with TASK-047: whichever task first changes `payload-v2.ts` closes it), -07 (job-identity half), -08 (the rest), -11 and -12.
+     - TASK-047: PR64-SEC-07 (tenant-context half) and -06; adds lock `worker-queues`.
+     - TASK-287 card: 287-B carries PR62 R1-m1/m2, R1-n1..n5 and PR62-SEC-02, and the PART ORDER line no longer says "and nothing else". 287-C carries PR62-SEC-01, policy first.
+     - TASK-089: the D-ARCH-151/153 changes (OPERATOR_ORG_ID, two-transaction staff provisioning, exported service function) were already on the card; only the D-PM-070 reference is added.
+  8. **D-ARCH-139 re-run.** The regeneration after 287-A merged adds the `security-integration` DoD line where the widened trigger list now matches: TASK-015, TASK-034, TASK-211 and TASK-290 gain it as D-ORCH-121 expected, several existing lines name the new globs, and TASK-293 has it from the start.
+- **Alternatives rejected:**
+  - An explicit cuttable override in Wave 8 (inconsistent wave semantics; see item 1).
+  - Renumbering the moved tasks (hundreds of ID references in DECISIONS, traceability, PRD and the cards).
+  - Re-adding them as late tasks (new IDs TASK-29x would orphan every existing reference).
+  - Dependency edges for TASK-292/293 (they would start-gate the critical path).
+  - Dropping the `members` → `invite` dependency (D-PM-068's default kept; it remains open for a later proposal).
+- **In-flight conflicts:**
+  - **PR #65 (TASK-037):** the card now reads partial for US-061 and US-062 and lists the US-062 scenario split. Nothing new is required of the code: the `[AT-US-062-06]` unit test is already in the PR. The PR body and the merge note must say "partial" and not "completes".
+  - **287-B (in progress):** the card adds the PR #62 follow-ups and PR62-SEC-02 to the workflow PR, as D-ORCH-135 routed them. The orchestrator relays this to devops-engineer.
+- **Reversibility:** High (plan data and generator; `idAt` and `waveExceptions` are additive and removable).
+
+### D-SECPR287B-01 · 2026-11-19 · security-analyst · TASK-287 part 287-B (workflow PR, branch `ci/TASK-287B-workflow`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `06f62ac` (record `docs/05-quality/security/PR-pending-TASK-287B-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-287B-security-review.md` once the PR exists)
+- **Decision:** 0 Critical, High, Medium or Low; 2 INFO (PR287B-SEC-01, PR287B-SEC-02), both pre-existing defence in depth routed to 287-C. The record binds to the code commit `06f62ac` through its single `Head` row. The evidence-only tip changes no owned path, so main's checker accepts it through the merge ref. Simulation: 11 of 11 scenarios as expected, 4 passing and 7 controls failing. The controls cover the placeholder name, no record, a later FAIL row, a wrong `Head`, an owned or `ci.yml` change after the head, and another PR number. Host rule: static review plus single-process Node probes on `git archive` extracts. Three read-only git commands ran in the PR worktree at the start; this is disclosed in the record.
+- **Closed:**
+  - **PR62-SEC-02.** The policy accepts V2 only, and the four `FAST_LANE_*` aggregation entries are required with their exact values. The transitional `pinnedScriptAlternativesProblems` and `envOptional` are deleted. The merge-base and head policies ran over 1,229 mutants of the head `ci.yml`: 0 are weaker at the head, and the 10 stricter ones are exactly the designed ones.
+  - **PR59-SEC-01 item 2, workflow half.** Both tooling steps check `HEAD == GITHUB_SHA` before the tested-base lines. In real bash, a crafted merge with an attacker's first parent fails closed under V2 and writes nothing to `$GITHUB_ENV`; under V1 (the control) it becomes `TOOLS_REF`. `GITHUB_*` names are refused at every env level. With item 1 (287-A), PR59-SEC-01 is closed once this merges.
+  - **PR55-SEC-05, workflow half.** The aggregation now receives the four outputs. Main's gate already reports `fast-lane outputs mismatch` on any difference, so the compare is live from this PR's own run.
+- **Run-full (PR #62 code review R1-m1):** `voidedByBase` under the head implies it under the merge base. Every API failure and the 40-call cap give `false` (light, BLOCKED). A full run only adds gates. Code review R1-m1 (MINOR) and R1-n1 of this round are minutes and UX items, not security findings. If R1-m1 is fixed in this cycle it must only add conjuncts, and it needs a delta security round.
+- **D-SEC-PR62-01 interim rule kept:** no `uses:` commit changed and no action step gained `env:` in any workflow. The only step-env change is the four entries on the aggregation `run:` step. Permissions, triggers, job env and token placement are unchanged. No `${{ }}` appears in any `run:`.
+- **New findings:**
+  - **PR287B-SEC-01 (INFO, CWE-693, A08:2021).** `lane-scope.mjs` `gateInputStage2FromEnv` still skips an absent `FAST_LANE_*` entry, so the requirement lives only in the policy. Fix in 287-C: absence gives `fast-lane outputs missing (<keys>)`, with a test row. Owner: devops-engineer.
+  - **PR287B-SEC-02 (INFO, CWE-693, A08:2021).** The stage-2 job shape is a deny-list. `runs-on` (including `self-hosted`) and `environment` are accepted on fast-lane, security-integration and ci-gate under both policies. This fails closed today because no self-hosted runner exists. Fix in 287-C, with PR62-SEC-01: an exact job key set and `runs-on: ubuntu-24.04`. Owner: devops-engineer.
+- **Interim rule extended:** until 287-C, the record of any PR that changes `.github/workflows/**` also checks that no stage-2 job's `runs-on` changed and that no `environment:` was added (in addition to the D-SEC-PR62-01 checks on `uses:` commits and action-step `env:`).
+- **Merge conditions:**
+  1. Push `06f62ac` and the evidence-only commit as they are, in one code push.
+  2. Rename the record on main before the `pull_request` event whose ci-gate must pass. Cheapest order: open the PR as a draft, rename, then mark it ready for review. Otherwise close and reopen it after the rename.
+  3. The full lane A run must be green in every step, with ci-gate MERGE-READY. A red V2 check or a red `FAST_LANE_*` compare is fail-closed: revert, never bypass.
+  4. A lane-B `pr` run on `06f62ac`.
+  5. Any `.github/workflows/**` or `tools/ci/**` change after `06f62ac` needs a delta security round.
+- **Reversibility:** High (record and routing only; the follow-ups are policy-first changes in 287-C).
+
+### D-ARCH-154 · 2026-11-19 · principal-architect · PR #65 R1-m1 (b): references between organisation-keyed tables are composite foreign keys through `org_id`, in the TASK-037 migration now; rule T1/T2 and catalog assertion C16 for every later table (ADR-0005 amendment 13 items 27 and 28)
+- **Decision:**
+  - In `20261117000000_organisations_identity`, before it merges: `membership_roles (org_id, membership_id) → memberships (org_id, id)` and `memberships (org_id, invitation_id) → invitations (org_id, id)` replace the two single-column keys and keep their names. `memberships` and `invitations` each gain a unique index `ux_<table>__org_id_id` on `(org_id, id)`.
+  - The service fix of R1-m1 (a) stays. The key is the control for the case where the service is wrong.
+  - Rule for every later table (data-model §4.7). T1: a reference from a table with `org_id NOT NULL` to another table that carries `org_id` is composite through `org_id`. T2: where `org_id` is nullable on the referencing side (GUEST_CAPABLE), the single-column key stays and the composite key is added beside it.
+  - Catalog assertion C16 (data-model §4.6) checks the rule, with an exception map that starts empty. Default owner TASK-293, fallback TASK-051. Due before the next migration that adds such a reference merges.
+  - Outside the rule: references to GLOBAL tables, to `organisations` and to `users`, and the logical actor columns.
+- **Why:**
+  - PostgreSQL runs referential-integrity checks without row security. Probed on the PR's migration: in the context of organisation A, a role row with `org_id = A` naming B's membership is accepted. B's own grant of that role to that member then fails with `23505` while B sees no role row. A can block a role grant in B, and the key and the index answer questions about B's data.
+  - RLS `WITH CHECK` cannot help, because the forged row carries A's own `org_id`.
+  - Now is the cheapest point: the tables are empty and the file is mutable. After the merge it is an expand migration per table pair (concurrent unique index in its own file, `NOT VALID`, `VALIDATE`).
+  - Cost: one unique index per referenced table (32-byte key, about 50 MB per million rows, estimated), one more index insertion per parent insert, nothing on the referencing table.
+  - No policy, template, manifest or renderer rule changes, so the DR-A14 sign-off is not reopened.
+- **Alternatives rejected:**
+  - Service-layer checks only: leaves the table open to exactly the defect class RLS exists for (NFR-SEC-011).
+  - A trigger that compares the parent's `org_id`: an invoker trigger cannot see the other tenant's row, a definer one adds a privileged read, and each reference needs its own.
+  - Later, in an expand migration: three files per table pair, and every table added meanwhile repeats the finding.
+- **Verified here:** single-process PGlite 17.5 probes on a patched scratch copy of the developer's migration, with the unpatched file as the negative control (cross-tenant reference `23503`, own reference ok, registration shape ok, the six generated-suite probe shapes unchanged against committed seed rows with dangling references, C16 sketch 0 rows against 2 unpatched). `prisma validate` and `prisma migrate diff --from-empty` accept the schema form and emit the same four statements. `tools/db/lint-migrations.ts` reports no findings on the patched file. Rule T2 was checked on a two-table probe only.
+- **Not verified here:** no Jest, type check or container run. PGlite is PostgreSQL 17. Lane B on the fix head is the evidence. The index cost is an estimate.
+- **Open:** binding guest rows of GUEST_CAPABLE tables through `guest_token_hash`. Ruled with database-engineer before TASK-051 writes the quotes migration (risks.md R-ARCH-34).
+- **Where:** `docs/03-architecture/rulings/wave-1-pr65-r1-rulings.md` §2 and §5 (exact statements, Prisma form, tests); ADR-0005 amendment 13 items 27 and 28; data-model §1.1 P12, §3.2, §4.6 C16, §4.7, A31; risks.md R-ARCH-34.
+- **Reversibility:** High until PR #65 merges. After that, dropping a composite key is a contract migration; the rule itself can be relaxed per table through the C16 exception map.
+
+### D-ARCH-155 · 2026-11-19 · principal-architect · PR #65 R1-n1: an invitation row exists only in a `BUSINESS_CUSTOMER` organisation; the trigger is made stricter and the data-model stands (ADR-0005 amendment 13 item 30)
+- **Decision:**
+  - `platform.role_scope_matches_org()` gains one check for the `invitations` table: the organisation's type is `BUSINESS_CUSTOMER`. With the existing scope mapping the invited role is then always a customer role.
+  - The function stays shared and takes no argument. Both triggers and the marker `ROLE_NOT_ALLOWED_FOR_ORG_TYPE` are unchanged, so `ROLE_SCOPE_GUARDS` and its text pin in the generated suite do not move.
+  - `membership_roles` is unaffected: operator roles in the operator organisation and the Owner link of a personal organisation still pass.
+  - The service answers first (TASK-227: 422 `ORG_TYPE_RESTRICTION` or `ROLE_NOT_ALLOWED_FOR_ORG_TYPE`). The trigger is the backstop.
+- **Why:**
+  - REQ-ORG-010 invites into a `BUSINESS_CUSTOMER` organisation. REQ-ACCT-014 and A-082 exclude INDIVIDUAL organisations, and DR-A05 gives them exactly one member.
+  - `OPERATOR_SUPER_ADMIN` holds every role-assignable permission, `org:member:invite` included, with the operator organisation as its active organisation. Once the invitation route exists, the looser trigger admits an invitation for an operator role. Whoever accepts it becomes operator staff with cross-tenant read, outside the staff controls of M2 (EPIC-B-207) and the first-staff command of D-ARCH-153.
+  - Probed: on the unpatched file the operator-role invitation in the operator organisation and a customer-role invitation in a personal organisation are both accepted; with the check both raise `P0001`.
+- **Alternatives rejected:**
+  - Reword the data-model to the looser mapping: it would document a privilege path that no requirement asks for.
+  - A second trigger function, or a trigger argument: more objects or a changed text pin for the same effect.
+  - Leave it to TASK-227: the migration is immutable after the merge, and a later fix is a second migration for a rule that is known today.
+- **Later:** staff or partner onboarding by invitation (M2, M3) replaces the function in a new migration under an ADR-0005 amendment.
+- **Where:** rulings file §3 and §5.2 item 4; ADR-0005 amendment 13 item 30; data-model §3.2 `invitations`, `membership_roles`.
+- **Reversibility:** High (a function body; `CREATE OR REPLACE` by its owner in a later migration).
+
+### D-ARCH-156 · 2026-11-19 · principal-architect · PR #65 security flag S1: a database control is required in this migration, the `AFTER ROW` trigger `trg_memberships__lifecycle_guard`; the service rule alone does not stand (ADR-0005 amendment 13 item 29)
+- **Decision:**
+  - `memberships` carries an assertion trigger (`AFTER INSERT OR UPDATE OF user_id, org_id, status`, function `platform.memberships_lifecycle_guard()`, `SECURITY INVOKER`, fixed search path) that raises `P0001 MEMBERSHIP_LIFECYCLE_VIOLATION` unless:
+    1. on insert, `user_id = platform.app_actor_id()`;
+    2. on insert, `status = 'ACTIVE'`;
+    3. on update, `user_id` and `org_id` are unchanged;
+    4. on update, a `REMOVED` row keeps that status.
+  - No exemption for the SYSTEM actor or for any role.
+  - Provisioning code (demo seed, staff-provisioning function of TASK-089, `ops:staff-bootstrap` at M5) runs the membership insert with the member as `app.actor_id`, as it already must for the `users` insert. The audit actor type and run reference are fields of the audit entry, not `app.actor_id`.
+  - Default from now on: a new assertion trigger on an RLS table is `AFTER ROW` unless it has a stated reason to run earlier. The standard-columns guard, the de-claim guard and the two role-scope triggers stay `BEFORE`.
+- **Why:**
+  - `p_memberships__tenant` lets any session of an organisation write a membership row, and `p_users__org_member_read` shows the user of an ACTIVE or SUSPENDED membership to that organisation. Probed on the unpatched file: actor A in context A inserts an ACTIVE membership for user B and then reads B's `users` row.
+  - D-ARCH-123 removed `INVITED` from the policy list for this reason. The reason holds for ACTIVE as well; that ruling closed the design path and left the table open.
+  - In all three creating paths (registration, organisation creation, invitation acceptance) the new member is already the actor, so the rule costs the product nothing. DR-A05 and REQ-ORG-003 already state rules 2 to 4.
+  - It ships in this migration, although a trigger could be added later, because the security sign-off on `p_users__org_member_read` rests on who can create a membership, and because TASK-049, 089, 224, 227 and 231 all build fixtures on this table.
+  - `AFTER ROW` keeps RLS `WITH CHECK` first: a cross-tenant write still fails as `42501`, the generated suite keeps proving `WITH CHECK` on `memberships` without a new trait, and C15 (b) is not in play.
+- **Alternatives rejected:**
+  - Insert only through a definer function with `INSERT` revoked: a write-capable definer function and a write policy for `platform_definer`, against ADR-0005 amendments 6 and 12 item 25. It would test the same condition and would not cover updates.
+  - A restrictive `FOR INSERT` policy: a new policy kind in the DR-A14 memberships template (renderer allow-list, rule 9, C3, the §4.3 fence, the sign-off), and a policy cannot compare OLD and NEW.
+  - Require an accepted invitation: invitations are tenant-writable too, and two of the three creating paths have none.
+  - An exemption for the SYSTEM actor: it reopens the hole for every job context.
+  - Service rule with a tracked task: leaves the table open in the migration whose policies are being signed off.
+- **Verified here:** PGlite probes as in D-ARCH-154: the foreign-user insert is refused and the user's row stays invisible (unpatched: accepted, 1 row); own ACTIVE insert ok and visible to a fellow member; non-ACTIVE at creation, `user_id` change and leaving `REMOVED` refused; `ACTIVE ↔ SUSPENDED → REMOVED` ok; re-parenting refused by RLS as `platform_app` and by the guard as the superuser in origin mode; the SEC-TC-74 forged-creator case still answers `STD_COLUMNS_VIOLATION`.
+- **Consequence:** a path in which an organisation enrols a user who is not the actor (directory provisioning, staff management by an administrator) needs an ADR-0005 amendment and a migration that replaces the function.
+- **Where:** rulings file §4 and §5.2 item 5, §5.4; ADR-0005 amendment 13 item 29; data-model §1.7, §3.2 `memberships`, §4.3, §4.7, §9.1, §9.3.
+- **Reversibility:** High (a trigger and a function; replaceable in a later migration without touching data).
+
+### D-ARCH-157 · 2026-11-19 · principal-architect · Invitation acceptance: the membership's `created_by` is the accepting user; "`created_by` = the inviter" of D-ARCH-123 / D-067 is withdrawn (wording routed to product-manager)
+- **Decision:** at `POST /invitations/accept` the membership is inserted with `created_by` = the accepting user, who is the actor of the transaction. The inviter is `invitations.created_by`, reached through `memberships.invitation_id`, which D-ARCH-154 binds to the same organisation.
+- **Why:** `platform.std_columns_guard()` (D-ARCH-091, shipped by PR #65) refuses an insert whose `created_by` is not the transaction's actor. D-ARCH-123 was written after that guard and contradicts it. Running the acceptance as the inviter would misstate who acted and would fail rule 1 of D-ARCH-156. Found while ruling S1; no code exists yet (TASK-227).
+- **Alternatives rejected:** run the acceptance transaction as the inviter (a false actor on every stamped row and audit entry); an `invited_by` column on `memberships` (duplicates `invitations.created_by`).
+- **Routed (orchestrator to product-manager; story files are tooling inputs, so the edit is scheduled, and it is due before TASK-227 is dispatched):**
+  - REQ-ORG-011 note: "the membership is created as `ACTIVE` by the accepting user with `invitation_id` set; the inviter is the creator of the invitation".
+  - US-084: "created_by is the inviter" becomes "invitation_id names the invitation"; "record created_by the inviter" becomes "record created_by the accepting user, the invitation's created_by the inviter".
+- **Where:** rulings file §6; data-model §3.2 `memberships`, `invitations`; ADR-0005 amendment 13 (closing paragraph).
+- **Reversibility:** High (documents only until TASK-227).
+
+### D-ORCH-136 · 2026-11-19 · sdlc-orchestrator (session A) · TASK-292 README authorisation; PR #65 rulings relayed; 287-B as PR #68; queue fixes
+- **TASK-292 README edit authorised:** the orchestrator authorised TASK-292 to correct docs/03-architecture/api/README.md §11/§18 (non-existent `api:check-errors`/`api:sync-errors` scripts, `catalogue.ts`, the `source` field), although its card DoD said the README is not edited there. Reason: PR63 R1-m1 routed the doc fix to api-designer, and doing it in the same PR as the parity arm keeps the table and its test in step. **api-designer acknowledges the wording at the next sheet fold.**
+  - D-TASK292-01..05 accepted per code review r1 (`7961d7d`). The three MINOR findings (R1-m1..m3) are being fixed in-branch; a fresh lane-B run follows.
+  - Whichever of TASK-292 and PR #65 merges second re-runs the unit lane on its merged head.
+- **287-B is PR #68:** its records were renamed on main to `PR-0068-…` (`2517054`). The ready-for-review run (44458437015) read a merge ref built before the rename, so the record step failed with every other step green. The PR was closed and reopened, with no new commits, for a fresh merge ref.
+  - Rule: rename a pending record before the PR leaves draft, and confirm the rename is on main before marking it ready.
+  - D-TASK287A-01..03 and D-TASK287B-01 accepted as proposed by devops-engineer (TASK-287 split per D-ARCH-140; run-full narrowed per SPK-07 §6.1 and R1-m1; cache hygiene moves to 287-C; 287-B ships PR62-SEC-02 with the workflow half).
+  - Code review MINOR (non-voided cancelled or light runs suppress run-full), R1-n1..n5, PR287B-SEC-01 (the gate tool must report missing `FAST_LANE_*`) and PR287B-SEC-02 (exact job keys and `runs-on`) go to 287-C.
+- **PR #65 (TASK-037):** the lane-B run `20261118T1407Z_bf53c46` failed on R1-B1 (42601/P3018), confirming the code review.
+  - Fix cycle 2: done at `bcb3082`, checked on PGlite 17.5 (all migrations, up/down/up, rls committed layer 75/75, organisations cases). D-TASK037-17..23 accepted.
+  - D-ARCH-154..157 (composite tenant-bound FKs, invitations only in BUSINESS_CUSTOMER, the membership lifecycle guard, `created_by` is the accepting user) were relayed into the same cycle, so it is still open.
+  - Security review r1 runs on the final fc2 head. product-manager updates REQ-ORG-011 and the two US-084 lines for D-ARCH-157 before TASK-227 is dispatched.
+- **Lane-B queue:**
+  - An overnight host sleep stretched the TASK-292 run to 13.5 h; it errored, was moved aside, and was re-run (PASS `20261119T0406Z_c9a0f3c`).
+  - An orphan-wait bug lifted the lock while that re-run held it, so 287-B ran concurrently. Both passed. The wait now lifts only a lock still owned by the orphan's worktree, once its summary exists and no containers remain.
+- **Reversibility:** High.
+
+### D-SEC-PR65-01 · 2026-11-19 · security-analyst · PR #65 (TASK-037) security r1 at 29be7be: PASS_WITH_CONDITIONS; DR-A14 policies and the standard-columns guard signed off (D-ORCH-COORD-03); SEC-TC-76..78 assigned
+- **Decision:** PR #65 r1 at code head `29be7be` = **PASS_WITH_CONDITIONS** (0 Critical, 0 High, 0 Medium; 2 LOW, 3 INFO). Record: `docs/05-quality/security/PR-0065-TASK-037-security-review.md` (Head row `29be7be`; the pushed tip `29be7be` + an evidence-only commit keeps the binding, as does a later merge of `main` that brings no path the PR changes; record simulation S1–S5 pass, C1–C6 fail as expected).
+  - **Sign-off (D-ORCH-COORD-03; PR11-SEC-10 and PR26-SEC-03 closed, subject to C1):**
+    - The ten RLS and guard blocks equal the renderer's output, and both function templates are verbatim.
+    - ENABLE + FORCE on all five tables. `platform_app` has SELECT/INSERT/UPDATE (no DELETE), `platform_definer` SELECT on the four definerRead tables only, no column or PUBLIC grants.
+    - `app_is_operator()` is definer-owned with a fixed path, EXECUTE app + definer only; its early placement (D-TASK037-06) exposes nothing.
+    - D-ARCH-151's reserved row plus AT-US-061-02 close "create a first OPERATOR organisation".
+    - D-ARCH-154..156 work as ruled, each with a killed mutant. `p_users__org_member_read` is signed off citing the membership lifecycle guard.
+  - **C1 (orchestrator, at merge; no new security round unless an observation differs):** the credited lane-B run on the `29be7be` tree (PostgreSQL 18) shows:
+    - migrations up/down/up;
+    - catalog-c1-c14 incl. C3, the C11 helper rows and the 16 `[SEC-TC-74]` C15 cases;
+    - all 19 `organisations.int.test.ts` blocks passing, none skipped;
+    - rls-cross-tenant committed layer with unchanged observations (rulings §2.5).
+  - **Rulings:**
+    - D-TASK037-14: sufficient. The R1-m2 two-organisation cases prove WITH CHECK, C3 pins the deparsed `with_check`, and the generated expectation matches the marker. A `WITH CHECK (true)` mutant is invisible to the generated suite and caught by R1-m2.
+    - D-TASK037-16 `timezone`: accepted (probed head vs main).
+    - D-TASK037-08: accepted (500, rule code to the log only).
+    - D-TASK037-27: accepted as routed (R2-n2), with PR65-SEC-04 (d).
+    - C10 classes: accepted (`token_hash` SECRET, e-mails and names PERSONAL).
+    - **T1 (with T2 and R1-m2), T3 and T4 (with T5–T8) carry SEC-TC-76, -77 and -78.** They are tagged by TASK-293, added to `integration.required_cases` by qa-lead in the same commit (with the catalog `min_tests` ratchet of D-SEC-PR47-01 (2) and the PR43-SEC-07 remainder cases), and the rows are added to the threat-model SEC-TC table. Due before TASK-049 merges.
+  - **PR65-SEC-01 (LOW, CWE-203):** `ux_membership_roles__membership_role_live` lacks `org_id`. A unique check runs before the composite FK, so A learns whether B's membership holds a role (`23505` vs `23503`) and briefly blocks B's grant. This corrects D-ARCH-154 §2.1/§2.2. Fix: `(org_id, membership_id, role_id) WHERE revoked_at IS NULL` (validated) plus a C16 rule that unique TENANT indexes contain `org_id`. In this PR if it gets another code cycle, else TASK-293 expand migration, before TASK-231 merges.
+  - **PR65-SEC-02 (LOW, latent, CWE-269):** from a context naming `OPERATOR_ORG_ID`, any actor can self-insert an ACTIVE operator membership and an `OPERATOR_SUPER_ADMIN` link, then read every tenant. The database cannot tell this from provisioning. Bound: context integrity.
+    - Card lines: TASK-049/224 set `app.org_id` only after an ACTIVE-membership check (never from a client value, a claim or `last_active_org_id`; abuse case with `OPERATOR_ORG_ID`). TASK-227 creates a membership only from a PENDING invitation of the context organisation for the verified e-mail and grants exactly its role.
+    - principal-architect decides a database rule for OPERATOR-organisation membership inserts before TASK-089.
+  - **INFO:**
+    - PR65-SEC-03: existence-oracle inventory. TASK-049: uniform answer on `ux_users__email`; no credentials or auth flows for `is_system` users.
+    - PR65-SEC-04: INVITED reachable by UPDATE (comment overstates; guard clause at the next function replacement); PARTNER organisation + PARTNER role creatable below the service (M3); the subject can write its own `users` security columns (TASK-049/057 keep them server-controlled; architect on a users transition guard); caller-supplied `granted_by` (TASK-231 derives it from the actor).
+    - PR65-SEC-05: evidence binding (above).
+- **Why:** COORD-03 made the security sign-off a merge condition. The migration becomes immutable at merge, so the ruled controls were probed on the database, not only read. PGlite is PostgreSQL 17.5, hence C1.
+- **Reversibility:** High (review record; the LOW fixes are an index and a trigger clause).
