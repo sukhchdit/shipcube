@@ -59,7 +59,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-210 **DC** (M1 Must) Stripe adapter: test keys only, fixture-backed |
 | REQs | REQ-PAY-004, REQ-PAY-017 |
 | NFRs | NFR-SEC-010, NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-21, SEC-P3-08, COND-SANDBOX-DEMO |
+| Spikes / security / decisions | SEC-P3-21, SEC-P3-08, COND-SANDBOX-DEMO, D-ARCH-202, D-ARCH-205, R-ARCH-39, D-QG-004, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-085, TASK-113 |
@@ -74,6 +74,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-210 scenarios
 - SEC-TC-60: livemode:true fixture rejected and audited; unknown event stored not processed; non-allow-listed host blocked
+- CHECKOUT CALL, STRIPE (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendments 5 and 6; D-ARCH-202, D-ARCH-205; R-ARCH-39): with the Stripe adapter the call phase of checkoutOrder creates the PaymentIntent unconfirmed and never returns AUTHORISED; the browser confirms with the client secret of the committed response; the key is auth:<order_id>:<order_version>:<attempt> and replaces auth:<order_id>:<attempt> in the D-ARCH-106 line; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; TASK-167 runs the suite assertion of the SIMULATED GATEWAY line on the Stripe fixtures
+- DISPATCH GATE: STRIPE REPEATED 500 (D-ARCH-202 open item; D-QG-004 QG-040-C8; D-SD-010): Stripe replays the saved answer of an idempotency key, a 500 included, for at least 24 h, so a derived key that never changes would repeat a gateway 500 (the attempt number is read in load and nothing is written when call fails); principal-architect rules how the key or the attempt moves after a gateway 5xx before this task is dispatched, and the ruling is folded here with its test
 - AT-US-210-01 … AT-US-210-06: all 6 scenarios of US-210, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -140,7 +142,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-209 **DC** (M1 Must) Server-computed amount and authorise-then-capture |
 | REQs | REQ-PAY-006, REQ-PAY-008 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-011, D-ARCH-191 |
+| Spikes / security / decisions | D-011, D-ARCH-191, D-ARCH-202, D-ARCH-205, R-ARCH-39, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-166, TASK-085 |
@@ -153,8 +155,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-209 scenarios
-- D-ARCH-106 (ADR-0003 am. 2026-11-13): checkoutOrder is load (order, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<attempt>, never random) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response only; ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
+- D-ARCH-106 (ADR-0003 am. 2026-11-13; key replaced by D-ARCH-202 and D-ARCH-205, see CHECKOUT CALL, STRIPE): checkoutOrder is load (order with its version, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<order_version>:<attempt>, never random; with the Stripe adapter it creates the intent unconfirmed) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response and, encrypted, into the stored response of the idempotency key, nowhere else (ADR-0014 amendment 15); ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder (required) (D-SD-007)
+- CHECKOUT CALL, STRIPE (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendments 5 and 6; D-ARCH-202, D-ARCH-205; R-ARCH-39): with the Stripe adapter the call phase of checkoutOrder creates the PaymentIntent unconfirmed and never returns AUTHORISED; the browser confirms with the client secret of the committed response; the key is auth:<order_id>:<order_version>:<attempt> and replaces auth:<order_id>:<attempt> in the D-ARCH-106 line; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; TASK-167 runs the suite assertion of the SIMULATED GATEWAY line on the Stripe fixtures
 - AT-US-209-01 … AT-US-209-08: all 8 scenarios of US-209, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -258,7 +261,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-212 **DC** (M1 Must) 3-D Secure, declines and attempt limit |
 | REQs | REQ-PAY-009, REQ-PAY-010 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-COND-06, SEC-P3-28, D-ARCH-191 |
+| Spikes / security / decisions | SEC-COND-06, SEC-P3-28, D-ARCH-191, D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-170, TASK-167 |
@@ -274,6 +277,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-212 scenarios
 - SEC-TC-37 (amended, gateway part): Mock CVC fail/unavailable -> FAILED/AUTHENTICATION_FAILED, authorisation voided, no saga
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: confirmPayment (required) (D-SD-007)
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: confirmPayment keeps class reachable (its row comes from TASK-092 through TASK-096); the void of an authorisation when the cvc_check rule requires it runs in call on the intent that the committed payment row names, and the fault test covers it: the handler transaction fails after the void, the next request derives the same state from the gateway
 - AT-US-212-01 … AT-US-212-07: all 7 scenarios of US-212, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
