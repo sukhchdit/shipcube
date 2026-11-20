@@ -553,23 +553,23 @@ Feature: Cross-tenant tests
 ### US-078 — Tenant context in worker jobs
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** S · **Depends on:** US-075, EPIC-01
 - **Linked REQs:** REQ-RLS-008
-- **As a** system actor **I want** jobs to run under the payload's tenant context **so that** background work cannot cross tenants.
-- **Notes:** EC-A38; DR-A25. Tenant-spanning scheduled jobs iterate organisations explicitly.
+- **As a** system actor **I want** jobs to run under the tenant context that PostgreSQL resolves for the row the payload names **so that** background work cannot cross tenants.
+- **Notes:** EC-A38; DR-A25. Payload v2 (ADR-0013 amendment 1; REQ-PLAT-014): a payload names its row by `kind` and `id` and never carries `org_id` or `actor_id`; the worker takes both from `platform.job_context(kind, id)`. A soft-deleted organisation is still a tenant context: its jobs run, in its own scope, because work in flight settles what already exists (a saga ends booked or compensated, money is captured or refunded, a draft expires). The 1.0 text of the last scenario expected such a job to fail (ADR-0013 amendment 4, D-ARCH-180; D-PM-075). The scenario titles are unchanged because they are keys of `gherkin-test-map.md`: "payload context" reads as "the context resolved for the row the payload names", and "Missing or invalid org_id" as "no organisation can be resolved". Tenant-spanning scheduled jobs iterate organisations explicitly.
 
 #### Acceptance criteria
 ```gherkin
 Feature: Worker tenant context
   Scenario: Job runs in payload context
-    Given a job with org_id O and actor_id U When it runs Then it sees only O's rows with app.org_id=O and app.actor_id=U
+    Given a job whose payload names by kind and id a row of organisation O with initiating actor U, and carries no org_id and no actor_id When it runs Then it sees only O's rows with app.org_id=O and app.actor_id=U, both resolved by PostgreSQL for that row
 
   Scenario: Missing or invalid org_id
-    Given a job touching tenant data with no org_id or "abc" Then it fails once without retry and lands in the dead-letter queue with reason "MISSING_TENANT_CONTEXT" and no data is read
+    Given a job touching tenant data whose kind and id resolve to no row, or to a row without an organisation on a queue that requires one Then it fails once without retry and lands in the dead-letter queue with reason "JOB_CONTEXT_NOT_FOUND" or "MISSING_TENANT_CONTEXT" respectively and no data is read
 
   Scenario: Cross-tenant job iterates explicitly
     Given a scheduled job spanning tenants Then it opens one context per organisation and never an unscoped query
 
   Scenario: Permission path: not applicable — jobs run as actor type SYSTEM_JOB. Second negative
-    Given a job payload with org_id of a deleted organisation Then it fails non-retryably with an audit entry outcome "FAILED"
+    Given a job whose payload names a row of organisation D, and D is soft-deleted (deleted_at set) When it runs Then it completes in D's own context with app.org_id=D, is not dead-lettered, and a select, update or delete of another organisation's row by its exact ID affects 0 rows
 ```
 
 ### US-079 — Soft delete and optimistic locking
