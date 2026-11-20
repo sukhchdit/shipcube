@@ -5724,3 +5724,47 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Still owed:** lane B on `7815e1c8` (code review C1); lane A on the pushed head; the rename of the record and the merge-ref check. A new round is needed only if an owned path changes after `7815e1c8`.
 - **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected: no wire module exists before TASK-135, so a due date before that merge is enough.
 - **Reversibility:** High. This is a review record only.
+
+### D-SECPR038-01 · 2026-11-20 · security-analyst · TASK-038 security round 1 (pre-push, `f9cc7ca1..b7482fb8`) = PASS_WITH_FOLLOW-UPS at code head `b7482fb8` (record `docs/05-quality/security/PR-pending-TASK-038-security-review.md` on main; rename at PR time per D-ORCH-136/138)
+- **Trigger:** main's checker counts 16 owned paths: root `package.json` (the `tokens:build` script), `stylelint.config.mjs`, `tools/stylelint-rules/token-lint.mjs`, `tools/lint/negative-fixtures.test.ts` and 12 CSS fixtures (8 new, 4 edited). `security_paths=false`, so no hosted `security-integration` job runs. `LINT_CONTROLS=true`, so lane A's base-ref no-weakening step runs.
+- **Decision:**
+  - **The gate edits weaken no existing lint control.**
+    - Effective-config diff over 19 paths, head against base: only `platform/token-lint` is added. It is off only for `packages/ui/src/theme/tokens.generated.css`, every near miss keeps it on, and the three `report*Disables` flags are unchanged. Both mutation controls were visible.
+    - No disable comment or ignore entry exists for the new rule.
+    - Exact-mode replica: clean. Base-ref replica: 0 expected findings missing; 4 extras, all with a rule id, which no-weakening mode allows.
+    - Repository CSS lints clean.
+  - **D-TASK038-06 is accepted** as a build-time seam. Port conditions (i)-(vi) in record §4 bind whichever task first loads `BRAND_PRIMARY_*` or tenant theme values at runtime:
+    - (i) a closed Joi schema plus a `typeof` check;
+    - (ii) opaque colours only;
+    - (iii) a same-origin stylesheet, no `<style>` and no `'unsafe-inline'`;
+    - (iv) a server-side contrast gate whose logs and errors never echo the raw value;
+    - (v) tenant binding from the authenticated context, with an RBAC permission and an audit record on write;
+    - (vi) a start-up assertion over `tenantOverridable`.
+
+    No task in the plan names this work yet; principal-architect assigns it.
+- **Findings:**
+  - **PR038-SEC-01 LOW** (CWE-829, A08:2021; twin R1-m3 (2)). The owned rule imports its analysis and vocabulary from unowned `tools/ui/**`, and that code runs inside the Stylelint gate process. Neither CODEOWNERS nor `LINT_CONTROL_PATHS`/`PROOF_BASE_DIRS` names `tools/ui/`.
+    - Probe M1: an unowned exit handler in `tokens-core.mjs` turns `stylelint "**/*.css"` exit 2 into 0 over 4 findings from all three rules, and the fixture harness stays green.
+    - Probe M2: dropping `oklch()` is not noticed by any owned case.
+    - Mitigation: PR4-SEC-13 typegen already runs unowned code earlier in `npm run lint`.
+    - Fix: (a) add `/tools/ui/` to CODEOWNERS, and `tools/ui/` to `LINT_CONTROL_PATHS` and `PROOF_BASE_DIRS`; or (b) move the analysis under `tools/stylelint-rules/`. In both cases, add owned fixtures for `oklch()`, `rgba()`, 8-digit hex, a named colour in `border` and an `em` length in `gap`.
+    - Owner: senior-developer and devops-engineer. Due: in this PR if a fix cycle happens; otherwise before the next PR that changes `tools/ui/**`, and at the latest before TASK-046 merges. The fix needs a security round (owned paths).
+  - **PR038-SEC-02 INFO** (twin R1-m3 (1)). The "off" override is exact today, but no test pins it. Fix: in-memory `color: #ff0000` probes at repository paths in `lint-fixtures.mjs`, asserted in the always-run half. Owner: with SEC-01.
+  - **PR038-SEC-03 LOW** (CWE-1287, A03:2021). `buildTenantOverrideCss` checks the value by `RegExp#test` coercion and then calls `value.toLowerCase()`.
+    - A JSON array passes the check and throws a TypeError.
+    - A JS object with forged `toString`/`toLowerCase` injects `} html { display: none`.
+    - No runtime caller exists yet.
+    - Fix: `typeof value !== 'string' ||` before the regex, and a reason without the raw value. Owner: this PR's fix cycle (unowned file, no new round); otherwise port condition (i).
+  - **PR038-SEC-04 INFO** (A05:2021). `theme.css` documents a `<style>` delivery, which the planned hash-based CSP (`style-src 'self'`) refuses. Fix: deliver a same-origin stylesheet (for example under `/brand/`). Owner: port condition (iii); the comment fix rides any fix cycle.
+  - **PR038-SEC-05 INFO** (CWE-117/770). Rejection reasons echo the raw value without a bound: a 1 MiB value gave a 1,048,610-character reason. Owner: port condition (iv).
+  - **PR038-SEC-06 INFO** (CWE-1333). The token-lint quoted-string regex backtracks super-linearly on an unterminated quote plus a run of backslashes inside `url(...)`: about x2.2 per 2 backslashes, 85 ms at 30. It fails closed and only repository authors can reach it. Fix: `/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/gu`. Owner: with twin R1-m2.
+- **Checked with no finding:**
+  - No dependency: the lockfile and every workspace manifest are unchanged, and `tailwindcss` and `jest-environment-jsdom` were already declared.
+  - The generated CSS has no `url(`, `@import`, `@font-face` or scheme, uses system font stacks only, and works with `style-src 'self'`.
+  - Builder allow-list and grammar: the per-code-point fuzz accepted only `0-9A-Fa-f`, and every overridable token is named by at least one contrast pair.
+  - Secrets: the over-approximating pinned-rule scan of 2,605 added lines found 5 `generic-api-key` regex candidates, all below the entropy threshold and digit-free; the record itself has 0.
+  - Main (tip `8281055c` when this was written) shares no path with the PR, and `merge-tree` is clean.
+- **Simulation:** main's real checker on the merge-ref form (main tip `8281055c` plus the record renamed to `PR-9999-…`, merged with `b7482fb8`, `--pr 9999`): 6/6 scenarios as expected. Pass with the renamed record, both with base = merge base and with base = tip. Missing with no record, with the pending name only, with a FAIL verdict, and with a `Head` row that names a main commit.
+- **Still owed:** lane A on the pushed head; lane B (code review C1); the rename and the merge-ref check. A new round is needed only if an owned path changes after `b7482fb8`, which includes folding SEC-01 (a) or SEC-02 into this PR.
+- **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected for three reasons: PR4-SEC-13 already gives an equivalent lever earlier in the same `npm run lint`; the head suite's exact mode catches weakening of the 7 pinned shapes; and the fix touches CODEOWNERS and `tools/ci/`, which is better made as its own owned change before TASK-046.
+- **Reversibility:** High. This is a review record only.
