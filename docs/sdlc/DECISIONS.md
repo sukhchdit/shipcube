@@ -4948,3 +4948,38 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **TASK-047 and the saga and carrier tasks:** PR039-SEC-03 (b); ruling conditions (i) and (ii) for their schedules.
   - **devops:** PR64-SEC-09.
 - **Reversibility:** High (a review record; the ruling binds schedules that do not exist yet).
+
+### D-SECPR075-03 · 2026-11-20 · security-analyst · TASK-075 security round 3 (delta `dde830b..82aa275`, pre-push; the C3 round of D-SECPR075-02) = PASS_WITH_FOLLOW-UPS at code head `82aa275` (round appended to `docs/05-quality/security/PR-pending-TASK-075-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Scope.** `82aa275` is one commit on `dde830b`, under `packages/carriers/src/**` only, and the owned path is unchanged.
+  - **Method.** Static review plus single-process Node probes on a `git archive` extract of `82aa275`, with `dde830b` as the control. Nothing was run in the PR worktree.
+- **Closed:**
+  - **PR075-SEC-10 (MEDIUM).** For each of the 11 operations, a `CarrierContractError` thrown inside the adapter leaves the guard as `CarrierError(CARRIER_UNKNOWN_ERROR)` with `safeCause`, and a context refusal leaves as `CarrierContractError` with no adapter call. Result 11/11 (control 0/11). `recoverLabel` refusals log `carrier.label.refused`.
+  - **PR075-SEC-11.** Cross-carrier production hosts in a sandbox list are refused at derivation.
+  - **PR075-SEC-12.** The field is renamed `carrierDescription`.
+  - **PR075-SEC-13.** A non-list `labels` writes a line.
+  - **Code review R2-m1, R2-n2, R2-n3, R2-n4.**
+  - **Every round-1/2 closure was re-probed and holds.**
+- **Accepted trade-off:** a contract error that an adapter raises before any I/O also reaches the gateway as ambiguous, so it ends in `EXCEPTION`, never a retry. This is the safe direction.
+- **New:**
+  - **PR075-SEC-14 (LOW, CWE-20).** `isPdf` accepts `%PDF-` anywhere in the first 1024 bytes, so HTML-, PNG- and ZPL-led payloads now pass as PDF. That regresses the round-1 guarantee, which `dde830b` still kept, and the module doc states the opposite. Separately, one blank or BOM byte moves the foreign magic past `isZpl`'s offset-0 check (open since round 2).
+    - **Fix.** Allow only blank or BOM bytes before the header, test the foreign magic after them, and search `^XA` natively. Validated on a scratch copy: 13 of 14 shapes as wanted; the remaining one is the stated EPL residual (D-TASK075-21).
+    - **Due:** preferred in this PR; otherwise before TASK-135/139/140 or the label-serving route merges.
+  - **PR075-SEC-15 (INFO, CWE-400).** The `^XA` caret loop takes 708 ms on an adversarial 20 MB payload of `^` (native search: 413 ms). The real bound is the ADR-0016 §13 response-size cap, which has no value yet: TASK-113 sets it with this cost in mind. An optional label cap here.
+- **Concurred with the code review round 3 (`559ad1e`, APPROVED_WITH_NITS):**
+  - **R3-m1.** An adapter that builds labels itself now ends in `EXCEPTION` with the `ref` lost. That is safe. The fix is a `LabelDocument` JSDoc line (return `{ format, content }` and let the guard drop) plus a TASK-101 contract case.
+  - **R3-n1.**
+- **Binding.** The three `Head` rows name `c2eaa47`, `dde830b` and `82aa275`. Simulation with main's real checker: 9 of 9 as expected.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at `82aa275`.
+  - **C2.** Rename the record and confirm the merge ref.
+  - **C3.** A delta round 4 on any later change to `packages/carriers/src/{guard,errors,labels,egress,context}.ts`, including the PR075-SEC-14 fix.
+- **Routed:**
+  - **This PR:** PR075-SEC-14 and the R3-m1 JSDoc line.
+  - **TASK-113:** PR075-SEC-15, PR075-SEC-02 (b), -09.
+  - **TASK-132:** -04 (b).
+  - **TASK-128:** -09.
+  - **Orchestrator:** -02 (c), the CODEOWNERS lines for the egress files.
+  - **Public tracking task:** the -12 sentinel test.
+  - **TASK-101/135/139/140:** real fixtures pass the sniffers, and an R3-m1 contract case.
+- **Reversibility:** High (a review record; the fixes are local to `packages/carriers`).
