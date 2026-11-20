@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-085.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-086.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -6823,4 +6823,42 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - principal-architect: the PR040-SEC-03 decision, the ADR-0018 register row, data-model §10.4, the rotation note, and the `ReauthProofConditional` wording with QG-040-C3.
   - product-manager: PR040-SEC-05 and the scope of D-PM-081.
 - **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 4 rows of `task-map.csv` changed (refs of TASK-015, 040, 049 and 187); no branch, title, wave or batch changed.
+- **Reversibility:** High.
+
+### D-PM-085 · 2026-11-20 · product-manager · AT-US-293-15 retitled "Redis unavailable: anonymous fan-out is refused" at qa-lead's request; the D-PM-084 boundary sentence added to the US-038 and US-088 notes
+- **Input:** qa-lead, relayed by the orchestrator: the title of the 15th scenario of US-293 still read "Redis unavailable falls back to per-instance counting" although D-PM-074 replaced its steps with the carrier admission refusal. D-PM-074 kept the title because it is a key of `gherkin-test-map.md` and recommended this retitle to qa-lead "at the next map regeneration". D-PM-084 left the boundary sentence of the two story notes for "their next edit".
+- **Decision:**
+  - **US-293, 15th scenario:** the Scenario line reads "Redis unavailable: anonymous fan-out is refused". The steps are those of D-PM-074, unchanged. The ID (AT-US-293-15), the position, the scenario count (15) and the owner (TASK-190) are unchanged. The US-293 notes record the old title and the reason it was kept until now.
+  - **US-038 and US-088 notes:** one sentence each. The idempotency exception covers a refusal made before the handler or any external call has run; a request that loses its claim after its external call has run is answered 409 `IDEMPOTENCY_IN_PROGRESS` and writes a `FAILED` entry (D-PM-084).
+- **Why now:** a title that says the opposite of its steps misleads whoever writes the TASK-190 test from the map. The map is qa-lead's, and qa-lead regenerates it with this change, so the drift test stays green. The row of `gherkin-test-map.md` (line 792) still shows the old title until that regeneration.
+- **Rule kept:** a scenario title changes only together with a map regeneration by qa-lead (D-PM-069, D-PM-074). This is such a case; it is not a precedent for retitling without one.
+- **Applied in:** `docs/01-requirements/stories/EPIC-06-carrier-integration.md` (US-293 notes, the Scenario line), `docs/01-requirements/stories/EPIC-16-api-conventions-security.md` (US-038 notes), `docs/01-requirements/stories/EPIC-04-audit-trail-viewer.md` (US-088 notes), this file (the next-entry pointer in D-PM-068). No requirement, assumption, PRD or traceability text changes: wording of a title and of two notes, already decided by D-PM-074 and D-PM-084. The three story files are lane-B tooling inputs; the orchestrator times the commit with qa-lead's map regeneration.
+- **Validation:** the gherkin drift test after the regeneration. Nothing was run for this entry.
+- **Reversibility:** High.
+
+### D-SD-009 · 2026-11-20 · senior-developer · Plan fold for D-PM-084 (a claim lost after the external call is audited) and the qa-lead report: CLAIM LOST AFTER CALL and the m4 test change on TASK-040 part 040-B, the idempotency rows of the generated audit suite on TASK-033, an optional alert on TASK-214, and a new late tooling task TASK-297 for named tests in the gherkin map (plan regenerated: 297 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..296 unchanged)
+- **Trigger:** the orchestrator's relay of the qa-lead report and D-PM-084 (`afb2b73c`).
+- **Decision (cards):**
+  1. **TASK-040, part 040-B.**
+     - CLAIM LOST AFTER CALL, verbatim.
+     - A TEST CHANGE line: the 040-A case `[m4] a key taken over during call answers 409 … with no audit entry` (`idempotency.api.test.ts`, line 555 at the 040-A head) is changed to expect exactly one FAILED entry with the code `IDEMPOTENCY_IN_PROGRESS` and one WARN `api.idempotency_claim_lost`; a takeover before `call` expects none. If part 040-A merges with the old expectation, part 040-B changes it in the same PR as the behaviour.
+     - The PR040-SEC-05 clause of the security-conditions line now points at D-PM-084 instead of "pending".
+  2. **TASK-033 (auditgen).** The idempotency rows of the generated audit suite, with the boundaries as D-PM-084 narrows D-PM-081:
+     - No FAILED entry, only a log line with the code and the correlation ID, for:
+       - 409 `IDEMPOTENCY_IN_PROGRESS` refused before the handler or any external call;
+       - 422 `IDEMPOTENCY_KEY_REUSED`;
+       - an unreadable replay, which also raises an ERROR event without key or body.
+     - Exactly one FAILED entry for:
+       - a 409 or 422 that the handler produced;
+       - the 5xx of a failed claim on a new request;
+       - a claim lost after `call` (409 plus WARN).
+  3. **TASK-214.** IDEMPOTENCY CLAIM LOST ALERT (ticket) with the reconciliation runbook line, as D-PM-084 recommends.
+  4. **New late task TASK-297 `gherkinnotes`** (batch 1.11; test-engineer, S, sonnet; depends on TASK-277; lock `quality-trace`).
+     - `gherkin-suite-assignments.json` gains an optional `notes` object keyed by AT-ID.
+     - `gen-gherkin-map` validates the IDs and renders a trailing "Named tests" section. `parseGherkinMap` is unchanged and still reads only the `| AT-` rows, and a test pins the map rows and the trace output.
+     - The map is regenerated.
+     - Seed notes for AT-US-011-03, AT-US-011-04 (both halves), AT-US-038-01 and AT-US-038-06; qa-lead supplies the exact titles at dispatch.
+     - It lands only when no PR evidence is pending.
+     - Rejected: a line on TASK-294. Its `quality-tools` lock and its runner scope are unrelated, and it is due only before G3, while the notes are needed for the TASK-043 and TASK-040 merges.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 3 rows changed (refs of TASK-033, 040 and 214); new row TASK-297 (`feat/TASK-297-named-tests-gherkin-test-map`, batch 1.11); no branch, title, wave or batch changed.
 - **Reversibility:** High.
