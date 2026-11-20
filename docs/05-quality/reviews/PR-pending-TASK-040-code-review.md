@@ -367,3 +367,10 @@ FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR (R4-m1), 1 NIT (R4-n1)
 3. The security-analyst record on the final head (D-SECPR040-01 follow-ups).
 4. Part 040-B carries R3-m1 and R2-n1 as ADR-0014 am. 10 and 16 require.
 5. The second of TASK-040 and TASK-043 to merge takes the four literal unions and settles R2-n4.
+
+**R4 addendum (after `3eb56d70`, security D-SECPR040-02, which landed while this round was being pushed).** R4-m1 follows that ruling:
+- No change to `tools/quality/gitleaks-baseline.txt`, so option (b) above is withdrawn as worded.
+- Preferred: (a), a superseding branch, one squash commit of the final tree checked with `git diff --quiet <final head> HEAD`.
+- Accepted alternative: commit-bound exact entries in `.gitleaks.toml` under D-SEC-PR45-01, delivered in their own PR before TASK-040's lane A.
+
+Under (a), the lane B run queued on `93f0f126` is not the PR's gitleaks evidence: merge condition 2 then applies to the superseding head, and this review owes a supersede round (a partition proof by SHA: `git diff --quiet e96bd979 <new head>` plus a check of the main delta).
