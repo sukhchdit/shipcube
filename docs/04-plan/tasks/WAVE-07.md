@@ -155,7 +155,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-293 (M1 Must) Anonymous rate-shopping budget and daily carrier quota guard |
 | REQs | REQ-CARR-022, REQ-CARR-023 |
 | NFRs | NFR-RES-007 |
-| Spikes / security / decisions | SEC-COND-02, SEC-COND-07, SEC-P3-02, SEC-P3-29, D-048 |
+| Spikes / security / decisions | SEC-COND-02, SEC-COND-07, SEC-P3-02, SEC-P3-29, D-048, D-ARCH-178, PR041-SEC-03, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-132, TASK-136, TASK-141, TASK-041 |
@@ -171,6 +171,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-293 scenarios
 - SEC-TC-41: at (100 - reserve) % anonymous fan-out stops; carrier_quota_pressure at 70 % and 90 %
 - SEC-TC-62: unverified = anonymous; quote-create 30/min; 10 % org share
+- ADMISSION STORE FAILURE (ADR-0010 amendment 13; D-ARCH-178; PR041-SEC-03): when the admission counters cannot be read or written, anonymous fan-out to the account and, for an account with CARRIER_DAILY_QUOTA above 0, rates-pool calls of verified callers are refused locally (LOCAL_REJECT, CARRIER_BUSY; cached results still served); transactional calls are never refused and are counted in process and added to the daily counter on recovery; store calls are bounded and share a breaker; event rate_limit_store_unavailable with scope carrier-admission at most once a minute; tests: with the store failing, a guest quote gets CARRIER_BUSY for the account and makes zero carrier calls, a booking still reaches the carrier, and the count of the outage is added afterwards; qa-lead adds this outage row to SEC-TC-41 when this task is dispatched
 - AT-US-293-01 … AT-US-293-15: all 15 scenarios of US-293, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -468,7 +469,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-157 (M1 Must) Quote widget units toggle and live billable weight |
 | REQs | REQ-QUOTE-005, REQ-QUOTE-006 |
 | NFRs | NFR-I18N-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-170, D-SD-004 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-125, TASK-076 |
@@ -481,6 +482,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-157 scenarios
+- the live billable weight uses the rule of the origin country unit system (REQ-QUOTE-006; ADR-0009 amendment 2 item 4; D-ARCH-170); the units toggle changes the displayed unit only; test: toggling units changes no weight beyond the unit conversion
 - AT-US-157-01 … AT-US-157-07: all 7 scenarios of US-157, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -552,7 +554,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-243 (M1 Must) Poll carrier tracking with adaptive intervals and stale flag |
 | REQs | REQ-TRACK-003 |
 | NFRs | NFR-RES-002 |
-| Spikes / security / decisions | D-ARCH-161, D-SD-003 |
+| Spikes / security / decisions | D-ARCH-161, D-SD-003, D-SECPR039-01, PR039-SEC-03 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-172, TASK-039 |
@@ -566,6 +568,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-243 scenarios
 - RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job
+- SCHEDULE CONDITIONS (D-SECPR039-01 ruling on D-TASK039-01, conditions (i) to (iv)): for every schedule this task adds, (i) parameters come from code or configuration, never from the job; (ii) a destructive or non-idempotent handler applies its own policy predicate (purges by age), and if it writes it runs through idempotentProcessor keyed by the occurrence id; (iii) SCHEDULE_NAMES stays closed, with the one-queue check and the processor refusal kept, and a name of at most 47 characters; (iv) a run-now action goes through the scheduler, never as a hand-made repeat: job
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - AT-US-243-01 … AT-US-243-07: all 7 scenarios of US-243, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -819,7 +823,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
@@ -844,6 +848,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #11 code review R3-m1 (ii) (first metrics task; D-ARCH-079): the leak counter sessionContextLeaks() exported by apps/api/src/platform/db/runtime.ts is published as the metric db_session_context_leak_total (api and worker) with an alert rule; the latched not-ready state stays visible in /health/ready
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
 - IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
+- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -860,7 +865,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-OPS-004, NFR-SCALE-003 |
-| Spikes / security / decisions | R-ARCH-13, D-002 |
+| Spikes / security / decisions | R-ARCH-13, D-002, D-ARCH-179, PR041-SEC-05, D-SD-004 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-015 |
@@ -874,6 +879,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - terraform fmt/validate and Checkov clean in lane A iac job; no apply step in ci.yml (policy test)
+- TRUST PROXY PIN (ADR-0016 amendment 12 item 9; D-ARCH-179; PR041-SEC-05): the api task definition sets TRUST_PROXY_HOPS=2; a Terraform test (or Checkov custom policy) fails unless that value, the CloudFront origin-facing prefix list on sg-alb and the ALB rule that refuses a request without X-Origin-Verify are all present; the post-deploy smoke step of PR041-SEC-05 (audit IP and access-log ip are never an ALB or CloudFront address) belongs to the first pipeline that deploys to a real target, a G4 precondition for a production release
 
 **DoD notes**
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.

@@ -204,7 +204,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-125 (M0 Must) Shared adapter contract test suite |
 | REQs | REQ-CARR-011 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | T-QA-10 |
+| Spikes / security / decisions | T-QA-10, D-ARCH-168, PR075-SEC-14, D-SECPR075-03, D-SD-004 |
 | Specialist · model | test-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-097, TASK-075 |
@@ -217,6 +217,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-125 scenarios (Mock passes the full suite)
+- RATE RESPONSE RULES (ADR-0010 amendment 12 item 1; D-ARCH-168): per adapter, noServiceReason is set only when quotes is empty, and it is never AUTH_FAILED, RATE_LIMITED, TIMEOUT, CARRIER_UNAVAILABLE, CARRIER_BUSY, CAPABILITY_NOT_SUPPORTED or CARRIER_UNKNOWN_ERROR (a failed call throws)
+- LABEL CONTRACT CASE (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): an adapter returns raw { format, content } and the guard builds the LabelDocument; a case where createShipment returns a bad label ends with the label dropped (carrier.label.refused, recoverLabel path), never thrown; the real PDF and ZPL fixtures of every adapter pass createLabelDocument and the sniffers
 - AT-US-125-01 … AT-US-125-05: all 5 scenarios of US-125, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -537,7 +539,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-047 (M0 Must) SSRF-safe outbound client and security events |
 | REQs | REQ-SEC-010, REQ-SEC-012 |
 | NFRs | NFR-RES-001, NFR-SEC-010 |
-| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076, PR075-SEC-02, PR075-SEC-09, D-SECPR075-01, D-SD-003 |
+| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076, PR075-SEC-02, PR075-SEC-09, D-SECPR075-01, D-SD-003, PR075-SEC-15, D-SECPR075-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-010, TASK-029 |
@@ -565,6 +567,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR44-SEC-14 FETCH ALIAS FORMS (D-TASK020-84; the lint half of SEC-14 landed in 020-D): outbound-http-via-client reports the X09/X10 alias forms (const f = fetch; f(url); const { fetch: g } = globalThis; g(url); globalThis.fetch through an alias or a computed key) with one negative fixture each, and the SSRF rule covers the same forms in the same change
 - PR075-SEC-02 (b) TIER BY THE MOST SPECIFIC ENTRY (LOW, CWE-183; D-SECPR075-01 ruling 1): egressAllowed decides the tier by the most specific matching entry across all tiers of the origin (an exact path beats a prefix, a longer prefix beats a shorter one) and refuses when that tier differs from ctx.environment; SEC-TC-66 gains three rows: production to .../mydhlapi/test/rates blocked, sandbox to .../mydhlapi/rates blocked, an exact path shared by both tiers allowed for both
 - PR075-SEC-09 (INFO; D-SECPR075-01; shared with TASK-128): before G4 a production-tier carrier call is refused at the client even when a carrier_accounts row says production under APP_ENV=production, so sandbox only holds for the rows as well as for configuration
+- PR075-SEC-15 (INFO, CWE-400; D-SECPR075-03): this task sets the ADR-0016 section 13 response-size cap value, which also bounds carrier label payloads; the value is chosen with the measured cost of the label sniffers in mind (the ^XA scan takes about 700 ms on an adversarial 20 MB payload); a test shows a response over the cap is refused before any label check runs
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

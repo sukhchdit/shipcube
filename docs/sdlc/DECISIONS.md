@@ -5140,3 +5140,47 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - The `job_executions` purge: TASK-043.
   - PR64-SEC-09: devops.
 - **Reversibility:** High (a review record).
+
+### D-SD-004 · 2026-11-20 · senior-developer · Plan fold for the TASK-041 rulings (D-ARCH-173..179, rulings/wave-1-task-041-rulings.md §6) and D-SECT39-01, D-ARCH-168..172, and the TASK-075/039/076 routings: 30 cards updated; part 041-B is a part of TASK-041, not a new task id, and TASK-052 depends on TASK-041 with a dispatch gate on part 041-B (plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Decision:**
+  1. **TASK-041 delivery in two parts.** The TWO PARTS line (§6 line 1) goes on the card. Part 041-B is a part on the same card, the TASK-020 / TASK-287 precedent, and not a new task id. A late id would need a batch before 1.5 with a free slot, and batches 1.1–1.4 are full. A new batch number would sort after 1.5 and break the dependency rule.
+     - TASK-052 gains the edge `signin → ratelimit` and a DISPATCH GATE line that part 041-B is merged; part 041-A alone does not satisfy it.
+     - TASK-041 stays partial on the STATUS board until 041-B merges.
+     - The D-SECT39-01 card lines are applied:
+       - files: `capture.ts` (+ api test), `app.ts`, `start-api.ts`;
+       - **locks `api-audit-mw` and `api-platform-core`** (code review C4);
+       - T-39 lines (b), key and window, (d), the answer headers and the outage event, rewritten as quoted there;
+       - the test list of card line 8;
+       - "confirmed by D-SECT39-01" replaces the confirm-before-dispatch clause.
+     - Batch 1.2 shares no lock.
+  2. **§6 lines 2–8:** TASK-052 AUTHENTICATOR COST RULES, TASK-055 REFRESH COOKIE REFUSALS, TASK-091 GUEST TOKEN COST, TASK-171 and TASK-261 SIGNATURE REFUSALS, TASK-190 ADMISSION STORE FAILURE (plus the qa-lead SEC-TC-41 row), TASK-215 TRUST PROXY PIN (plus the G4 post-deploy smoke note), TASK-214 rate-limit metrics with the breaker state and the `rl:` key-count gauge.
+  3. **D-ARCH-168..170:**
+     - TASK-080: re-export and browser-safe addition to its vocabulary line.
+     - TASK-087: CANONICAL LISTS, "move, never write twice".
+     - TASK-101: RATE RESPONSE RULES.
+     - TASK-066: CURRENCY PARITY, both directions; re-check ANG/CUC/SLL.
+     - TASK-093: BILLABLE-WEIGHT RULE BY ORIGIN (12,701 g vs 13,000 g).
+     - TASK-201: live billable weight by origin.
+  4. **D-ARCH-171/172:**
+     - TASK-043's PURGE line adds `job_executions` (completed more than 30 days ago): DELETE grant, `hardDelete`, grants.manifest, batches of 5,000, 29-day test, the age predicate in its own SQL.
+     - TASK-034 adds RULE 14 refuses CREATE CAST and CREATE AGGREGATE.
+  5. **TASK-075 routings:**
+     - **TASK-101 LABEL CONTRACT CASE (R3-m1, PR075-SEC-14):** an adapter returns raw `{ format, content }`; a bad label is dropped, never thrown.
+     - **TASK-079/135/139/140 LABEL FIXTURES:** real PDF and ZPL fixtures pass `createLabelDocument` and the sniffers.
+     - **TASK-113:** PR075-SEC-15, the response-size cap value.
+     - **TASK-176 (public tracking lookup):** the PR075-SEC-12 sentinel.
+     - **CODEOWNERS** for `packages/carriers/src/egress.ts` and `adapters/*/egress.ts` (PR075-SEC-02 (c)): on TASK-015 part 015-C, the devops CODEOWNERS owner, or a CODEOWNERS-only PR. It is also a MERGE PREREQUISITE line on TASK-135, the first real adapter.
+  6. **TASK-039 routings:**
+     - **D-SECPR039-01 conditions (i)–(iv)** on the schedule-owning tasks: TASK-043 (daily housekeeping), TASK-090 (audit partition job), TASK-204 (tracking poll), and TASK-047 for any tenant-bound schedule.
+     - **PR039-SEC-03 (b) abort-signal discipline** on TASK-047, TASK-092, TASK-094, TASK-204 and TASK-132.
+     - **PR64-SEC-09 CODEOWNERS list as grown** (worker jobs/, `open-queue`, `job-handler`, `retention`, `runtime`, `scheduled-job`, `payload-v2`) on TASK-015 part 015-C, together with PR61-SEC-04.
+  7. **TASK-076 routings:**
+     - **PR076-SEC-06:** on TASK-079, the likely first subpath export (`./testing`). The control is a repository test pinning the exports map, or a boundaries arm that needs the `lint` lock. If TASK-079 adds no subpath export, the line moves to the first task that does.
+     - **R1-n10 (security side) has no card.** Pricing from billable weight is M2 (`RATE_CARD`), and Run 1 has no such task. It goes to product-manager for the M2 rate-card backlog item: "the engine derives or verifies the volumetric weight; a forged `volumetricG` is refused".
+  8. **TASK-047 gate updated for D-PM-072:** US-010 and the platform requirements are reworded to payload v2. Only US-078 remains for product-manager, after the architect's answer on `job_context` for a deleted organisation.
+- **Check:** `gen.mjs` reports 0 errors and 0 warnings. `task-map.csv`: 294 rows, 30 changed: refs on all 30, plus depends_on on TASK-052. No branch changed.
+- **Owed by others:**
+  - product-manager: the R1-n10 note on the M2 backlog; US-078 (gate on TASK-047); the D-ARCH-173..179 wording items of rulings §7.
+  - api-designer: the §7 / §13 acknowledgement.
+  - devops-engineer: the CODEOWNERS PR, if it runs before 015-C.
+- **Reversibility:** High (plan data only).
