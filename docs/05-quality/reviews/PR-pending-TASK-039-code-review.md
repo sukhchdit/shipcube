@@ -135,3 +135,98 @@ Set-up: `git archive 64eefab` (packages, apps/worker, apps/api, prisma, tools, c
 - R1-m3: the ACL negative case does not prove the `~bull:*` key restriction.
 - D-TASK039-01: the scheduled-job identity and payload contract (code-accepted; threat ruling is yours).
 - `job_executions` grants are SELECT + INSERT only for platform_app, there is no DELETE, and the class is SYSTEM without RLS. This matches worker.json and the manifest.
+
+---
+
+# Round 2: delta review of the fix cycle (head `766ae52`)
+
+| Field | Value |
+|---|---|
+| Head | `feat/TASK-039-idempotent-job-processing-singleton-scheduled` @ `766ae52` = merge `9af4da9` (64eefab + origin/main `2960391`) + fix commit `766ae52` |
+| Diff reviewed | `git diff 9af4da9 766ae52`: 19 files, +394 / -88; the remerge diff of `9af4da9` |
+| Developer decisions | D-TASK039-07..12 (commit message; deadline guard, per-queue key, rollback on abort, breadth-first walk, sweep signal, STALLED context) |
+| Reviewer | code-reviewer, 2026-11-20 (read from the main checkout's object store; the busy evidence worktree was not used) |
+
+## R2.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every round-1 finding is closed or routed: R1-M1 by a promise-job start with both promises handled and the
+         timer inside the try (probe: no unhandled rejection), R1-m1 by ux_job_executions__queue_job_key (D-ARCH-171),
+         R1-m2 to R1-m5 by code and tests that would fail against the round-1 code, R1-m6/m7 on main. Three new NITs.
+```
+
+## R2.2 Verification performed (same host rule: static review and single-process Node probes on a `git archive` extract)
+
+Set-up: `git archive 766ae52` from the main checkout into `review/TASK-039-cr2`. node_modules is a junction to the main checkout, with `apps|packages/node_modules/@platform/{shared,api,config}` junctions to the copy's own packages, so imports resolve to the head.
+
+- **Merge `9af4da9` is a pure union.** `git merge-tree --write-tree 64eefab 2960391` gives tree `573ae11`, and `git diff --stat 573ae11 9af4da9` is empty. No file changed on both sides since the merge base `7da0e50`. The main side changed docs and agent memory only (no migration, no code).
+- **Format:** `prettier --check` on every changed `.ts`/`.json`: clean.
+- **Migration linter:** "no findings". **`prisma validate`:** valid (the `@@unique([queue, jobKey])` and `@@index([completedAt])` names match the SQL).
+- **P2 re-run** (the round-1 sync-throw probe) on `766ae52`: the attempt fails `TRANSIENT` with one record, and **no `unhandledRejection` fires** 200 ms past a 50 ms deadline. R1-M1 is closed.
+- **P4** (`carriesTenantContext` on `766ae52`):
+  - true for the round-1 P1a payload (root `org_id` behind 300 filler keys), for a 40-element root array, for a 300-element nested array, and for `[{ userId }]`;
+  - false for a valid payload, a traced payload with `tracestate`, and `{ v: 2, schedule }`;
+  - `validateDequeuedJob` still accepts a valid outbox job;
+  - 100,000 nested keys take 32 ms.
+- **Not re-run:** ESLint, `tsc -b`, Jest, coverage and the integration files. **The lane-B run now in progress is on the round-1 head `64eefab`.** The migration, `retention.int` and `job-executions.int` all changed in `766ae52`, so that run is not evidence for this head (merge condition 2).
+- **Mutation reasoning on the new pins** (each would fail against the round-1 code):
+  - The R1-M1 unit case asserts `signal.aborted === false` 80 ms after a 20 ms deadline. An armed timer aborts the signal, so this does not depend on Jest delivering `unhandledRejection` to the listener.
+  - The ACL case now needs `SET rl:acl-probe` to succeed and `SET` / `HSET bull:…` to fail with `/NOPERM.*key/i`. Granting `~bull:*` to `api` now fails the case; the INFO denial is asserted separately.
+  - The `defa` case writes exactly the hash field `moveStalledJobsToWait-9.lua` writes, before the consumer starts. It asserts 0 processor calls, a `failed` state, a STALLED record and a `worker.job_failed` line with the payload's `correlation_id`. The record is written after `moveToFailed` and after the log line, so the polls cannot race.
+  - The two-queue claim is pinned in the fake ledger (`jobs.test.ts`) and on PostgreSQL (`job-executions.int`, which now runs through `withStandardColumns` and `serverStamped`, exactly the production row).
+
+## R2.3 Round-1 closure
+
+| R1 item | Status | Evidence |
+|---|---|---|
+| R1-M1 sync throw, unhandled deadline rejection | **closed** | `job-handler.ts` `runWithDeadline`: `Promise.resolve().then(() => work(signal))`, `.catch` on both promises, timer inside `try`, cleared in `finally`; unit case; P2 |
+| R1-m1 ledger key across queues | **closed** | `ux_job_executions__queue_job_key ON (queue, job_key)`; data-model §3.5 AP-PLAT-10 amends ADR-0013 §4 "`job_key UNIQUE`" (D-ARCH-171); fake and PostgreSQL two-queue cases |
+| R1-m2 signal budget evasion | **closed** | breadth-first, root first; past depth, keys or `MAX_PAYLOAD_KEYS` counts as flagged; compound spellings (`on_behalf_of_org_id`, `orgUuid`, `user_id`, `targetTenantId`, `orgRefId`); P4 |
+| R1-m3 ACL negative vacuous | **closed** | raw ioredis `api` client, control write on `rl:`, key-level NOPERM on `bull:`, INFO denial named separately |
+| R1-m4 int test bypassed stamping | **closed** | `scopeClient: (stamp) => withStandardColumns(client, stamp)`, claim row `{ jobKey, queue, status }` via `serverStamped` |
+| R1-m5 stalled wiring unpinned | **closed** | `isDeferredFailure` unit table; deterministic `defa` Valkey case |
+| R1-m6 US-010 split | **closed on main** | DECISIONS.md: TASK-039 partial (AT-US-010-02..06), TASK-047 -07, TASK-092 completes with -01 |
+| R1-m7 data-model §3.5 / §1.5 | **closed on main** | data-model §3.5 entry, §1.5, §4.4, §10.1/§10.5 (D-ARCH-171, A33) |
+| R1-n1 correlation id length | closed | `SCHEDULED_JOB_ID` `{0,46}`, exported `SCHEDULE_NAME_PATTERN`, test over `SCHEDULE_NAMES` with a 16-digit suffix |
+| R1-n2 duplicated step regex | closed | `isJobIdOf` reuses `STEP`; test against `jobIdFor` |
+| R1-n3 stale references | closed (one left, R2-n1) | |
+| R1-n4 timing assertions | closed | the 400 ms assertion removed; sweep window 10 s age / 12 s sleep |
+| R1-n5 sweep ignores signal | closed | `sweepRetention({ signal })` stops between queues, logs `worker.queue_retention_aborted`; unit case |
+| R1-n6 over-trim undocumented | closed | JSDoc |
+| R1-n7 STALLED lines without context | closed | `runWithJobContext` when the payload's correlation id is valid; `error: 'UnrecoverableError'` (see R2-n3) |
+| R1-n8 purge owner | closed on main | TASK-043 owns the 30-day purge (D-ARCH-171); `ix_job_executions__completed_at` added now |
+| R1-n9 import grouping | closed | |
+| R1-n10 untested branches | **partly** | processor refusal on a schedule-only queue: now refused before any connection opens, with a unit case. The registration retry branch stays untested; a NIT carried as R2-n4 |
+
+Security items in the same commit, checked on code grounds:
+- **PR039-SEC-03:** `job.signal.throwIfAborted()` inside the transaction after the effect, so an attempt past its deadline rolls back. Its rejection lands on the abandoned `running` promise, which has a handler. A deadline that fires during COMMIT still commits, but the retry then finds the key and skips, so the effect stays at most once. That residual is acceptable.
+- **PR039-SEC-05:** `ck_job_executions__result_unset CHECK (result IS NULL)`.
+- **D-SECPR039-01 conditions (i)-(iv):** stated on `SCHEDULE_NAMES`.
+
+## R2.4 New findings
+
+| ID | Severity | File:line | Issue | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `tools/db/table-classes/worker.json` `$comment` | It still reads "data-model §3.5 as added by TASK-039". The entry now exists, under D-ARCH-171. | "data-model §3.5 (D-ARCH-171)". |
+| R2-n2 | NIT | `apps/worker/src/platform/jobs/schedulers.ts:45-48` | The JSDoc sentence was spliced into one line of about 170 characters. Prettier does not reflow comments. | Re-wrap at 120. |
+| R2-n3 | NIT | `job-handler.ts` (`createStalledFailureRecorder`); `retention.int.test.ts` STALLED case | For the same STALLED failure, the log line says `error: 'UnrecoverableError'` and the dead-letter record says `error: 'NonRetryableError'` (both pinned). An operator correlating the two sees two classes. | Pick one. Either pass an `UnrecoverableError`-named error to the writer, or log `NonRetryableError`, and align both pins. |
+| R2-n4 | NIT | `runtime.ts` `registerUntilDone` | Carried from R1-n10: the fail, log, retry and stop-on-close path has no test. Round-1 P3 showed it is reached only after the connection is ready (e.g. NOPERM). | One fake-timer unit case, when convenient. |
+
+## R2.5 Deviation rulings (D-TASK039-07..12)
+
+All six are accepted:
+- **-07** (promise-job start): it closes R1-M1.
+- **-08** (per-queue key, completed_at index, result reserved): it matches D-ARCH-171.
+- **-09** (`throwIfAborted` before commit): accepted with the commit-window residual noted above.
+- **-10** (breadth-first walk with "unexamined = flagged"): no valid payload can trip it, because the payload keys are fixed and the depth is at most 1, as P4 shows.
+- **-11** (sweep signal).
+- **-12** (STALLED context).
+
+## R2.6 Merge conditions (replace §6)
+
+1. Lane A green on the pushed head `766ae52` (or its successor): lint, typecheck, unit, coverage, migration-lint, catalog, classification and grants.
+2. **Lane B PASS on `766ae52`**, not on `64eefab`: `consumer.int`, `retention.int` (including the new STALLED and key-level ACL cases and AT-US-010-05/06) and `prisma/tests/worker/job-executions.int` (the migration changed). The PR body quotes the two `MEMORY USAGE` figures and the D-ORCH-139 recurrence note.
+3. The security-analyst round-2 record on the head.
+4. Carried from round 1 (orchestrator): the D-PM-072 patch lands with or before this PR.
+5. R2-n1 to R2-n4 are optional.
