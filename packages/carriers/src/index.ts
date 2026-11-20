@@ -154,3 +154,20 @@ export {
   type RequiredOperation,
 } from './operations.js';
 export { type CarrierRegistry, createCarrierRegistry } from './registry.js';
+// The deterministic Mock carrier (TASK-079): it has no wire format, so the factory is public. Whether it is registered
+// is the composition root's decision from `MOCK_CARRIER_ENABLED` (REQ-CARR-006, TASK-097).
+export {
+  createMockAdapter,
+  MAX_LATENCY_MS,
+  MOCK_CARRIER_CODE,
+  MOCK_EGRESS,
+  MOCK_LABEL_MARKER,
+  MOCK_SERVICE_CODES,
+  type MockAdapterOptions,
+  type MockCallRecord,
+  type MockCarrierAdapter,
+  type MockServiceCode,
+  mockCapabilities,
+  mockLabel,
+  parseLatencyMs,
+} from './adapters/mock/index.js';

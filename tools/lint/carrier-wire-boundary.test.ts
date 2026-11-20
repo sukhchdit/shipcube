@@ -112,6 +112,10 @@ describe('[AT-US-121-05] wire formats cannot leak out of packages/carriers', () 
     const barrel = readFileSync(join(repoRoot, 'packages', 'carriers', 'src', 'index.ts'), 'utf8');
     const sources = [...barrel.matchAll(/from\s+'([^']+)'/gu)].map((match) => match[1] ?? '');
     expect(sources.length).toBeGreaterThan(0);
-    expect(sources.filter((source) => /(?:^|\/)(?:adapters|wire)(?:\/|\.|$)/u.test(source))).toEqual([]);
+    // The one sanctioned exception (TASK-079, D-TASK079-01): the deterministic Mock has no wire format and the
+    // composition root must be able to register it; it is named exactly, so no other adapter folder can follow.
+    const MOCK_ENTRY = './adapters/mock/index.js';
+    expect(sources.filter((source) => source !== MOCK_ENTRY && /(?:^|\/)(?:adapters|wire)(?:\/|\.|$)/u.test(source))).toEqual([]);
+    expect(sources.filter((source) => source === MOCK_ENTRY)).toHaveLength(1);
   });
 });
