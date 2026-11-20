@@ -309,3 +309,61 @@ I ran nothing in `../Shipqube-TASK-040`, which is in lane B.
 - The stored and the sent document are the same object, rendered once, and the API test compares response **text**, not parsed JSON.
 - A 4xx thrown in `load` and one thrown in `call` are covered, with `call` counted once.
 - The merge of main has no hand resolution (an empty diff against the clean merge-tree).
+
+
+---
+
+# Round 4: head `e96bd979` (2026-11-20)
+
+- **Commits:**
+  - three merges of `origin/main` (`5bea60ad`, `2ae719aa`, `a8b69fed`);
+  - code and tests: `db92e7f1` and `427373a7`, then `e96bd979` (D-PM-084);
+  - decision texts: `20758572` (D-TASK040-14..16) and `e96bd979` (D-TASK040-17).
+- **Scope:** a delta review of R3-M1, the lane B fixes, D-PM-084 and the merge proofs. The evidence worktree (`93f0f126`) was not touched.
+
+```
+VERDICT: APPROVED_WITH_NITS (conditional: §R4.4)
+SUMMARY: R3-M1 is closed. The origin of a stored response is sealed inside the AES-GCM envelope, so only a row the
+  slot rendered replays through RenderedProblemError, and a handler's own problem+json 4xx replays as returned. R2-n2
+  is closed by D-PM-084, implemented as ruled. The three merges are pure unions. Open and non-blocking for part 040-A:
+  R3-m1 and R2-n1, both routed to part 040-B by ADR-0014 am. 10 and 16. One merge condition is new:
+  the gitleaks-flagged literal is gone from the tree but stays in three commits of the PR range (R4-m1).
+FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR (R4-m1), 1 NIT (R4-n1)
+```
+
+## R4.1 What I verified myself, and what I could not
+
+| Check | Result |
+|---|---|
+| The three merges | For each merge M, `git merge-tree --write-tree M^1 M^2` gives a tree with an **empty diff** against M: `5bea60ad` (tree `c24d6597`), `2ae719aa` (`46b8622d`) and `a8b69fed` (`8d56c8d6`). No hand resolution, and nothing of the branch is edited inside a merge. `merge-tree e96bd979 origin/main` (now `1012fa6f`) is clean. No `package.json` or lock delta against main. |
+| R3-M1 fix (`store.ts`, `problem.ts`, `execute.ts`), read in full | The sealed text is `JSON.stringify({ origin, body })` with `origin ∈ {handler, slot-problem}`. The origin is covered by the GCM tag, whose AAD binds the table, column, scope hash and key id, so no column or header edit can turn a handler row into a slot row. `replayOf` routes only `slot-problem` to `replayedProblemOf`, and the "malformed" refusal now applies only to those rows. A body-less (204) row is `handler`. `complete(…, 'slot-problem')` refuses a body-less slot problem. The 2xx completion inside the transaction and every returned result pass the default `handler`. |
+| R3-M1 tests | `[R3-M1]`: a returned 409 with extension members and one with a catalogue `code` are each replayed as returned (`text` equal, same `Content-Type`, `Idempotent-Replayed: true`, handler once, no ERROR line). These are the cases my round-3 probe failed. |
+| D-PM-084 (`e96bd979`) against `DECISIONS.md` (D-PM-084) and the D-SD-009 card line | Matches. `renew('before-handler', callRan = call !== undefined)`: a lost claim after `call` writes exactly one FAILED entry through `recordFailure` (409 `IDEMPOTENCY_IN_PROGRESS`). A lost claim before `call`, or before the handler of a load-only route, writes none. Both log WARN `api.idempotency_claim_lost {phase, correlation_id}`, and the serialised log lines are asserted to hold no key. |
+| C9 lists (`20758572`) | `ENUM_CHECKS` gains `ck_idempotency_keys__method` and `__status`, pinned from data-model §6.2. `enum-checks.test.ts` ties `IDEMPOTENT_METHODS` and the new `IDEMPOTENCY_KEY_STATUSES` to the migration text, and fails loudly if its regex stops matching. `store.ts` writes the statuses through the typed constants. |
+| Worker test cleanup | Test-only, `open-queue.test.ts`: it force-disconnects the queues a metrics scrape touched. It is outside the card's files but justified by the lane B log-after-teardown. Accepted. |
+| **Not run by me** | Jest, `tsc`, ESLint and Prettier on this head. My `git archive` extract failed with **"No space left on device"**: drive C: is at **0 bytes free** (476 GB used), and that is not the review's doing (my scratchpad is 25 MB). I removed the partial extract and its junctions. One side effect of the aborted command chain: the rest of it ran in the main checkout. It rewrote the `tsBuildInfoFile` path of 10 `tsconfig.json` files (I reverted them with `git checkout --`; `git status` shows no stray change) and regenerated the git-ignored `prisma/generated` client from main's own schema. **The test evidence for this head is lane B's run on `93f0f126`**, and that run needs free disk. |
+
+## R4.2 Status of open items
+
+| ID | Status |
+|---|---|
+| R3-M1 | **Closed** (above). With it, M2 of round 1 is closed: all four re-check items are met, and (b) is carried as R3-m1. |
+| R3-m1 (single source for `problemTypeBase`) | Open. Routed to part 040-B by ADR-0014 am. 16 (D-ARCH-200..204). It does not block 040-A: no type base is configured, and no idempotent route mounts before 040-B. |
+| R2-n1 (lease sizing) | Open. ADR-0014 am. 10 rules that 040-A merges with its formula (30 s at the defaults) and that 040-B implements `max(30 s, max(D + T, 3T + 1 s) + 5 s)` with a table test. Does not block. |
+| R2-n2 | **Closed** by D-PM-084 as implemented. |
+| R2-n3, R2-n4 | Unchanged NITs. R2-n4 (duplicated `migrated-postgres` helper) is settled by whichever of TASK-040 and TASK-043 merges second. |
+
+## R4.3 New findings
+
+| ID | Severity | Where | Issue | Required action |
+|---|---|---|---|---|
+| R4-m1 | MINOR (blocks merge until resolved) | commits `a633eb84` (`scope.test.ts:24`), `9f08ecb5` (`idempotency.api.test.ts:33`), `5e0dc1b0` (`prisma/tests/idempotency/idempotency-keys.int.test.ts:58`) | `20758572` removes the gitleaks-flagged UUID literal from the tree (randomUUID keys, D-TASK040-16), but the three commits stay in the PR range. Lane A's step "Gitleaks (PR commit range)" scans `RANGE_BASE..RANGE_HEAD` (first-parent, with the base's `.gitleaks.toml` and no baseline), and lane B's `gitleaks-full` scans the full history of the gate commit. Both will report the same findings that lane B reported on `95945b7e`. Brief working rule 11 says exactly this ("a committed false positive stays in the range"). | Orchestrator and security-analyst choose before the PR opens. Either (a) re-cut the work as a new branch from main carrying the tree of the final head (a superseding branch, as PR #18 replaced PR #11, with no force push), plus a partition proof by SHA; or (b) security-owned exact-fingerprint entries in `tools/quality/gitleaks-baseline.txt` for lane B **and** a recorded decision on lane A's range scan, which has no baseline. (a) is the only option that leaves no exception behind. |
+| R4-n1 | NIT | data-model §3.5 `response_body`; ADR-0018 key-register text | The sealed plaintext is now the JSON envelope `{origin, body}`, not "the UTF-8 JSON body" as data-model §3.5 says. | principal-architect folds D-TASK040-14 into §3.5 and §6.2 at the next fold. |
+
+## R4.4 Merge conditions (replace R3.5)
+
+1. R4-m1 resolved: a superseding branch, or a baseline plus a lane A decision.
+2. Lane B on PostgreSQL 18 green on the final head (`93f0f126` or its superseding twin): `store.int.test.ts`, `idempotency-keys.int.test.ts`, the C9 and C15 catalog tests, unit and api with diff coverage. **Drive C: has 0 bytes free**, so free disk before the run.
+3. The security-analyst record on the final head (D-SECPR040-01 follow-ups).
+4. Part 040-B carries R3-m1 and R2-n1 as ADR-0014 am. 10 and 16 require.
+5. The second of TASK-040 and TASK-043 to merge takes the four literal unions and settles R2-n4.
