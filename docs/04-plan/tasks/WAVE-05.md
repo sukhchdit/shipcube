@@ -33,7 +33,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-152) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
 | REQs | REQ-QUOTE-016, REQ-BOOK-001 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | D-ARCH-162, D-SD-003 |
+| Spikes / security / decisions | D-ARCH-162, D-SD-003, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-091, TASK-052, TASK-059 |
@@ -49,6 +49,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-166 scenarios
 - US-171 API scenarios (claim is atomic; selected option preserved)
 - The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 (D-ARCH-162): a claim written as separate statements fails with 23503 by design
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: claimQuote, createShipment (optional) (D-SD-007)
 - AT-US-166-01 … AT-US-166-08: all 8 scenarios of US-166, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-171-01 … AT-US-171-06 that belong to its layer; US-171 closes in TASK-152
 
@@ -123,7 +124,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-172 **DC** (M1 Must) Server-side draft shipment, resume and optimistic concurrency |
 | REQs | REQ-BOOK-002 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-146, TASK-096, TASK-100, TASK-084 |
@@ -137,6 +138,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-172 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createShipment, updateShipment (optional) (D-SD-007)
 - AT-US-172-01 … AT-US-172-07: all 7 scenarios of US-172, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -210,7 +212,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
 | REQs | REQ-BOOK-001 |
 | NFRs | NFR-A11Y-001 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-195, D-SD-007 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-146, TASK-072, TASK-144 |
@@ -223,6 +225,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-171 scenarios (S-A01, S-A02, S-B01 entry)
+- IDEMPOTENCY KEY LIFETIME IN THE CLIENT (ADR-0026 item 4 as amended; ADR-0014 amendment 6; D-ARCH-195): one key per submission; it is reused only for the automatic retry of that submission (network failure, 5xx, 429, 409 IDEMPOTENCY_IN_PROGRESS, after a token refresh, with a fresh re-authentication proof); any other answer ends the key and the draft drops it; test: after a 422 the next submit sends a new key; the helper built here is the one later wizard, checkout and account forms use (D-SD-007 names this the first frontend card that sends the header)
 - AT-US-171-01 … AT-US-171-06: all 6 scenarios of US-171, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -236,7 +239,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-192 **DC** (M1 Must) Order basket model: 1-10 shipments, one currency |
 | REQs | REQ-BOOK-013 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-149, TASK-126 |
@@ -249,6 +252,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-192 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createOrder (required), addOrderShipment (optional) (D-SD-007)
 - AT-US-192-01 … AT-US-192-05: all 5 scenarios of US-192, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -264,7 +268,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-160, TASK-160) | US-180 **DC** (M1 Must) Step 2: contents, customs applicability and document declaration<br>US-181 **DC** (M1 Must) Step 2: customs lines and reason for export |
 | REQs | REQ-BOOK-009, REQ-CUST-001, REQ-CUST-002, REQ-CUST-003, REQ-CUST-004 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-130, TASK-122 |
@@ -278,6 +282,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - API scenarios of US-180 and US-181
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: replaceShipmentCustoms (optional) (D-SD-007)
 - Covers the scenarios of AT-US-180-01 … AT-US-180-08 that belong to its layer; US-180 closes in TASK-160
 - Covers the scenarios of AT-US-181-01 … AT-US-181-09 that belong to its layer; US-181 closes in TASK-160
 

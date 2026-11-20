@@ -32,7 +32,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-208 **DC** (M1 Must) Checkout gate: verified email, unexpired quotes, complete steps |
 | REQs | REQ-BOOK-016, REQ-PAY-007 |
 | NFRs | — |
-| Spikes / security / decisions | D-009 |
+| Spikes / security / decisions | D-009, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-153, TASK-059, TASK-149, TASK-154, TASK-151 |
@@ -45,6 +45,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-208 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder (required) (D-SD-007)
 - AT-US-208-01 … AT-US-208-09: all 9 scenarios of US-208, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -139,7 +140,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-209 **DC** (M1 Must) Server-computed amount and authorise-then-capture |
 | REQs | REQ-PAY-006, REQ-PAY-008 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-011 |
+| Spikes / security / decisions | D-011, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-166, TASK-085 |
@@ -153,6 +154,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-209 scenarios
 - D-ARCH-106 (ADR-0003 am. 2026-11-13): checkoutOrder is load (order, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<attempt>, never random) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response only; ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder (required) (D-SD-007)
 - AT-US-209-01 … AT-US-209-08: all 8 scenarios of US-209, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -256,7 +258,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-212 **DC** (M1 Must) 3-D Secure, declines and attempt limit |
 | REQs | REQ-PAY-009, REQ-PAY-010 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-COND-06, SEC-P3-28 |
+| Spikes / security / decisions | SEC-COND-06, SEC-P3-28, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-170, TASK-167 |
@@ -271,6 +273,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-212 scenarios
 - SEC-TC-37 (amended, gateway part): Mock CVC fail/unavailable -> FAILED/AUTHENTICATION_FAILED, authorisation voided, no saga
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: confirmPayment (required) (D-SD-007)
 - AT-US-212-01 … AT-US-212-07: all 7 scenarios of US-212, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

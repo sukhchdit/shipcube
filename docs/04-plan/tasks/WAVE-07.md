@@ -2,7 +2,7 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M1** · Priority band: **Must non-DC**
 
-Tasks: **38** (S 13 / M 25; opus 10 / sonnet 28; demo-critical 0) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 94.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **39** (S 14 / M 25; opus 11 / sonnet 28; demo-critical 0) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 96 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** All 218 Must stories merged, US-061 and US-062 included (TASK-224 and TASK-231; all eleven scenarios pass in `ac-trace.json`, otherwise product-manager applies the rung-4 fallback of D-PM-068); M1 demo journey green; NFR tasks evidence committed; lane C `release-candidate` run; ready for P6 (G3).
 
@@ -14,7 +14,7 @@ Tasks: **38** (S 13 / M 25; opus 10 / sonnet 28; demo-critical 0) in **11** batc
 
 | Batch | Tasks (parallel) | Locks held |
 |---|---|---|
-| 7.1 | TASK-186 Sessions list and remote sign-out API<br>TASK-187 Re-authentication primitive, auth_time and age-based step-up<br>TASK-188 Redacted raw carrier payload retention<br>TASK-189 Pre-rendered public pages per locale | identity-session<br>identity-reauth<br>pkg-carriers-raw<br>web-public |
+| 7.1 | TASK-186 Sessions list and remote sign-out API<br>TASK-187 Re-authentication primitive, auth_time and age-based step-up<br>TASK-188 Redacted raw carrier payload retention<br>TASK-189 Pre-rendered public pages per locale | identity-session<br>identity-reauth, api-tx-execute<br>pkg-carriers-raw<br>web-public |
 | 7.2 | TASK-190 Anonymous rate-shopping budget, daily carrier quota guard and per-organisation share<br>TASK-191 Fixture hygiene, adapter README docs-check and live-sandbox opt-in<br>TASK-192 Margin rule selection and precedence; discount stacking rule<br>TASK-193 Sessions page | mod-quotes-rateshop, pkg-carriers-gateway<br>pkg-carriers-fixtures<br>pkg-pricing<br>web-account-security, admin-sessions |
 | 7.3 | TASK-194 Expired quote with one-action re-quote; rate-relevant change creates a new quote<br>TASK-195 Address validation against country rules; required tax and identity references<br>TASK-196 Prohibited and restricted items<br>TASK-197 Re-authentication prompt | mod-quotes, web-quote-results<br>mod-shipments-validation, web-wizard-step1<br>mod-compliance, mod-customs<br>fe-reauth |
 | 7.4 | TASK-198 Included liability cover line<br>TASK-199 Dangerous-goods attestation, explicit screening status and carrier customs field mapping in adapters<br>TASK-200 Partial capture for multi-shipment orders<br>TASK-201 Quote widget units toggle and live billable weight | pkg-pricing<br>mod-customs, carrier-dhl, carrier-fedex, carrier-ups<br>mod-payments-core<br>web-home |
@@ -23,7 +23,7 @@ Tasks: **38** (S 13 / M 25; opus 10 / sonnet 28; demo-critical 0) in **11** batc
 | 7.7 | TASK-210 Rate-limit public tracking lookups<br>TASK-211 Tenant isolation on every account route<br>TASK-212 CI gate for template and variable parity across locales<br>TASK-213 Address only booking-organisation users | mod-tracking-public<br>tests-account-iso<br>notif-parity<br>mod-notifications |
 | 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs, infra-compose, worker-queues<br>infra-tf<br>tests-load<br>tests-web-perf |
 | 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-224 Switch active organisation; organisation profile and creating a business organisation<br>TASK-282 Developer README and CONTRIBUTING<br>TASK-294 TASK-W0-FLAKE-3-F | e2e-demo<br>mod-organisations<br>docs-dev<br>quality-tools, tests-harness |
-| 7.10 | TASK-227 Invite members into a business organisation; accept an invitation | mod-organisations |
+| 7.10 | TASK-227 Invite members into a business organisation; accept an invitation<br>TASK-296 Outbox and ledger purge behind definer functions with 45-day ledgers | mod-organisations<br>outbox |
 | 7.11 | TASK-231 Manage members with last-Owner and individual-organisation safeguards | mod-organisations |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
@@ -40,7 +40,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-193) | US-027 (M1 Must) Sessions list and remote sign-out (API and My sessions page) |
 | REQs | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | D-047 |
+| Spikes / security / decisions | D-047, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-095, TASK-067 |
@@ -53,6 +53,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - API scenarios of US-027
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: revokeOtherSessions, revokeMySession (optional) (D-SD-007)
 - Covers the scenarios of AT-US-027-01 … AT-US-027-07 that belong to its layer; US-027 closes in TASK-193
 
 **DoD notes**
@@ -68,21 +69,23 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-197) | US-291 (M1 Must) Re-authentication primitive, `auth_time` and age-based step-up |
 | REQs | REQ-AUTH-020, REQ-AUTH-025 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-COND-01, SEC-P3-01, D-046, D-ARCH-017 |
+| Spikes / security / decisions | SEC-COND-01, SEC-P3-01, D-046, D-ARCH-017, D-ARCH-193, D-SD-007 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-061, TASK-055 |
-| Batch · locks | 7.1 · identity-reauth |
+| Batch · locks | 7.1 · identity-reauth, api-tx-execute |
 | Branch | `feat/TASK-187-re-authentication-primitive-auth-time` |
 | Priority | Must |
 
 **Files / modules**
 - apps/api/src/modules/identity/reauth/**
 - apps/api/src/platform/auth/step-up.ts (x-reauth-max-age)
+- apps/api/src/platform/tx/execute.ts (the re-authentication check after the idempotency claim and before load; D-ARCH-193)
 
 **Acceptance tests to write**
 - API scenarios of US-291
 - SEC-TC-37 (step-up part): listed operations without proof -> 401 REAUTH_REQUIRED; auth_time > 12 h on member/invitation routes -> 401
+- RE-AUTHENTICATION CHECK PLACEMENT (ADR-0014 amendment 7; ADR-0006 as amended 2026-11-20; api/README sections 5 and 8; D-ARCH-193): the check is called by the tx slot (apps/api/src/platform/tx/execute.ts, lock api-tx-execute) after the idempotency claim and before load, never as a pipeline slot of its own; the proof is consumed there; a refusal releases the claim; tests: a retry with the same key and the consumed proof is replayed and consumes nothing; a new key with the consumed proof answers 401 REAUTH_REQUIRED; a keyed request refused with 401 leaves no idempotency row and the same key with a fresh proof executes; 422 IDEMPOTENCY_KEY_REUSED does not consume the proof; no call phase runs before the check; security-analyst confirms the placement in the security record of this task
 - Covers the scenarios of AT-US-291-01 … AT-US-291-13 that belong to its layer; US-291 closes in TASK-197
 
 **DoD notes**
@@ -526,7 +529,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-236 (M1 Must) Schedule a pickup after the booking<br>US-237 (M1 Must) Cancel pickup when a shipment is cancelled |
 | REQs | REQ-PICK-007, REQ-PICK-008 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-178 |
@@ -539,6 +542,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-236 and US-237 scenarios (cancellation event emitted by a service-level test until US-196 lands)
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: schedulePickup (required), cancelPickup (optional) (D-SD-007)
 - AT-US-236-01 … AT-US-236-08: all 8 scenarios of US-236, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-237-01 … AT-US-237-06: all 6 scenarios of US-237, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -689,7 +693,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-256 (M1 Must) Drafts list, resume, delete and 30-day expiry |
 | REQs | REQ-ACCT-004 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-180 |
+| Spikes / security / decisions | D-ARCH-180, D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-183 |
@@ -705,6 +709,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-256 scenarios
 - CANDIDATE FUNCTION draft_expiry_candidates: the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: deleteDraftShipment (optional) (D-SD-007)
 - AT-US-256-01 … AT-US-256-11: all 11 scenarios of US-256, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -826,7 +831,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004, D-ARCH-182, PR041-SEC-09, D-SD-005, D-ARCH-183, D-QG-002, D-SD-006 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004, D-ARCH-182, PR041-SEC-09, D-SD-005, D-ARCH-183, D-QG-002, D-SD-006, D-ARCH-188, D-ARCH-196, PR043-SEC-04, D-SD-007 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
@@ -852,7 +857,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
 - IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
 - RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160; an alert on the security event rate_limit_auth with class authn-failed and on the counter step0-authn-failed (ADR-0016 amendment 13 item 4; PR041-SEC-09; PRD R-16; D-ARCH-182): the runbook entry says that every credentialed request of that address is refused for up to 60 s and names the two narrower designs
-- OUTBOX ALARMS (ADR-0013 amendment 5 item 25; D-ARCH-183): the alert rules OutboxRelayLag and OutboxRelayStalled with the expressions, durations, severity and runbook of that table; the lane A test of the alarm rules pins both; the worker readiness reports the relay as degraded when platform_outbox_relay_oldest_pending_age_seconds is above 60 s; D-QG-002 observations: OutboxRelayStalled gets an absent() arm (or a worker-down alarm beside it), because with every worker down the gauge has no series and the expression returns nothing; reconsider the page set of QueueDeadLetterNew now that every saga and payment event passes outbox-relay
+- OUTBOX ALARMS (ADR-0013 amendment 5 item 25; D-ARCH-183): the alert rules OutboxRelayLag and OutboxRelayStalled with the expressions, durations, severity and runbook of that table; the lane A test of the alarm rules pins both; the worker readiness reports the relay as degraded when platform_outbox_relay_oldest_pending_age_seconds is above 60 s; OutboxRelayStalled has the absent() arm of ADR-0013 amendment 5 item 26; QueueDeadLetterNew pages for booking, payments and outbox-relay; the relay-lag readiness component exists on the worker only (D-ARCH-188); OutboxRelayStalled reads the last tick that held the relay lock (ADR-0004 amendment 4 item 24), so a foreign holder of the key fires it (D-ARCH-196; PR043-SEC-04, C4-2 of D-SECPR043-01)
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -974,7 +979,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-081 (M1 Should) Switch active organisation<br>US-082 (M1 Should) Organisation profile and creating a business organisation<br>US-061 **DC** (M0 Must) Organisation types and the single operator organisation |
 | REQs | REQ-ORG-006, REQ-ORG-008, REQ-ORG-009, REQ-ORG-001 |
 | NFRs | — |
-| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002 |
+| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002, D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-056, TASK-100 |
@@ -992,6 +997,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - CONTRACT CHANGE FOR createOrganisation (D-ARCH-152: approved change request, exact YAML in rulings/wave-1-batch-1.1-rulings.md section 3.3, applied verbatim; api/README section 18 item 1: the contract changes in this PR, with the route): OrganisationCreateRequest gains the OPTIONAL property type - string, enum OPERATOR, BUSINESS_CUSTOMER, PARTNER, INDIVIDUAL, default BUSINESS_CUSTOMER; required and additionalProperties false do not change; OrganisationPatch stays without type; one more request example, type_refused; in api/README.md one line in the amendments list and the ORG_TYPE_NOT_ALLOWED row of section 11 reworded (a createOrganisation request for a type other than BUSINESS_CUSTOMER); npm run openapi:lint with 0 errors and npm run openapi:types, with the regenerated packages/shared/src/api/types.gen.ts in the same commit; the Joi schema mirrors the property (valid over the four values, default BUSINESS_CUSTOMER) and the handler passes the validated value to createOrganisation of TASK-037, which refuses everything but BUSINESS_CUSTOMER; the web form and its Zod schema never send type
 - US-061 SCENARIOS THAT NEED THE ROUTES (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152), with the IDs in the test titles: AT-US-061-02 at the response - POST with type PARTNER, OPERATOR and INDIVIDUAL each answers 422 ORG_TYPE_NOT_ALLOWED and the organisations row count is unchanged, a value outside the enum answers 400 VALIDATION_ERROR, a request without type creates a BUSINESS_CUSTOMER organisation; AT-US-061-03 at the response - PATCH with type answers 400 VALIDATION_ERROR with sub-code UNKNOWN_FIELD; AT-US-061-04 - an anonymous POST answers 401 AUTH_REQUIRED; AT-US-061-05 - the refused PARTNER attempt leaves one audit entry with outcome FAILED, action CREATE and entity organisation, written outside the rolled-back transaction (REQ-AUDIT-010 writes no entry for a 400, which is why type must pass the schema). COMPLETES US-061 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-061-01 and the service and database halves of AT-US-061-02/03); if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (the route-level scenarios move to US-082 as appended scenarios) and the task returns to ladder rung 2
 - PR65-SEC-02 (a) SWITCH ONLY INTO AN ACTIVE MEMBERSHIP (LOW, latent, CWE-269; D-SEC-PR65-01; D-ORCH-137; binding route condition): the organisation switch sets app.org_id only for an organisation in which the actor holds an ACTIVE membership, re-checked at the switch, never from a client value, a token claim or users.last_active_org_id alone; abuse case [PR65-SEC-02]: a customer switching to OPERATOR_ORG_ID gets 403 or 404 and no transaction opens with that context; createOrganisation is called with the creator as the transaction actor (rulings wave-1-pr65-r1 section 7; member = actor, D-ARCH-156)
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createOrganisation, updateOrganisation (optional) (D-SD-007)
 - AT-US-081-01 … AT-US-081-05: all 5 scenarios of US-081, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-082-01 … AT-US-082-07: all 7 scenarios of US-082, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-061-01 … AT-US-061-05: US-061 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037 the rest, with the IDs in the test titles; the story is accepted when all 5 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
@@ -1080,7 +1086,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-083 (M1 Should) Invite members into a business organisation<br>US-084 (M1 Should) Accept an invitation |
 | REQs | REQ-ORG-010, REQ-ORG-011 |
 | NFRs | — |
-| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067, D-PM-068, D-SD-001, D-ARCH-157, D-ARCH-154, D-ARCH-155, PR65-SEC-02, D-SEC-PR65-01, D-ORCH-137, D-SD-002, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
+| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067, D-PM-068, D-SD-001, D-ARCH-157, D-ARCH-154, D-ARCH-155, PR65-SEC-02, D-SEC-PR65-01, D-ORCH-137, D-SD-002, D-ARCH-184, D-ARCH-185, R-ARCH-37, D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-224, TASK-169, TASK-187 |
@@ -1101,11 +1107,44 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR65-SEC-02 (a) ACCEPTANCE ONLY FROM A PENDING INVITATION (LOW, latent, CWE-269; D-SEC-PR65-01; binding route condition): acceptance inserts a membership only for a PENDING, unexpired invitation of the context organisation addressed to the accepting user's verified e-mail, and grants exactly the invitation's role (the database does not bind the role to invitations.role_id); abuse cases [PR65-SEC-02]: an expired, accepted or revoked invitation, an invitation of another organisation, an unverified or different e-mail, and a tampered role each create no membership
 - RULINGS wave-1-pr65-r1 SECTION 7 (D-ARCH-155, D-ARCH-154): the service refuses an invitation into a non-BUSINESS_CUSTOMER organisation with 422 ORG_TYPE_RESTRICTION before the database does; acceptance runs as the accepting user; invitation_id must name an invitation of the same organisation (composite key)
 - EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createInvitation, revokeInvitation, resendInvitation, acceptInvitation (optional) (D-SD-007)
 - AT-US-083-01 … AT-US-083-12: all 12 scenarios of US-083, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-084-01 … AT-US-084-08: all 8 scenarios of US-084, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-296 — Outbox and ledger purge behind definer functions with 45-day ledgers (PR043-SEC-06)
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| REQs | — (enabler; see refs) |
+| NFRs | NFR-DATA-004 |
+| Spikes / security / decisions | D-ARCH-198, PR043-SEC-06, R-ARCH-38, D-SECPR043-01, D-ARCH-171, D-SD-007 |
+| Specialist · model | database-engineer · opus |
+| Complexity | S |
+| Depends on | TASK-043, TASK-047 |
+| Batch · locks | 7.10 · outbox |
+| Branch | `feat/TASK-296-outbox-ledger-purge-behind-definer` |
+| Priority | Enabler |
+
+> Scheduling note: Late task (plan fold D-SD-007) in the free slot of batch 7.10, due before G3 without holding the Wave 1 exit; dispatchable once TASK-043 and TASK-047 are merged.
+
+**Files / modules**
+- prisma/migrations/<ts>_outbox_purge_definer_functions/{migration.sql, down.sql} (platform.purge_outbox_events, purge_processed_events, purge_job_executions; owner platform_definer; catalog C11)
+- prisma/sql/function-templates (the three functions) and prisma/sql/grants.manifest
+- tools/db/table-classes/{platform,worker}.json (hardDelete becomes definerPurge for outbox_events, processed_events, job_executions)
+- apps/worker/src/platform/outbox/purge.ts (calls the functions; keeps its ledger claim per batch)
+
+**Acceptance tests to write**
+- PURGE BEHIND DEFINER FUNCTIONS (ADR-0004 amendment 4 item 26; D-ARCH-198; PR043-SEC-06; R-ARCH-38): platform.purge_outbox_events, platform.purge_processed_events and platform.purge_job_executions, SECURITY DEFINER, owner platform_definer, each deleting at most p_limit rows (capped at 5,000 inside) past the horizon in its body: outbox events published more than 30 days ago, processed events processed more than 45 days ago whose event row is gone, job executions completed more than 45 days ago; platform_app gets EXECUTE and loses DELETE on the three tables, platform_definer gets SELECT and DELETE on them, the three table-class entries change from hardDelete to definerPurge; the outbox-purge handler calls the functions and keeps its ledger claim per batch; tests: as platform_app a DELETE on each table gives 42501, each function keeps a row inside its horizon and removes one past it, a claim whose event row exists stays, a 44-day ledger row stays; C5 and C11 follow
+
+**DoD notes**
+- Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
+- DUE before G3 (D-ARCH-198); until then the residual is accepted as R-ARCH-38; security-analyst closes PR043-SEC-06 on this task; prisma/ and tools/db/ are security-owned paths (security record); the definer-function template and the C11 allow-list follow the purge_expired_tokens precedent
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`prisma/**`, `tools/db/**`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-231 — Manage members with last-Owner and individual-organisation safeguards
@@ -1115,7 +1154,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-04, D-SEC-PR65-01, D-ARCH-154, D-ORCH-137, D-SD-002 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-04, D-SEC-PR65-01, D-ARCH-154, D-ORCH-137, D-SD-002, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-227, TASK-187 |
@@ -1137,6 +1176,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - US-062 SCENARIOS DEFERRED FROM TASK-037 (D-ORCH-COORD-03 item 3, accepted in D-ORCH-131): AT-US-062-05 (permission denied on assigning roles) and AT-US-062-06 (audit of a membership change) need mounted member routes and are proven here, with the IDs in the test titles. COMPLETES US-062 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-062-01 to -04 and the change record of AT-US-062-06) and TASK-049 the creation clause of AT-US-062-06 at registration; if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (AT-US-062-05 and -06 move to US-085 as appended scenarios) and the task returns to ladder rung 2
 - PR65-SEC-04 (d) ATTRIBUTION FROM THE ACTOR (INFO; D-SEC-PR65-01; PR #65 code review R2-n2, D-TASK037-27): membership_roles.granted_by and revoked_by, memberships.removed_by and accepted_by_user_id are derived from the transaction actor, never taken from the caller (today assignRole passes a caller-supplied grantedBy and the database binds only created_by and updated_by); one unit case per column with a mismatching caller value
 - RULINGS wave-1-pr65-r1 SECTION 7 (D-ARCH-154): LAST_OWNER and owner-cap counts may rely on membership_roles.org_id (composite key); a removed member is re-added as a new row and REMOVED is never reversed
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: updateMember, removeMember (optional) (D-SD-007)
 - AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: US-062 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037, TASK-049 the rest, with the IDs in the test titles; the story is accepted when all 6 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

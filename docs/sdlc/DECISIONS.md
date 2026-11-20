@@ -6715,3 +6715,55 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **A replay entry for every SENSITIVE VIEW/DOWNLOAD replay.** Not needed for the one operation in the set; the contract pin forces the question for any new one.
   - **Ruling PR040-SEC-02 a merge blocker of part 040-A.** Rejected. No row can exist before part 040-B, so the fix lands where the stored form first meets production.
 - **Reversibility:** High (a review record; every follow-up lands before any row exists).
+
+### D-SD-007 · 2026-11-20 · senior-developer · Plan fold for QG-040-C6 (D-QG-003; card lines of D-ARCH-191..195, D-PM-081/082), D-ARCH-188..190, D-ARCH-196..199 and D-SECPR043-01: TASK-040 delivered in parts with US-038 partial in `task-map.csv`, part 040-B gates 33 cards derived from the contract (TASK-062 in Wave 1 among them), TASK-047 takes the follow-up-job, lint, org-binding and admission lines, new late task TASK-296 `outboxpurgefn` (plan regenerated: 296 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..295 unchanged)
+- **Trigger:** the orchestrator's fold request after D-QG-003 (`5451a677`), D-ARCH-196..199 (`af4a1b48`) and D-ARCH-188..190 (`57eb12e1`); PR #79 (TASK-295) merged as `1ce81abd`.
+- **Decision (cards in `docs/04-plan/generator/plan-data.mjs`, outputs regenerated):**
+  1. **TASK-040 (before part 040-A merges).**
+     - Cards now carry, verbatim: TWO PARTS, STORED RESPONSES, the D-PM-081 audit line and the D-PM-082 SCENARIO OWNERSHIP line, which replaces "All US-038 scenarios". The 4xx-completion line no longer limits itself to a returned 4xx.
+     - **US-038 partial in `task-map.csv`.** The generator gains a card field `inPart: {story: part}`. The story still counts as completed by the task for validation, because part 040-B is a part of TASK-040 and not a new task ID (D-ARCH-191). `task-map.csv` lists it under `partial_stories` until that part merges, and the card shows "in part 040-B; partial until that part merges".
+       - Rejected: `us:[]` with `part`, because gen then reports a Must story with no completing task.
+       - Rejected: a new task ID, which the architect rejected.
+  2. **TASK-040, part 040-B (before it is dispatched).**
+     - SCOPE (verbatim) and PURGE (verbatim), plus the two tests D-QG-003 adds: the forged occurrence and the 200-batch bound.
+     - PROOFS, sharpened as D-QG-003 writes:
+       - (b) names the configuration key `IDEMPOTENCY_BODY_KEY`;
+       - (d) states its result: no 400 `IDEMPOTENCY_KEY_REQUIRED` on an allowed required case, and still 403 when denied;
+       - (e) is on the card;
+       - (f) is unconditional, with its result.
+     - FILES AND LOCKS of D-ARCH-191 line 4 sit as an acceptance line, not in `f`/`lk`. TASK-040 and TASK-041 are both in batch 1.2, so gen's batch-lock rule would refuse `api-platform-core`/`api-routing` on both. The orchestrator assigns them at the part 040-B dispatch, after part 041-A releases them.
+     - A DISPATCH GATES line lists the D-QG-003 conditions per part.
+  3. **PRECONDITION PART 040-B, derived from the contract.**
+     - Method: the 47 operations with `x-idempotency` `required`/`optional` in `openapi.yaml`, mapped to tasks through `x-requirements` × `task-map.csv` and then read card by card. I kept the task that builds or extends the handler and dropped the UI-only and REQ-sharing cards.
+     - The verbatim line, with the operation list, is on 32 cards:
+       - Wave 1–2: TASK-062 (`updateMe`, Wave 1 batch 1.7) and TASK-092.
+       - Waves 5–6: TASK-146, 149, 153, 154, 166, 170, 174.
+       - Waves 7–9: TASK-186, 203, 209, 219, 224, 227, 229, 231, 234, 236, 237, 243, 247, 248, 249, 255, 262, 263, 264, 268, 272, 273, 274.
+     - TASK-096 carries the precondition inside its own line, so 33 cards wait for part 040-B in all.
+     - **Not on the list:** TASK-177. It shares REQ-PAY-005 but its card builds no payment-method route.
+     - **New finding: TASK-062** (Wave 1, the locale persistence through `PATCH /me`) mounts an `optional` operation. D-ARCH-191 and D-QG-003 knew of no Wave 1 task that waits for part 040-B. Part 040-B is therefore on the path of batch 1.7 and of the M0 booking (TASK-092). This answers part of QG-040-C5 (b) for product-manager.
+  4. **Other D-ARCH-191 and D-ARCH-193/195 lines.**
+     - TASK-049: PART 040-A IS THE GATE.
+     - TASK-096: ORDER AROUND THE IDEMPOTENCY CLAIM, plus a DISPATCH GATE placeholder for QG-040-C2.
+     - TASK-187: RE-AUTHENTICATION CHECK PLACEMENT. It gains `execute.ts` and the lock `api-tx-execute`.
+     - **TASK-152 is the first frontend card that sends `Idempotency-Key`.** It is the guest gate that claims the quote and starts the booking, and it gets KEY LIFETIME IN THE CLIENT; later forms reuse its helper. TASK-062 sends `updateMe` from a switcher, not from a submission, and the header is optional there.
+  5. **TASK-047.**
+     - FOLLOW-UP JOBS (D-ARCH-189, verbatim) replaces the D-SD-006 placeholder.
+     - T-83 LINT (D-ARCH-188), OUTBOX ORG BINDING (D-ARCH-197) and SYSTEM ADMISSION KEY (D-ARCH-199), all verbatim, plus C4-1 (D-SECPR043-01).
+     - The BOUNDARIES RESOLVED-FILE POLICY of TASK-043 R2-m3 / PR043-SEC-02 (b) goes on the next holder of the lint lock. The line sits on TASK-047 and on TASK-040 part 040-B: whichever takes the lock first after part 041-A carries it, and the other drops it. TASK-041 part 041-B does not hold the `lint` lock, so it is not the holder.
+     - Files gain `eslint.config.mjs`, the ratchet test, `writer.ts` and `grants.manifest`; locks gain `lint` and `outbox`.
+     - **Note:** TASK-047 is now the largest card of batch 1.4. If its first PR runs long, the orchestrator may split it into parts in the TASK-041 form.
+  6. **TASK-078.**
+     - The HANDLER RULES clause "the token_enc overwrite carries published_at IS NOT NULL" is withdrawn (D-ARCH-190), and the apply/followUps sentence of D-ARCH-189 is added.
+     - TOKEN OVERWRITE (verbatim) replaces the QG-043-C3 placeholder.
+     - Security conditions T078-1 to T078-5 (D-SECPR043-01) are on the card.
+  7. **TASK-214.** The D-SD-006 observation text in OUTBOX ALARMS is replaced by the lines of D-ARCH-188 (the `absent()` arm, the QueueDeadLetterNew page set, readiness on the worker only) and D-ARCH-196 (the last tick that held the lock). C4-2 is met by D-ARCH-196.
+  8. **New late task TASK-296 `outboxpurgefn`** (batch 7.10; database-engineer, S, opus; depends on TASK-043 and TASK-047; lock `outbox`; due before G3). It carries PURGE BEHIND DEFINER FUNCTIONS (D-ARCH-198, verbatim). STATUS tracks R-ARCH-38 against it.
+- **Not foldable on a card:** the P7 runbook lines for RB-06 (D-ARCH-188, D-ARCH-196, D-ARCH-198 / PR043-SEC-06 (b)). No plan task writes the P7 runbooks, so they are kept verbatim as STATUS tracked condition RB-06-LINES (devops-engineer / technical-writer, G4).
+- **For qa-lead (not senior-developer's):** the `gherkin-test-map.md` rows.
+  - AT-US-011-03: names F3.
+  - AT-US-011-04: names both halves, the TASK-043 relay half and the TASK-047 consumer half.
+  - AT-US-038-01 and AT-US-038-06: name the part 040-B tests (proofs (a) and (f)).
+- **STATUS:** TASK-295 is merged (PR #79, `1ce81abd`). EFFECT-WAIVER is closed, with PR295-SEC-01 named as the open follow-up on TASK-015 part 015-C. **traceability v1.14:** the Design cells of REQ-API-009..011 name ADR-0014 amendments 5 to 9 and ADR-0013 amendment 6.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` shows 0 changes of branch, title, wave or batch; 40 rows changed (refs, plus the stories columns of TASK-040); one new row, TASK-296.
+- **Reversibility:** High (plan sources, the generator field, STATUS, traceability; no product code).
