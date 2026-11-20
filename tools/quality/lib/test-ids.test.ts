@@ -98,9 +98,14 @@ describe('NFR Test(s) cells', () => {
 });
 
 describe('committed maps', () => {
-  it('security-test-cases.md: 64 adopted cases 01..64, proposed ones kept apart', () => {
+  it('security-test-cases.md: 67 adopted cases (01..64 and 76..78, TASK-293), proposed ones kept apart', () => {
     const { adopted, proposed } = parseSecurityCases(read(MAP_PATHS.security));
-    expect(adopted).toEqual(Array.from({ length: 64 }, (_, i) => `SEC-TC-${String(i + 1).padStart(2, '0')}`));
+    expect(adopted).toEqual([
+      ...Array.from({ length: 64 }, (_, i) => `SEC-TC-${String(i + 1).padStart(2, '0')}`),
+      'SEC-TC-76',
+      'SEC-TC-77',
+      'SEC-TC-78',
+    ]);
     expect(proposed.length).toBeGreaterThan(0);
     expect(proposed.filter((id) => adopted.includes(id))).toEqual([]);
   });

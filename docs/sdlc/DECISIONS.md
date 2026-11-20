@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-071.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-072.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -4186,3 +4186,465 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Draft PRs may have no merge ref until GitHub builds one. Fetch merge refs with `-f`, because they are not fast-forwards. A missing merge ref is safe to mark ready, because GitHub then builds it from the current main.
   - The queue's orphan-wait and retry rules were tightened today (D-ORCH-136, D-ARCH-158).
 - **Reversibility:** High.
+
+### D-SD-002 · 2026-11-19 · senior-developer · Plan fold for the D-ORCH-136..139 routings, D-SEC-PR65-01/02, D-SECPR287B-01, D-SECPR287C1-01, D-SECPR291-01/02, D-SECPR293-01/02, D-ARCH-154..157 and rulings wave-1-pr65-r1 §7: twelve cards updated, TASK-049 gains lock `mod-organisations`, TASK-034 gains lock `prisma-core` and owns the open `tools/db` linter items (plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Why:** none of the items routed since D-SD-001 was on a card. A grep for PR65-SEC-0x, PR293-SEC, R-ARCH-34, PR287C1, PR291-SEC, D-ARCH-157 and D-ORCH-139 over `plan-data.mjs` and the WAVE files found 0 hits. TASK-227 even contradicted D-ARCH-157.
+- **Decision:** cards changed in `plan-data.mjs` and regenerated. Every new line names its source.
+  - **TASK-039 `jobs`:** the consumer.int [AT-US-009-04] race fix (D-ORCH-139): assert the dead-letter record only after `settledFailure`; assertions unchanged.
+  - **TASK-049 `register`:**
+    - PR65-SEC-02 (a): set `app.org_id` only after an ACTIVE-membership check, with an `OPERATOR_ORG_ID` abuse case.
+    - PR65-SEC-03: uniform answer on `ux_users__email`; no credential, token or session for `is_system` users.
+    - PR65-SEC-04 (c): server-controlled `users` columns, shared with TASK-057.
+    - Code review R2-n2 with rulings §5.5/§7: the member comes from the transaction actor or equality is asserted; a typed error replaces the P0001 → 500.
+    - **New lock `mod-organisations`** for `organisation-service.ts`. TASK-056, the next holder, depends on TASK-052 → TASK-049, so it is never concurrent.
+    - No TenantDb accessor here, because that would need `api-tenant-db` on a critical-path task. If one is needed, the developer asks the orchestrator for the lock.
+    - The TASK-292 merge prerequisite is marked MET (#69).
+  - **TASK-057 `totp`:** PR65-SEC-04 (c). The architect's optional users transition guard joins this task if it is ruled before dispatch.
+  - **TASK-051 `guestclaim`:** a DISPATCH GATE on the R-ARCH-34 ruling covering three questions: (1) guest-row binding, (2) GUEST_CAPABLE unique keys, (3) one error-mapper answer for a T2 pair (PR293-SEC-03).
+  - **TASK-089 `seeddemo`:**
+    - A DISPATCH GATE on the architect's OPERATOR-membership database rule (PR65-SEC-02 (b)).
+    - The rulings §7 line: member = actor in every seed transaction.
+  - **TASK-224 `orgswitch`:**
+    - PR65-SEC-02 (a): switch only into an ACTIVE membership, with an abuse case.
+    - `createOrganisation` is called with the creator as the actor.
+  - **TASK-227 `invite`:**
+    - `created_by = the inviter` is replaced by "the accepting user" (D-ARCH-157).
+    - A DISPATCH GATE on the product-manager REQ-ORG-011 / US-084 wording.
+    - PR65-SEC-02 (a): acceptance only from a PENDING, unexpired invitation of the context organisation, for the verified e-mail, granting exactly its role, with abuse cases.
+    - Rulings §7: 422 `ORG_TYPE_RESTRICTION`; `invitation_id` must name an invitation of the same organisation.
+  - **TASK-231 `members`:**
+    - PR65-SEC-04 (d): `granted_by`, `revoked_by`, `removed_by` and `accepted_by_user_id` come from the actor.
+    - Rulings §7: LAST_OWNER counts use `membership_roles.org_id`; a removed member is re-added as a new row.
+  - **TASK-287 `fastlaneinc`:** the state and the C1/C2/C3 split per D-TASK287C-01.
+    - 287-A, B and C1 are merged. The "287-C CONDITION" line is closed by C1, and so are 287-B code review R1-m1 and R1-n1..n4.
+    - 287-C2 is the incremental-lane policy PR and carries PR287C1-SEC-01 first, fail closed with no exclusion escape.
+    - 287-C3 is the workflow PR. It carries the Dependabot procedure (287-C1 R1-n4) and the ci.yml rewraps.
+    - The optional C1 NITs n1/n3/n5/n6/n7 are listed. 287-B R1-n5 (a D-TASK287 DECISIONS entry) stays the orchestrator's.
+  - **TASK-015 `lanec`:** PR287C1-SEC-02, one repository-wide action-commit table that also covers `lane-c.yml` and `nightly.yml`.
+  - **TASK-294 `flake3f`:**
+    - Part 294-B carries PR #71 code review R2-n1 (exact pin), R2-n2 = R1-m1 (ii) (name-based marker: detect the shapes or record the limit), R1-n1 (nested read stall), R1-n2 (`prisma/tests/` scan root) and R1-n3 (comment stripper).
+    - The consumer.int fallback (D-ORCH-139).
+  - **TASK-034 `backup`, the owner of the open `tools/db` linter items** (PR293-SEC-04, D-ORCH-139's "next holder"):
+    - It gains lock `prisma-core` and the `tools/db/{lint-migrations,sql-text}.ts` files. No remaining card held that lock after TASK-293.
+    - TASK-034 already works in `tools/db`, is a database-engineer task, and is still undispatched in batch 0.10.
+    - Code review R2-n1 of PR #72 (non-ASCII routine names) was closed in PR #72 round 3; the card says so and asks nothing.
+- **Check:** `gen.mjs` reports 0 errors and 0 warnings. `task-map.csv`: 294 rows, 12 changed (TASK-015, 034, 039, 049, 051, 057, 089, 224, 227, 231, 287, 294: refs, plus locks on 034/049), 0 branch changes. No batch shares a lock: 0.10 adds `prisma-core` beside `tests-gen-audit`, `quality-trace` and `tests-gen-abuse`; 1.4 adds `mod-organisations` beside `worker-ctx`/`worker-queues`, `api-csrf` and `i18n-format`.
+- **Dispatch effect:**
+  - TASK-034 now waits for PR #72 (`prisma-core`). It was not in the dispatch plan before #72 anyway.
+  - TASK-049, 051, 089 and 227 have explicit dispatch gates that the orchestrator checks.
+  - No change to TASK-039's ADR-0013 line. principal-architect may be editing TASK-039/TASK-214 for the retention amendment; this fold touched only TASK-039's acceptance list and refs, so a later architect edit of the same card merges as an append.
+- **Alternatives rejected:**
+  - A new late `tools/db` follow-up task for PR293-SEC-04: an INFO item with no due point, and another PR and its CI minutes while R-CI-MIN is HIGH.
+  - A `contextActorId` TenantDb accessor on TASK-049: it would add the `api-tenant-db` lock to the critical path.
+  - Rewriting the historic 287-B/287-C lines: they are kept and marked closed, so the routing trail stays readable.
+- **Owed by others:**
+  - product-manager: the REQ-ORG-011 / US-084 wording (gate on TASK-227).
+  - principal-architect: the R-ARCH-34 ruling (gate on TASK-051), the OPERATOR-membership rule (gate on TASK-089), optionally the users transition guard (TASK-057), and PR65-SEC-04 (a)/(b).
+  - orchestrator: the 287-B R1-n5 DECISIONS entry.
+- **Reversibility:** High (plan data only).
+
+### D-PM-071 · 2026-11-19 · product-manager · REQ-ORG-011 and US-084 wording: the membership created at invitation acceptance has `created_by` = the accepting user; the inviter is the creator of the invitation (D-ARCH-157)
+- **Input:** D-ARCH-157 and `docs/03-architecture/rulings/wave-1-pr65-r1-rulings.md` §6, routed by D-ORCH-136/137. It is the dispatch gate on the TASK-227 card (D-SD-002).
+- **Decision:**
+  - **REQ-ORG-011 note.** The acceptance transaction's actor is the accepting user. The membership is created as `ACTIVE` by that user (`created_by` = the accepting user) with `invitation_id` set to the accepted invitation of the same organisation. The inviter is the creator of the invitation (`invitations.created_by`), reached through `invitation_id`, and is not copied onto the membership. The 1.10 wording "`created_by` = the inviter (from the invitation row)" is withdrawn in a dated sentence. The shall-statement is unchanged.
+  - **US-084, three lines.** The two Gherkin steps named by D-ARCH-157 both stated `created_by` = the inviter, so each step is amended, and nothing else in its scenario:
+    - "Accept" (AT-US-084-01): "created_by is the inviter" becomes "created_by is the accepting user, invitation_id names the invitation".
+    - "Audit" (AT-US-084-08): "record created_by the inviter" becomes "record created_by the accepting user, the invitation's created_by the inviter".
+    - The Notes line carried the same statement and is corrected too. This is a third line beyond the two that were routed: left as it was, the story would contradict its own steps.
+  - **One addition to the architect's wording.** The "Accept" step keeps a `created_by` assertion (now the accepting user) next to "invitation_id names the invitation", instead of dropping it. The TASK-227 card already requires the tests to assert `memberships.created_by` = the accepting user, and a criterion that is silent on the column would let the withdrawn reading return.
+  - **Unchanged:** scenario titles, order and count (8), so AT-US-084-01..08 keep their numbers; REQ and US IDs, priorities, milestones, DC tags and counts (434 / 91 / 293 / DC 134); traceability. REQUIREMENTS.md → 1.12, PRD → 1.13 (§11 row, which also records that REQUIREMENTS 1.10 / D-067 had no row).
+  - **D-067 is corrected on this one point only.** The invitation row as the whole pending state, no membership before acceptance and the reserved `INVITED` status all stand.
+- **Why:**
+  - `platform.std_columns_guard()` (D-ARCH-091, merged with PR #65) refuses an insert whose `created_by` is not the transaction's actor. The old wording asked for a row the database refuses, so TASK-227 could not satisfy both the story and the schema.
+  - Nothing the user sees is lost. "Who invited this member" stays answerable from the invitation, and the API already exposes it there (`Invitation.invited_by`). No story or screen reads the inviter from the membership.
+  - The audit reads more truthfully: the person who joined is the actor and the creator of the membership, and the inviter is the creator of the invitation that the membership names.
+- **Alternatives:**
+  - Run the acceptance as the inviter, or add an `invited_by` column to `memberships`. Both rejected by D-ARCH-157 (a false actor on every stamped row and audit entry; a duplicate of `invitations.created_by`).
+  - Use the architect's "Accept" wording as given, with no `created_by` assertion. Rejected (see the addition above).
+  - Leave the Gherkin steps and explain only in the notes, as D-PM-069 did for US-061. Rejected: there the Then-clause still held as written; here both steps assert a value that is now false, and the tests are written from the steps.
+  - Leave the Notes line because only two lines were routed. Rejected: the story would contradict itself.
+- **Not applied here:**
+  - `docs/03-architecture/api/openapi.yaml`, `acceptInvitation` description (line 3849), still ends "The membership `created_by` is the inviter." It is api-designer's; due before TASK-227 implements the operation.
+  - `docs/03-architecture/rulings/wave-0-sheet-fold-7.md` line 20 and the D-067 / D-ARCH-123 entries keep the old statement as history. D-ARCH-157 and data-model §3.2 already mark it withdrawn.
+  - The TASK-227 card needs no change. Its DISPATCH GATE line is met once these files are on main.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.12 (REQ-ORG-011 note, version and date lines), `docs/01-requirements/stories/EPIC-03-organisations-rbac-tenancy.md` (US-084 notes and two Then-steps), `docs/01-requirements/PRD.md` 1.13 (header, §11).
+- **Validation:** the AT-US-084-01 and AT-US-084-08 tests of TASK-227 assert `memberships.created_by` = the accepting user and `invitations.created_by` = the inviter. The standard-columns guard refuses the opposite at the database.
+- **Reversibility:** High (wording only; no code exists until TASK-227).
+
+### D-SECT39-01 · 2026-11-19 · security-analyst · T-39 / PR56-SEC-03 / D-ARCH-142: the aggregated-entry shape of the TASK-041 denial budget is confirmed, with precisions (closed `details` set, TTL-anchored window and atomic carry claim, actor segment for non-user principals, fallback event, composition); threat model v1.2 (§10.4 H); card lines for the next plan fold
+- **Confirmed as carded:**
+  - the budget is per actor, taken in the authorise slot before `capture.denied`;
+  - N individual entries a minute (default 20), one aggregated entry at the crossing, then 429 without a write;
+  - the suppressed count is carried lazily into a later entry;
+  - D-TASK029-06 is unchanged.
+  - My PR56-SEC-03 sketch (`details.count` written when the window closes) is superseded, because no request exists to close a window.
+- **1. Action registry.**
+  - Action `PERMISSION_DENIED`, outcome `DENIED` (`AUDIT_ENTRY_ACTIONS`; `DENIED_ONLY_ACTIONS` refuses any other outcome).
+  - No new action, actor type or CHECK value: no bootstrap SQL, and `actions.test.ts` and catalog C9 are unchanged. A new action such as `AUDIT_FLOOD_SUPPRESSED` is rejected: it would widen REQ-AUDIT-002's closed list for something a `details` flag already says.
+  - The aggregated entry is the crossing request's own denial entry, built by `capture.denied` (actor, organisation stream, `entity_name` = `route.audit.entity ?? 'request'`, `entity_id` null, method, route template, source app), plus the aggregation keys.
+- **2. `details` is a closed set.** It holds integers, one boolean and one timestamp, never a `PiiValue`.
+  - Every denial: `required_permission` (unchanged).
+  - The crossing denial (count N+1) only: `aggregated: true`, `threshold` (the N in force), `window_seconds: 60` and `window_ends_at` (the budget key's expiry, RFC 3339 UTC, rounded up to the second). There is no `count`.
+  - The denial that opens a window (count 1) only, and only when the carry it claimed is at least 1: `suppressed_in_previous_window`. This is a safe integer of at least 1 and is never written as 0. A Valkey value outside 1..2^31-1 is dropped and logged by class, never written. It counts the 429 answers given without an entry since the last claim, which is the actor's last aggregated window.
+  - Individual entries carry no `aggregated` key.
+  - `capture.denied` takes a closed typed mark from the slot (`{ kind: 'individual', suppressed?: number } | { kind: 'aggregated', threshold, windowSeconds, windowEndsAt }`) and maps it to these keys itself. The slot passes no free-form details.
+  - Probe at `5145d52` with the real `isSecretKey`, `isPiiKey` and `isOmittedKey`: none of the five key names is redacted, so the chain hashes them as written. If a later matcher change caught one, it would be redacted in the immutable trail. The SEC-TC-15 deep-equal on the stored `details` is the tripwire.
+- **3. Key and window.**
+  - The budget key is `rl:authz-denial:{org}:{actor}`:
+    - `{org}` is `principal.orgId`, or the literal `system` when it is empty;
+    - `{actor}` is `principal.actorId` for a user actor, else the credential kind (`signature`, the only non-user principal authorise can deny);
+    - no segment is ever empty.
+  - The carry key is `rl:authz-denial-carry:{org}:{actor}`, with a 24 h TTL refreshed on each increment.
+  - The window is a fixed 60 s, anchored at its first denial by the budget key's own TTL in Valkey, not by instance clocks, so two replicas never split a window.
+  - One atomic script per denial:
+    - `INCR`;
+    - on 1: `PEXPIRE 60000` and `GETDEL` of the carry;
+    - above N+1: `INCR` and `EXPIRE 86400` of the carry;
+    - it returns the count, `PTTL` and the claimed carry.
+  - A budget key without a TTL would silence the actor's denials for good, so the script never leaves one (test: `PTTL` in 1..60000 after the first take).
+  - Valkey calls are bounded by the limiter's command timeout. An error or a timeout uses the in-memory fallback for that request.
+  - Only the `AUTHZ_DENIED` path takes the budget. A permitted request never spends it or gets its 429, so there is no new oracle: 429 versus 2xx tells what 403 versus 2xx told.
+- **4. Per-request personal data.**
+  - A suppressed denial writes nothing: no tenant transaction, no vault row, no `ip_hash`. Its only traces are the request log line (status 429, existing policy) and the counter.
+  - The aggregated entry holds one request's personal values, the crossing request's IP and user agent. They take the writer's normal path: vault tokens (PERSONAL, subject = the actor), the keyed `ip_hash`, `ip_coarse` and `ua_parsed`.
+  - It never lists the IPs, user agents, routes, correlation ids or permissions of other requests. Such a list would put untokenised per-request data into the immutable trail.
+  - Valkey keys and values hold internal UUIDs and integers only: no IP, user agent, route, e-mail or correlation id. Nothing needs hashing.
+  - The counter's only label is the budget name `authz-denial`, never an organisation, actor or IP. `authz-denial` is not a route rate class: it is in neither `RateLimitClass` nor `x-rate-limit-class`, since the drift test would then demand it in the contract.
+- **5. Answers and failures.**
+  - The crossing and suppressed denials answer 429 `RATE_LIMITED` with these headers (REQ-API-014):
+    - `Retry-After` = ceil(`PTTL`/1000), at least 1;
+    - `RateLimit-Limit` N;
+    - `RateLimit-Remaining` 0;
+    - `RateLimit-Reset` equal to `Retry-After`.
+  - All 98 contract operations whose `x-error-codes` hold `AUTHZ_DENIED` already declare 429 and `RATE_LIMITED` (checked), so no contract change is needed.
+  - A failed write of an individual or crossing entry answers 500 or 503 (D-TASK029-06). The unit stays spent and nothing is carried.
+  - When the window-opening entry is not written, the claimed carry is restored (`INCRBY` + `EXPIRE`). A failed restore is logged by class only.
+  - **Valkey outage.** The in-memory fallback keeps the same threshold, shape and carry, per instance: K replicas allow at most K·(N+1) entries a minute per actor. Its state is discarded when Valkey returns.
+  - The ERROR event fires when an instance enters the fallback, at most once a minute, with allow-listed fields and no key.
+  - No catalogued event fits. TASK-041 adds one runtime event through an api-designer change request for the README §13 runtime table (the D-TASK010-01 pattern, outside the SEC-TC-63 parity):
+    - proposed name `rate_limit_store_unavailable`;
+    - level error;
+    - fields `store` and `scope`;
+    - it is shared with the auth-class fallback of ADR-0016 item 8.
+- **6. Composition.**
+  - The budget travels with the capture: `defaultPipelineSlots` builds it from the runtime's Valkey client whenever it builds the capture.
+  - A composition test proves that `startApi`'s authorise slot answers 429 at denial N+1.
+  - A composition without a capture writes no denial entry and needs no budget. The RBAC matrix app's plain `authorise` is unaffected.
+  - A test that needs other budget behaviour passes its own slots through `createApp`'s existing `pipeline` option, never through configuration or an environment variable.
+- **Residuals (threat model §10.4 H):**
+  - A carry not claimed within 24 h never reaches the trail (metric and request log only). D-ARCH-142 accepts this until a job can close windows.
+  - During an outage the fallback is per instance.
+  - The budget is per actor, so M accounts of one tenant multiply it, inside that tenant's bulkhead (T-86 growth alert).
+- **Card lines for the next senior-developer plan fold (TASK-041).** D-SD-002 (`c1efce3`) landed while this ruling was written and does not carry them; the quoted card text is unchanged at `f723fef`.
+  1. **Files:** add `apps/api/src/platform/audit/capture.ts` (+ `capture.api.test.ts`), where `denied` takes the mark of item 2.
+  2. **Locks:** add `api-audit-mw` and `api-platform-core`. The second is needed because the AT-US-087-04 trust-proxy setting, the RBAC-matrix `createApp` seam and the `startApi` budget composition all edit `app.ts` / `start-api.ts` (D-ARCH-147 table). It is missing today whatever this ruling says.
+  3. **T-39 line (b):** "details: aggregated true, threshold, window_seconds, window_ends_at; no entity id" → "details: required_permission plus aggregated true, threshold, window_seconds, window_ends_at (closed set, D-SECT39-01 item 2; no count); no entity id".
+  4. **T-39 key and window:**
+     - after "a colon and the actor id" add ", or the credential kind for a principal without a user actor";
+     - after "window 60 s" add ", anchored by the Valkey key's TTL at the window's first denial, one atomic script per denial (D-SECT39-01 item 3)".
+  5. **T-39 (d):** add "claimed atomically by the denial that opens a window, restored when its entry is not written, omitted when 0".
+  6. **T-39 answer:** after "Retry-After = the rest of the window" add ", RateLimit-Limit N, RateLimit-Remaining 0, RateLimit-Reset".
+  7. **T-39 outage:** "with an ERROR security event" → "with the runtime security event of D-SECT39-01 item 5 (api-designer change request), at most once a minute per instance".
+  8. **T-39 tests:** add:
+     - the stored `details` deep-equal the closed sets (crossing; opener with carry; plain);
+     - N+K denials from K distinct IPs and user agents add vault and `ip_hash` rows for the N+1 entries only;
+     - every Valkey key under the two prefixes matches the item 3 grammar;
+     - budget-key `PTTL` in 1..60000;
+     - the carry is restored after a failed opener write;
+     - the `startApi` composition answers 429 at N+1;
+     - the counter has no organisation or actor label.
+- **Routed:**
+  - SEC-TC-15 wording in `docs/05-quality/tests/security-test-cases.md` → qa-lead (per D-ARCH-142), to match threat model §10.2;
+  - the README §13 runtime row → api-designer, through TASK-041's change request.
+- **Reversibility:** High (docs only).
+
+### D-QA-021 · 2026-11-19 · qa-lead · Acknowledgement of the PR #65 and PR #72 manifest and registry edits; adopted SEC-TC set 64 → 67 in TEST-STRATEGY 1.5; SEC-TC-74 placement; AT-US-061 primary suite; a malformed-ID problem in `quality:trace`
+- **Input:** D-ORCH-137 (PR #65 code review R2-n3/R2-n4 → qa-lead), D-ORCH-139 and D-SECPR293-01/02 (TEST-STRATEGY "64/64" and SEC-TC-74's registry section → qa-lead); PR-0065 code review R1-m4/R2-n4; PR-0072 code review R1-m3, R2-n3 and conditions 3/4; PR-0072 security record §4.6; rulings `wave-1-batch-1.1-rulings.md` (open item: AT-US-061-01..03 primary suite).
+- **Acknowledged (edits by others under qa-lead content ownership; each tightens a gate, none weakens one):**
+  - PR #65 (`ca7e4b7`, D-TASK037-22): SEC-TC-74 moved from `required_cases_pending.catalog-c1-c14` to `catalog-c1-c14.required_cases`.
+  - PR #72 (`f723fef`, PR65-SEC-05 (a)/(b)): `integration.required_cases` `[]` → SEC-TC-76/77/78; SEC-TC-76 also added to `catalog-c1-c14.required_cases`; `catalog-c1-c14.min_tests` 14 → 113 (106 + 7), confirmed by lane B `20261119T1550Z_c618d8a` (catalog 113, 0 skipped). `integration` keeps `min_tests` 1 (no floor), as the PR-0072 code review noted.
+  - PR #72: section "Adopted cases SEC-TC-76..78" in `docs/05-quality/tests/security-test-cases.md`, adopted directly (D-SEC-PR47-01 (1)); `parseSecurityCases` gives 67 adopted (01..64, 76..78) and 7 proposed (69..75).
+- **Decision:**
+  1. **TEST-STRATEGY 1.5** (R2-n3): every line that pinned 64 adopted cases now reads 67 (01..64 and 76..78): the companion-files row, §2 "Security cases are gates", the §6 ID table, the §6 G3 bullet (line 192), §7.11, the §9 layout listing, §14 step 5 and §15 item 6 (line 599). §15 item 6 also states that SEC-TC-74 is gated by the manifest already and that the line becomes 68/68 when its row moves.
+  2. **Registry** (`security-test-cases.md`): title and rule 6 → 67/67; a qa-lead amendment line; adoption note 3 now says 67/67 → 78/78 if 65..75 are all adopted (it said 64/64 → 75/75).
+  3. **SEC-TC-74 placement** (security §4.6 note, D-SECPR293-01 "SEC-TC-74's registry section"): the row stays under "Proposed" for now, with adoption note 5 stating that it is required, carried and enforced. Reason: `tools/quality/lib/test-ids.test.ts` pins the adopted set to exactly 01..64 and 76..78, so moving the row without the pin turns lane A red, and this change is docs only. The row move, the pin (68 IDs) and 67/67 → 68/68 (registry rule 6, TEST-STRATEGY §15 item 6) go in one qa-lead change with the next PR that touches `tools/quality/lib`, at the latest before G3. Nothing is ungated meanwhile: the evidence check reads `required_cases`, and `trace.mjs` knows proposed IDs, so its tests are not orphans.
+  4. **AT-US-061 primary suite** (rulings item): `gherkin-test-map.md` is **not edited**. The suite column is descriptive: `quality:trace` credits an ID in any suite, so the label changes no gate, and a map edit makes the lane-B evidence of every open PR stale (tooling input). Under D-PM-068, AT-US-061-02/-03 keep `api`: their response-level halves land with the routes on TASK-224, and the integration/unit tests of PR #65 are the database and service halves. AT-US-061-01 (seed only, no route) moves to `integration` through `gherkin-suite-assignments.json` (US-061 override `"01": "integration"`) at the next regeneration of the map after a story change. AT-US-062-01..04 stay `api` for the same reason (route halves on TASK-049/TASK-231).
+  5. **New problem found while confirming:** `npm run quality:trace` on `20261119T1550Z_c618d8a` reports 0 orphans but 1 problem and exits 1. The unit test title `[PR46-SEC-06] … SEC-TC-060 does not satisfy SEC-TC-06 …` (`tools/ci/security-integration.test.ts:143`) carries the decoy as a literal, and `trace.mjs` treats it as a malformed ID. This is a test defect (S4, no product impact), present since PR #46. Route: test-engineer under qa-lead, or the next holder of `tools/ci/security-integration.test.ts`. Reword the title so that the decoy is not a literal token (the decoy string in the test body stays). Due before `quality:trace` becomes a gate input (TASK-015-B attachment hook), at the latest G3.
+- **Why:** the G3 checklist is what the gatekeeper reads, so it must match the adopted set; the SEC-TC-74 move and the map relabel each need a non-docs or tooling-input change that is cheaper bundled with work that already pays that cost.
+- **Alternatives:** move SEC-TC-74 now with a `test-ids.test.ts` edit (rejected: not docs only, needs lane A on a PR); regenerate the map now (rejected: stale lane-B evidence for every open PR, no gate effect); count SEC-TC-74 in the G3 line while it is listed as proposed (rejected: the line would disagree with `parseSecurityCases`).
+- **Applied in:** `docs/05-quality/TEST-STRATEGY.md` 1.5; `docs/05-quality/tests/security-test-cases.md`. Not edited: `gherkin-test-map.md`, story files, `required-suites.json`.
+- **Reversibility:** High (docs only).
+
+### D-QA-022 · 2026-11-19 · qa-lead · SEC-TC-15 wording aligned with the per-actor denial budget (D-ARCH-142, D-SECT39-01, threat model v1.2 §10.4 H)
+- **Input:** D-SECT39-01 "Routed" (SEC-TC-15 wording in `security-test-cases.md` → qa-lead, per D-ARCH-142), relayed by the orchestrator.
+- **Decision:** the SEC-TC-15 row now states the case that TASK-041 must pass. N+2 denials by one Viewer in one 60 s window give:
+  - N individual `PERMISSION_DENIED` entries with no `aggregated` key;
+  - one aggregated entry for the crossing request, whose stored `details` deep-equal the closed set {`required_permission`, `aggregated: true`, `threshold`, `window_seconds: 60`, `window_ends_at`}, with no `count`;
+  - 429 `RATE_LIMITED` with `Retry-After` / `RateLimit-*` for denials N+1 and N+2, and no write for N+2;
+  - `suppressed_in_previous_window` = 1 on the first denial of the next window.
+
+  The budget is keyed by organisation and actor, never by IP. The old wording ("≤ N entries plus a summary entry") left the key and the entry shape open. The `details` deep-equal is the redaction tripwire that D-SECT39-01 item 2 names.
+- **Unchanged:** ID, type, suite `abuse`, lanes, gated story, placement; the adopted count (67) and the manifest.
+- **Applied in:** `docs/05-quality/tests/security-test-cases.md` (row and amendment line).
+- **Reversibility:** High (docs only).
+
+### D-ARCH-159 · 2026-11-19 · principal-architect · PR64-SEC-04: bounded queue retention under `noeviction` — failed jobs 7 days / newest 1,000 per queue, dead-letter records 14 days / newest 2,000 per dead-letter queue, trimmed by the consumer at each record write and by the hourly `queue-retention` sweep of TASK-039 (ADR-0013 amendment 3 items 8–11, 15, 16)
+- **Trigger:** PR #64 security record PR64-SEC-04 (LOW, CWE-770, T-77), routed to principal-architect by D-ORCH-132 and due before TASK-039 is dispatched (D-SD-001 item 7; STATUS dispatch plan). Under `maxmemory-policy noeviction` Valkey removes nothing by itself, and TASK-035 kept every failed job and every dead-letter record without limit on the instance that also holds the api's session and rate-limit keys.
+- **Decision (the exact bounds):**
+
+  | Set, per named queue | Age | Count (newest kept) | BullMQ form |
+  |---|---|---|---|
+  | Completed jobs (unchanged) | 24 hours | 10,000 | `removeOnComplete: { age: 86400, count: 10000 }` |
+  | Failed jobs | 7 days | 1,000 | `removeOnFail: { age: 604800, count: 1000 }` |
+  | Dead-letter records in `<queue>-dead` | 14 days | 2,000 | none: trimmed by the platform |
+
+  1. **Constants.** `COMPLETED_RETENTION`, `FAILED_RETENTION` and `DEAD_LETTER_RETENTION`, exported from `@platform/shared/queues`. They are constants, not environment configuration, because the memory budget and the alarm threshold of D-ARCH-160 are derived from them. A change is an ADR-0013 amendment.
+  2. **Failed jobs.** `removeOnFail: FAILED_RETENTION` replaces `false` in `jobOptions`. Every Job Scheduler template carries both bounds, and every consumer `Worker` sets them as its defaults, which BullMQ applies to a job that carries no option of its own. BullMQ trims the failed set in the script that marks a job failed, so the count holds at every moment.
+  3. **Dead-letter records, who trims them: TASK-039, in two places.**
+     - The consumer, at each record write: above 2,000 waiting records it removes the oldest surplus with `clean(0, surplus, 'wait')`. It never calls with a limit of 0, which BullMQ reads as "no limit".
+     - The hourly housekeeping job `queue-retention` (the first housekeeping job; a singleton through its Job Scheduler): for every named queue `clean(604_800_000, 1000, 'failed')` and `clean(86_400_000, 1000, 'completed')`, and on its dead-letter queue `clean(1_209_600_000, 1000, 'wait')` plus the count trim. A call is repeated while it removed exactly its limit, at most 10 times per queue and set in one run.
+  4. **Rule between the bounds.** The age and count of the records are never set below those of the failed jobs, so a retained failed job normally still has its record.
+  5. **Retention is the duplicate window (code review R1-n5).** While a job is retained BullMQ ignores an add with the same id: 24 hours after completion, up to 7 days after a final failure. Redrive is `job.retry()` while the failed job is retained, and a new enqueue of the same `kind` and `id` afterwards. The consequence for recurring keys is D-ARCH-161.
+- **Why these numbers:**
+  - **7 days** covers a weekend and the triage of an incident, and is no longer than the purge horizon of a published outbox event under either document that states one (see the open item in D-ARCH-161).
+  - **1,000**: a larger incident is replayed from PostgreSQL (outbox, saga sweeper, tracking planner), not job by job.
+  - **14 days**: the record is the operator's evidence and outlives the retry handle by a week. It stays below the 30-day log retention, and with the 7-day snapshot retention of the AWS design nothing in Valkey outlives the month in which an erasure request must be answered, so Valkey needs no erasure job (the concern of PR64-SEC-02).
+  - **2,000** is twice the failed bound for twice the age: at a steady rate both sets reach their count bound together (about 143 dead letters a day on one queue).
+- **Memory (estimate, not measured):** about 2 KiB per retained job or record. Failed jobs at most 9,000 (18 MiB) and records at most 18,000 (35 MiB) across the 9 queues: about 53 MiB, where there was no bound. With the unchanged completed bound (90,000, 176 MiB) the retained sets total about 229 MiB at every bound at once. TASK-039 quotes `MEMORY USAGE` of one failed job key and one record key in its PR body; a figure above 3 KiB comes back to me and is not a merge condition.
+- **Facts checked (read in `node_modules/bullmq` 6.7.0, nothing was run):**
+  - `KeepJobs` evaluates an age bound only when another job of the same queue finishes, which is why the sweep exists.
+  - `moveToFinished` adds the job to the failed set, then trims by age and by count.
+  - `getKeepJobs`: a job's own option wins over the `Worker` default.
+  - `Queue.clean`: `limit || Infinity`; for a list the script reads `LRANGE -limit -1`, and `addStandardJob` pushes new jobs with `LPUSH`, so those are the oldest entries.
+- **Not verified:** no test, container or Valkey ran (docs-only task). Whether BullMQ's scripts still run when Valkey is at its ceiling is unknown, so the design does not rely on a trim there.
+- **What it does not bound:** waiting and delayed jobs (the backlog alarm), and a party that can write `bull:*` (ACL users are the control; T-73, T-92). No committed state is lost when a failed job or record is removed: PostgreSQL stays the source of truth.
+- **Alternatives rejected:**
+  - **An age bound only on the failed set** (the sketch in the security record): a flood inside the window stays unbounded.
+  - **Count trimming of the records only in the hourly sweep:** a bad deploy that fails a relayed backlog can dead-letter 100,000 jobs within minutes.
+  - **Refusing new records at the bound (keep the oldest):** the newest failures would have no record while the failed set keeps the newest jobs, and a full dead-letter queue would hide the next incident for up to 14 days.
+  - **One age for both sets:** 7 days loses the evidence when the retry handle goes; 14 days keeps ids blocked for re-enqueue twice as long.
+  - **30 days for the records** (the log retention): backup copies would pass the month of an erasure request.
+  - **Environment configuration for the bounds:** a changed bound would silently leave the alarm threshold and the budget behind.
+  - **Lowering the completed count now:** outside PR64-SEC-04. It is the recorded lever if a node proves too small.
+  - **A PostgreSQL dead-letter table:** a table, a migration and a tenancy class for an operational view; REQ-PLAT-013 asks for a dead-letter queue. It can be reconsidered with the M4 System health screen (EPIC-B-414).
+- **Applied in:** ADR-0013 (§1 and §2 notes, amendment 3), data-model §10.5 (one row), platform.md §4.3 (note), the TASK-039 card (`plan-data.mjs`; plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; CSV diff = the TASK-039 and TASK-214 rows).
+- **Owed by others:** security-analyst may cite the amendment in the T-77 mitigation column at the next threat-model revision; PR64-SEC-04 closes when TASK-039 merges.
+- **Reversibility:** High (three constants, one trim, one sweep).
+
+### D-ARCH-160 · 2026-11-19 · principal-architect · Queue and Valkey alarms for TASK-214: `QueueDeadLetterNew`, `QueueDeadLetterDepthHigh` (≥ 1,600), `ValkeyMemoryHigh` (≥ 70 %), `ValkeyMemoryCritical` (≥ 85 %); the implemented gauge names are canonical, a dead-letter counter joins them, and Compose gets a 512 MiB Valkey ceiling (ADR-0013 amendment 3 items 12–14)
+- **Trigger:** PR64-SEC-04 remediation ("alarms on DLQ depth and Valkey `used_memory`"), plus the note in the same record that the implemented gauge names differ from platform.md §8.2. TASK-214 needs names and thresholds it can implement.
+- **Decision:**
+  1. **Metric names.** `platform_queue_jobs{queue,state}` and `platform_queue_dead_letter_jobs{queue}` (TASK-035) are canonical. The `bullmq_queue_*`, `bullmq_dlq_depth` and `bullmq_oldest_waiting_age_seconds` names of platform.md are withdrawn. New: the counter `platform_queue_dead_lettered_total{queue}` (TASK-039; every queue's series at 0 from worker start), and the gauges `platform_queue_oldest_waiting_age_seconds{queue}`, `platform_valkey_memory_used_bytes` and `platform_valkey_memory_max_bytes` (TASK-214). The worker reads the memory from `INFO memory`: its ACL user has `+info`, the api user has not.
+  2. **Alarms (Prometheus rules of the Compose `observability` profile; labels `severity` and `runbook`):**
+
+     | Alarm | Condition | For | Severity | Runbook |
+     |---|---|---|---|---|
+     | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`, ticket for the other queues | RB-07 |
+     | `QueueDeadLetterDepthHigh` | `platform_queue_dead_letter_jobs` ≥ 1,600 on a queue (80 % of the 2,000 bound) | 5 min | page | RB-07 |
+     | `ValkeyMemoryHigh` | `used_memory` / `maxmemory` ≥ 0.70 | 10 min | ticket | RB-06 |
+     | `ValkeyMemoryCritical` | the same ratio ≥ 0.85 | 5 min | page | RB-06 |
+
+  3. **Ceiling.** Compose adds `--maxmemory ${REDIS_MAXMEMORY:-512mb}` to the `redis` command (TASK-214). 512 MiB is the memory of the smallest planned node (cache.t4g.micro, minimal staging). The alarm levels are then 358 MiB and 435 MiB locally.
+  4. **Start-up check (ADR-0013 §9, unowned until now).** At worker start `maxmemory_policy` must be `noeviction` or the worker refuses to start; a `maxmemory` of 0 logs a WARN outside `APP_ENV=test`. Owner TASK-214, with the gauges (the same `INFO memory` read).
+  5. **Renderer.** The in-house text renderer of TASK-035 stays until TASK-214 brings `@prometheus-io/client` to the worker (ADR-0017 amendment 1). Names and label sets are the contract and do not change with that move.
+  6. **Card.** TASK-214 gains the alarm line, `compose.yaml` and `metrics.ts` in its files, the locks `infra-compose` and `worker-queues`, and the dependency TASK-039 (the counter). No lock is shared in batch 7.8.
+- **Why:**
+  - **A counter for "new dead letters".** The depth is now bounded and trimmed, so one dead letter and one trimmed record in the same window cancel out on a gauge.
+  - **Two memory levels.** At 100 % Valkey refuses writes, and the queues, refresh-token rotation and rate limits stop together. 70 % is the existing platform.md threshold; 85 % pages while there is still room to act.
+  - **A ceiling.** Without one there is no percentage, and the failure is the memory of the host (D-ORCH-130 shows what that costs here).
+  - **Zero cloud budget.** Everything is local: the worker's own `/metrics`, Prometheus in the existing Compose profile, no exporter image, no new credential. At M5 the same four alarms map to CloudWatch (EMF queue metrics; ElastiCache `DatabaseMemoryUsagePercentage`), which this run does not build.
+- **Alternatives rejected:**
+  - **Renaming the implemented gauges to the platform.md names:** code and test churn for names that name the library.
+  - **A redis_exporter container:** a new image and a new ACL user for two numbers the worker can already read.
+  - **Alarming on the change of the depth gauge:** misses a dead letter whenever a trim lands in the same window.
+  - **A standing "depth > 0" alarm:** it would fire for up to 14 days and teach operators to delete evidence to clear it.
+  - **The ceiling and the start-up check on TASK-039:** it keeps the critical-path task smaller, and the alarm and its denominator land together.
+- **Applied in:** ADR-0013 amendment 3 (items 12–14; §8 and §9 notes), platform.md §2.2, §5.4, §5.5, §8.2 and §8.5, the TASK-214 and TASK-039 cards.
+- **Not verified:** the PromQL was written, not run; TASK-214 pins it with a lane A test.
+- **Reversibility:** High (names are fixed before any consumer of them exists; thresholds are rule data).
+
+### D-ARCH-161 · 2026-11-19 · principal-architect · ADR-0013 §1/§2 spellings (`<queue>-dead`, job id `<kind>.<id>[.<step>]`) and the rule for recurring job keys: `tracking_poll.<schedule_id>.<occurrence>` (ADR-0013 amendment 3 items 7 and 11)
+- **Trigger:** PR #64 code review (§3 row 01, §5 "ADR-0013 §1/§2 spelling") routed by D-ORCH-132; D-TASK035-01, -02 and -07 (accepted by D-ORCH-131 and D-ORCH-134).
+- **Decision:**
+  1. **Spellings, corrected in place in ADR-0013 §1 and §2.** The dead-letter queue of a queue is `<queue>-dead` (no named queue may end in `-dead`). A job id is `<kind>.<id>` or `<kind>.<id>.<step>`, for example `outbox_event.<event_id>` and `saga.<saga_id>.<step>`. A dead-letter record id is `<job id>.dead.<attempts>`. Reason: BullMQ 6 refuses `:` in a queue name, and in a custom id unless it has exactly three parts.
+  2. **Other documents** that still show a `:` form (ADR-0014 "Saga model", ARCHITECTURE.md §7.5, data-model §6.3, api/README §12) read as the forms above and are corrected at their next edit. api/README is a lane B tooling input and is not edited in a docs commit.
+  3. **Recurring keys carry their occurrence as `<step>`.** Retention is the duplicate window (D-ARCH-159 item 5). The tracking poll of one shipment repeats every 15 minutes to 4 hours (DR-B19), so `tracking_poll.<schedule_id>` would be ignored by BullMQ for 24 hours after each completed poll. The id is `tracking_poll.<schedule_id>.<occurrence>`, the occurrence derived from the due time of that poll; TASK-204 chooses the form. The old §2 example `tracking:<shipment_id>` is withdrawn. Jobs produced by a Job Scheduler have BullMQ's own id per occurrence and are not affected.
+- **Alternatives rejected for item 3:**
+  - **`removeOnComplete: true` on `tracking-poll`:** a failed poll would still block the key for 7 days, and the queue would leave the common retention rule.
+  - **BullMQ's `deduplication` option:** a second duplicate mechanism beside the deterministic id.
+  - **A shorter retention for that one queue:** any window longer than 15 minutes still drops polls.
+- **Card line for the next plan fold (TASK-204, not applied here):** "RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job".
+- **Open items found while writing this, not decided here:**
+  1. **Outbox purge horizon.** ADR-0004 §6 and ADR-0013 §1 say published events are deleted after 30 days; data-model §6 and §10.5 say 7 days. No decision records the change. Mine to rule before the outbox purge is built (TASK-043 or the housekeeping task that owns it).
+  2. **Scheduler-produced jobs.** They carry BullMQ ids, and the `housekeeping` and `audit-maintenance` queues accept no payload kind until TASK-039 defines one (D-TASK035-05). The job-identity check of PR64-SEC-07 on the same card is written for `<kind>.<id>` ids, so the developer's proposal has to say how a scheduled job is identified; security-analyst reviews it.
+  3. **US-010 still describes payload v1** (PR64-SEC-10, product-manager): two of its scenarios expect `org_id` and `actor_id` in the payload, and TASK-039 is specified from them.
+  4. **The dead-letter replay command** of api/README §12 has no owning task.
+- **Reversibility:** High (documentation; the id rule binds a task that has not started).
+
+### D-SECPR075-01 · 2026-11-19 · security-analyst · TASK-075 (CarrierAdapter contract, capability guard, normalisation and egress contract; branch `feat/TASK-075-carrieradapter-contract-carriercontext-capability-guard`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `c2eaa47` (record `docs/05-quality/security/PR-pending-TASK-075-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-075-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on type-stripped `git archive` extracts of `c2eaa47` and `5145d52`. No npm, Jest or Docker, and nothing was run in the PR worktree.
+- **The record is a merge condition.** The PR changes one owned path, `tools/lint/carrier-wire-boundary.test.ts` (`/tools/lint/`). Main's classifier also selects the hosted `security-integration` job, through `packages/config/src/carrier-environment.test.ts`.
+- **Held:**
+  - **Egress validation.** 33 origin and 17 prefix shapes were probed. IP literals in six notations, IPv6, wildcards (also `%2A`), IDN, case, ports, credentials, TAB/LF, dot segments, `%` and `//` are refused. The derivation reads no configuration, fails closed without `EGRESS` (inherited names too), and refuses production accounts and rules outside `APP_ENV=production`.
+  - **`packages/config`** refuses `CARRIER_<X>_ENVIRONMENT=production`, and 8 other non-`sandbox` spellings, under all four APP_ENVs.
+  - **CWE-209 and CWE-117.** `CarrierError` messages are canonical and `toJSON` is the safe subset. Unknown codes are logged in a safe shape only.
+  - **Prototype safety.** Mapping lookups are `Map`s (15 of 15 inherited names unresolved).
+  - **Labels.** Bytes only: URL and base64 strings are refused, PDF formats need `%PDF-`, and nothing in `src` does I/O.
+  - **The guard** refuses unsupported operations before the context check, with zero adapter calls.
+- **New findings:**
+  - **PR075-SEC-01 (LOW, CWE-367).** The guard validates one read of the context and passes the caller's live object to the adapter. A getter, a Proxy or a mutation after the adapter's first `await` gives the adapter `production` where the guard checked `sandbox`, so `egressBase` yields the production base.
+    - **Fix.** Snapshot through `createCarrierContext`, then pass the frozen copy. Validated on a scratch copy; it also closes code review R1-n5.
+  - **PR075-SEC-02 (LOW, CWE-183).** Tier separation on a shared origin.
+    - (a) `egressIssues` accepts a sandbox list that covers production entries: DHL `/mydhlapi/` or `/`, FedEx or UPS production hosts copied into `sandbox`. Such a rule becomes a sandbox-tier rule that neither the start-up refusal nor TASK-113's tier check sees, so production endpoints are reachable before G4. A cross-tier check was validated: 6 valid tables give 0 issues, 4 misfiled tables give 1 each.
+    - (b) Code review S1: a production context can reach `/mydhlapi/test/` under ADR item 6's tier equality and item 8's prefix containment.
+    - (c) The `EGRESS` tables are not security-owned paths.
+  - **PR075-SEC-03 (LOW, CWE-20).** ZPL content is not checked: PNG, GIF, JPEG, PDF, HTML and EPL bytes pass, and `labels.test.ts` pins that. The guard passes the labels from `createShipment`/`recoverLabel` unchanged (a `PNG` format, raster bytes as PDF, a URL object).
+    - **Fix (a).** A ZPL shape check (validated on 11 shapes).
+    - **Fix (b).** The guard re-checks labels. It must never throw after `createShipment` succeeds: a `CarrierContractError` there would be classified local and non-ambiguous (D-TASK075-03) and retried into a duplicate label. Drop the bad label instead, and leave the missing format to `recoverLabel`.
+  - **PR075-SEC-04 (LOW, CWE-532).** Raw carrier text reaches logs: through `normaliseError`'s verbatim `cause` (the real platform logger writes it under `err.cause.message`, and `util.inspect` shows it too), and through non-`CarrierError` failures, which the guard passes unchanged. This is the security rating of code review R1-m5 and R1-n7.
+    - **Fix.** `safeCause` = `{ name, code? }` in this PR. TASK-132 converts unknown failures.
+  - **INFO items:**
+    - PR075-SEC-05: runtime-invalid code, carrier or operation kept by `CarrierError`.
+    - PR075-SEC-06: the `EGRESS` rule schema is open, so unknown keys reach the allow-list.
+    - PR075-SEC-07: unbounded warn lines per carrier answer.
+    - PR075-SEC-08: `registry.get` echoes the caller's code.
+    - PR075-SEC-09: before G4, "sandbox only" holds for configuration but not for `carrier_accounts` rows under `APP_ENV=production`.
+- **Rulings:**
+  1. **Tier matching (to TASK-113).** `egressAllowed` decides the tier by the most specific matching entry across all tiers of the origin (an exact path beats a prefix, a longer prefix beats a shorter one), and refuses when that tier differs from `ctx.environment`. SEC-TC-66 gains three rows: production to `…/mydhlapi/test/rates` blocked, sandbox to `…/mydhlapi/rates` blocked, and an exact path shared by both tiers allowed for both.
+  2. **Ambiguity.** A `CarrierContractError` is local and non-ambiguous only when it is thrown before the adapter is reached. Nothing thrown after a successful `createShipment` may carry that class.
+  3. **Ownership.** `/packages/carriers/src/egress.ts` and `/packages/carriers/src/adapters/*/egress.ts` should be security-owned. Orchestrator, in a CODEOWNERS-only PR with a security record, before TASK-135 merges.
+- **Binding.** The single `Head` row names `c2eaa47`. Simulation with main's real checker: 10 of 10 as expected.
+  - Pass: the record at the head; the merge ref with the record committed on main; a later commit to `packages/carriers` only.
+  - Fail: no record; `eslint.config.mjs` or the owned lint test changed after the head; the placeholder name; a later FAIL verdict; a `Head` row naming the base or a main commit.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at the pushed head.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A security delta round on the fix-cycle head. The code review is CHANGES_REQUESTED, and the fixes of SEC-01/03/04 and R1-M1 sit in the reviewed controls. The checker voids the binding by itself only if an owned path changes, for example `eslint.config.mjs` for R1-m2.
+- **Routed:**
+  - **This PR's fix cycle, preferred:** PR075-SEC-01, -02 (a), -03, -04 (a), -05 to -08. If not fixed there, they are due before the first real adapter merges (TASK-135/139/140).
+  - **TASK-113:** PR075-SEC-02 (b) and ruling 1.
+  - **TASK-132:** PR075-SEC-04 (b).
+  - **Orchestrator:** PR075-SEC-02 (c), ruling 3.
+  - **TASK-128 and TASK-113:** PR075-SEC-09.
+- **Reversibility:** High (a review record; the rulings bind tasks that have not started).
+
+### D-ARCH-162 · 2026-11-19 · principal-architect · R-ARCH-34 (a), dispatch gate of TASK-051: on a GUEST_CAPABLE table a reference is a pair of composite keys, one through `org_id` and one through `guest_token_hash`, with no single-column key; the claim is one statement (ADR-0005 amendment 14 items 31 and 32)
+- **Trigger:** D-SD-002 dispatch gate on TASK-051; the open item of D-ARCH-154 and risks.md R-ARCH-34; PR-0072 security record PR293-SEC-03.
+- **Decision:**
+  1. **Rule T2 of data-model §4.7 is revised.** A reference from a GUEST_CAPABLE table to another organisation-keyed table is `fk_<child>__org_id_<x>_id (org_id, <x>_id) → <parent> (org_id, id)` plus `fk_<child>__guest_token_hash_<x>_id (guest_token_hash, <x>_id) → <parent> (guest_token_hash, id)`, and no single-column key. The parent carries `ux_<parent>__org_id_id` and `ux_<parent>__guest_token_hash_id` (T2-G).
+  2. **A reference that guest rows can never hold** has the key through `org_id` alone, a CHECK that the column is NULL on guest rows, and an entry in the C16 (a) exception map (T2-O). First instance: `quotes.requote_of_quote_id`, set only when the original quote belongs to the same organisation.
+  3. **A table with a nullable `org_id` and no `guest_token_hash`** keeps the D-ARCH-154 form (T2-N; no instance yet).
+  4. **The guest claim is one statement:** the child updates are data-modifying CTEs of the `UPDATE` of `quotes`. `expectAffected(result, 1)` reads the outer `UPDATE`. A claim that leaves a child table out fails with `23503`.
+  5. **C16 (a)** learns guest-bound keys (rulings file §2.6). Its exception map no longer has to be empty; every entry must be live. Owner TASK-051.
+  6. **The quote tables** (data-model §3.10) are amended accordingly; TASK-087 and TASK-237 create them.
+- **Why:**
+  - Nothing made a child's copy of the owner columns equal to its quote. A guest row could name another owner's quote: an existence channel for quote ids, which `quote_share_resolve` hands to every holder of a share link, and a forged row attached to someone else's quote.
+  - The owner CHECK leaves exactly one owner column set, so exactly one of the two keys is checked for every row. The single-column key adds nothing, and without it a foreign parent and an unknown id fail on the same constraint.
+  - With the pair no order of separate statements satisfies both keys, and one statement does, because PostgreSQL runs the referential checks at the end of the statement.
+- **Checked (PGlite 0.4.3 = PostgreSQL 17.5, single process, scratchpad; rulings file §2.7):**
+  - a guest or an organisation naming a foreign or unknown quote gets `23503` on the one constraint of its writer class;
+  - the one-statement claim succeeds with `RESTRICT` keys under the tenant and guest policies; both orders of separate statements fail; a statement without one child table fails;
+  - the control table with the D-ARCH-154 shape shows the three gaps (a forged guest row accepted, `23505` for another owner's value, two constraint names);
+  - `prisma validate` accepts two optional relations that share the referencing column, and the differ emits the indexes and keys under these names (7.10).
+- **Not verified:** PostgreSQL 18. Lane B of TASK-051 is the evidence; a differing observation comes back to me.
+- **Alternatives rejected:**
+  - **Accept the existence channel** (the other option on the card): the same shape lets a foreign row take a unique value of another owner, which D-ARCH-154 closed on the TASK-037 tables.
+  - **Keep the single-column key as a third key:** it adds nothing and brings back two constraint names.
+  - **A trigger that compares child and quote:** hand-written per table, and it does not catch a claim that leaves a child table behind.
+  - **A deferred guest key with the claim in separate statements:** the refusal would arrive at COMMIT through another error path, and the keys would need `NO ACTION` instead of the project's `RESTRICT`.
+- **Specialist:** database-engineer was not dispatched. The question was decidable from the constraint semantics and a probe; the database-engineer of TASK-051 implements it and proves it on PostgreSQL 18.
+- **Cost:** one more unique index on `quotes`, about 70 to 90 MB per million rows (estimate).
+- **Applied in:** ADR-0005 amendment 14 items 31 and 32; data-model §1.1 P12, §3.10, §4.3, §4.6 C16, §4.7, A32; risks.md R-ARCH-34; `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §2.
+- **Card lines:** rulings file §6 (TASK-051, TASK-087, TASK-146, TASK-194, TASK-237), for senior-developer's fold. The gate on TASK-051 is met by this entry and the next two.
+- **Reversibility:** High until TASK-087 creates the tables; afterwards a change of key shape is an expand migration per table.
+
+### D-ARCH-163 · 2026-11-19 · principal-architect · R-ARCH-34 (b) / PR293-SEC-03 (a) and (c): every unique key of a TENANT or GUEST_CAPABLE table holds an owner column; C16 arm (b) covers GUEST_CAPABLE tables and exclusion constraints (ADR-0005 amendment 14 item 33)
+- **Decision:**
+  1. **U1, the gate.** Every non-primary unique index and every exclusion constraint of a TENANT or GUEST_CAPABLE table has `org_id`, or on a GUEST_CAPABLE table `guest_token_hash`, among its key columns. Only globally unique secret digests are exceptions, each listed with its reason.
+  2. **U2, a design rule checked in review.** On a GUEST_CAPABLE table a uniqueness rule that must hold for guest rows and for organisation rows is two indexes, one per owner column.
+  3. **The quote tables:** `ux_quote_packages__org_quote_seq` and `ux_quote_packages__guest_quote_seq` replace `ux_quote_packages__quote_seq` and `ix_quote_packages__org_quote`; `ux_quote_shares__org_quote_active` and `ux_quote_shares__guest_quote_active` replace `ux_quote_shares__quote_active`; `ux_quote_shares__share_token_hash` is an exception entry.
+  4. **C16 (b):** scope TENANT plus GUEST_CAPABLE; the owner column is `org_id` or `guest_token_hash`; it reads `indisunique OR indisexclusion`. Owner TASK-051.
+  5. **Reads of a child carry the owner predicate** next to `quote_id`.
+- **Why:** a unique index is checked before the referential check, so a key without an owner column answers `23505` for a value another owner holds and lets a foreign row take it. For `ux_quote_shares__quote_active` that would have let one owner block another owner's share link. NULLs are distinct, so an index through `org_id` says nothing about guest rows.
+- **Narrower than the security note on one point:** it proposed "every class with `org_id`". USER_OWNED tables are left out: their isolation key is the user, and a rule for them is written when the first one carries a unique business key.
+- **Alternatives rejected:**
+  - **Only secret digests may be unique on a GUEST_CAPABLE table:** the package sequence and the one-active-share backstop are real rules.
+  - **One index over both owner columns with `NULLS NOT DISTINCT`:** not expressible in the Prisma schema as far as I know (not checked), and the key would be about 80 bytes wide.
+  - **U2 as a catalog finding:** a rule only organisation rows can break is legitimate, and predicates would have to be compared as text.
+- **Applied in:** ADR-0005 amendment 14 item 33; data-model §3.10, §4.6 C16, §4.7; rulings file §2.4 and §2.6. This also writes down C16 (b) and P9-CK in §4.6, routed to me by D-SECPR293-01 and D-ORCH-139.
+- **Still owed by me:** the §8.3 wording for the rule-10 call sites and the lone carriage return (D-ORCH-139). Not done here.
+- **Reversibility:** High (no GUEST_CAPABLE table exists yet).
+
+### D-ARCH-164 · 2026-11-19 · principal-architect · R-ARCH-34 (c) / PR293-SEC-03 (b): a refused reference has one answer — every `23503` maps to the same response and nothing branches on the constraint name (ADR-0005 amendment 14 item 34)
+- **Decision:**
+  1. `mapDbError` maps every `23503` to 500 `INTERNAL_ERROR` with reason `DB_ERROR`, and never reads the constraint name, the message or the detail. This is what the code at `29fe2a1` already does (read, not run); TASK-051 pins it with a test, and no product code changes.
+  2. No service, repository or module catalogue maps a foreign-key violation (`P2003`, or `23503` under a raw query) to a client-visible answer by constraint or field name. A repository test keeps those two tokens out of every file but the mapper and its test.
+  3. A reference that a client supplies is resolved by a read under RLS before the write. A row of another owner and an absent row are then the same miss.
+  4. A `23505` may be mapped by index name only for an index that C16 (b) passes or lists.
+- **Why:**
+  - With D-ARCH-162 the database already answers a foreign parent and an unknown id with one constraint on GUEST_CAPABLE tables. The rule covers what is left: a T2-N pair, should one arrive, and any later mapping by name.
+  - 500 and not 404: a `23503` that reaches the mapper means a service skipped the read. It should fail the abuse suite and not look like a clean miss. D-ARCH-156 read `MEMBERSHIP_LIFECYCLE_VIOLATION` the same way.
+- **Alternative rejected:** a table of T2 pairs in the mapper that gives both members a 404. It would make the mapper depend on constraint names, which is the thing to avoid, and it would hide service defects.
+- **Applied in:** ADR-0005 amendment 14 item 34; data-model §4.7; rulings file §2.5. Card line: TASK-051.
+- **Reversibility:** High.
+
+### D-ARCH-165 · 2026-11-19 · principal-architect · PR65-SEC-02 (b), dispatch gate of TASK-089: a database control is required — a membership of an OPERATOR organisation needs a row in `operator_staff_grants`, which `platform_app` can read and only the provisioning lane writes (ADR-0005 amendment 14 item 35; risks.md R-ARCH-35)
+- **Trigger:** D-SD-002 dispatch gate on TASK-089; PR-0065 security record PR65-SEC-02 (b) (LOW latent, CWE-269); D-ORCH-137.
+- **Decision:**
+  1. **New table `public.operator_staff_grants`** (GLOBAL, `runtimeReadOnly`; the standard columns and `user_id` with a unique index; no RLS; `SELECT` for `platform_app`; written by `platform_migrator` only).
+  2. **`platform.memberships_lifecycle_guard()` is replaced in place** by a later expand migration. New on INSERT: a membership of an organisation of type OPERATOR needs a grant for its `user_id`, and an organisation the session cannot see counts as OPERATOR. The member is still the actor.
+  3. **Who writes a grant:** the provisioning lane, between creating the user and adding the membership. The demo seed (TASK-089) uses the migrator connection the seed CLI already opens. `ops:staff-bootstrap` (M5) holds the migrator credential for this one row beside the runtime credential; this changes ADR-0005 amendment 12 item 26 and R-ARCH-33.
+  4. **The staff-provisioning function of the service layer** takes the grant step as a one-method port. Its only implementation is in the seed lane, because api and worker never hold the migrator credential (REQ-RLS-005).
+  5. **Implementing task:** recommended TASK-051, as a second migration directory in the same PR. senior-developer may place it elsewhere; it is merged before TASK-089 opens its PR. The exact change list, with the SQL, is rulings file §3.4.
+- **Why a database control and not the service rule alone:**
+  - The membership row is the only fact `app_is_operator()` reads, and it opens every tenant. D-ARCH-156 made every insert a self-insert, so the database could not tell staff provisioning from a user enrolling himself.
+  - The two service defects it takes are in code that TASK-049 and TASK-224 are about to write.
+  - D-ARCH-151 and D-ARCH-155 already closed the two neighbouring paths (creating a second operator organisation; an invitation into it) at the database, for the same outcome.
+  - No provisioning code exists yet, so the cost is one table and one clause.
+- **Checked (PGlite 17.5 with the real bootstrap files 00 to 02 and the six released migrations, statement by statement; rulings file §3.5):**
+  - without the migration, a user with no membership joins the operator organisation, links `OPERATOR_SUPER_ADMIN` and sees every organisation (PR65-SEC-02 reproduced);
+  - with it, the join is `P0001`; `platform_app` cannot insert a grant (`42501`) and can read the table; the migrator's grant makes the provisioned join work; customer organisations are unaffected;
+  - `down.sql` restores the function text exactly;
+  - the repository linter reports 0 findings on the migration with the manifest entry, and the rule-9 finding without it.
+- **Not verified:** PostgreSQL 18 and the suites. Lane B on the implementing PR is the evidence.
+- **Limits, stated:**
+  - A session that can set the context keys can name an existing staff member as its actor (T-35, accepted). The grant closes minting, not impersonation.
+  - A context that wrongly names the operator organisation still shows that organisation's own rows, as for any tenant. The route conditions of PR65-SEC-02 (a) stay binding.
+  - A granted user can re-add the own membership after removal until the grant is deleted. No Run 1 flow removes staff.
+- **Alternatives rejected:**
+  - **Service-layer control only:** no database control behind the one fact that opens every tenant.
+  - **Operator memberships only through a `SECURITY DEFINER` function:** a write-capable definer function and a write policy for `platform_definer`, against ADR-0005 amendments 6, 12 item 25 and 13 item 29; it stops only paths that do not call it.
+  - **A dedicated provisioning login role:** a new role, credential, policy set and grant set, and the audit entry of the membership would need it too.
+  - **A marker in the transaction context:** any session can set a context key.
+  - **A grant keyed by e-mail, written before the user exists:** an account registered earlier under that address would be covered by it.
+  - **A foreign key from the grant to `users`:** the Prisma relation needs a line in `identity.prisma`, which TASK-052 edits in the same batch, and a grant for an id that is no user grants nothing.
+- **Applied in:** ADR-0005 amendment 14 item 35 (and notes at items 26 and 29); data-model §1.5, §3.2, §4.4, §9.1, §9.3, A32; risks.md R-ARCH-33 and new R-ARCH-35; rulings file §3.
+- **Card lines:** rulings file §6 (the implementing task and TASK-089). The gate on TASK-089 is met by this entry.
+- **Owed by others:** security-analyst assigns the SEC-TC id and may cite the grant in T-35; product-manager may note on EPIC-B-207 that M2 staff management needs a runtime writer of grants and their removal, through an ADR-0005 amendment.
+- **Reversibility:** High until the migration merges. Afterwards the rule is removed by another function replacement; the table can stay unused.
+
+### D-ARCH-166 · 2026-11-19 · principal-architect · PR65-SEC-04: (a) `INVITED` by UPDATE closes with the function replacement of D-ARCH-165; (b) the PARTNER backstop is deferred to the M3 partner design; no users transition guard joins TASK-057 (ADR-0005 amendment 14 item 36)
+- **(a) Decision:** the replaced lifecycle guard also refuses an UPDATE that turns a status other than `INVITED` into `INVITED`. Until that migration merges, "no INVITED row is written" is a database property for INSERT only; data-model §3.2 now says so. The comment in the merged migration cannot be corrected, because an applied file is immutable. Nothing is exposed meanwhile: `INVITED` is in neither read list.
+- **(b) Deferred:** a PARTNER organisation with its own membership and a partner role link can be created below the service. In M1 no route or permission gives it anything. A CHECK that forbids the type until M3 would bind every role, change a merged case (the type-immutability control of `prisma/tests/organisations/cases.ts`) and need a contract step at M3. The M3 partner design decides how such an organisation is provisioned and owns the backstop.
+- **Users transition guard: not adopted.** The request was a trigger that lets a user do only `PENDING_VERIFICATION → ACTIVE` with verification and `ACTIVE → DEACTIVATED` on the own row.
+  - Every writer of a `users` row has `app.actor_id` = that user, because `p_users__own` is the only write policy. The verification flow, the housekeeping suspension for an overdue MFA enrolment, `ops:staff-reactivate` and the session worker of OI-25 all act as the user.
+  - A trigger therefore cannot tell a self-service request from a system flow, and an actor type carried in the context is a value any session can set.
+  - The bare transition graph would not stop the cases of the finding: `SUSPENDED → ACTIVE` is a legal edge.
+  - The control stays the closed request schemas and the T-33 fuzz cases already on the TASK-049 and TASK-057 cards (PR65-SEC-04 (c)).
+  - Revisit with M2 staff management, which adds an operator write branch on `users`.
+- **Card line:** TASK-057 drops its conditional sentence (rulings file §6).
+- **Applied in:** ADR-0005 amendment 14 item 36; data-model §3.2; rulings file §4.1 to §4.3.
+- **Reversibility:** High.
+
+### D-ARCH-167 · 2026-11-19 · principal-architect · Outbox purge horizon: 30 days — ADR-0004 item 6 stands and the data-model is corrected (the open item of D-ARCH-161)
+- **Decision:** published outbox events are deleted 30 days after publishing. data-model §3.5, §6.1, §10.1 and §10.5 said 7 days and are corrected; ADR-0004 item 6 and the note in ADR-0013 amendment 3 record that it is settled.
+- **Why:**
+  - ADR-0004 is the accepted decision, and no entry ever recorded a change to 7 days.
+  - A dead-letter record lives 14 days (D-ARCH-159). Redriving an `outbox_event` job needs its row, because `platform.job_context` reads it; at 7 days the row would be gone for the second half of the record's life.
+  - The horizons are then ordered: failed jobs 7 days, dead-letter records 14 days, outbox events 30 days, and `processed_events` 30 days after processing, which is never earlier than publishing. A replayed event still finds its `processed_events` row.
+- **Cost:** about 1.6 million resident rows instead of 0.4 million, about 1 GB with indexes (estimate from data-model §10.1).
+- **Alternative rejected:** amending ADR-0004 to 7 days. Smaller table, but it loses the redrive window and the "replayable for 30 days" consequence the ADR states, for about 1 GB.
+- **Found while ruling:** no card owns the outbox purge (nor the `processed_events` purge). senior-developer assigns it at the next fold; the card line is in rulings file §6.
+- **Applied in:** ADR-0004 item 6; ADR-0013 amendment 3 (one note); data-model §3.5, §6.1, §10.1, §10.5, A32.
+- **Reversibility:** High (one interval; nothing is built).

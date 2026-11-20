@@ -13,6 +13,10 @@
  *     same outcome: the extended protocol refuses two commands in one piece (42601 "cannot insert multiple commands into
  *     a prepared statement") and a fragment is a syntax error, so a passing piece is exactly one PostgreSQL command.
  * A control proves both refusals of step 2 on this server.
+ *
+ * The same oracle covers the token boundaries of tools/db/lexer-cases.ts (PR66-SEC-01 a-c, TASK-293): a `--` comment
+ * that a lone CR ends, a `$tag$` right after a non-ASCII identifier character, and a non-ASCII dollar tag. PostgreSQL
+ * reads every byte of a deployed file, so the split must agree with its scanner as well as with its grammar.
  */
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import type pg from 'pg';
@@ -25,6 +29,7 @@ import {
   caseText,
   type AtomicBodyCase,
 } from '../../../tools/db/atomic-body-cases.js';
+import { LEXER_CASES } from '../../../tools/db/lexer-cases.js';
 import { splitStatements } from '../../../tools/db/sql-text.js';
 import { PlatformPostgres } from '../harness/postgres.js';
 
@@ -136,6 +141,40 @@ describe('[PR43-SEC-11] splitStatements agrees with PostgreSQL 18 on BEGIN ATOMI
           outcomes.push((await outcome(() => split.query({ name: `piece_${String(index)}`, text: piece }))).code);
         }
         expect(outcomes).toEqual([entry.refusedWith ?? 'ok', ...HOSTILE_TAIL_STATEMENTS.map(() => 'ok')]);
+        expect(await tailEffects(split)).toEqual(TAIL_TOOK_EFFECT);
+      } finally {
+        await split.end();
+      }
+    },
+    120_000,
+  );
+});
+
+describe('[PR66-SEC-01] tokenize agrees with PostgreSQL 18 on token boundaries (lone CR, identifier-character $, non-ASCII tags)', () => {
+  it.each(LEXER_CASES.map((entry) => [entry.shape, entry] as const))(
+    '%s: the whole file and its split pieces have the same outcome, piece by piece, and the hostile tail runs at top level',
+    async (_shape, entry) => {
+      const pieces = splitStatements(entry.text);
+      expect(pieces).toEqual(entry.pieces);
+
+      // 1. The whole text as PostgreSQL receives a migration file in one simple query: the tail takes effect.
+      const whole = await freshSession();
+      try {
+        expect(await outcome(() => whole.query(entry.text))).toEqual({ code: 'ok', message: '' });
+        expect(await tailEffects(whole)).toEqual(TAIL_TOOK_EFFECT);
+      } finally {
+        await whole.end();
+      }
+
+      // 2. Every piece alone, through the extended protocol: each is exactly one command, and together they have the
+      // same effect (a piece holding a hidden statement would be refused with 42601; a cut string would not parse).
+      const split = await freshSession();
+      try {
+        const outcomes: string[] = [];
+        for (const [index, piece] of pieces.entries()) {
+          outcomes.push((await outcome(() => split.query({ name: `lex_piece_${String(index)}`, text: piece }))).code);
+        }
+        expect(outcomes).toEqual(pieces.map(() => 'ok'));
         expect(await tailEffects(split)).toEqual(TAIL_TOOK_EFFECT);
       } finally {
         await split.end();

@@ -1,6 +1,7 @@
 /**
  * Migration linter with negative fixtures (data-model.md §8.3; NT-DATA-004-b; NT-AVAIL-003-a (rules 2-6, 11);
- * SEC-TC-33 (rules 7-9, 12, 14); ADR-0005 am. 10 items 1 and 9 (rules 16 and 15); PR5-SEC-11/-12; TASK-003, TASK-016).
+ * SEC-TC-33 (rules 7-9, 12, 14); ADR-0005 am. 10 items 1 and 9 (rules 16 and 15); PR5-SEC-11/-12; TASK-003, TASK-016;
+ * PR66-SEC-01/02, TASK-293: token boundaries as PostgreSQL reads them, a lone CR, rule 10 at the call site).
  * Fixtures: tools/db/fixtures/lint/{migrations,bootstrap}/<case>/. The fixture tables are classified by
  * FIXTURE_CLASSES below (the repository's own manifests stay the source for the repository run).
  */
@@ -21,9 +22,11 @@ import {
   lintMigrations,
   lintRepository,
   lockTimeoutMs,
+  loneCarriageReturnLines,
   main,
   parseHeader,
   readReviewers,
+  routineBodyChangesData,
   routineDefinitionSha256,
   type LintFinding,
   type LockTimeoutEvent,
@@ -976,6 +979,416 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
       [join('escape-setting', '10-set-config.sql'), '20'],
     ]);
     expect(findings.map((finding) => finding.message.slice(-11))).toEqual(['statement 2', 'statement 2']);
+  });
+});
+
+describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and rule 10 at the call site (PR66-SEC-02)', () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'lint-task293-'));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+  /**
+   * Migration directories written at run time (a lone CR and the non-ASCII shapes are not committed as fixtures: the
+   * point is that they are invisible in review). One directory per entry, in order; returns [index, file, rule, message].
+   */
+  const lintTexts = (name: string, migrations: readonly string[], dataChanging: 'yes' | 'no' = 'no', down = 'SELECT 1;\n') => {
+    migrations.forEach((migration, index) => {
+      const dir = join(scratch, name, `2026111900000${String(index)}_case`);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'migration.sql'),
+        `-- migration-kind: expand\n-- data-changing: ${dataChanging}\n-- reversible: yes\n${migration}\n`,
+      );
+      writeFileSync(join(dir, 'down.sql'), down);
+    });
+    return lintMigrations(join(scratch, name), name, { tableClasses: FIXTURE_CLASSES }).map((finding) => {
+      const [, directory, file] = finding.file.split(/[\\/]/);
+      return [Number((directory ?? '').slice(13, 14)), file, finding.rule, finding.message] as const;
+    });
+  };
+  const ruleOf = (findings: readonly (readonly [number, string | undefined, string, string])[]) =>
+    findings.map(([index, file, rule]) => [index, file, rule]);
+  const GRANT = 'GRANT TRUNCATE ON public.fixture_items TO platform_app;';
+  const LONE_CR = /^a lone CR \(not followed by LF\) on line\(s\) \d+/;
+
+  it('[PR66-SEC-01] control: the GRANT alone is rule 8', () => {
+    expect(ruleOf(lintTexts('control', [GRANT]))).toEqual([[0, 'migration.sql', '8']]);
+  });
+
+  it('[PR66-SEC-01 a] a lone CR ends a -- comment: the GRANT after it is rule 8, and the CR itself is rule L', () => {
+    const findings = lintTexts('cr-comment', [`SELECT 1; -- note\r${GRANT}\nSELECT 2;`]);
+    expect(ruleOf(findings)).toEqual([
+      [0, 'migration.sql', 'L'],
+      [0, 'migration.sql', '8'],
+    ]);
+    expect(findings[0]?.[3]).toMatch(LONE_CR);
+  });
+
+  it('[PR66-SEC-01 a] a lone CR before the END of a routine body closes it there: the GRANT between two routines is rule 8', () => {
+    const routine = (name: string) => `CREATE FUNCTION public.${name}() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1;`;
+    expect(ruleOf(lintTexts('cr-body', [`${routine('f')} --\rEND; ${GRANT} ${routine('g')}\nEND;`]))).toEqual([
+      [0, 'migration.sql', 'L'],
+      [0, 'migration.sql', '8'],
+    ]);
+  });
+
+  it('[PR66-SEC-01 b] a $tag$ after a non-ASCII identifier character is part of the identifier: the GRANT between two such labels is rule 8', () => {
+    expect(ruleOf(lintTexts('ident-dollar', [`SELECT 1 AS é$a$; ${GRANT} SELECT 2 AS ä$a$;`]))).toEqual([[0, 'migration.sql', '8']]);
+    expect(ruleOf(lintTexts('nbsp-dollar', [`SELECT 1 AS \u00a0$q$; ${GRANT} SELECT 2 AS \u00a0$q$;`]))).toEqual([
+      [0, 'migration.sql', '8'],
+    ]);
+  });
+
+  it('[PR66-SEC-01 c] a non-ASCII dollar tag quotes a fake RESET ROLE: rule 15 still fires (the file ends inside SET ROLE); a real RESET ROLE is clean', () => {
+    const definer =
+      'SET ROLE platform_definer;\nCREATE FUNCTION platform.fixture_job() RETURNS int LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $$ SELECT 1 $$;\n';
+    const faked = lintTexts('tag-reset-role', [`${definer}SELECT $é$; RESET ROLE; $é$;`]);
+    expect(ruleOf(faked)).toEqual([[0, 'migration.sql', '15']]);
+    expect(faked[0]?.[3]).toMatch(/^the file ends with a SET ROLE still in effect/);
+    expect(lintTexts('tag-reset-role-control', [`${definer}RESET ROLE;`])).toEqual([]);
+  });
+
+  it('[PR66-SEC-01 c] a non-ASCII dollar tag quotes a fake ENABLE + FORCE: rule 9 still fires for the TENANT table; the real statements are clean', () => {
+    const table = 'CREATE TABLE public.fixture_orders (id uuid PRIMARY KEY, org_id uuid NOT NULL);\n';
+    const rls = 'ALTER TABLE public.fixture_orders ENABLE ROW LEVEL SECURITY; ALTER TABLE public.fixture_orders FORCE ROW LEVEL SECURITY;';
+    const faked = lintTexts('tag-rls', [`${table}SELECT $é$; ${rls} $é$;`]);
+    expect(ruleOf(faked)).toEqual([[0, 'migration.sql', '9']]);
+    expect(faked[0]?.[3]).toMatch(/^TENANT table "fixture_orders" needs ENABLE and FORCE ROW LEVEL SECURITY/);
+    expect(lintTexts('tag-rls-control', [`${table}${rls}`])).toEqual([]);
+  });
+
+  it('[PR66-SEC-01] rule L for a lone CR: in down.sql and in a bootstrap file too; CRLF line ends are not refused; loneCarriageReturnLines counts LF-delimited lines', () => {
+    expect(ruleOf(lintTexts('cr-down', ['SELECT 1;'], 'no', 'SELECT 1;\r-- x\n'))).toEqual([[0, 'down.sql', 'L']]);
+    expect(lintTexts('crlf', ['SELECT 1; -- note\r\nSELECT 2;\r\n'], 'no', 'SELECT 1;\r\n')).toEqual([]);
+    const bootstrap = join(scratch, 'bootstrap-cr');
+    mkdirSync(bootstrap, { recursive: true });
+    writeFileSync(join(bootstrap, '00-x.sql'), 'SET search_path = pg_catalog, pg_temp;\n-- c\rSELECT 1;\n');
+    const findings = lintBootstrap(bootstrap, { reviewers: [], today: '2026-11-19' }, 'bootstrap-cr');
+    expect(findings.map((finding) => finding.rule)).toEqual(['L']);
+    expect(findings[0]?.message).toMatch(/^a lone CR \(not followed by LF\) on line\(s\) 2:/);
+    expect(loneCarriageReturnLines('a\rb\nc\r\nd\re\n\r')).toEqual([1, 3, 4]);
+    expect(loneCarriageReturnLines('a\r\nb\n')).toEqual([]);
+  });
+
+  const WRITER = 'CREATE FUNCTION public.fixture_purge() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+  const CALL_RULE_10 =
+    /^call of public\.fixture_purge, a routine of this or an earlier migration whose body changes data, without "data-changing: yes" \(PR66-SEC-02\)/;
+
+  it('[PR66-SEC-02] rule 10 at the call site: a routine created in the file whose BEGIN ATOMIC body deletes, then called, is data-changing', () => {
+    const findings = lintTexts('call-atomic', [`${WRITER}\nSELECT public.fixture_purge();`]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+    expect(findings[0]?.[3]).toMatch(CALL_RULE_10);
+    // Controls: the definition alone, and the call under "data-changing: yes", are clean.
+    expect(lintTexts('call-atomic-definition-only', [WRITER])).toEqual([]);
+    expect(lintTexts('call-atomic-declared', [`${WRITER}\nSELECT public.fixture_purge();`], 'yes')).toEqual([]);
+  });
+
+  it.each([
+    [
+      'a PL/pgSQL dollar body (UPDATE) called with SELECT',
+      "CREATE FUNCTION public.fixture_touch() RETURNS void LANGUAGE plpgsql AS $$ BEGIN UPDATE public.fixture_items SET note = 'x'; END $$;\nSELECT fixture_touch();",
+    ],
+    [
+      'an SQL string body (DELETE) called unqualified',
+      "CREATE FUNCTION public.fixture_wipe() RETURNS void LANGUAGE sql AS 'DELETE FROM public.fixture_items';\nSELECT fixture_wipe();",
+    ],
+    [
+      'an SQL string body (MERGE) called with a quoted name',
+      'CREATE FUNCTION public.fixture_merge() RETURNS void LANGUAGE sql AS \'MERGE INTO public.fixture_items t USING public.fixture_owners o ON t.id = o.id WHEN MATCHED THEN DELETE\';\nSELECT "public"."fixture_merge"();',
+    ],
+    [
+      'a procedure (TRUNCATE in a dollar body) called with CALL',
+      'CREATE PROCEDURE public.fixture_reset() LANGUAGE sql AS $$ TRUNCATE public.fixture_items $$;\nCALL public.fixture_reset();',
+    ],
+    ['a DO block that PERFORMs the writer', `${WRITER}\nDO $$ BEGIN PERFORM public.fixture_purge(); END $$;`],
+    [
+      'a routine that calls the writer, called (transitive)',
+      `${WRITER}\nCREATE FUNCTION public.fixture_outer() RETURNS void LANGUAGE sql BEGIN ATOMIC SELECT public.fixture_purge(); END;\nSELECT public.fixture_outer();`,
+    ],
+    ['a call inside a CTE', `${WRITER}\nWITH x AS (SELECT public.fixture_purge()) SELECT 1 FROM x;`],
+    [
+      'an INSERT … SELECT body',
+      'CREATE FUNCTION public.fixture_copy() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items SELECT * FROM public.fixture_owners $$;\nSELECT public.fixture_copy();',
+    ],
+    [
+      'an upsert body (ON CONFLICT … DO UPDATE)',
+      "CREATE FUNCTION public.fixture_upsert() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items (id) VALUES (1) ON CONFLICT (id) DO UPDATE SET note = 'x' $$;\nSELECT public.fixture_upsert();",
+    ],
+    [
+      'a data-modifying WITH body',
+      'CREATE FUNCTION public.fixture_cte() RETURNS bigint LANGUAGE sql AS $$ WITH d AS (DELETE FROM public.fixture_items RETURNING 1) SELECT count(*) FROM d $$;\nSELECT public.fixture_cte();',
+    ],
+  ])('[PR66-SEC-02] rule 10 at the call site: %s', (_shape, migration) => {
+    expect(ruleOf(lintTexts(`call-${_shape.replace(/\W+/g, '-')}`, [migration]))).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[PR66-SEC-02] rule 10 at the call site across files: a writer created in an earlier migration and called in a later one', () => {
+    expect(ruleOf(lintTexts('call-cross-file', [WRITER, 'SELECT public.fixture_purge();']))).toEqual([[1, 'migration.sql', '10']]);
+  });
+
+  it.each([['"f("'], ['"g["'], ['"h)"'], ['"a*b+?"'], ['"x\\y{1}"'], ['"p|q^$"'], ['"say ""hi"""']])(
+    '[TASK-293 R1-m1] a writing routine named %s (regular-expression metacharacters, a quote) is a finding at its call, never a crash; the next file still lints',
+    (quoted) => {
+      const writer = `CREATE FUNCTION public.${quoted}() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;`;
+      const findings = lintTexts(`call-meta-${quoted.replace(/\W+/g, '-')}`, [`${writer}\nSELECT public.${quoted}();`, 'SELECT 1;']);
+      expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+      expect(findings[0]?.[3]).toContain(`call of public.${quoted.slice(1, -1).replaceAll('""', '"')}, a routine`);
+    },
+  );
+
+  it('[TASK-293 R1-m2] transitivity does not depend on order: a routine calling a writer created later in the file, or in a later file, is a writer at its call', () => {
+    const caller =
+      'CREATE FUNCTION public.fixture_caller() RETURNS void LANGUAGE plpgsql AS $$ BEGIN PERFORM public.fixture_purge(); END $$;';
+    expect(ruleOf(lintTexts('call-forward', [`${caller}\n${WRITER}\nSELECT public.fixture_caller();`]))).toEqual([
+      [0, 'migration.sql', '10'],
+    ]);
+    // A call judged between the two definitions (no writer yet) does not freeze the answer for the later call.
+    const between = lintTexts('call-forward-between', [
+      `${caller}\nSELECT public.fixture_caller();\n${WRITER}\nSELECT public.fixture_caller();`,
+    ]);
+    expect(ruleOf(between)).toEqual([[0, 'migration.sql', '10']]);
+    expect(between[0]?.[3]).toMatch(/^call of public\.fixture_caller, /);
+    expect(ruleOf(lintTexts('call-forward-files', [caller, `${WRITER}\nSELECT public.fixture_caller();`]))).toEqual([
+      [1, 'migration.sql', '10'],
+    ]);
+    // Control: the same caller without any writer behind it is clean.
+    expect(lintTexts('call-forward-control', [`${caller}\nSELECT public.fixture_caller();`])).toEqual([]);
+  });
+
+  it('[TASK-293 R1-n1] names: a writer created unqualified matches a call in any schema, and a quoted name keeps its spaces', () => {
+    const unqualified = 'CREATE FUNCTION fixture_unq() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    expect(ruleOf(lintTexts('call-unqualified', [`${unqualified}\nSELECT platform.fixture_unq();`]))).toEqual([[0, 'migration.sql', '10']]);
+    const spaced = 'CREATE FUNCTION public."my purge"() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    expect(ruleOf(lintTexts('call-spaced', [`${spaced}\nSELECT public."my purge"();`]))).toEqual([[0, 'migration.sql', '10']]);
+    expect(lintTexts('call-spaced-control', [`${spaced}\nSELECT public."my purge 2"();`])).toEqual([]);
+  });
+
+  it('[TASK-293 R1-n3] rule 10 body forms are matched in linear time: a 60 KB routine body and DO block without a semicolon lint in well under a second each', () => {
+    const body = ' insert into public.fixture_items on conflict'.repeat(2000);
+    const started = performance.now();
+    const findings = lintTexts('call-redos', [
+      `CREATE FUNCTION public.fixture_slow() RETURNS void LANGUAGE sql AS $$${body} $$;`,
+      `DO $$ BEGIN IF true THEN ${body} END IF; END $$;`,
+    ]);
+    // Generous bound against host load: the replaced pattern needed about 21 s for the routine body alone.
+    expect(performance.now() - started).toBeLessThan(5000);
+    expect(findings).toEqual([]); // no SELECT and no DO UPDATE after the INSERT: not data-changing
+  });
+
+  it('[PR293-SEC-02] bootstrap lane: an approved audit-DDL file whose E-string is continued on a new line is rule L, so a statement it hides is never linted as string text', () => {
+    const bootstrap = join(scratch, 'bootstrap-econt');
+    mkdirSync(bootstrap, { recursive: true });
+    writeFileSync(
+      join(bootstrap, '10-x.sql'),
+      "-- @audit-ddl security-approved: security-analyst 2026-11-13\nSET search_path = pg_catalog, pg_temp;\nSELECT E'x'\n'a\\'' ; CREATE FUNCTION public.h() RETURNS int LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1 $$ ; SELECT 1 AS \"q\" -- '\n;\n",
+    );
+    const findings = lintBootstrap(bootstrap, { reviewers: ['security-analyst'], today: '2026-11-19' }, 'bootstrap-econt');
+    expect(findings.map((finding) => finding.rule)).toEqual(['L']);
+    expect(findings[0]?.message).toMatch(/an E-string continued on a new line is refused \(PR293-SEC-02\)/);
+  });
+
+  /** An EXECUTE of a hex-obfuscated set_config('app.org_id', …) as an E-string continued on a new line (R3-M1 probe). */
+  const CONTINUED_EXECUTE = "EXECUTE E'SELECT s\\x65t_config(\\x27\\x61pp.org_id\\x27, \\x27x\\x27, true)'\n'';";
+
+  it('[TASK-293 R3-M1] rule 16: a DO block whose body holds a continued E-string is refused as an E-string, as the uncontinued control is', () => {
+    const findings = lintTexts('r3m1-do', [`DO $$ BEGIN ${CONTINUED_EXECUTE} END $$;`]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '16']]);
+    expect(findings[0]?.[3]).toMatch(/E-prefixed escape string/);
+    const control = lintTexts('r3m1-do-control', [`DO $$ BEGIN ${CONTINUED_EXECUTE.replace("'\n'';", "';")} END $$;`]);
+    expect(ruleOf(control)).toEqual([[0, 'migration.sql', '16']]);
+  });
+
+  it('[TASK-293 R3-M1] rule 16: a PL/pgSQL routine body holding a continued E-string is refused as an E-string (rule 16 reports one finding per statement, the context write first; without the mark only the dynamic-SQL finding would remain)', () => {
+    const findings = lintTexts('r3m1-fn', [
+      `CREATE FUNCTION public.fixture_cont() RETURNS void LANGUAGE plpgsql AS $$ BEGIN ${CONTINUED_EXECUTE} END $$;`,
+    ]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '16']]);
+    expect(findings[0]?.[3]).toMatch(/^writes the tenant request context in SQL \(E-prefixed escape string\)/);
+  });
+
+  it('[PR293-SEC-01] rule 10 body forms scale linearly: time(4n) / time(n) < 8 on an adversarial body with every statement start', () => {
+    const body = (n: number) => `as${' in insert into t on conflict open c for'.repeat(n)}`;
+    const fastest = (text: string) =>
+      Math.min(
+        ...[0, 1, 2].map(() => {
+          const started = performance.now();
+          expect(routineBodyChangesData(text)).toBe(false);
+          return performance.now() - started;
+        }),
+      );
+    const small = fastest(body(20_000));
+    const large = fastest(body(80_000));
+    expect(large / Math.max(small, 1)).toBeLessThan(8);
+  });
+
+  const DO = (body: string) => `DO $$ DECLARE r record; c refcursor; BEGIN ${body} END $$;`;
+
+  it.each([
+    [
+      'ALTER FUNCTION … SET SCHEMA, then a call in the new schema (row 1)',
+      `${WRITER}\nALTER FUNCTION public.fixture_purge() SET SCHEMA platform;\nSELECT platform.fixture_purge();`,
+      /^call of platform\.fixture_purge, /,
+    ],
+    [
+      'ALTER FUNCTION … RENAME TO, then a call under the new name',
+      `${WRITER}\nALTER FUNCTION public.fixture_purge() RENAME TO fixture_erase;\nSELECT public.fixture_erase();`,
+      /^call of public\.fixture_erase, /,
+    ],
+    [
+      'a routine body FOR r IN DELETE … RETURNING (row 2)',
+      'CREATE FUNCTION public.fixture_loop() RETURNS void LANGUAGE plpgsql AS $$ DECLARE r record; BEGIN FOR r IN DELETE FROM public.fixture_items RETURNING id LOOP NULL; END LOOP; END $$;\nSELECT public.fixture_loop();',
+      /^call of public\.fixture_loop, /,
+    ],
+    [
+      'a DO FOR r IN DELETE … RETURNING (row 7)',
+      DO('FOR r IN DELETE FROM public.fixture_items RETURNING id LOOP NULL; END LOOP;'),
+      /^data-changing statement/,
+    ],
+    [
+      'a DO FOR r IN UPDATE … RETURNING (row 7)',
+      DO("FOR r IN UPDATE public.fixture_items SET note = 'x' RETURNING id LOOP NULL; END LOOP;"),
+      /^data-changing statement/,
+    ],
+    [
+      'a DO OPEN c FOR DELETE … RETURNING (row 8)',
+      DO('OPEN c FOR DELETE FROM public.fixture_items RETURNING id;'),
+      /^data-changing statement/,
+    ],
+    [
+      'a DO OPEN c NO SCROLL FOR UPDATE … RETURNING (row 8)',
+      DO("OPEN c NO SCROLL FOR UPDATE public.fixture_items SET note = 'x' RETURNING id;"),
+      /^data-changing statement/,
+    ],
+    [
+      "a DO WITH x AS (SELECT ';') DELETE (row 9)",
+      DO("WITH x AS (SELECT ';') DELETE FROM public.fixture_items;"),
+      /^data-changing statement/,
+    ],
+    [
+      "a DO INSERT … VALUES (1, ';') ON CONFLICT … DO UPDATE (row 10)",
+      DO("INSERT INTO public.fixture_items (id, note) VALUES (1, ';') ON CONFLICT (id) DO UPDATE SET note = 'y';"),
+      /^data-changing statement/,
+    ],
+    [
+      'a DO UPDATE of an unqualified quoted name holding ; (row 11, the regression of the round-1 segment split)',
+      DO('UPDATE "fixture;items" SET note = \'x\';'),
+      /^data-changing statement/,
+    ],
+    [
+      "a DO EXECUTE of a string holding ';' before DELETE",
+      DO("EXECUTE 'SELECT 1; DELETE FROM public.fixture_items';"),
+      /^data-changing statement/,
+    ],
+    [
+      'a non-ASCII routine name (row 6, code review R2-n1)',
+      'CREATE FUNCTION public.purgé() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;\nSELECT public.purgé();',
+      /^call of public\.purgé, /,
+    ],
+    [
+      'a writing definition whose name the linter cannot read (three-part name; fail closed)',
+      'CREATE FUNCTION mydb.public.fixture_three() RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;',
+      /^a routine whose body changes data, with a name the linter cannot read/,
+    ],
+    [
+      'a call written with a three-part name (code review R2-n2)',
+      `${WRITER}\nSELECT mydb.public.fixture_purge();`,
+      /^call of public\.fixture_purge, /,
+    ],
+  ])('[PR293-SEC-01] rule 10 sees a shape PostgreSQL runs: %s', (shape, migration, message) => {
+    const findings = lintTexts(`sec01-${shape.replace(/\W+/g, '-').slice(0, 60)}`, [migration]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+    expect(findings[0]?.[3]).toMatch(message);
+  });
+
+  it('[TASK-293 R3-n1] a row lock inside a WITH query of a FOR … IN loop is clean; a data-modifying CTE there, and an UPDATE CTE, stay data-changing', () => {
+    expect(
+      lintTexts('r3n1-lock', [DO('FOR r IN WITH x AS (SELECT 1) SELECT id FROM public.fixture_items FOR UPDATE LOOP NULL; END LOOP;')]),
+    ).toEqual([]);
+    expect(
+      lintTexts('r3n1-no-key', [
+        DO('FOR r IN WITH x AS (SELECT 1) SELECT id FROM public.fixture_items FOR NO KEY UPDATE LOOP NULL; END LOOP;'),
+      ]),
+    ).toEqual([]);
+    expect(
+      ruleOf(
+        lintTexts('r3n1-delete', [
+          DO('FOR r IN WITH d AS (DELETE FROM public.fixture_items RETURNING id) SELECT id FROM d LOOP NULL; END LOOP;'),
+        ]),
+      ),
+    ).toEqual([[0, 'migration.sql', '10']]);
+    expect(
+      ruleOf(
+        lintTexts('r3n1-update', [
+          DO("FOR r IN WITH u AS (UPDATE public.fixture_items SET note = 'x' RETURNING id) SELECT id FROM u LOOP NULL; END LOOP;"),
+        ]),
+      ),
+    ).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[TASK-293 R3-n2] RENAME TO is tracked when the argument list holds parenthesised types (numeric(10,2), varchar(20)) and a quoted type name', () => {
+    const writer =
+      'CREATE FUNCTION public.fixture_typed(a numeric(10,2), b varchar(20)) RETURNS void LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; END;';
+    const findings = lintTexts('r3n2', [
+      `${writer}\nALTER FUNCTION public.fixture_typed(numeric(10,2), varchar(20)) RENAME TO fixture_typed2;\nSELECT public.fixture_typed2(1, 'x');`,
+    ]);
+    expect(ruleOf(findings)).toEqual([[0, 'migration.sql', '10']]);
+    expect(findings[0]?.[3]).toMatch(/^call of public\.fixture_typed2, /);
+    const quoted = lintTexts('r3n2-quoted', [
+      `${writer}\nALTER FUNCTION public.fixture_typed(numeric(10,2), "my(type") SET SCHEMA platform;\nSELECT platform.fixture_typed(1, 'x');`,
+    ]);
+    expect(ruleOf(quoted)).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[PR293-SEC-01] controls: row locks, IN (SELECT …), a cursor over a SELECT … FOR UPDATE, a string holding ; without DML and a reading routine whose name cannot be read are clean', () => {
+    const migration = [
+      DO('FOR r IN SELECT id FROM public.fixture_items FOR UPDATE LOOP NULL; END LOOP;'),
+      DO('OPEN c FOR SELECT id FROM public.fixture_items FOR UPDATE OF fixture_items;'),
+      DO('PERFORM 1 FROM public.fixture_items WHERE id IN (SELECT 1);'),
+      DO("RAISE NOTICE 'a; b';"),
+      'CREATE FUNCTION mydb.public.fixture_three_reader() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM public.fixture_items; END;',
+      'CREATE FUNCTION public.purgé_read() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM public.fixture_items; END;',
+      'SELECT public.purgé_read();',
+    ].join('\n');
+    expect(lintTexts('sec01-controls', [migration])).toEqual([]);
+  });
+
+  it('[PR293-SEC-01] stated limits, pinned: attribute notation, a cast function and an aggregate support function call a writer unseen', () => {
+    const writerOfRow =
+      'CREATE FUNCTION public.fixture_attr(t public.fixture_items) RETURNS integer LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; SELECT 1; END;';
+    const migration = [
+      writerOfRow,
+      'SELECT t.fixture_attr FROM public.fixture_items t;',
+      'CREATE CAST (public.fixture_items AS integer) WITH FUNCTION public.fixture_attr(public.fixture_items);',
+      'SELECT (t)::integer FROM public.fixture_items t;',
+      WRITER,
+      'CREATE AGGREGATE public.fixture_agg(integer) (SFUNC = public.fixture_purge, STYPE = integer);',
+      'SELECT public.fixture_agg(1);',
+    ].join('\n');
+    // PostgreSQL runs the DELETE in each of the three shapes (security record PR293-SEC-01 rows 3-5); the linter does
+    // not see it. A change that starts seeing one of them updates this pin and the "Not seen" list together.
+    expect(lintTexts('sec01-limits', [migration])).toEqual([]);
+  });
+
+  it('[PR66-SEC-02] rule 10 call-site controls: references that call nothing, a reading routine, a row lock and a same-prefix name are clean', () => {
+    const migration = [
+      'CREATE TABLE public.fixture_events (id integer);',
+      WRITER,
+      'REVOKE EXECUTE ON FUNCTION public.fixture_purge() FROM PUBLIC;',
+      'GRANT EXECUTE ON FUNCTION public.fixture_purge() TO platform_app;',
+      "COMMENT ON FUNCTION public.fixture_purge() IS 'deletes';",
+      'CREATE TRIGGER trg_fixture_events__purge AFTER INSERT ON public.fixture_events FOR EACH ROW EXECUTE FUNCTION public.fixture_purge();',
+      'CREATE FUNCTION public.fixture_read() RETURNS bigint LANGUAGE sql BEGIN ATOMIC SELECT count(*) FROM public.fixture_items; END;',
+      'SELECT public.fixture_read();',
+      "CREATE FUNCTION public.fixture_lock() RETURNS void LANGUAGE plpgsql AS $$ BEGIN PERFORM 1 FROM public.fixture_items FOR UPDATE; RAISE NOTICE 'x'; END $$;",
+      'SELECT public.fixture_lock();',
+      // INSERT … VALUES, also with ON CONFLICT DO NOTHING, is no rule-10 form at top level, so not in a body either.
+      'CREATE FUNCTION public.fixture_seed() RETURNS void LANGUAGE sql AS $$ INSERT INTO public.fixture_items (id) VALUES (1) ON CONFLICT DO NOTHING $$;',
+      'SELECT public.fixture_seed();',
+      'SELECT public.fixture_purge_count(), other.fixture_purge();',
+      // The statement exemption alone covers the second name of a list (it has no FUNCTION keyword before it).
+      'GRANT EXECUTE ON FUNCTION public.fixture_read(), public.fixture_purge() TO platform_app;',
+      // The FUNCTION-reference stripping alone covers a reference in a statement outside the exemption list.
+      'CREATE CAST (public.fixture_money AS integer) WITH FUNCTION public.fixture_purge() AS ASSIGNMENT;',
+    ].join('\n');
+    expect(lintTexts('call-controls', [migration])).toEqual([]);
   });
 });
 

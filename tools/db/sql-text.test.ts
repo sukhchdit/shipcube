@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   ESCAPE_STRING_MARK,
+  EscapeContinuationError,
   SqlLexError,
   containsEscapeString,
   literalBody,
@@ -16,6 +17,7 @@ import {
   tokenize,
 } from './sql-text.js';
 import { ATOMIC_BODY_CASES, HOSTILE_TAIL, HOSTILE_TAIL_STATEMENTS, caseText } from './atomic-body-cases.js';
+import { LEXER_CASES } from './lexer-cases.js';
 
 describe('SQL text helpers (bootstrap runner, migration linter)', () => {
   it('substitutes psql-style variables as a literal or an identifier, and only outside quotes, comments and bodies', () => {
@@ -261,6 +263,122 @@ describe('SQL text helpers (bootstrap runner, migration linter)', () => {
     expect(splitStatements(sql)).toEqual([String.raw`SELECT éE'\'`, 'SELECT 2']);
     // The ASCII control still marks a lone E.
     expect(tokenize(String.raw`SELECT E'\''`).some((token) => token.escape === true)).toBe(true);
+  });
+
+  it.each(LEXER_CASES.map((entry) => [entry.shape, entry] as const))(
+    '[PR66-SEC-01] splitStatements reads token boundaries as PostgreSQL does: %s',
+    (_shape, entry) => {
+      expect(splitStatements(entry.text)).toEqual(entry.pieces);
+      // Each row is a real differential: the PR #66 lexer split it otherwise (or threw).
+      expect(entry.before).not.toEqual(entry.pieces);
+    },
+  );
+
+  it('[PR66-SEC-01] the case table covers (a) CR before GRANT, SET and a body END, (b) é, U+00A0, U+FEFF, U+3000 before $q$, (c) a non-ASCII tag', () => {
+    const texts = LEXER_CASES.map((entry) => entry.text).join('\n');
+    for (const shape of [
+      'note\rGRANT',
+      'note\rSET lock_timeout',
+      '--\rEND;',
+      'é$q$',
+      '\u00a0$q$',
+      '\ufeff$q$',
+      '\u3000$q$',
+      '$é$; RESET ROLE; $é$',
+    ]) {
+      expect([shape, texts.includes(shape)]).toEqual([shape, true]);
+    }
+  });
+
+  it('[PR66-SEC-01 a] tokenize: a -- comment ends at LF or at a lone CR (scan.l non_newline [^\\n\\r]); CRLF keeps the CR out of the comment', () => {
+    expect(tokenize('-- a\rGRANT x;')).toEqual([
+      { kind: 'comment', text: '-- a' },
+      { kind: 'code', text: '\rGRANT x;' },
+    ]);
+    expect(tokenize('-- a\r\nSELECT 1')).toEqual([
+      { kind: 'comment', text: '-- a' },
+      { kind: 'code', text: '\r\nSELECT 1' },
+    ]);
+    // ASCII control: an LF-ended comment and a comment that ends the text are unchanged.
+    expect(tokenize('-- a\nSELECT 1')).toEqual([
+      { kind: 'comment', text: '-- a' },
+      { kind: 'code', text: '\nSELECT 1' },
+    ]);
+    expect(tokenize('SELECT 1 -- end')).toEqual([
+      { kind: 'code', text: 'SELECT 1 ' },
+      { kind: 'comment', text: '-- end' },
+    ]);
+    // psql reads the same comment end (psqlscan.l), so a variable after a CR-ended comment is substituted.
+    expect(substituteVariables("-- c\rSELECT :'v'", { v: 'x' })).toBe("-- c\rSELECT 'x'");
+    expect(stripComments('SELECT 1; -- c\rSELECT 2;')).toBe('SELECT 1; \rSELECT 2;');
+  });
+
+  it('[PR66-SEC-01 b] tokenize: a $ after an identifier character (ASCII or not) continues the identifier; after white space, punctuation or another token it opens a dollar quote', () => {
+    const kinds = (sql: string) => tokenize(sql).map((token) => token.kind);
+    for (const lead of ['é', 'ä', '\u00a0', '\ufeff', '\u3000', 'x', '_', '9', '$']) {
+      expect([lead, kinds(`SELECT a${lead}$q$ FROM t`)]).toEqual([lead, ['code']]);
+    }
+    expect(tokenize('SELECT 1 AS é$a$')).toEqual([{ kind: 'code', text: 'SELECT 1 AS é$a$' }]);
+    // ASCII controls: a dollar quote after a space, a parenthesis, a string or a comment.
+    expect(kinds('SELECT $q$x$q$')).toEqual(['code', 'dollar']);
+    expect(kinds('SELECT ($q$x$q$)')).toEqual(['code', 'dollar', 'code']);
+    expect(kinds("SELECT 'a'$q$x$q$")).toEqual(['code', 'string', 'dollar']);
+    expect(kinds('SELECT /* c */$q$x$q$')).toEqual(['code', 'comment', 'dollar']);
+  });
+
+  it('[PR66-SEC-01 c] tokenize: a dollar tag may hold non-ASCII letters (scan.l dolq_start / dolq_cont); a digit still cannot start it', () => {
+    expect(tokenize('SELECT $é$; RESET ROLE; $é$;')).toEqual([
+      { kind: 'code', text: 'SELECT ' },
+      { kind: 'dollar', text: '$é$; RESET ROLE; $é$' },
+      { kind: 'code', text: ';' },
+    ]);
+    expect(tokenize('SELECT $abé_9$x$abé_9$').map((token) => token.kind)).toEqual(['code', 'dollar']);
+    expect(literalBody({ kind: 'dollar', text: '$é$ body $é$' })).toBe(' body ');
+    expect(() => tokenize('SELECT $é$ open')).toThrow(/unterminated dollar-quoted string \$é\$/);
+    // `$1` is a parameter, never a tag.
+    expect(tokenize('SELECT $1, $2').map((token) => token.kind)).toEqual(['code']);
+  });
+
+  it.each([
+    ['U+00A0', '\u00a0'],
+    ['U+FEFF', '\ufeff'],
+    ['U+3000', '\u3000'],
+  ])(
+    '[PR #66 R1-n1] splitStatements: a lone %s piece is no white space (scan.l space is ASCII), so an END after it closes no block and BEGIN … ATOMIC around it opens none',
+    (_name, ch) => {
+      const routine = 'CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql BEGIN ATOMIC SELECT 1;';
+      // PostgreSQL refuses both texts (42601); the splitter must not close the block early.
+      expect(() => splitStatements(`${routine} ${ch} END; SELECT 2;`)).toThrow(/ends inside a routine body \(1 open\)/);
+      expect(splitStatements(`CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql BEGIN ${ch} ATOMIC SELECT 1; END;`)).toEqual([
+        `CREATE FUNCTION public.f() RETURNS integer LANGUAGE sql BEGIN ${ch} ATOMIC SELECT 1`,
+        'END',
+      ]);
+      // ASCII controls: tab, LF, CR, FF and VT are white space.
+      for (const space of ['\t', '\n', '\r', '\f', '\v']) {
+        expect(splitStatements(`${routine} ${space} END; SELECT 2;`)).toEqual([`${routine} ${space} END`, 'SELECT 2']);
+      }
+    },
+  );
+
+  it.each([
+    ['LF', "SELECT E'x'\n'a\\'' ; SELECT 2; SELECT 1 AS \"q\" -- '\n;"],
+    ['CR', "SELECT E'x'\r'y'"],
+    ['a comment before the newline', "SELECT E'x' -- c\n'y'"],
+    ['a comment line between', "SELECT E'x'\n-- c\n  'y'"],
+  ])('[PR293-SEC-02] an E-string continued on a new line (%s) is refused: PostgreSQL keeps its escapes live there', (_shape, sql) => {
+    expect(() => tokenize(sql)).toThrow(EscapeContinuationError);
+    expect(() => splitStatements(sql)).toThrow(SqlLexError);
+  });
+
+  it('[PR293-SEC-02] controls: a plain string continued on a new line, an E-string followed by a string on the same line or after ;, and an E-string before a comment and code stay accepted; nested dynamic SQL with a continued E-string counts as an escape string', () => {
+    expect(tokenize("SELECT 'a'\n'b'").filter((token) => token.kind === 'string')).toHaveLength(2);
+    expect(() => tokenize("SELECT E'a' 'b'")).not.toThrow();
+    expect(() => tokenize("SELECT E'a';\n'b'")).not.toThrow();
+    expect(() => tokenize("SELECT E'a'\n-- c\nSELECT 1")).not.toThrow();
+    expect(() => tokenize(`SELECT E'a'${'\n--'.repeat(50_000)}`)).not.toThrow(); // linear scan, no backtracking
+    // The body of the literal is `SELECT E'x'` LF `'y'`: it does not lex, and it is an escape string (fail closed).
+    expect(containsEscapeString("SELECT 'SELECT E''x''\n''y'''")).toBe(true);
+    expect(containsEscapeString("SELECT 'SELECT ''x''\n''y'''")).toBe(false);
   });
 
   it('fails on unterminated comments, strings, identifiers and dollar quotes', () => {
