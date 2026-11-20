@@ -12,6 +12,7 @@ import { API_PREFIX, createApp, type ModuleRegistration } from '../../apps/api/s
 import { moduleRegistry } from '../../apps/api/src/modules/index.generated.js';
 import type { TenantTxRunner } from '../../apps/api/src/platform/db/index.js';
 import { healthRoutes } from '../../apps/api/src/platform/health/router.js';
+import type { IdempotencyStore } from '../../apps/api/src/platform/idempotency/store.js';
 import { DOCS_PATH } from '../../apps/api/src/platform/openapi/serve.js';
 import type { RouteDescriptor } from '../../apps/api/src/platform/routing/define-route.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../../apps/api/src/platform/routing/pipeline.js';
@@ -39,21 +40,31 @@ export const unusedRunner: TenantTxRunner<unknown> = {
   withTenantTx: <R>(): Promise<R> => Promise.reject(new Error('api-mounts: the metadata checks never open a transaction')),
 };
 
+/** An idempotency store a metadata fixture never calls (the tx slot refuses an idempotent route without one; TASK-040). */
+const unusedIdempotency: IdempotencyStore = {
+  begin: () => Promise.reject(new Error('metadata fixtures never execute')),
+  complete: () => Promise.reject(new Error('metadata fixtures never execute')),
+  release: () => Promise.reject(new Error('metadata fixtures never execute')),
+  renew: () => Promise.reject(new Error('metadata fixtures never execute')),
+  log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+};
+
 const passThrough: RouteSlot = () => (_req, _res, next) => {
   next();
 };
 
 /**
- * Slots for contract-shaped FIXTURE routes (route-metadata seeded defects): the audit, idempotency and rate-limit
- * stubs refuse at mount the metadata they cannot honour (PR32-SEC-03), which is right for an app and wrong for a test
- * that only compares a route's metadata with openapi.yaml. Never used for the real registry (`loadApiMounts()`).
+ * Slots for contract-shaped FIXTURE routes (route-metadata seeded defects): the audit and rate-limit stubs and the tx
+ * slot without an idempotency store refuse at mount the metadata they cannot honour (PR32-SEC-03), which is right for
+ * an app and wrong for a test that only compares a route's metadata with openapi.yaml. Never used for the real registry
+ * (`loadApiMounts()`).
  */
 export function metadataFixtureSlots(): PipelineSlots {
   return {
     ...defaultPipelineSlots({ tenantTx: unusedRunner }),
     rateLimit: passThrough,
     idempotency: passThrough,
-    execute: executeSlot({ tenantTx: unusedRunner, audit: () => Promise.resolve() }),
+    execute: executeSlot({ tenantTx: unusedRunner, audit: () => Promise.resolve(), idempotency: unusedIdempotency }),
   };
 }
 
