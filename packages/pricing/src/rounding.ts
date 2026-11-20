@@ -13,13 +13,21 @@ import { PricingError } from './errors.js';
 /** `{ bps: 1500 }` is 15 %; `{ decimal: '0.15' }` is the same rate as an exact decimal fraction. */
 export type Rate = { readonly bps: number } | { readonly decimal: string };
 
-/** The exact ratio of a rate; PRICING_CONFIG_INVALID for a non-integer bps value or a malformed decimal. */
+/**
+ * The exact ratio of a rate; PRICING_CONFIG_INVALID for a non-integer bps value, a malformed decimal, or a rate with
+ * both keys or neither (code review R1-n3). Only own properties count (PR076-SEC-03).
+ */
 export function rateRatio(rate: Rate): Ratio {
-  if ('bps' in rate) {
-    if (!Number.isSafeInteger(rate.bps)) throw new PricingError('PRICING_CONFIG_INVALID', 'rate bps must be an integer');
-    return ratio(rate.bps, BPS_PER_UNIT);
+  const isObject = typeof rate === 'object' && rate !== null;
+  const hasBps = isObject && Object.hasOwn(rate, 'bps');
+  const hasDecimal = isObject && Object.hasOwn(rate, 'decimal');
+  if (hasBps === hasDecimal) throw new PricingError('PRICING_CONFIG_INVALID', 'a rate has exactly one of bps and decimal');
+  if ('bps' in rate && hasBps) {
+    const { bps } = rate;
+    if (!Number.isSafeInteger(bps)) throw new PricingError('PRICING_CONFIG_INVALID', 'rate bps must be an integer');
+    return ratio(bps, BPS_PER_UNIT);
   }
-  const parsed = parseDecimal(rate.decimal);
+  const parsed = parseDecimal((rate as { readonly decimal: string }).decimal);
   if (parsed === undefined) throw new PricingError('PRICING_CONFIG_INVALID', 'rate decimal must be a finite decimal string');
   return parsed;
 }

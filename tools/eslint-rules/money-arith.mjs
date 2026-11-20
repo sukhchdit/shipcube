@@ -9,11 +9,17 @@
  *    whatever its name;
  *  - name-based, always (the fallback for untyped files): it recognises `amount`, `minor`, `<x>Amount`, `<x>Minor` and
  *    the snake-case column names `<x>_amount`, `<x>_minor`, as identifiers or as member names.
- * Comparisons are allowed; so is `+` on strings.
+ * Both sides of a binary operator and of a compound assignment (`total += line.amount`) are checked. Comparisons are
+ * allowed; so is `+` / `+=` on strings.
+ *
+ * Limits: an explicit conversion strips the brand and the name (`Number(m.amount) + 1`, `+m.amount * 1`), so it is not
+ * reported; `-m.amount` is `@typescript-eslint/no-unsafe-unary-minus`.
  */
 
 const MINOR_BRAND_PROPERTY = '__brand';
 const MINOR_BRAND_VALUE = 'Minor';
+/** TypeScript `TypeFlags.String | StringLiteral | TemplateLiteral | StringMapping`. */
+const STRING_LIKE_FLAGS = 4 | 128 | 134_217_728 | 268_435_456;
 
 /**
  * True when the TypeScript type, or one of its union/intersection constituents, has `__brand: 'Minor'`.
@@ -118,6 +124,17 @@ export default {
       return carriesMinorBrand(type, checker, tsNode) ? context.sourceCode.getText(node).slice(0, 40) : null;
     }
 
+    /**
+     * True when type information shows the expression is a string (only with types; untyped files answer false).
+     * @param {import('estree').Node} node
+     * @returns {boolean}
+     */
+    function isStringTyped(node) {
+      if (checker === null || services?.esTreeNodeToTSNodeMap === undefined) return false;
+      const tsNode = services.esTreeNodeToTSNodeMap.get(/** @type {never} */ (node));
+      return tsNode !== undefined && (checker.getTypeAtLocation(tsNode).flags & STRING_LIKE_FLAGS) !== 0;
+    }
+
     return {
       BinaryExpression(node) {
         if (!ARITHMETIC.has(node.operator)) return;
@@ -127,7 +144,9 @@ export default {
       },
       AssignmentExpression(node) {
         if (!ARITHMETIC_ASSIGN.has(node.operator)) return;
-        const name = moneyName(node.left);
+        // `text += …` builds a string (code review R1-m2 keeps it allowed); `total += line.amount` accumulates money.
+        if (node.operator === '+=' && (isStringish(node.right) || isStringTyped(node.left))) return;
+        const name = moneyName(node.left) ?? moneyName(node.right);
         if (name !== null) context.report({ node, messageId: 'moneyArithmetic', data: { name } });
       },
       UpdateExpression(node) {

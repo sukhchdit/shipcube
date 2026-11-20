@@ -285,6 +285,18 @@ const RULES: readonly Violation[] = [
   ['import-x/no-cycle: a <-> b (b)', 'rules/import-cycle/packages/shared/src/bad-b.ts', 'import-x/no-cycle', ''],
   ['platform/money-arith: `+` on minor units', 'rules/money-arith/packages/pricing/src/bad-total.ts', 'platform/money-arith', ''],
   [
+    '[R1-m2] platform/money-arith: `t += line.amount` (the right-hand side of a compound assignment)',
+    'rules/money-arith/packages/pricing/src/bad-compound.ts',
+    'platform/money-arith',
+    "'amount'",
+  ],
+  [
+    '[R1-m2] platform/money-arith (type-aware): `sum += value` over Minor values',
+    'typed/money-arith/packages/pricing/src/bad-minor-compound.ts',
+    'platform/money-arith',
+    "'value'",
+  ],
+  [
     '[PR #2 m10] platform/money-arith (type-aware): `+` on two Minor-branded values whose names the heuristic misses',
     'typed/money-arith/packages/pricing/src/bad-minor-brand.ts',
     'platform/money-arith',
@@ -298,6 +310,24 @@ const RULES: readonly Violation[] = [
       ['crypto.randomUUID()', 'bad-random-uuid', 'crypto.randomUUID'],
       ['globalThis.crypto.getRandomValues()', 'bad-get-random-values', 'crypto.getRandomValues'],
       ['process.env', 'bad-process-env', 'process.env'],
+      ['[R1-m1] a destructured process (const { env } = process)', 'bad-destructured-env', 'process'],
+      ['[R1-m1] an aliased Date (const Clock = Date; new Clock())', 'bad-aliased-date', 'Date'],
+      ['[R1-m1] process.hrtime.bigint()', 'bad-process-hrtime', 'process.hrtime'],
+      ['[R1-m1] process.argv (environment)', 'bad-process-argv', 'process.argv'],
+      ['[R1-m1] Date(x) still reads the clock', 'bad-date-call-with-argument', 'Date()'],
+      ['[R1-m1] new Date(...spread)', 'bad-new-date-spread', 'new Date()'],
+      ['[R1-m1] performance.timeOrigin', 'bad-performance-time-origin', 'performance.timeOrigin'],
+      ['[PR076-SEC-01] Math[`random`] through a template key', 'bad-math-template-key', 'Math.random'],
+      [
+        '[PR076-SEC-01] uuidv7 (clock and randomness) from the allow-listed @platform/shared root',
+        'bad-shared-uuidv7',
+        '@platform/shared uuidv7',
+      ],
+      [
+        '[PR076-SEC-01] a namespace import of @platform/shared (it carries uuidv7)',
+        'bad-shared-namespace',
+        '@platform/shared (whole module)',
+      ],
     ] as const
   ).map(([title, name, what]): Violation => [
     `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
@@ -305,6 +335,12 @@ const RULES: readonly Violation[] = [
     PRICING_PURITY,
     `'${what}' is not allowed in packages/pricing`,
   ]),
+  [
+    '[AT-US-138-02] [PR076-SEC-01] platform/pricing-purity: production code imports a module of its tests/ folder',
+    'rules/pricing-purity/packages/pricing/src/bad-tests-import.ts',
+    PRICING_PURITY,
+    'never imports a test module',
+  ],
   [
     '[AT-US-138-02] platform/pricing-purity, the boundaries allow-list and outbound-http-via-client: packages/pricing imports axios',
     'rules/pricing-purity/packages/pricing/src/bad-axios.ts',

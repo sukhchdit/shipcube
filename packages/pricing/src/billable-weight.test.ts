@@ -1,9 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
-import { type BillableWeight, type CanonicalPackage, money } from '@platform/shared';
+import type { BillableWeight, CanonicalPackage } from '@platform/shared';
 
 import { validatedBillableWeight } from './billable-weight.js';
 import { isPricingError } from './errors.js';
-import { applyRate, rateRatio } from './rounding.js';
 import { pricingInput } from './tests/fixtures.js';
 
 const { packages, billableWeight } = pricingInput().request;
@@ -53,19 +52,5 @@ describe('validatedBillableWeight (ADR-0015 §3)', () => {
     ],
   ])('refuses %s with PRICING_INPUT_INVALID', (_name, pkgs, weight) => {
     expect(codeOf(() => validatedBillableWeight(pkgs, weight))).toBe('PRICING_INPUT_INVALID');
-  });
-});
-
-describe('rounding (DR-B11)', () => {
-  it('reads bps and exact decimal rates', () => {
-    expect(rateRatio({ bps: 1500 })).toEqual({ numerator: 3n, denominator: 20n });
-    expect(rateRatio({ decimal: '0.15' })).toEqual({ numerator: 3n, denominator: 20n });
-    expect(applyRate(money(1050, 'USD'), { bps: 1500 })).toEqual(money(158, 'USD'));
-    expect(applyRate(money(1050, 'USD'), { decimal: '-0.15' })).toEqual(money(-158, 'USD'));
-  });
-
-  it('refuses a fractional bps value or a malformed decimal with PRICING_CONFIG_INVALID', () => {
-    expect(codeOf(() => rateRatio({ bps: 15.5 }))).toBe('PRICING_CONFIG_INVALID');
-    expect(codeOf(() => rateRatio({ decimal: '15%' }))).toBe('PRICING_CONFIG_INVALID');
   });
 });

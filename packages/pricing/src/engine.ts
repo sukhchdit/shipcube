@@ -17,7 +17,7 @@ import { add, assertCurrencyCode, isMoney, isNegative, type Money, MoneyError, n
 import { validatedBillableWeight } from './billable-weight.js';
 import { PricingError } from './errors.js';
 import { baseFreightStep } from './lines/base-freight.js';
-import { chargeLine, EMPTY_STATE, explanationEntry } from './state.js';
+import { chargeLine, EMPTY_STATE, explanationEntry, rejectedCandidateCount, warnings } from './state.js';
 import {
   type ChargeLine,
   COST_SOURCES,
@@ -90,8 +90,8 @@ export function runPricing(input: PricingInput, steps: readonly PricingStep[]): 
       engineVersion: ENGINE_VERSION,
       configVersion,
       entries: Object.freeze(state.entries.map(explanationEntry)),
-      rejectedCandidateCount: state.rejectedCandidateCount,
-      warnings: Object.freeze([...state.warnings]),
+      rejectedCandidateCount: rejectedCandidateCount(state),
+      warnings: warnings(state),
     }),
   });
 }

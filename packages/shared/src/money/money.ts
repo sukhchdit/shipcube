@@ -54,15 +54,34 @@ export function zero(currency: string): Money {
   return money(0, currency);
 }
 
-/** True for a plain `{ amount, currency }` object holding a safe integer and a known ISO 4217 code. */
-export function isMoney(value: unknown): value is Money {
-  if (typeof value !== 'object' || value === null) return false;
-  const { amount, currency } = value as { amount?: unknown; currency?: unknown };
-  return Number.isSafeInteger(amount) && isCurrencyCode(currency);
+/** An own data property (never an inherited value or a getter; PR076-SEC-03). */
+function ownData(value: object, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  return descriptor !== undefined && 'value' in descriptor ? descriptor.value : undefined;
 }
 
-/** CURRENCY_MISMATCH unless both values share one currency. */
+/**
+ * True for an object whose own data properties `amount` (a safe integer) and `currency` (an ISO 4217 code of the
+ * table) make a Money value. Inherited and accessor properties do not count (PR076-SEC-03).
+ */
+export function isMoney(value: unknown): value is Money {
+  if (typeof value !== 'object' || value === null) return false;
+  return Number.isSafeInteger(ownData(value, 'amount')) && isCurrencyCode(ownData(value, 'currency'));
+}
+
+/**
+ * Every helper checks its operands, not only its results (PR076-SEC-02): a forged `{ amount: '9' }`, `0.5` or `1050n`
+ * (a JSON snapshot, a raw-SQL `int8` string) fails with MONEY_INVALID instead of computing on the wrong figure.
+ */
+function operand(value: Money): Money {
+  if (!isMoney(value)) throw new MoneyError('MONEY_INVALID', 'operand must be integer minor units with an ISO 4217 code');
+  return value;
+}
+
+/** CURRENCY_MISMATCH unless both values share one currency (MONEY_INVALID for an operand that is not Money). */
 export function assertSameCurrency(left: Money, right: Money): void {
+  operand(left);
+  operand(right);
   if (left.currency !== right.currency) {
     throw new MoneyError('CURRENCY_MISMATCH', `cannot combine ${left.currency} with ${right.currency} without an FX step`);
   }
@@ -79,6 +98,7 @@ export function sub(left: Money, right: Money): Money {
 }
 
 export function negate(value: Money): Money {
+  operand(value);
   return make(minor(0 - value.amount), value.currency);
 }
 
@@ -96,19 +116,24 @@ export function compare(left: Money, right: Money): -1 | 0 | 1 {
 }
 
 export function equals(left: Money, right: Money): boolean {
+  operand(left);
+  operand(right);
   return left.currency === right.currency && left.amount === right.amount;
 }
 
 export function isZero(value: Money): boolean {
+  operand(value);
   return value.amount === 0;
 }
 
 export function isNegative(value: Money): boolean {
+  operand(value);
   return value.amount < 0;
 }
 
 /** `value * factor`, rounded once to the minor unit, halves away from zero (DR-B11). */
 export function mulRatio(value: Money, factor: Ratio): Money {
+  operand(value);
   const exact = ratio(BigInt(value.amount) * factor.numerator, factor.denominator);
   return make(fromBigInt(roundHalfAwayFromZero(exact)), value.currency);
 }
@@ -124,6 +149,7 @@ export function percentage(value: Money, bps: number): Money {
  * remainders, ties to the lower index. Deterministic; signs follow `value`.
  */
 export function allocate(value: Money, weights: readonly number[]): Money[] {
+  operand(value);
   const ws = weights.map((weight) => {
     if (!Number.isSafeInteger(weight) || weight < 0) throw new MoneyError('RATE_INVALID', 'weights must be non-negative safe integers');
     return BigInt(weight);
@@ -148,6 +174,7 @@ export function allocate(value: Money, weights: readonly number[]): Money[] {
  * halves away from zero. RATE_INVALID for a rate that is not positive.
  */
 export function convert(value: Money, rate: Ratio | string, to: string): Money {
+  operand(value);
   const factor = typeof rate === 'string' ? decimalRatio(rate) : rate;
   if (factor.numerator <= 0n) throw new MoneyError('RATE_INVALID', 'FX rate must be positive');
   const target = assertCurrencyCode(to);
@@ -175,6 +202,7 @@ export function fromMajor(value: string | number, currency: string): Money {
 
 /** The major-unit decimal text with exactly the currency's exponent of fraction digits (1234 USD -> "12.34"). */
 export function toMajorString(value: Money): string {
+  operand(value);
   const exponent = currencyExponent(value.currency);
   const digits = String(Math.abs(value.amount)).padStart(exponent + 1, '0');
   const sign = value.amount < 0 ? '-' : '';
