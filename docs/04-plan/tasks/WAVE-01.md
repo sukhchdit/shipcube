@@ -2,11 +2,11 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Must DC (+ non-DC enablers)**
 
-Tasks: **41** (S 7 / M 34; opus 17 / sonnet 24; demo-critical 33) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 112.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **42** (S 8 / M 34; opus 17 / sonnet 25; demo-critical 33) in **11** batches of ≤ 4 parallel tasks. Estimated effort ≈ 114 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Lane B `wave` evidence; staff and customer sign-in API + screens work in compose; generated suites green incl. new identity/org routes; lane C `wave-end` if within the monthly cap (priority tier 2, PLAN.md §8).
 
-**Stories completed in this wave (40):** US-009 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-040, US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-087 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
+**Stories completed in this wave (39):** US-009 (DC), US-011 (DC), US-015 (DC), US-016 (DC), US-017 (DC), US-018 (DC), US-020 (DC), US-023 (DC), US-024 (DC), US-025 (DC), US-030 (DC), US-031 (DC), US-036, US-037, US-038 (DC), US-042 (DC), US-044, US-052 (DC), US-053 (DC), US-063 (DC), US-068 (DC), US-070, US-076 (DC), US-078 (DC), US-080 (DC), US-087 (DC), US-101 (DC), US-103, US-104, US-106, US-107 (DC), US-108 (DC), US-110 (DC), US-115 (DC), US-116 (DC), US-117 (DC), US-274 (DC), US-276 (DC), US-284 (DC).
 
 ## Batches
 
@@ -22,7 +22,7 @@ Tasks: **41** (S 7 / M 34; opus 17 / sonnet 24; demo-critical 33) in **11** batc
 | 1.8 | TASK-063 Mandatory TOTP for operator members, e-mailed first-enrolment code outside local/test, 24 h deadline<br>TASK-064 Permission-aware UI helper can() and frontend route guard<br>TASK-065 Client token handling<br>TASK-066 Seed currencies and FX snapshots | identity-mfa<br>fe-authz<br>fe-session<br>prisma-seed |
 | 1.9 | TASK-067 Admin app route guard, staff-only admission, MFA gate and 30-minute sliding admin refresh<br>TASK-068 Customer web shell<br>TASK-069 Admin shell<br>TASK-070 Public read-only reference endpoints complete | identity-session, api-mfa-gate<br>web-shell<br>admin-shell<br>mod-admin-settings-reference |
 | 1.10 | TASK-071 Staff sign-in, MFA challenge and TOTP enrolment screens<br>TASK-072 Customer auth screens<br>TASK-073 Audit viewer API<br>TASK-074 Notification provider interface, Mailpit transport in non-production only, BullMQ send job with retries and DLQ | admin-auth<br>web-auth<br>mod-audit-viewer, lint<br>mod-notifications |
-| 1.11 | TASK-292 TASK-036-F1 | shared-errors |
+| 1.11 | TASK-292 TASK-036-F1<br>TASK-295 Prisma bump or effect override; remove the effect audit waiver | shared-errors<br>root |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
 
@@ -252,11 +252,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-040 (M0 Must) Redis-backed rate limiting and headers |
-| Stories (partial; completed by TASK-073) | US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
+| Stories (completes) | — |
+| Stories (partial; completed by TASK-141, TASK-073) | US-040 (M0 Must) Redis-backed rate limiting and headers<br>US-087 **DC** (M0 Must) Action types, actor types and complete entry fields |
 | REQs | REQ-API-014, REQ-SEC-005, REQ-SEC-006, REQ-AUDIT-002, REQ-AUDIT-003, REQ-AUDIT-011 |
 | NFRs | NFR-SEC-005 |
-| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084, D-ARCH-125, PR48-SEC-06, D-TASK027-11, D-ARCH-134, T-39, SEC-TC-15, PR56-SEC-03, D-SEC-PR56-01, D-ORCH-109, D-ARCH-142, PR61-SEC-12, D-SEC-PR61-03, D-ORCH-135, D-ARCH-173, D-ARCH-174, D-ARCH-175, D-ARCH-176, D-ARCH-177, D-ARCH-178, D-ARCH-179, D-SECT39-01, D-SECPR041-01, PR041-SEC-02, D-SD-004 |
+| Spikes / security / decisions | PR21-SEC-01, D-ARCH-084, D-ARCH-125, PR48-SEC-06, D-TASK027-11, D-ARCH-134, T-39, SEC-TC-15, PR56-SEC-03, D-SEC-PR56-01, D-ORCH-109, D-ARCH-142, PR61-SEC-12, D-SEC-PR61-03, D-ORCH-135, D-ARCH-173, D-ARCH-174, D-ARCH-175, D-ARCH-176, D-ARCH-177, D-ARCH-178, D-ARCH-179, D-SECT39-01, D-SECPR041-01, PR041-SEC-02, D-SD-004, D-ARCH-181, D-ARCH-182, PR041-SEC-09, D-SECPR041-02, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
@@ -276,15 +276,16 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - apps/api/src/app.ts and apps/api/src/start-api.ts (trust-proxy setting of AT-US-087-04, the RBAC-matrix createApp seam, the startApi budget composition; D-SECT39-01 card line 2, D-ARCH-147 table)
 
 **Acceptance tests to write**
-- All US-040 scenarios (429 problem+json, RateLimit-* headers, shared across 2 API replicas)
+- SCENARIO OWNERSHIP (D-PM-078; code review R1-m7 and R2-C3): this task proves through mounted routes AT-US-040-01, -02, -03 rows 1, 3 and 4, -05 to -12 and -17 (429 problem+json, RateLimit-* headers, shared across 2 API replicas); the tests of quoteCreateRules, emailSendRules, authAccountRule and the stream slots are engine proofs and complete no scenario; AT-US-040-03 row 2 is owned by TASK-052, AT-US-040-13 and -14 by TASK-049, AT-US-040-04 and AT-US-040-03 row 5 by TASK-091, AT-US-040-15 and -16 by TASK-141, which completes US-040
 - PR21-SEC-01 step 5 (PR #21 security review; D-ARCH-084; owner resolved here, not TASK-108): the step-0 per-IP limiter (ADR-0016 am. 1) fills the pipeline slot TASK-020 fixed BEFORE `routes` (path-less), so /api/docs/* is limited like every other public route; the TASK-020 pipeline-order test stays green and a test proves a docs path returns 429 after the step-0 budget
-- AT-US-087-04 (D-ARCH-125; PR #42 code review R1-m5; ADR-0016 am. item 1; EC-A12): this task owns the trusted proxy chain — the Express trust-proxy setting is derived from TRUST_PROXY_HOPS (hops or CIDRs of the edge) in the api composition, so req.ip is the first untrusted hop; api test: a request whose X-Forwarded-For carries a forged leading address from an untrusted hop yields req.ip (and therefore the audit entry IP that TASK-029 copies and the step-0 limiter key) equal to the first untrusted hop, never the forged value; the local edge proxy in Compose counts as one trusted hop; US-087 is partial here
+- AT-US-087-04 (D-ARCH-125; PR #42 code review R1-m5; ADR-0016 am. item 1; EC-A12): this task owns the trusted proxy chain — the Express trust-proxy setting is derived from TRUST_PROXY_HOPS (hops of the edge; ADR-0016 amendment 12 item 9 narrows amendment 1 to a hop count; D-QG-001 QG-041-C3 (c); D-ARCH-181) in the api composition, so req.ip is the first untrusted hop; api test: a request whose X-Forwarded-For carries a forged leading address from an untrusted hop yields req.ip (and therefore the audit entry IP that TASK-029 copies and the step-0 limiter key) equal to the first untrusted hop, never the forged value; the local edge proxy in Compose counts as one trusted hop; US-087 is partial here
 - RBAC MATRIX SEAM (PR48-SEC-06; PR #48 code review R1-m3; D-TASK027-11; D-ARCH-134): when the step-0 per-IP limiter becomes real, the generated matrix (tests/generated/rbac) needs a seam to pass it — a createApp option reachable only from tests (no environment variable or configuration switch) plus a test that the production composition passes the real limiter; the seam is listed in the still-stubbed list of the matrix app (TASK-289) and retired like the credential seams when its owner lands
 - T-39 PER-ACTOR DENIAL BUDGET (threat-model T-39, MEDIUM; PR56-SEC-03 = PR #56 code review R1-m3; D-SEC-PR56-01; D-ORCH-109; D-ARCH-142; DUE before the first route with a catalogued permission is registered in moduleRegistry: TASK-049 depends on this task and every identity and organisation route task descends from TASK-049 (generator-verified); the route tasks of wave 2 and later that do not descend from it — TASK-087 quote, TASK-091 guestquote, TASK-092 saga and the like — start after batch 1.2 by wave order, and the orchestrator does not back-fill a route task with a catalogued permission ahead of this task): authorisation runs before the route limiter (DR-A08), so the authorise slot takes one unit of a per-actor budget BEFORE it writes PERMISSION_DENIED; key = the organisation id (or the literal system for an organisation-less principal), a colon and the actor id, or the credential kind for a principal without a user actor (an anonymous request answers 401, which is not audited, and stays with the step-0 per-IP limiter); window 60 s, anchored by the Valkey key's TTL at the window's first denial, one atomic script per denial (D-SECT39-01 item 3); AUTHZ_DENIAL_BUDGET_PER_MIN in packages/config (default 20, validated 1..600); (a) denials 1..N of a window are audited one by one and answer 403 as now (D-TASK029-06 unchanged: a failed write answers 500 or 503, never a silent 403); (b) denial N+1 writes ONE aggregated PERMISSION_DENIED entry (details: required_permission plus aggregated true, threshold, window_seconds, window_ends_at (closed set, D-SECT39-01 item 2; no count); no entity id) and answers 429 RATE_LIMITED with Retry-After = the rest of the window, RateLimit-Limit N, RateLimit-Remaining 0, RateLimit-Reset; (c) every further denial of the window writes nothing and answers 429; (d) the number suppressed is kept under a second key (TTL 24 h) and is written as details.suppressed_in_previous_window on the first audited denial of the same actor in a later window, claimed atomically by the denial that opens a window, restored when its entry is not written, omitted when 0; a counter metric per rate class and the request log (status 429) carry it meanwhile — one actor therefore costs at most N+1 audit transactions a minute; Valkey outage: the budget falls back to an in-memory per-instance counter with the runtime security event of D-SECT39-01 item 5 (api-designer change request), at most once a minute per instance (the ADR-0016 item 8 rule for the auth class), never to unlimited writes; tests: [SEC-TC-15] N+2 denials in one window give N entries, one aggregated entry and two 429 answers, and the first denial of the next window carries suppressed_in_previous_window = 1; two API replicas share one budget; a store failure uses the fallback and logs the event; the k6 denied-flood case (p95 and 503 rate of the legitimate writes of the same tenant stay inside their budget while a Viewer floods) stays with qa-lead in the abuse suite; the aggregated-entry shape is confirmed by security-analyst (D-SECT39-01)
 - PR61-SEC-12 (INFO, CWE-1289; D-SEC-PR61-03; D-ORCH-135): network.ts unmaps an IPv4-mapped IPv6 address from its parsed groups, so every spelling (::ffff:a.b.c.d, ::ffff:7f00:1, the expanded 0:0:0:0:0:ffff:... forms, upper case) is coarsened as the IPv4 address it carries, for the audit IP index and for the trusted-proxy chain of this task; one test row per spelling
 - TWO PARTS (ADR-0016 amendment 12; D-ARCH-173..179; rulings/wave-1-task-041-rulings.md sections 3 and 4): part 041-A is the first pull request with changes A1 to A8; part 041-B (failed-authentication budget, signature headers in the step-0 selector, store breaker, fallback set, api/README section 7 additions of section 5.2) is merged before TASK-052 is dispatched and closes PR041-SEC-02 (b); part 041-B may be a second pull request or ride the first (orchestrator choice); the task stays partial on the STATUS board until 041-B merges (D-SD-004: a part on this card, not a new task id)
 - T-39 TESTS ADDED BY D-SECT39-01 (card line 8): the stored details deep-equal the closed sets (crossing; opener with carry; plain); N+K denials from K distinct IPs and user agents add vault and ip_hash rows for the N+1 entries only; every Valkey key under the two prefixes matches the item 3 grammar; budget-key PTTL in 1..60000; the carry is restored after a failed opener write; the startApi composition answers 429 at N+1; the counter has no organisation or actor label
-- AT-US-040-01 … AT-US-040-17: all 17 scenarios of US-040, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- PART 041-B REVISION 2 (ADR-0016 amendment 13; D-ARCH-182; PR041-SEC-09): the refresh cookie selects the credentialed rule only on the paths of routes that declare refresh-cookie, derived by createApp from route metadata; tests B1 (9) to (13) of the rulings file; the wrapper exemption keys on the code ACCESS_TOKEN_EXPIRED alone
+- Covers the scenarios of AT-US-040-01 … AT-US-040-17 that belong to its layer; US-040 closes in TASK-141
 - Covers the scenarios of AT-US-087-01 … AT-US-087-08 that belong to its layer; US-087 closes in TASK-073
 
 **DoD notes**
@@ -461,7 +462,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-092) | US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
 | REQs | REQ-RLS-008, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-086, D-ORCH-033, PR42-SEC-17, PR42-SEC-19, D-TASK029-09, D-TASK029-10, D-ARCH-143, PR64-SEC-06, PR64-SEC-07, D-SEC-PR64-02, D-ORCH-132, D-SD-003, D-ARCH-161, PR64-SEC-10, PR039-SEC-03, D-SD-004, D-PM-072 |
+| Spikes / security / decisions | SEC-P3-12, D-ARCH-025, D-062, PR19-SEC-01, D-ARCH-080, D-ARCH-086, D-ORCH-033, PR42-SEC-17, PR42-SEC-19, D-TASK029-09, D-TASK029-10, D-ARCH-143, PR64-SEC-06, PR64-SEC-07, D-SEC-PR64-02, D-ORCH-132, D-SD-003, D-ARCH-161, PR64-SEC-10, PR039-SEC-03, D-SD-004, D-PM-072, D-ARCH-180, D-PM-075, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-043, TASK-016 |
@@ -487,9 +488,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR64-SEC-06 (INFO), unless TASK-039 closed it first: the forgery-signal gaps of payload v2 (case and nested tenant-key spellings flagged as job_context_mismatch, an own __proto__ key refused and flagged, the issue list capped)
 - MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - AT-US-010-07 (US-010 delivery split, D-SD-003): a job for org A, processed by the worker with its tenant context resolved from platform.job_context, has database access scoped to org A and cannot read org B rows; the test title carries the ID; US-010 is completed by TASK-092
-- DISPATCH GATE: US-078 PAYLOAD WORDING (PR64-SEC-10, product-manager; D-ARCH-161 open item 3; D-SD-003): US-078 still describes payload v1 (org_id and actor_id in the payload; US-010 and the platform requirements were reworded by D-PM-072); product-manager rewrites it to payload v2 (kind and id only, tenant context from platform.job_context) before this task is dispatched, after principal-architect answers what job_context returns for a job whose organisation was deleted (refuse and dead-letter, or run as SYSTEM)
+- DISPATCH GATE CLOSED (D-ARCH-180; D-PM-075; was PR64-SEC-10, D-ARCH-161 open item 3, D-SD-003): principal-architect answered what job_context returns for a job whose organisation was deleted (ownership, not liveness: the job runs in the own tenant scope of that organisation; ADR-0013 amendment 4) and product-manager rewrote US-078 to payload v2 (AT-US-078-01..04 reworded, titles unchanged); the task is dispatchable once TASK-043 merges
 - ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - SCHEDULES (D-SECPR039-01): any schedule this task binds to a tenant follows conditions (i) to (iv) of the TASK-039 ruling (parameters from code or configuration, own policy predicate, closed SCHEDULE_NAMES of at most 47 characters, run-now through the scheduler)
+- DELETED ORGANISATION AND SOFT-DELETED ROW (D-ARCH-180; ADR-0013 amendment 4 items 17 to 23; data-model 4.5): platform.job_context filters deleted_at on neither the row nor its organisation and returns a fourth column org_deleted (true for a soft-deleted or missing organisation, NULL without an organisation); the migration creates the function with the body of data-model 4.5 as amended, and platform_definer holds SELECT on outbox_events (a SYSTEM table: the grant, no policy; data-model 4.3); the consumer hands the processor { orgId, actorType, actorId, orgDeleted } and runs a job of a soft-deleted organisation in the own tenant scope of that organisation, with no refusal, no new non-retryable reason and no wider scope; the queue definition marks the organisation optional on outbox-relay and notifications only, and on every other queue with payload kinds the consumer refuses a context without an organisation with MISSING_TENANT_CONTEXT before the processor is called; tests: the function cases of item 23 on outbox_events (live, soft-deleted, no organisation, unknown id, unknown kind); AT-US-078-04 as reworded (an outbox_event job of a soft-deleted organisation completes with app.org_id of that organisation and orgDeleted true, leaves no dead-letter record, and reads and writes no row of a second organisation); the pin of the non-retryable reasons unchanged; a row without an organisation refused before the processor on a requiring queue while the same row runs on outbox-relay
 - AT-US-078-01 … AT-US-078-04: all 4 scenarios of US-078, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-010-01 … AT-US-010-07 that belong to its layer; US-010 closes in TASK-092
 
@@ -538,10 +540,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Field | Value |
 |---|---|
 | Stories (completes) | US-015 **DC** (M0 Must) Register an account with a compliant password |
-| Stories (partial; completed by TASK-231) | US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
-| REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
+| Stories (partial; completed by TASK-231, TASK-141) | US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles<br>US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-AUTH-001, REQ-AUTH-002, REQ-AUTH-003, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-123, D-ARCH-125, D-SEC-PR56-01, D-ARCH-141, D-PM-068, D-ORCH-132, D-SEC-PR65-01, PR65-SEC-02, PR65-SEC-03, PR65-SEC-04, D-ARCH-156, D-ORCH-137, D-SD-002 |
+| Spikes / security / decisions | SEC-P3-05, SEC-P3-16, D-049, D-ARCH-042, DR-A14, PR11-SEC-10, D-ARCH-072, D-ORCH-039, PR43-SEC-01, D-SEC-PR43-01, D-ARCH-123, D-ARCH-125, D-SEC-PR56-01, D-ARCH-141, D-PM-068, D-ORCH-132, D-SEC-PR65-01, PR65-SEC-02, PR65-SEC-03, PR65-SEC-04, D-ARCH-156, D-ORCH-137, D-SD-002, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-037, TASK-041, TASK-029, TASK-043, TASK-040, TASK-028 |
@@ -573,8 +575,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR65-SEC-03 (INFO, CWE-204; D-SEC-PR65-01): registration maps the ux_users__email unique violation (23505) to the same uniform response as a new address (SEC-TC-46 timing rule unchanged), so the constraint is no enumeration oracle; the reserved SYSTEM and ANONYMOUS users (is_system, ck_users__is_system, PR26-SEC-04) never get a credential, e-mail token or session row, and every auth flow of this task refuses an is_system user; one api test for each
 - PR65-SEC-04 (c) SERVER-CONTROLLED USERS COLUMNS (INFO; D-SEC-PR65-01; shared with TASK-057): p_users__own is FOR ALL, so the database lets the subject write its own users row; every self-service route of this task keeps status, status_reason, email_verified_at, first_signed_in_at, deletion_requested_at, is_system and personal_org_id server-controlled (closed Joi schemas; the T-33 mass-assignment fuzz cases name each column and expect 400 UNKNOWN_FIELD or no effect)
 - MEMBER = TRANSACTION ACTOR (PR #65 code review R2-n2; rulings wave-1-pr65-r1 sections 5.5 and 7; D-ARCH-156): registration runs with the new user as app.actor_id for the user insert and the membership insert (already the design); createPersonalOrganisation takes the member user id from the transaction actor, or asserts equality and throws a typed service error before the lifecycle guard answers P0001 (today a wrong caller surfaces as a 500); one unit case; fixtures follow section 4.4 of the rulings file. A TenantDb actor accessor is NOT added here (it would need lock api-tenant-db): if the service cannot read the actor without it, stop and ask the orchestrator for the lock
+- [AT-US-040-13] and [AT-US-040-14] at POST /auth/register (D-PM-078): the 4th accepted registration for one normalised address within an hour and the 11th accepted registration from one IP within an hour answer 429 RATE_LIMITED with Retry-After (email-send class); the 11th registration from one IP within a minute answers 429 (auth class); the 6th distinct normalised address from one IP within an hour answers 429 with exactly one registration_probe event and its counter incremented; the first email-send refusal of a key and window logs one rate_limit_auth with class email-send; the tests go through the mounted route and carry the IDs in their titles; they may be the SEC-TC-46 tests
 - AT-US-015-01 … AT-US-015-12: all 12 scenarios of US-015, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-062-01 … AT-US-062-06 that belong to its layer; US-062 closes in TASK-231
+- Covers the scenarios of AT-US-040-01 … AT-US-040-17 that belong to its layer; US-040 closes in TASK-141
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -657,9 +661,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Field | Value |
 |---|---|
 | Stories (completes) | US-017 **DC** (M0 Must) Sign in with email and password |
-| REQs | REQ-AUTH-005 |
+| Stories (partial; completed by TASK-141) | US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-AUTH-005, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-SEC-003, NFR-SEC-004 |
-| Spikes / security / decisions | SEC-P3-26, PR20-SEC-05, PR20-SEC-13, D-ORCH-025, PR19-SEC-01, D-ARCH-080, D-ARCH-084, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, D-ARCH-120, PR48-SEC-06, PR48-SEC-01, D-SEC-PR48-01, D-ARCH-134, D-ARCH-137, PR56-SEC-05, PR56-SEC-07, D-SEC-PR56-01, D-ORCH-109, D-ARCH-143, D-ARCH-175, PR041-SEC-02, D-SD-004 |
+| Spikes / security / decisions | SEC-P3-26, PR20-SEC-05, PR20-SEC-13, D-ORCH-025, PR19-SEC-01, D-ARCH-080, D-ARCH-084, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, D-ARCH-120, PR48-SEC-06, PR48-SEC-01, D-SEC-PR48-01, D-ARCH-134, D-ARCH-137, PR56-SEC-05, PR56-SEC-07, D-SEC-PR56-01, D-ORCH-109, D-ARCH-143, D-ARCH-175, PR041-SEC-02, D-SD-004, D-ARCH-182, D-SECPR041-02, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-049, TASK-048, TASK-284, TASK-289, TASK-041 |
@@ -687,8 +692,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - USER ENTRIES CARRY ROLES AND SESSION; source_app IS VERIFIED (REQ-AUDIT-002, AT-US-087-01; PR #56 code review R1-m5; PR56-SEC-07 first half; PR56-SEC-05; D-SEC-PR56-01; D-ORCH-109; D-ARCH-143): Principal gains sessionId (the verified sid claim) and roleKeys (the role keys from which the permission set of the request was resolved — the access token carries no roles, ADR-0006), and entryFor writes them to session_id and actor_roles on every USER entry, the LOGIN and PERMISSION_DENIED entries included; for a principal with a session source_app comes from the verified app claim of the access token and never from X-Client-App: web when the claim says web, admin ONLY when the claim says admin and the principal scope is OPERATOR, anything else api; a request without a session (anonymous, guest quote token, signature) may still say web through X-Client-App and never admin — that value is client-asserted and the viewer says so (TASK-073 line); tests: a tenant member sending X-Client-App: admin records web (the claim of its token), never admin; an operator session issued for the admin app records admin; a USER entry has a non-empty actor_roles and the session id of the token; fixtures that build a Principal by hand are updated in the same PR; TASK-060 keeps roleKeys in step when the live resolution replaces this one
 - MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
 - DISPATCH GATE: TASK-041 PART 041-B MERGED (rulings/wave-1-task-041-rulings.md section 4; D-ARCH-175, D-ARCH-177; D-SD-004): the dependency on TASK-041 is its part 041-B (failed-authentication budget, store breaker), which the orchestrator checks before dispatch; part 041-A alone does not satisfy it
-- AUTHENTICATOR COST RULES (ADR-0016 amendment 12 item 4; D-ARCH-175; PR041-SEC-02): (a) the session authenticator checks the token structure and the exp claim of the unverified payload first and answers 401 ACCESS_TOKEN_EXPIRED for an expired token without verifying the signature; (b) it makes no Valkey or database call before the ES256 signature has verified; (c) it never calls the limiter: the wrapper of TASK-041 counts its refusals; tests: a forged bearer causes zero store and database calls (spies); 121 forged bearers from one IP through the startApi composition give 120 times 401 and then 429 before the authenticator runs; 200 expired tokens from one IP cause no 429
+- AUTHENTICATOR COST RULES (ADR-0016 amendment 12 item 4 and amendment 13 item 3; D-ARCH-175; D-ARCH-182; PR041-SEC-02; D-SECPR041-02): (a) EXP PRE-CHECK UNDER E1 TO E5: the unverified exp is used only to refuse an expired token early; every token that passes is verified in full (algorithms ES256 only, issuer, audience, the same clock tolerance) and nothing else of the unverified payload is read or logged; only a well-formed token whose exp is a finite number in the past is expired, anything else malformed is AUTH_REQUIRED and spends; the pre-check is bounded by a length cap, three base64url segments and alg equal to ES256 before the payload is decoded; ACCESS_TOKEN_EXPIRED is raised only there or by the library expiry check inside the tolerance and emits no security event; (b) it makes no Valkey or database call before the ES256 signature has verified; (c) it never calls the limiter: the wrapper of TASK-041 counts its refusals; tests: 200 forged tokens with a past exp give 200 times 401 ACCESS_TOKEN_EXPIRED with zero signature verifications, zero store and database calls, no security event and no 429; a forged token with a future exp causes one verification and spends one unit; 121 forged bearers with a future exp from one IP through the startApi composition give 120 times 401 and then 429 before the authenticator runs; a forged bearer causes zero store and database calls (spies)
+- [AT-US-040-03-2] at the login route (D-PM-078): the 6th login for one account identifier within a minute answers 429 RATE_LIMITED whatever the source IP; [AT-US-040-06] repeated on the real route: the 11th login from one IP within a minute answers 429 and the PasswordHasher verify spy records no call
 - AT-US-017-01 … AT-US-017-06: all 6 scenarios of US-017, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-040-01 … AT-US-040-17 that belong to its layer; US-040 closes in TASK-141
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -759,7 +766,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-018 **DC** (M0 Must) Refresh cookie, rotation and reuse detection |
 | REQs | REQ-AUTH-006, REQ-AUTH-007, REQ-AUTH-008 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-P3-01, SEC-COND-01, D-046, PR20-SEC-13, D-ARCH-084, D-ARCH-109, PR32-SEC-16, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-06, PR48-SEC-01, D-ARCH-134, D-ARCH-175, R-ARCH-36, D-SD-004 |
+| Spikes / security / decisions | SEC-P3-01, SEC-COND-01, D-046, PR20-SEC-13, D-ARCH-084, D-ARCH-109, PR32-SEC-16, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-06, PR48-SEC-01, D-ARCH-134, D-ARCH-175, R-ARCH-36, D-SD-004, D-ARCH-182, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-052, TASK-048 |
@@ -782,7 +789,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the cookie authenticator learns that a refresh cookie is present only through presentedKinds(req.headers, route.auth), and parses the cookie header itself only after that, on the three refresh-cookie routes, to pick the one cookie by app (the TASK-055 D-ARCH-109 line); it builds the permissions of the refreshed principal with readonlySet; it calls markCredentialsRead(res) together with its decision for a current, rotated, revoked, expired or absent cookie alike; private, no-store on 401 SESSION_REVOKED, SESSION_EXPIRED and AUTH_REQUIRED comes from the descriptor test of the problem handler ([refresh-cookie] has no anonymous member, so every answer on the three routes is private whatever the authenticator marked); x-csrf-token is read by the csrf slot (TASK-048) and x-csrf-token, cookie and authorization are refused in schema.headers by 020-C (PR38-SEC-03), so no identity handler receives the cookie or the token; api tests: a reuse-detected cookie answers 401 private, no-store with the family revoked and markCredentialsRead called exactly once; a stale cookie plus a valid bearer on refreshSession takes the cookie path and the bearer is never parsed (spy)
 - RBAC MATRIX SEAM RETIREMENT, refresh-cookie kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the refresh-cookie branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents real __Host-rt_web and __Host-rt_admin cookies (sessions created by the test) through the real cookie authenticator on the three refresh-cookie routes; the admin refresh cookie stays a foreign credential on every other route (TASK-289 rows); regenerated matrix, drift test green, still-stubbed-kinds tripwire of TASK-052 passes; PR48-SEC-01 must have merged (TASK-289) before this task merges (transitively enforced through TASK-052)
 - MERGE PREREQUISITE TASK-293 (= TASK-290-F; PR66-SEC-01, D-SEC-PR66-01, D-ORCH-134; D-SD-001): if this PR adds or changes a migration or bootstrap file, TASK-293 (tokenizer parity with the PostgreSQL lexer in tools/db/sql-text.ts) is on main before it merges; the orchestrator checks it at merge time
-- REFRESH COOKIE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175; R-ARCH-36): every refusal of a presented refresh cookie (unknown, rotated, revoked, expired) is a 401 raised in the authentication slot, so the wrapper of TASK-041 counts it; the 401 response clears the cookie; test: 121 unknown cookies from one IP give 429 at the 121st before any lookup; security-analyst rates the R-ARCH-36 residual (a valid cookie costs one indexed read per request up to the credentialed ceiling before the public class limit) in this review
+- REFRESH COOKIE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175; R-ARCH-36): every refusal of a presented refresh cookie (unknown, rotated, revoked, expired) is a 401 raised in the authentication slot, so the wrapper of TASK-041 counts it; the 401 response clears the cookie; test: 121 unknown cookies from one IP give 429 at the 121st before any lookup; security-analyst rates the R-ARCH-36 residual (a valid cookie costs one indexed read per request up to the credentialed ceiling before the public class limit) in this review; the cookie selects the credentialed rule and the lock only on the three cookie routes (ADR-0016 amendment 13 item 1; D-ARCH-182); test: with the budget of an IP spent, a sign-in request that carries a stale refresh cookie is served
 - AT-US-018-01 … AT-US-018-11: all 11 scenarios of US-018, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1068,7 +1075,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-020 **DC** (M0 Must) Client-side token handling with single-flight refresh |
 | REQs | REQ-AUTH-010 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-P3-11, D-ARCH-024, D-ORCH-023, D-ARCH-084 |
+| Spikes / security / decisions | SEC-P3-11, D-ARCH-024, D-ORCH-023, D-ARCH-084, D-ARCH-182, D-SD-005 |
 | Specialist · model | frontend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-055 |
@@ -1083,6 +1090,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-020 scenarios
 - SEC-TC-39 (client part): admin idle 30 min -> silent refresh stops, logout, sign-in shown; warning alertdialog at 28 min; background refetch is not activity
 - PR #21 code review R1-m5 remainder (D-ORCH-023 (1); api/README §17; D-ARCH-084): the typed `client.ts` over packages/shared/src/api/types.gen.ts (Axios; paths and operation types from the generated file) lands here as its first frontend consumer; the Axios interceptor of this task is built on it
+- 429 IS NOT AN AUTHENTICATION FAILURE (ADR-0016 amendment 13 item 5; D-ARCH-182): on 429 the web and admin clients wait for Retry-After and retry, on refreshSession too, and never sign the user out or clear the session because of it; test: a 429 on refresh followed by a 200 keeps the session
 - AT-US-020-01 … AT-US-020-06: all 6 scenarios of US-020, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1384,4 +1392,40 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **DoD notes**
 - Test-only change (no production code, no new dependency); the README itself is not edited here; DUE before TASK-049 merges (its card carries the merge-prerequisite line); PR63-SEC-01 (uniformDetail) is NOT in this task: it is due before TASK-052 as routed by D-ORCH-132
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-295 — Prisma bump or effect override; remove the effect audit waiver (D-SECAUDIT-02 forcing plan)
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| REQs | — (enabler; see refs) |
+| NFRs | NFR-MAINT-002 |
+| Spikes / security / decisions | D-SECAUDIT-02, EFFECT-SEC-01, EFFECT-SEC-03, D-ORCH-140, D-SD-005 |
+| Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | S |
+| Depends on | TASK-001 |
+| Batch · locks | 1.11 · root |
+| Branch | `feat/TASK-295-prisma-bump-or-effect-override` |
+| Priority | Enabler |
+
+> Scheduling note: Late chore task (plan fold D-SD-005) for the D-SECAUDIT-02 forcing plan, in batch 1.11 beside TASK-292; its only dependency (TASK-001) is merged; the root lock keeps it off any other dependency change in flight.
+
+**Files / modules**
+- package.json (overrides entry, route 2 only)
+- package-lock.json
+- tools/ci/advisory-watchlist.json (the D-SECAUDIT-02 waiver removed)
+- tools/ci/check-audit.test.ts (the waiver pin and its it.each due-date row removed)
+
+**Acceptance tests to write**
+- ROUTE 1 (D-SECAUDIT-02 forcing plan item 1): if a stable Prisma whose @prisma/config allows effect 3.22.1 or later has been published at least 7 days (min-release-age), bump prisma, @prisma/client and @prisma/adapter-pg together; beyond 7.10.x principal-architect checks ADR-0001 first
+- ROUTE 2, otherwise (item 2): add "overrides": { "@prisma/config": { "effect": "<newest 3.22.x at least 7 days old>" } } (3.22.4 now; 3.22.5 from 2026-11-26T21:22Z), then npm install --package-lock-only and full lane B; a same-major transitive override of the Prisma CLI config package, not gate tooling, so PR2-SEC-06 does not bar it
+- WAIVER REMOVED IN THE SAME PR (item 3): the GHSA-7589-6fvf-x4pw entry of tools/ci/advisory-watchlist.json, its check-audit.test.ts pin and its due-date row; npm audit (the lane A audit step) passes with no effect waiver; the PR67-SEC-02 production-closure test stays green (effect stays devOptional)
+- EFFECT-SEC-03: the api and worker runtime stages keep --omit=dev --omit=optional; a Docker build is not needed for this change, the lockfile diff shows the effect tuple and nothing else of the production closure moving
+
+**DoD notes**
+- No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
+- TARGET 2026-12-11, HARD DEADLINE 2026-12-18 (the waiver expires then and lane A audit fails on every PR): dispatchable now (route 2 with effect 3.22.4, which clears min-release-age; 3.22.5 is installable from 2026-11-26T21:22Z); renewing the waiver instead needs a new security-analyst decision explaining why neither route was possible (item 4)
+- package-lock.json and tools/ci are security-owned paths: a security record is required; lane B unit and integration evidence on the head (Prisma CLI and client paths are exercised by the migrations and integration suites)
+- `security-integration` (ADR-0023 am. N items 1–2): the planned files match the trigger list (`package-lock.json`), so expect the hosted job on the PR. The base-ref classifier decides on the paths the PR actually changes (`tools/ci/security-paths.mjs`): when it selects, `ci-gate` needs the job's success or an inherited security proof (am. L item 2) and degraded mode never waives it (D-ARCH-021); when it does not select, the PR does not claim the run.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.

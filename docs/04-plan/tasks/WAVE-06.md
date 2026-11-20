@@ -199,7 +199,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-242 **DC** (M1 Must) Store events once, order them, and drive shipment state forward |
 | REQs | REQ-TRACK-002, REQ-TRACK-005 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-ORCH-039 |
+| Spikes / security / decisions | D-ORCH-039, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-168, TASK-084 |
@@ -214,6 +214,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-242 scenarios
 - SEC-TC-22 (D-ORCH-039; threat model T-72, AC-36; ADR-0010 am. 9; named on this sheet because the manifest parks it in required_cases_pending with this task as owner, checkpoint G3): an integration test whose title carries [SEC-TC-22]: an event that reaches the store without a confirming track() result (the shape a carrier push has) is stored as a hint, does not advance the shipment to PICKED_UP or to a terminal state, and cancellation and refund of that shipment still succeed; conditional (security-test-cases.md rule 4): the push route belongs to US-252 (TASK-261, Should), so while it is absent the same test also asserts that no mounted route accepts a carrier push and that no code path advances state from an unconfirmed event, and TASK-261 adds the signed-push half; after this task merges qa-lead moves the ID back to integration.required_cases at the next activation checkpoint
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (tracking_poll_schedule, joined to shipments, if this task creates it (otherwise TASK-204 carries the line); live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest; for the SYSTEM table tracking_poll_schedule the SELECT grant to platform_definer); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-242-01 … AT-US-242-09: all 9 scenarios of US-242, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

@@ -655,7 +655,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-215 (M1 Should) EXCEPTION handling and automatic void retry |
 | REQs | REQ-BOOK-030 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-105, TASK-109 |
@@ -668,6 +668,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-215 scenarios
+- CANDIDATE FUNCTION void_retry_candidates: the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
 - AT-US-215-01 … AT-US-215-07: all 7 scenarios of US-215, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -710,7 +711,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-219 (M1 Should) Authorisation and capture sweeper |
 | REQs | REQ-PAY-018 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-170, TASK-105 |
@@ -723,6 +724,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-219 scenarios
+- CANDIDATE FUNCTION payment_sweeper_candidates: the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
 - AT-US-219-01 … AT-US-219-06: all 6 scenarios of US-219, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

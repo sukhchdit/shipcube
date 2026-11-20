@@ -119,7 +119,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-278 **DC** (M1 Must) Create notification jobs only from outbox events, idempotently |
 | REQs | REQ-NOTIF-014 |
 | NFRs | NFR-RES-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-074, TASK-043, TASK-047 |
@@ -135,6 +135,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-278 scenarios
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (notification_log, the notification row table of data-model 4.2; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-278-01 … AT-US-278-07: all 7 scenarios of US-278, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -301,7 +302,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-197 **DC** (M0 Must) Shipment state machine core<br>US-198 **DC** (M0 Must) Transition history and same-transaction audit |
 | REQs | REQ-BOOK-018, REQ-BOOK-019 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-030 |
+| Spikes / security / decisions | D-030, D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-029, TASK-032, TASK-043 |
@@ -315,6 +316,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-197 and US-198 scenarios (transition table DR-B01)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (shipments; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-197-01 … AT-US-197-06: all 6 scenarios of US-197, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-198-01 … AT-US-198-05: all 5 scenarios of US-198, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -331,7 +333,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-199 **DC** (M0 Must) Payment gateway interface and deterministic Mock gateway<br>US-200 **DC** (M0 Must) Payment record with status history |
 | REQs | REQ-PAY-001, REQ-PAY-002, REQ-PAY-003 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-011, PR40-SEC-05, D-ARCH-115 |
+| Spikes / security / decisions | D-011, PR40-SEC-05, D-ARCH-115, D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-032, TASK-029 |
@@ -347,6 +349,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-199 and US-200 scenarios
 - D-ARCH-106 (ADR-0005 am. 11 item 20): the binding names under which module code receives the payment gateway (paymentGateway, gateway) are added to the names option of the T-83 lint with one fixture; every gateway call runs in a call phase or in the worker, never inside a tenant transaction
 - PR40-SEC-05 / PR #40 code review R1-m4 (a) (D-ARCH-115): the D-QA-003 money-path scope of tools/ci/coverage-gate.mjs and TEST-STRATEGY 8 is the folder apps/api/src/modules/payments/service/**, while this task lists apps/api/src/modules/payments/service.ts, a file the scope does not match; before merging, place the money-moving service code under apps/api/src/modules/payments/service/** (preferred) or ask qa-lead to re-point the scope with a D-QA decision, so the scope activates with this task; the PR body quotes the merged lines and branches of the scope, and in the first activation checkpoint after it merges qa-lead adds coverage gate: apps/api/src/modules/payments/service lines and branches to unit.required_cases (manifest-only PR with a security record)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (payments; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-199-01 … AT-US-199-07: all 7 scenarios of US-199, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-200-01 … AT-US-200-05: all 5 scenarios of US-200, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -395,7 +398,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-154 **DC** (M0 Must) Quote entity with 24 h expiry<br>US-173 **DC** (M0 Must) Shipment direction, content type and package type |
 | REQs | REQ-QUOTE-001, REQ-BOOK-027, REQ-BOOK-028 |
 | NFRs | NFR-DATA-002 |
-| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004 |
+| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-083, TASK-051, TASK-029, TASK-070 |
@@ -411,6 +414,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-154 and US-173 scenarios
 - QUOTE TABLES AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10; rulings/wave-1-r-arch-34-operator-rulings.md section 2.8): ux_quotes__org_id_id and ux_quotes__guest_token_hash_id; quote_packages and quote_options reference quotes through the owner-bound pair with no single-column key; ux_quote_packages__org_quote_seq (partial on org_id IS NOT NULL) and ux_quote_packages__guest_quote_seq replace ux_quote_packages__quote_seq and ix_quote_packages__org_quote; requote_of_quote_id has the composite key through org_id, ck_quotes__requote_org_only and the entry fk_quotes__requote_of_quote_id in TENANT_REFERENCE_EXCEPTIONS; every read and write of a child carries the owner predicate next to quote_id; C16 is the gate
 - CANONICAL LISTS (ADR-0010 amendment 12 item 2; D-ARCH-168; data-model 1.7): a canonical list that packages/carriers already holds is moved to packages/shared and re-exported, never written a second time
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (quotes; also the soft-deleted quote: the row resolves, and the processor reads it in the tenant transaction, finds it deleted and completes without effect; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-154-01 … AT-US-154-09: all 9 scenarios of US-154, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-173-01 … AT-US-173-07: all 7 scenarios of US-173, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -427,7 +431,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-201 **DC** (M0 Must) Order number allocation |
 | REQs | REQ-BOOK-026 |
 | NFRs | NFR-SCALE-002 |
-| Spikes / security / decisions | D-032 |
+| Spikes / security / decisions | D-032, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-023, TASK-032 |
@@ -441,6 +445,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-201 scenarios (no gaps under 2 replicas, format per D-032)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (orders; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-201-01 … AT-US-201-08: all 8 scenarios of US-201, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -519,9 +524,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Field | Value |
 |---|---|
 | Stories (completes) | US-155 **DC** (M0 Must) Guest quoting with access token and rate limits |
-| REQs | REQ-QUOTE-002 |
+| Stories (partial; completed by TASK-141) | US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-QUOTE-002, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-SEC-005 |
-| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134, D-ARCH-175, D-SD-004 |
+| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134, D-ARCH-175, D-SD-004, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-041, TASK-044 |
@@ -542,7 +548,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR48-SEC-04 deny-404 (LOW; D-SEC-PR48-01 (4); D-ARCH-134; DUE before this task merges): the RBAC matrix generator gains the outcome deny-404 (REFUSALS[deny-404] = { status: 404, code: NOT_FOUND }, symbol 404, private, no-store); for a route whose auth set is exactly [session, quote-token] rule 1 gives deny-404 when no usable credential is presented (none, a refresh cookie, an expired bearer) and rule 2 gives a guest principal for a well-formed unknown token (the handler answers 404) and deny-404 for a malformed one — ADR-0008 am. 5 item 1 and A-078; the committed matrix is regenerated (the 8 cells of getQuote and streamQuoteResults change from 401), the D-ARCH-107 test title no longer calls 401 the expected answer, the US-155 wrong-token and missing-token api tests and the matrix agree, and the security record of this PR covers tests/generated/rbac (owned path)
 - RBAC MATRIX SEAM RETIREMENT, quote-token kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the quote-token branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents a real X-Quote-Token (a guest quote minted by the test) through the real authenticate slot; regenerated matrix, drift test green, the still-stubbed-kinds tripwire of TASK-052 passes
 - GUEST TOKEN COST (ADR-0016 amendment 12 item 4; D-ARCH-175): the guest authenticator does no I/O; it derives the token hash, and the quote row is matched by the handler query after the step-5 class limit; a refusal the authenticator raises itself is counted by the wrapper of TASK-041; test: a forged X-Quote-Token causes no database call before the public class limit has been consumed
+- [AT-US-040-04] and [AT-US-040-03-5] at POST /quotes (D-PM-078): a verified signed-in user is limited by the quote-create class (the 31st quote in a minute and the 301st in an hour answer 429 RATE_LIMITED with Retry-After although the user is far below 600 authenticated requests a minute; the 1001st in an hour by the users of one organisation answers 429 and a user of another organisation is not affected), and a guest POST /quotes is counted only against the guest per-IP class (20/min, 100/h)
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-040-01 … AT-US-040-17 that belong to its layer; US-040 closes in TASK-141
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -555,7 +563,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging<br>US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
 | REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-OBS-003, NFR-PERF-004, NFR-RES-005 |
-| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004 |
+| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004, D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-084, TASK-085, TASK-088, TASK-079, TASK-047, TASK-040, TASK-043 |
@@ -573,6 +581,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - AT-US-008-03 END TO END (D-062; this task COMPLETES US-008): one integration test titled with AT-US-008-03 POSTs the M0 booking with X-Correlation-Id: demo-booking-0001, runs the saga through the worker on the Mock carrier and asserts that exactly that value appears in the api log lines, every audit entry of the booking (STATE_TRANSITION entries and the carrier_call entry), the outbox row, the BullMQ payload v2, the worker log lines and the Mock carrier call record; US-008 reads Implemented only when TASK-010, TASK-029, TASK-035, TASK-043, TASK-079 and this task are merged
 - AT-US-010-01 (US-010 delivery split, D-SD-003; this task COMPLETES US-010): given the M0 mock-booking job for shipment S1, delivering the same job twice leaves exactly one Mock carrier shipment for S1 and exactly one audit entry for the booking transition; AT-US-010-02 to -06 are proven by TASK-039 and AT-US-010-07 by TASK-047
 - ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (saga_executions; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- CANDIDATE FUNCTION saga_due_candidates (when this task builds it; otherwise TASK-094): the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
 - AT-US-202-01 … AT-US-202-07: all 7 scenarios of US-202, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)

@@ -5649,3 +5649,40 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - The routes of round 2 are unchanged.
 - **Next round:** none, unless an owned path changes after `f08948eb`.
 - **Reversibility:** High. This is a review record only.
+
+### D-SD-005 · 2026-11-20 · senior-developer · Plan fold for D-PM-078 (US-040 delivery split), D-ARCH-180 with D-PM-075 (TASK-047 gate closed, job-context lines), D-ARCH-181/182 (rulings/wave-1-task-041-rulings.md §6 lines 9–14) and the D-SECAUDIT-02 forcing plan (new chore TASK-295); merges of PR #72–#76 recorded; next batch TASK-043, TASK-079, TASK-038 (plan regenerated: 295 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..294 unchanged)
+- **Trigger:** the orchestrator's fold request after PR #73 (TASK-075), #74 (effect waiver), #75 (TASK-076) and #76 (TASK-039) merged; D-PM-078 items 1–9, D-ARCH-180 "Card lines for the next fold", D-PM-075 "For senior-developer", D-ARCH-181 (c) and D-ARCH-182 card lines, D-SECAUDIT-02 "Forcing plan" (code review n3 of PR #74).
+- **Decision (cards; all in `docs/04-plan/generator/plan-data.mjs`, outputs regenerated):**
+  1. **US-040 split (D-PM-078).** TASK-041 `us` [] and `part` US-040 + US-087; its "All US-040 scenarios" line is replaced by the SCENARIO OWNERSHIP line. TASK-049, TASK-052 and TASK-091 hold US-040 as partial, each with its route-level AT line. TASK-141 completes US-040 with the stream line and gains the edge TASK-041; I checked on the DAG that TASK-041 is not reached through `fanout`, `ratecache` or `sse`. The new edge leaves the critical path alone, because TASK-041 is in Wave 1 and TASK-141 in Wave 4. TASK-210 gets the note line. `waveExceptions` gains US-040 (through 4, dcBy `ratelimit`, D-PM-078), and gen lists it with the US-061/US-062 exceptions. No DC flag changed (US-040 is not DC). The Wave 3 exit, PLAN.md §3 row 3 and the M0 checkpoint paragraph read 110 of 113 M0 Must complete, with US-040, US-061 and US-062 partial.
+  2. **TASK-047 (D-ARCH-180, D-PM-075).** The DISPATCH GATE line becomes DISPATCH GATE CLOSED: the task is dispatchable once TASK-043 merges. The D-ARCH-180 line DELETED ORGANISATION AND SOFT-DELETED ROW is added as written, with one wording change: "that organisation's own tenant scope" becomes "the own tenant scope of that organisation", because plan-data lines carry no apostrophes.
+  3. **D-ARCH-180, generic lines.** JOB CONTEXT CASE goes on the tasks that create the later source tables:
+     - TASK-084 (`shipments`), TASK-085 (`payments`), TASK-088 (`orders`), TASK-092 (`saga_executions`), TASK-147 (`documents`) and TASK-151 (`pickups`).
+     - TASK-078 (`notification_log`). Its card plans a `notification_jobs` table; the line names the data-model table.
+     - TASK-172 and TASK-204 (`tracking_poll_schedule`, whichever creates it, with the SELECT grant to `platform_definer`).
+     - TASK-087 (`quotes`, with the soft-deleted quote).
+     The candidate-function line ("does not filter on organisations.deleted_at") goes on TASK-244 (`payment_sweeper_candidates`), TASK-092 (`saga_due_candidates`; otherwise TASK-094), TASK-246 (`void_retry_candidates`) and TASK-209 (`draft_expiry_candidates`). No Run 1 card builds `org_ids_page`, which serves resumable backfills (data-model §8.5). Its rule is stated in data-model §4.5 and ADR-0013 amendment 4 item 21, so no card line is added.
+  4. **Rulings §6 lines 9–14 (D-ARCH-181/182).**
+     - TASK-041: AT-US-087-04 reads "hops of the edge". The PART 041-B REVISION 2 line sits in the acceptance list beside TWO PARTS, because the card has no DoD field.
+     - TASK-052: the AUTHENTICATOR COST RULES line takes the new (a) "EXP PRE-CHECK UNDER E1 TO E5" and the new tests; (b) and (c) are kept.
+     - TASK-214: the alert and runbook sentence is appended to RATE-LIMIT METRICS.
+     - TASK-065: a new line, 429 IS NOT AN AUTHENTICATION FAILURE.
+     - TASK-055: the stale-cookie sign-in sentence is appended to REFRESH COOKIE REFUSALS.
+  5. **D-SECAUDIT-02 forcing plan.** I add a late chore card, `effectfix` = **TASK-295**, in batch 1.11 beside TASK-292: devops-engineer, S, sonnet, lock `root`, dependency TASK-001. Its content is route 1 (a Prisma bump) or route 2 (the `@prisma/config` effect override). The same PR removes the waiver, its test row and its pin. It is dispatchable now (route 2 with effect 3.22.4); target 2026-12-11, hard deadline 2026-12-18. STATUS gains the tracked condition EFFECT-WAIVER. I chose a card over a STATUS item alone, because the work needs a branch, a lane B run and a security record, as any task does.
+  6. **Merges recorded.** The STATUS board gains rows for TASK-075 (PR #73, `c6c98e67`), TASK-076 (PR #75, `2fd534ca`), TASK-039 (PR #76, `80cfb77d`), the waiver PR #74 (`91ab4132`) and TASK-041 (part 041-A approved, US-040 partial). The stale TASK-293 row now reads merged (PR #72, `f723fefa`). traceability v1.10:
+     - REQ-CARR-001/002/003/007 and REQ-PRICE-001/002/004 are Implemented.
+     - REQ-PLAT-014/015 are Implemented, partial. Their Task(s) column now reads TASK-039, TASK-047, TASK-092, the US-010 split of D-SD-003.
+- **Verified:** `gen.mjs .` reports 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` against the pre-fold file shows:
+  - 0 changes of branch, title, wave or batch for TASK-001..294;
+  - 23 rows changed: refs everywhere; stories and partials for TASK-041/049/052/091/141; `depends_on` for TASK-141 only;
+  - one new row, TASK-295 (`feat/TASK-295-prisma-bump-or-effect-override`, batch 1.11).
+- **Next batch (dispatch plan; developers are dispatched by the orchestrator).** MAX_PARALLEL 4, and TASK-041 keeps slot 1 (part 041-A merges after the user `.env.example` commit; part 041-B follows on the same task). The rule for the other three slots: no lock or file overlap with each other or with TASK-041, critical path first.
+  - **TASK-043** (opus): critical path 039 → 043 → 049 → 052. It unblocks TASK-047, TASK-049, TASK-078, TASK-084 and TASK-092.
+  - **TASK-079** (sonnet): a Wave 2 back-fill on the TASK-089 demo-users closure, unit-only.
+  - **TASK-038** (sonnet): starts the idle frontend chain toward TASK-071/072.
+  - Briefs are in `docs/04-plan/briefs/`; `TASK-040.md` is the standby.
+- **Alternatives:**
+  - **TASK-040 beside TASK-043.** Rejected under the overlap rule: both edit `prisma/schema/platform.prisma`, `tools/db/table-classes/platform.json` and `prisma/sql/grants.manifest`. It is the first standby, and the orchestrator may accept the union merge to save a day on the path to TASK-049.
+  - **TASK-048.** Deferred: its CSRF check mounts in the pipeline that part 041-B edits.
+  - **TASK-051.** Deferred: it shares `grants.manifest` and the table classes with TASK-043.
+  - **TASK-042.** The next frontend filler, after TASK-038.
+- **Reversibility:** High (plan sources, generated outputs, STATUS, traceability and briefs; no code).

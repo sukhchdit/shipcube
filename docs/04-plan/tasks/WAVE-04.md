@@ -6,7 +6,7 @@ Tasks: **24** (S 5 / M 19; opus 6 / sonnet 18; demo-critical 14) in **7** batche
 
 **Exit check:** Guest quote streams from 4 carriers (Mock + 3 fixture adapters) sorted with badges in the browser; contract suite green x4; lane B `wave` evidence; lane C `wave-end` if within the monthly cap (tier 2).
 
-**Stories completed in this wave (24):** US-054 (DC), US-056 (DC), US-057, US-058, US-059, US-109 (DC), US-119 (DC), US-127 (DC), US-128 (DC), US-129, US-130, US-131 (DC), US-132 (DC), US-133 (DC), US-134, US-135 (DC), US-142, US-147, US-148, US-149, US-158 (DC), US-159 (DC), US-160 (DC), US-161 (DC).
+**Stories completed in this wave (25):** US-040, US-054 (DC), US-056 (DC), US-057, US-058, US-059, US-109 (DC), US-119 (DC), US-127 (DC), US-128 (DC), US-129, US-130, US-131 (DC), US-132 (DC), US-133 (DC), US-134, US-135 (DC), US-142, US-147, US-148, US-149, US-158 (DC), US-159 (DC), US-160 (DC), US-161 (DC).
 
 ## Batches
 
@@ -613,13 +613,13 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET |
-| REQs | REQ-CARR-009 |
+| Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET<br>US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-CARR-009, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-PERF-003 |
-| Spikes / security / decisions | SEC-P3-02, D-ARCH-018 |
+| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-083, TASK-136, TASK-044 |
+| Depends on | TASK-083, TASK-136, TASK-044, TASK-041 |
 | Batch · locks | 4.5 · mod-quotes |
 | Branch | `feat/TASK-141-streaming-rate-results-fallback-get` |
 | Priority | Must · demo-critical |
@@ -630,7 +630,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-135 scenarios
 - SEC-TC-42: reopening the stream 10 times (incl. Last-Event-ID) causes 0 extra carrier calls; 3rd concurrent stream from one IP -> 429
+- [AT-US-040-15-1], [AT-US-040-15-2] and [AT-US-040-16] at the quote stream route (D-PM-078): the route-level tests of AT-US-135-11 and AT-US-135-12 also carry these IDs (the 3rd concurrent stream from one anonymous IP and the 6th for one authenticated user answer 429 RATE_LIMITED, the open streams are unaffected, and for an anonymous IP with 2 open streams closing one lets the next open succeed); completes US-040
 - AT-US-135-01 … AT-US-135-12: all 12 scenarios of US-135, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-040-01 … AT-US-040-17: US-040 completes here under the delivery split of D-PM-078: this task proves the scenarios that the card lines above assign to it and TASK-041, TASK-049, TASK-052, TASK-091 the rest, with the IDs in the test titles; the story is accepted when all 17 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.

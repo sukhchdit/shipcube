@@ -554,7 +554,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-243 (M1 Must) Poll carrier tracking with adaptive intervals and stale flag |
 | REQs | REQ-TRACK-003 |
 | NFRs | NFR-RES-002 |
-| Spikes / security / decisions | D-ARCH-161, D-SD-003, D-SECPR039-01, PR039-SEC-03 |
+| Spikes / security / decisions | D-ARCH-161, D-SD-003, D-SECPR039-01, PR039-SEC-03, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-172, TASK-039 |
@@ -570,6 +570,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job
 - SCHEDULE CONDITIONS (D-SECPR039-01 ruling on D-TASK039-01, conditions (i) to (iv)): for every schedule this task adds, (i) parameters come from code or configuration, never from the job; (ii) a destructive or non-idempotent handler applies its own policy predicate (purges by age), and if it writes it runs through idempotentProcessor keyed by the occurrence id; (iii) SCHEDULE_NAMES stays closed, with the one-queue check and the processor refusal kept, and a name of at most 47 characters; (iv) a run-now action goes through the scheduler, never as a hand-made repeat: job
 - ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (tracking_poll_schedule, joined to shipments, if TASK-172 did not create it; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest; for the SYSTEM table tracking_poll_schedule the SELECT grant to platform_definer); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-243-01 … AT-US-243-07: all 7 scenarios of US-243, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -688,7 +689,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-256 (M1 Must) Drafts list, resume, delete and 30-day expiry |
 | REQs | REQ-ACCT-004 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-183 |
@@ -703,6 +704,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-256 scenarios
+- CANDIDATE FUNCTION draft_expiry_candidates: the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
 - AT-US-256-01 … AT-US-256-11: all 11 scenarios of US-256, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -718,7 +720,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-249 (M1 Must) Rate-limit public tracking lookups |
 | REQs | REQ-TRACK-010 |
 | NFRs | NFR-SEC-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-PM-078 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-176 |
@@ -731,6 +733,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-249 scenarios
+- the failed-lookup rule of REQ-TRACK-010 (10/min per IP) is proven on the lookup route under the US-249 scenarios; it carries no US-040 ID (D-PM-078)
 - AT-US-249-01 … AT-US-249-09: all 9 scenarios of US-249, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -823,7 +826,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004, D-ARCH-182, PR041-SEC-09, D-SD-005 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
@@ -848,7 +851,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #11 code review R3-m1 (ii) (first metrics task; D-ARCH-079): the leak counter sessionContextLeaks() exported by apps/api/src/platform/db/runtime.ts is published as the metric db_session_context_leak_total (api and worker) with an alert rule; the latched not-ready state stays visible in /health/ready
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
 - IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
-- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160
+- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160; an alert on the security event rate_limit_auth with class authn-failed and on the counter step0-authn-failed (ADR-0016 amendment 13 item 4; PR041-SEC-09; PRD R-16; D-ARCH-182): the runbook entry says that every credentialed request of that address is refused for up to 60 s and names the two narrower designs
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
