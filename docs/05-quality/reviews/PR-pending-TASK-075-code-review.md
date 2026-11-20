@@ -109,3 +109,101 @@ Set-up: `git archive c2eaa47` (full tree, plus a packages-only copy) went into t
 - S2: `CarrierError.cause` is logged through the platform serializer with the URL path kept. ADR am. 11 item 8 ("drops any cause.message containing a URL") is not implemented in the error mapping (R1-m5). CWE-532.
 - S3: the type-only deep import of `@platform/carriers/*` passes lint and is held by the typecheck gate only (R1-m2).
 - S4: unmapped tracking events: the fix for R1-M1 adds `description` (PER) to the canonical event. It must never reach public tracking (DR-B31 / guardrail "no personal data beyond city on public tracking").
+
+---
+
+# Round 2 (pre-push), 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | `dde830b`: merge `7de6ec8` (origin/main `2ec81df` into `c2eaa47`), then fix commit `dde830b` |
+| Diff reviewed | fix: `git diff 7de6ec8 dde830b`, 19 files, +981 / -171 (all under `packages/carriers/src`); remerge of `7de6ec8` |
+| Inputs | round-1 findings above; security review `PR-pending-TASK-075-security-review.md` (PR075-SEC-01..09); D-SD-003 item 5 (routing of the TASK-075 follow-ups); D-TASK075-11..18 (in the hand-off) |
+
+## R2.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R1-M1 is closed: unmapped tracking events come back as IN_TRANSIT with unmapped: true, in input order, and none
+         is dropped. TrackingEvent carries unmapped, carrierEventId and description (PER, never logged). The R1 MINORs and
+         NITs are fixed or routed (D-SD-003). PR075-SEC-01..08 are addressed. One new MINOR: the label checks have false
+         negatives, and the guard drops a refused label, which DHL/FedEx cannot recover. Four NITs.
+```
+
+The approval holds only if (i) lane B passes on `dde830b` and (ii) principal-architect records D-TASK075-01 (merge condition C2). R2-m1 does not block: it can be fixed here or routed to TASK-101 with its fixtures.
+
+## R2.2 Verification performed (same HOST RULE: static review and single-process Node probes on a `git archive` extract; no npm, no Jest, no Docker)
+
+- **Remerge `7de6ec8` is a pure union:**
+  - `git merge-tree --write-tree c2eaa47 2ec81df` gives a tree with no diff to `7de6ec8`;
+  - `comm -12` of the two sides' file lists against the merge base is empty;
+  - main's 11 commits touch only `docs/**`, `prisma/tests/**`, `tools/db/**` and `tools/quality/**`. Nothing under `packages/carriers` or `packages/config`.
+- **Gates on the `dde830b` archive** (node_modules junction to the worktree; the worktree was not touched):
+  - `tsc -p` (scratch tsconfig over `packages/carriers/src` and the config test, noEmit): exit 0;
+  - type-aware ESLint with `--max-warnings 0` on the 36 `.ts` files of `5145d52..dde830b`: exit 0;
+  - `prettier --check`: clean.
+- **Not re-run:** Jest and coverage. Lane B on `dde830b` is queued and is the binding evidence.
+- **Behaviour probes** (`probe2.ts`, tsx):
+  - Q8: `['OK', 'a b', undefined, 'ZZ']` gives `DELIVERED/false` followed by three `IN_TRANSIT/true`. That is one output per input. It writes two warn lines (`(unprintable)` and `ZZ`), with no description.
+  - Q9: the adapter receives only the six context fields, so an extra `secret` key is dropped. Together with the guard-hardening tests (getter flip, Proxy, mutation after the call starts), the snapshot is taken synchronously before the adapter runs: closed.
+  - Q7b/Q7c: a sandbox prefix covering a production exact path is refused, and an own `__proto__` rule key is refused.
+  - Q6c: a `DOMException('…https://x/y', 'TimeoutError')` cause becomes `{ name: 'TimeoutError' }`, with no URL.
+  - The new findings come from Q1–Q7 (below).
+- **Routing check:**
+  - R1-m2: the TASK-076 code review (`PR-pending-TASK-076-code-review.md` line 128) confirms that `CARRIERS_DEEP_IMPORT_PATTERN` has value, `import type` and `export type … from` fixtures. That covers the shapes my round-1 lint probe found clean.
+  - R1-m3, R1-m6 and R1-n9: routed in D-SD-003 item 5 to TASK-124, TASK-080 and TASK-079.
+
+## R2.3 Round-1 closure
+
+| R1 item | Status | Evidence |
+|---|---|---|
+| M1 unmapped tracking dropped | **Closed** | `normalise.ts:156-180`; `types.ts` `TrackingEvent.unmapped`, `carrierEventId`, `description` (PER JSDoc); `tracking-and-logging.test.ts:40-78` (example, plus a property that preserves length, order and catalogue status); old drop test removed |
+| m1 clone after validate | **Closed** | `guard.ts:57-94` clones first and validates the clone; a non-cloneable value is a named issue, and the registry still reports the other adapters (`guard-hardening.test.ts:131-163`) |
+| m2 `import type` deep path lints clean | **Routed** | TASK-076 pattern and fixtures (verified above); whichever PR merges second re-runs negative-fixtures |
+| m3 IANA heuristic | **Routed** | TASK-124 (D-SD-003); the test title now says "interim heuristic" |
+| m4 false egress property | **Closed** | `egress.test.ts`: `fc.pre` excludes `test/…`, and an explicit overlap example documents the TASK-113 obligation |
+| m5 cause logged with URL path | **Closed** | `errors.ts` `safeCause` reduces `cause` to `{ name, code? }`; real-PlatformLogger test (`tracking-and-logging.test.ts:108-127`) asserts no sentinel, path or tracking number |
+| m6 CarrierMoney vs ADR-0009 | **Routed** | TASK-080 (D-SD-003) |
+| m7 contract gaps | **Closed** | `incoterm` (required on `ShipmentRequest`, optional on `RateRequest`), `PackageSpec.packageType`, `ShipmentConfirmation.packages` (`ShipmentPackageResult`) |
+| n1 dead branch | **Closed** | encoded-separator check now runs first; the test asserts its own message |
+| n2 coerced `carrierErrorCode` | **Closed** | `typeof` check; `hardening-misc.test.ts` uses `1001` |
+| n3 bidi / lone surrogate | **Closed** | `\p{Cf}` and `\p{Cs}` stripped; test |
+| n4 required ops read live | **Closed** | all eleven operations bound at registration; test |
+| n5 hand-built context | **Closed** | `snapshotContext` re-validates through `createCarrierContext`; test |
+| n6 RateResponse JSDoc | **Closed** | reworded; the invariant goes to the TASK-101 suite |
+| n7 errors.ts overclaim | **Closed** | JSDoc names the TASK-132 conversion |
+| n8 `es-419` | **Closed** | regex and test |
+| n9 Mock clause of AT-US-121-02 | **Routed** | TASK-079 (D-SD-003) |
+| n10 environment outside the union | **Closed** | named issue; test |
+| n11 cross-carrier canonical collision | **Closed** | the registry checks uniqueness across adapters; test |
+
+## R2.4 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `packages/carriers/src/labels.ts:30-55`; `guard.ts:149-166, 184-188` | The new format checks have **false negatives**, and `createShipment` now **drops** a label the check refuses (PR075-SEC-03 (b)). `recoverLabel` is true for UPS and Mock only (ADR-0010 am. 11 item 3), and DHL has no cancel, so for DHL Express and FedEx a dropped label is the only copy lost. The shipment ends booked, unvoidable (DHL) and label-less (`EXCEPTION`, operator). Probes: Q1 rejects as ZPL a payload whose `~DG` logo download before `^XA` is 3.2 KB, because only the first 1 KiB is searched (a 0.9 KB graphic passes). Q2 rejects a PDF with a UTF-8 BOM or a CRLF before `%PDF-`; PDF readers tolerate a header within the first 1024 bytes. Q3 is the reverse residual: EPL whose field data contains `^XA` passes as ZPL. The security review asked for the ZPL check to be re-checked against real carrier ZPL before merging, but no real fixtures exist yet. | (a) Search `^XA` across the whole payload (still linear; the outbound client already caps response size), or skip leading `~D*` download commands before applying the window. (b) Accept `%PDF-` within the first 1024 bytes for the PDF formats. (c) In any case, route to TASK-101 (and TASK-135/139/140): every real-carrier ZPL and PDF fixture must pass `createLabelDocument`, and a refused label for a carrier with `operations.recoverLabel = false` must be a test case with the saga's EXCEPTION path. If (a)/(b) are deferred, record the residual next to PR075-SEC-03. |
+| R2-n1 | NIT | `packages/carriers/src/guard.ts:15-17, 184-188` | The JSDoc says `createShipment` "never throws after the carrier accepted the shipment". Q4 (adapter returns `null`) and Q4b (a label getter throws) throw a TypeError or Error after the call. The duplicate-label guardrail then rests on TASK-132 treating a non-`CarrierError` failure after the call as ambiguous (EXCEPTION, no retry; add this to the TASK-132 hand-off next to the D-SD-003 line). Either way, the sentence is not true. | Wrap the post-call label pass in try/catch (on failure: `labels: []` plus one warn line), or reword to "never throws a `CarrierContractError`…". |
+| R2-n2 | NIT | `packages/carriers/src/guard.ts:36-39`; `registry.ts:22` | `GuardOptions.logger` is optional, so a composition root that omits it drops labels with no log line (Q5). | Make `logger` required in `createCarrierRegistry` (the production entry), and keep it optional only on `guardAdapter` for tests. |
+| R2-n3 | NIT | `packages/carriers/src/errors.ts:31-39` | `safeCause` reads `name`/`code` without a guard. A Proxy or throwing getter makes `new CarrierError(...)` itself throw (Q6, Q6b), turning error mapping into an unrelated error. | Wrap the reads in try/catch and return `{ name: 'Error' }`. |
+| R2-n4 | NIT | `packages/carriers/src/egress.ts:89-103` | `crossTierIssues` compares only sandbox **prefixes** with production entries. A sandbox **exact** path under a production prefix on the same origin passes: Q7, sandbox `/api/rates` against production `/api/`, which lists a production endpoint as a sandbox-tier rule. That is the copy-paste error PR075-SEC-02 (a) targets, in its exact-path form. The shared-token case (the same exact path listed in both tiers) must stay allowed. | Also refuse a sandbox exact entry covered by a production prefix unless the identical exact path is listed in production too. Add the Q7 row to the test. |
+
+## R2.5 Rulings (round-2 decisions as summarised in the dispatch; D-TASK075-11..18 are in the hand-off)
+
+- **Drop-not-throw for `createShipment` labels, refuse for `recoverLabel` (PR075-SEC-03 (b)): accepted.** A throw would be retried into a duplicate label, and that guardrail outranks label completeness. The cost is R2-m1 for non-recoverable carriers, so the checks must not refuse real carrier output.
+- **`safeCause` `{ name, code? }` replacing the cause: accepted.** It is stricter than ADR-0010 am. 11 item 8 ("drop a cause.message containing a URL"): it drops every message. That is the safe reading.
+- **Unmapped tracking → `IN_TRANSIT`, `unmapped: true`, metric owned by TASK-168 from the flag: accepted.** It matches REQ-TRACK-001 and US-241.
+- **Warning cap of 20 distinct codes plus one summary line per call (PR075-SEC-07): accepted.**
+- **Closed EGRESS schema and one-directional sandbox-covers-production check, with the reverse direction routed to TASK-113 (D-SD-003): accepted,** with R2-n4.
+- **Routings of R1-m2 (TASK-076), R1-m3 (TASK-124) and R1-m6 (TASK-080): accepted** (verified above).
+- **`incoterm` required on `ShipmentRequest` but optional (DAP when absent) on `RateRequest`: accepted.** The quote flow defaults DAP (REQ-CUST-005), while a booking must state it.
+
+## R2.6 Merge conditions (replace §5)
+
+- C1: met for code review. R2-m1 is fixed here or routed to TASK-101/135/139/140 in the hand-off.
+- C2: **still open for D-TASK075-01.** principal-architect records `getRates: RateResponse` against ADR-0010 §Interface ("exactly as brief §4.3"). D-TASK075-02 is covered by the D-SD-003 routing of the move to TASK-080; an architect line acknowledging the drift is still advisable.
+- C3: lane B passes on `dde830b`, and the security round 2 is recorded.
+
+## R2.7 Security flags (round 2)
+
+- R2-n4: the sandbox exact path under a production prefix (PR075-SEC-02 (a), exact-path form).
+- R2-m1: a format false negative destroys the only label copy for DHL/FedEx (availability and integrity, not confidentiality).
