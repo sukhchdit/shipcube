@@ -6978,3 +6978,44 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Applied in:** ADR-0014 amendments 15 and 16 with dated notes in amendments 5, 6 and 9; ADR-0018 (the register row, amendment 9); ADR-0012 amendment 5; data-model §3.5, §10.4, A39; api/README §5 ("Scope", "Clients").
 - **Validation:** the guard on `_PREVIOUS` was read in `packages/config/src/guards.ts` (rule `key.previousVersion`). Nothing was run.
 - **Reversibility:** High before part 040-B (no row exists). After it, the envelope is a stored form with a version field.
+
+### D-SECPR040-02 · 2026-11-20 · security-analyst · TASK-040 part 040-A security round 2 (delta `3dc1e225..e96bd979`, fix cycle 3 and D-PM-084) = PASS_WITH_FOLLOW-UPS at code head `e96bd979`; ruling on the synthetic UUID literal that gitleaks-full reports in three unpushed branch commits: no baseline change, a supersede branch preferred, D-SEC-PR45-01 commit-bound entries accepted as the alternative (round appended to `docs/05-quality/security/PR-pending-TASK-040-security-review.md` on main)
+- **Decision (delta):** nothing Critical, High or Medium is open, and the delta adds no finding.
+- **Scope.**
+  - The merges `5bea60ad`, `2ae719aa` and `a8b69fed` are pure unions: each merge commit's tree equals `git merge-tree` of its parents, and main changed only documents.
+  - 13 code files were reviewed.
+  - The PR head `93f0f126` adds only a merge of main that touches documents, so the binding to `e96bd979` holds.
+  - Main's checker counts 39 owned paths. A shared-clone simulation passes at `e96bd979` and at `93f0f126`. The control, the round-1 record alone, gives `missing`.
+- **Verified.**
+  - **R3-M1 origin envelope `{origin, body}`, probe P5 6/6.** The origin is inside the GCM plaintext. On a slot-problem row, a clear `Content-Type` tamper is ignored, a status flip is refused, and a body without the envelope is refused. This closes the marker path of PR040-SEC-02.
+  - **What stays open of PR040-SEC-02.** The status and headers of a handler row are still unauthenticated, and a body nulled together with its key id turns any row into a body-less handler replay.
+  - **PR040-SEC-05 is closed.** A claim lost after `call` writes the FAILED entry and a WARN `api.idempotency_claim_lost {phase, correlation_id}`. A claim lost before `call` writes no entry. The tests assert no key in any log line.
+  - **C9 lists and test keys.** The C9 lists are tied to the migration. The test keys are `randomUUID()`. The final tree holds no key-shaped literal on a key-named identifier: the one remaining occurrence is main's EPIC-16 Gherkin line, which cannot match `generic-api-key`.
+- **Status of the round-1 findings.**
+  - **Closed by ruling:** PR040-SEC-03 (D-ARCH-204, SEC-TC-04 at `b9c0ddeb`), -06 (D-ARCH-204) and -08 (D-ARCH-202 item 6).
+  - **Open, due in part 040-B, first pull request (D-ARCH-200, D-ARCH-204):** -01, -02 (narrowed), -04, -07 and -09.
+- **Gitleaks ruling (the coordinator's question).**
+  - **Facts.**
+    - The branch has never been pushed (`git ls-remote`).
+    - All 65 PR landings on main are squashes, so these commits never reach main's ancestry.
+    - Lane A's PR range scan reads only the base ref's `.gitleaks.toml`, never the baseline, so the first `pull_request` event would report the same lines.
+  - **(1) `tools/quality/gitleaks-baseline.txt`, `BASELINE_COUNT` and the sec-static pin stay unchanged.** Nothing is committed for this. The baseline is for main's history (D-SEC-PR25-01). It would not fix lane A, and it would keep fingerprints of commits that never reach main in an exact, count-pinned list for good.
+  - **(2) Preferred: a supersede branch.** A new branch from `origin/main` with one squash commit of the final tree, checked with `git diff --quiet <final head> HEAD`, and pushed in place of the old one. The old branch stays as it is, unpushed, as the archive of the reviewed SHAs. No ref moves and nothing is force-pushed, so this is no history rewrite (the precedent is PR #18 and PR #19). It costs one lane B run on the new head and a supersede round on its head row, in the code review and in this record. Both rounds are tree-equality proofs.
+  - **(3) Accepted alternative: exact entries in `.gitleaks.toml`, one per finding, under D-SEC-PR45-01 conditions 1 to 7.**
+    - **Each entry:** AND, `regexTarget = "line"`, the full commit, `targetRules = ["generic-api-key"]`, an anchored path, and `^\n?<exact line>$` with the value class pinned. Fingerprints come from the lane B report (rule, commit, path, line only).
+    - **Delivery:** in their own PR to main, with a record and a real-image before/after on a Docker slot.
+    - **Why it is allowed here.** D-SEC-PR45-01 covers already-pushed commits. I extend it to commits that review records and evidence have already bound.
+    - **Coverage and lifetime.** The entries cover lanes A, B and C. They are retired once the commits are not ancestors of main and the branch is closed.
+  - **(4) The orchestrator chooses (2) or (3).**
+    - Under (2), the lane B run queued on `93f0f126` cannot be the PR's gitleaks evidence.
+    - Under (3), the config PR merges before the TASK-040 PR's lane A and its gitleaks-full step.
+- **Routed:**
+  - **orchestrator:** the choice in item (4), then the rename and the merge-ref check.
+  - **senior-developer:** if (2), the supersede branch and the tree-equality check.
+  - **devops-engineer:** if (3), the config PR and its real-image proof.
+  - **security-analyst (self):** if (2), the supersede round; if (3), the review of the config PR.
+- **Alternatives considered:**
+  - **Baseline only.** Rejected: it leaves lane A red, and it is the wrong list.
+  - **A `.gitleaks.toml` path or rule allowlist for the test files.** Rejected: it is the class PR10-SEC-08 and D-SEC-PR45-01 forbid.
+  - **Changing the old branch in place (a rebase that drops the literal).** Not needed: it moves a ref the reviews are bound to, and option (2) gives the same result without moving any ref.
+- **Reversibility:** High (a review record, and no configuration change).
