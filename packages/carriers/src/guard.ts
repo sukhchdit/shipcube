@@ -12,9 +12,16 @@
  *  - every call's context is read once into a frozen copy validated by `createCarrierContext` (account of the adapter's
  *    carrier, the account's own environment, valid deadline, locale and scenario), and the adapter receives that copy,
  *    never the caller's object (PR075-SEC-01);
- *  - labels the adapter returns are re-checked (PR075-SEC-03): `recoverLabel` refuses an invalid or unrequested label;
- *    `createShipment` never throws after the carrier accepted the shipment (a throw would invite a retry and a
- *    duplicate label), so an invalid label is dropped and logged with codes only, and the saga recovers the format.
+ *  - a `CarrierContractError` that leaves the guard means the adapter was NOT entered (registration, context refusal):
+ *    it is local and non-ambiguous. Once the adapter is entered nothing is local, so a contract error thrown from
+ *    inside it, or by the label re-check after it, leaves as `CarrierError(CARRIER_UNKNOWN_ERROR)` with a safe cause
+ *    (PR075-SEC-10). Any other failure passes through unchanged; the gateway (TASK-132) treats a non-`CarrierError`
+ *    after `createShipment` as ambiguous (EXCEPTION, no retry);
+ *  - labels the adapter returns are re-checked (PR075-SEC-03): `recoverLabel` (idempotent, retryable) refuses an
+ *    invalid or unrequested label and logs `carrier.label.refused` with the format code; `createShipment` drops an
+ *    invalid label, or a non-list `labels`, with a `carrier.label.dropped` line (codes only) instead of throwing, so the
+ *    check never turns an accepted shipment into a retry and a duplicate label. A `null` result or a throwing getter
+ *    on the result still throws a non-contract error (ambiguous for the gateway).
  * All eleven operations are bound at registration; later changes to the adapter object do not move the facade.
  */
 import type { CarrierAdapter, GuardedCarrierAdapter } from './adapter.js';
@@ -39,6 +46,9 @@ export interface GuardOptions {
 }
 
 export const LABEL_DROPPED_EVENT = 'carrier.label.dropped';
+export const LABEL_REFUSED_EVENT = 'carrier.label.refused';
+/** Format code logged when an adapter's `labels` is not a list (a carrier `LabelURL` string, `URL_ONLY`). */
+const NOT_A_LIST = '(not a list)';
 
 /** Reads a member without binding it (a presence check only). */
 const hasFunction = (target: object, key: string): boolean => typeof (target as Record<string, unknown>)[key] === 'function';
@@ -143,12 +153,26 @@ export function guardAdapter(adapter: CarrierAdapter, options: GuardOptions = {}
   /** The single entry of every call: capability first (no I/O on refusal), then the context copy, then the adapter. */
   const run = async <R>(operation: CarrierOperation, ctx: unknown, call: ((ctx: CarrierContext) => Promise<R>) | undefined): Promise<R> => {
     if (!supported(operation) || call === undefined) throw new CarrierError('CAPABILITY_NOT_SUPPORTED', { carrier: code, operation });
-    return call(snapshotContext(ctx, code, operation));
+    const copy = snapshotContext(ctx, code, operation); // a CarrierContractError here: the adapter was not entered
+    try {
+      return await call(copy);
+    } catch (error) {
+      // Once the adapter is entered nothing is local: a contract error from inside it is a carrier-call failure.
+      if (error instanceof CarrierContractError)
+        throw new CarrierError('CARRIER_UNKNOWN_ERROR', { carrier: code, operation, cause: error });
+      throw error;
+    }
   };
 
   /** Re-checks returned labels; `requested` given = refuse (recoverLabel), absent = drop and log (createShipment). */
-  const checkedLabels = (operation: CarrierOperation, labels: unknown, requested?: readonly DocumentFormat[]): LabelDocument[] =>
-    (Array.isArray(labels) ? (labels as unknown[]) : []).flatMap((label) => {
+  const checkedLabels = (operation: CarrierOperation, labels: unknown, requested?: readonly DocumentFormat[]): LabelDocument[] => {
+    if (!Array.isArray(labels)) {
+      const event = requested === undefined ? LABEL_DROPPED_EVENT : LABEL_REFUSED_EVENT;
+      options.logger?.warn(event, { carrier: code, operation, format: NOT_A_LIST });
+      if (requested !== undefined) throw new CarrierContractError(`${code}.${operation} returned no label list`, [NOT_A_LIST]);
+      return [];
+    }
+    return (labels as unknown[]).flatMap((label) => {
       const { format, content } = (typeof label === 'object' && label !== null ? label : {}) as { format?: unknown; content?: unknown };
       try {
         const document = createLabelDocument(typeof format === 'string' ? format : '', content);
@@ -158,12 +182,15 @@ export function guardAdapter(adapter: CarrierAdapter, options: GuardOptions = {}
         return [document];
       } catch (error) {
         if (!(error instanceof CarrierContractError)) throw error;
-        if (requested !== undefined)
+        if (requested !== undefined) {
+          options.logger?.warn(LABEL_REFUSED_EVENT, { carrier: code, operation, format: loggableFormat(format) });
           throw new CarrierContractError(`${code}.${operation} returned an invalid label`, [loggableFormat(format)]);
+        }
         options.logger?.warn(LABEL_DROPPED_EVENT, { carrier: code, operation, format: loggableFormat(format) });
         return [];
       }
     });
+  };
 
   const getRates = adapter.getRates.bind(adapter);
   const createShipment = adapter.createShipment.bind(adapter);

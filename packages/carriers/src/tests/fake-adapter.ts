@@ -7,6 +7,14 @@ import type { CarrierAdapter } from '../adapter.js';
 import type { CarrierCapabilities, OperationSupport, ServiceCapability } from '../capabilities.js';
 import { type CarrierContext, createCarrierContext } from '../context.js';
 import type { CarrierOperation } from '../operations.js';
+import { type CarrierRegistry, createCarrierRegistry } from '../registry.js';
+
+/** A logger that discards lines, for tests that do not inspect them. */
+export const SILENT_LOGGER = { warn: (): void => undefined };
+
+/** `createCarrierRegistry` with the silent logger. */
+export const registryOf = (adapters: Iterable<CarrierAdapter>): CarrierRegistry =>
+  createCarrierRegistry(adapters, { logger: SILENT_LOGGER });
 
 export const FAKE_CARRIER = 'FAKE_CARRIER';
 

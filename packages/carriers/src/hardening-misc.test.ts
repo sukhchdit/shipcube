@@ -161,3 +161,59 @@ describe('[R1-n8] context locales', () => {
     expect(ctx.locale).toBe('es-419');
   });
 });
+
+describe('[R2-m1] label checks have no false negatives on real shapes', () => {
+  it('accepts ZPL whose ~DG graphic preamble is 4,800 bytes long', () => {
+    const preamble = `~DGR:LOGO.GRF,2400,30,${'F0'.repeat(2389)}\n`;
+    const label = bytes(`${preamble}^XA^XGR:LOGO.GRF,1,1^FS^XZ`);
+    expect(label.length).toBeGreaterThan(4800);
+    expect(createLabelDocument('ZPL', label).format).toBe('ZPL');
+  });
+
+  it('accepts a PDF with a UTF-8 BOM or CR/LF before %PDF- and refuses one whose header is beyond 1024 bytes', () => {
+    const bom = Uint8Array.from([0xef, 0xbb, 0xbf, ...bytes('%PDF-1.7 synthetic')]);
+    expect(createLabelDocument('PDF_4X6', bom).format).toBe('PDF_4X6');
+    expect(createLabelDocument('PDF_A4', bytes('\r\n%PDF-1.4 synthetic')).format).toBe('PDF_A4');
+    expect(() => createLabelDocument('PDF_A4', bytes(`${' '.repeat(1024)}%PDF-1.4`))).toThrow('PDF_A4 content must be a PDF');
+    expect(() => createLabelDocument('PDF_A4', bytes('%PDF%PD%'))).toThrow('PDF_A4 content must be a PDF');
+  });
+});
+
+describe('[R2-n4 / PR075-SEC-11] cross-tier egress, exact paths and other carriers', () => {
+  const rule = (origin: string, pathPrefixes: string[], tier: 'sandbox' | 'production') => ({ origin, pathPrefixes, tier });
+
+  it('refuses a sandbox exact path under a production prefix on the same origin, keeping a shared exact path valid', () => {
+    expect(
+      egressIssues({
+        sandbox: [rule('https://onlinetools.ups.com', ['/api/rates'], 'sandbox')],
+        production: [rule('https://onlinetools.ups.com', ['/api/'], 'production')],
+      }),
+    ).toEqual(['EGRESS.sandbox[0] /api/rates lies under the production prefix /api/ on https://onlinetools.ups.com']);
+    expect(
+      egressIssues({
+        sandbox: [rule('https://api.carrier.example', ['/v1/test/', '/v1/token'], 'sandbox')],
+        production: [rule('https://api.carrier.example', ['/v1/', '/v1/token'], 'production')],
+      }),
+    ).toEqual([]);
+  });
+
+  it("refuses a sandbox list that reaches another carrier's production host", () => {
+    const egress: Record<string, CarrierEgress> = {
+      FEDEX: defineCarrierEgress('FEDEX', {
+        sandbox: [rule('https://apis-sandbox.fedex.com', ['/'], 'sandbox')],
+        production: [rule('https://apis.fedex.com', ['/'], 'production')],
+      }),
+      NEWCO: defineCarrierEgress('NEWCO', { sandbox: [rule('https://apis.fedex.com', ['/'], 'sandbox')], production: [] }),
+    };
+    const account = (carrierCode: string): EgressAccount => ({
+      code: `${carrierCode}_SANDBOX`,
+      carrierCode,
+      environment: 'sandbox',
+      enabled: true,
+    });
+    expect(() => deriveCarrierEgressRules({ accounts: [account('NEWCO')], egress, appEnv: 'local' })).toThrow(
+      'NEWCO EGRESS.sandbox[0] / reaches the production entry / on https://apis.fedex.com',
+    );
+    expect(deriveCarrierEgressRules({ accounts: [account('FEDEX')], egress, appEnv: 'local' })).toEqual(egress.FEDEX?.sandbox);
+  });
+});

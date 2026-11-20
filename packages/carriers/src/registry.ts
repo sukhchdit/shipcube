@@ -9,6 +9,7 @@ import type { CarrierAdapter, GuardedCarrierAdapter } from './adapter.js';
 import { isCarrierCode } from './canonical/codes.js';
 import { CarrierContractError } from './errors.js';
 import { guardAdapter, type GuardOptions } from './guard.js';
+import type { NormaliseLogger } from './normalise/normalise.js';
 
 export interface CarrierRegistry {
   /** Registered carrier codes, in registration order. */
@@ -19,7 +20,11 @@ export interface CarrierRegistry {
 }
 
 /** Registers every adapter or none: all defects of all adapters are reported in one `CarrierContractError`. */
-export function createCarrierRegistry(adapters: Iterable<CarrierAdapter>, options: GuardOptions = {}): CarrierRegistry {
+/** The production entry: the logger is required, so a dropped or refused label always leaves a line (R2-n2). */
+export function createCarrierRegistry(
+  adapters: Iterable<CarrierAdapter>,
+  options: GuardOptions & { readonly logger: NormaliseLogger },
+): CarrierRegistry {
   const byCode = new Map<string, GuardedCarrierAdapter>();
   const serviceOwner = new Map<string, string>();
   const issues: string[] = [];

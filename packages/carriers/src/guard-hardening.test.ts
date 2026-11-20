@@ -1,14 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
+import fc from 'fast-check';
 
 import type { CarrierAdapter } from './adapter.js';
 import type { LabelDocument, RateRequest, ShipmentConfirmation, ShipmentRequest } from './canonical/types.js';
 import type { CarrierContext } from './context.js';
 import { egressBase, defineCarrierEgress } from './egress.js';
-import { CarrierContractError } from './errors.js';
-import { guardAdapter, LABEL_DROPPED_EVENT, registrationIssues } from './guard.js';
+import { CarrierContractError, CarrierError } from './errors.js';
+import { guardAdapter, LABEL_DROPPED_EVENT, LABEL_REFUSED_EVENT, registrationIssues } from './guard.js';
+import { createLabelDocument } from './labels.js';
+import { CARRIER_OPERATIONS } from './operations.js';
 import type { NormaliseLogger } from './normalise/normalise.js';
-import { createCarrierRegistry } from './registry.js';
-import { createFakeAdapter, FAKE_CARRIER, fakeCapabilities, fakeContext, fakeService } from './tests/fake-adapter.js';
+import {
+  registryOf as createCarrierRegistry,
+  createFakeAdapter,
+  FAKE_CARRIER,
+  fakeCapabilities,
+  fakeContext,
+  fakeService,
+} from './tests/fake-adapter.js';
 import { monitorNetwork, type NetworkMonitor } from './tests/network-monitor.js';
 
 const EGRESS = defineCarrierEgress(FAKE_CARRIER, {
@@ -204,29 +213,105 @@ describe('[PR075-SEC-03] labels returned by the adapter are re-checked', () => {
     expect(network.attempts()).toBe(0);
   });
 
-  it('createShipment with a non-array labels field resolves with no labels', async () => {
-    const result = await guardAdapter(returning(undefined)).createShipment(shipmentRequest, fakeContext());
+  it('[PR075-SEC-13] createShipment with a non-list labels field resolves with no labels and one warn line', async () => {
+    const warn = jest.fn<NormaliseLogger['warn']>();
+    const result = await guardAdapter(returning('https://carrier.example/label.pdf'), { logger: { warn } }).createShipment(
+      shipmentRequest,
+      fakeContext(),
+    );
     expect(result.labels).toEqual([]);
+    expect(warn.mock.calls).toEqual([
+      [LABEL_DROPPED_EVENT, { carrier: FAKE_CARRIER, operation: 'createShipment', format: '(not a list)' }],
+    ]);
+    expect((await guardAdapter(returning(undefined)).createShipment(shipmentRequest, fakeContext())).labels).toEqual([]);
   });
 
-  it('recoverLabel refuses a raster label, an unrequested format and string content', async () => {
+  it('[PR075-SEC-10] recoverLabel refusals leave as CarrierError(CARRIER_UNKNOWN_ERROR) with a carrier.label.refused line', async () => {
     const ref = { trackingNumber: 'T1' };
-    await expect(
-      guardAdapter(returning([], [{ format: 'GIF', content: png }])).recoverLabel(ref, ['PDF_4X6'], fakeContext()),
-    ).rejects.toThrow(`${FAKE_CARRIER}.recoverLabel returned an invalid label: GIF`);
-    await expect(
-      guardAdapter(returning([], [{ format: 'ZPL', content: zpl }])).recoverLabel(ref, ['PDF_4X6'], fakeContext()),
-    ).rejects.toThrow(CarrierContractError);
-    await expect(
-      guardAdapter(returning([], [{ format: 'PDF_4X6', content: 'https://carrier.example/x' }])).recoverLabel(
-        ref,
-        ['PDF_4X6'],
-        fakeContext(),
-      ),
-    ).rejects.toThrow(CarrierContractError);
+    const cases: [unknown, string][] = [
+      [[{ format: 'GIF', content: png }], 'GIF'],
+      [[{ format: 'ZPL', content: zpl }], 'ZPL'],
+      [[{ format: 'PDF_4X6', content: 'https://carrier.example/x' }], 'PDF_4X6'],
+      ['not a list', '(not a list)'],
+    ];
+    for (const [recovered, format] of cases) {
+      const warn = jest.fn<NormaliseLogger['warn']>();
+      const failure = guardAdapter(returning([], recovered), { logger: { warn } }).recoverLabel(ref, ['PDF_4X6'], fakeContext());
+      await expect(failure).rejects.toBeInstanceOf(CarrierError);
+      await expect(failure).rejects.toMatchObject({
+        code: 'CARRIER_UNKNOWN_ERROR',
+        operation: 'recoverLabel',
+        cause: { name: 'CarrierContractError' },
+      });
+      expect(warn.mock.calls).toEqual([[LABEL_REFUSED_EVENT, { carrier: FAKE_CARRIER, operation: 'recoverLabel', format }]]);
+    }
     await expect(
       guardAdapter(returning([], [{ format: 'PDF_4X6', content: pdf }])).recoverLabel(ref, ['PDF_4X6'], fakeContext()),
     ).resolves.toEqual([{ format: 'PDF_4X6', content: pdf }]);
+  });
+});
+
+describe('[PR075-SEC-10] a CarrierContractError leaves the guard only when the adapter was not entered', () => {
+  it('a contract error thrown inside createShipment after the carrier call becomes CarrierError(CARRIER_UNKNOWN_ERROR)', async () => {
+    let carrierCalls = 0;
+    const adapter = {
+      ...createFakeAdapter(),
+      createShipment: async () => {
+        carrierCalls += 1;
+        await Promise.resolve();
+        return { ref: { trackingNumber: 'T1' }, serviceCode: 'X', labels: [createLabelDocument('PDF_4X6', png)] };
+      },
+    };
+    const failure = guardAdapter(adapter).createShipment(shipmentRequest, fakeContext());
+    await expect(failure).rejects.toBeInstanceOf(CarrierError);
+    await expect(failure).rejects.toMatchObject({ code: 'CARRIER_UNKNOWN_ERROR', operation: 'createShipment' });
+    expect(carrierCalls).toBe(1);
+    const refused = guardAdapter(adapter).createShipment(shipmentRequest, { ...fakeContext(), correlationId: 'x' });
+    await expect(refused).rejects.toBeInstanceOf(CarrierContractError);
+    expect(carrierCalls).toBe(1);
+  });
+
+  it('property: for every operation, CarrierContractError leaves the guard only with zero adapter calls', async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.constantFrom(...CARRIER_OPERATIONS), fc.boolean(), async (operation, validContext) => {
+        const calls: string[] = [];
+        const adapter: Record<string, unknown> = { ...createFakeAdapter() };
+        for (const name of CARRIER_OPERATIONS) {
+          adapter[name] = () => {
+            calls.push(name);
+            throw new CarrierContractError('inside', ['adapter-side defect']);
+          };
+        }
+        const guarded = guardAdapter(adapter as unknown as CarrierAdapter) as unknown as Record<
+          string,
+          (...args: unknown[]) => Promise<unknown>
+        >;
+        const ctx = validContext ? fakeContext() : { ...fakeContext(), locale: 'bad locale' };
+        const args = operation === 'recoverLabel' ? [{ trackingNumber: 'T1' }, ['PDF_4X6'], ctx] : [{}, ctx];
+        const invokeOperation = guarded[operation];
+        if (invokeOperation === undefined) throw new Error(`no ${operation}`);
+        const error = await invokeOperation(...args).then(
+          () => undefined,
+          (thrown: unknown) => thrown,
+        );
+        if (error instanceof CarrierContractError) expect(calls).toEqual([]);
+        else expect(error).toMatchObject({ code: 'CARRIER_UNKNOWN_ERROR' });
+        expect(error instanceof CarrierContractError).toBe(!validContext);
+      }),
+      { numRuns: 60 },
+    );
+  });
+
+  it('[R2-n3] a cause with a throwing getter does not make CarrierError throw', () => {
+    const hostile = new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error('trap');
+        },
+      },
+    );
+    expect(new CarrierError('TIMEOUT', { cause: hostile }).cause).toEqual({ name: 'Error' });
   });
 });
 

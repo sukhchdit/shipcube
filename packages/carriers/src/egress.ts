@@ -91,10 +91,16 @@ const RULE_KEYS: ReadonlySet<string> = new Set(['origin', 'pathPrefixes', 'tier'
 function crossTierIssues(egress: CarrierEgress): string[] {
   const issues: string[] = [];
   egress.sandbox.forEach((sandboxRule, index) => {
-    for (const productionRule of egress.production.filter(({ origin }) => origin === sandboxRule.origin)) {
-      for (const entry of sandboxRule.pathPrefixes.filter((prefix) => prefix.endsWith('/'))) {
-        for (const other of productionRule.pathPrefixes.filter((prefix) => prefix.startsWith(entry))) {
+    const production = egress.production.filter(({ origin }) => origin === sandboxRule.origin).flatMap(({ pathPrefixes }) => pathPrefixes);
+    for (const entry of sandboxRule.pathPrefixes) {
+      if (entry.endsWith('/')) {
+        for (const other of production.filter((prefix) => prefix.startsWith(entry))) {
           issues.push(`EGRESS.sandbox[${String(index)}] ${entry} reaches the production entry ${other} on ${sandboxRule.origin}`);
+        }
+      } else if (!production.includes(entry)) {
+        // An exact sandbox path under a production prefix is a production endpoint (R2-n4); a shared exact path is not.
+        for (const other of production.filter((prefix) => prefix.endsWith('/') && entry.startsWith(prefix))) {
+          issues.push(`EGRESS.sandbox[${String(index)}] ${entry} lies under the production prefix ${other} on ${sandboxRule.origin}`);
         }
       }
     }
@@ -156,6 +162,10 @@ export interface DeriveEgressInput {
   readonly appEnv: string;
 }
 
+/** The production rules of every well-formed table (malformed ones are reported by `egressIssues`). */
+const everyProductionRule = (egress: Readonly<Record<string, CarrierEgress>>): EgressRule[] =>
+  Object.values(egress).flatMap((table): readonly EgressRule[] => (egressIssues(table).length === 0 ? table.production : []));
+
 const ruleKey = (rule: EgressRule): string => JSON.stringify([rule.origin, rule.tier, [...rule.pathPrefixes].sort()]);
 
 /**
@@ -183,6 +193,12 @@ export function deriveCarrierEgressRules({ accounts, egress, appEnv }: DeriveEgr
     const tableIssues = egressIssues(table);
     if (tableIssues.length > 0) {
       issues.push(...tableIssues.map((issue) => `${account.carrierCode} ${issue}`));
+      continue;
+    }
+    // PR075-SEC-11: the sandbox list may not reach any carrier's production endpoints, not only its own.
+    const crossCarrier = crossTierIssues({ sandbox: table.sandbox, production: everyProductionRule(egress) });
+    if (crossCarrier.length > 0) {
+      issues.push(...crossCarrier.map((issue) => `${account.carrierCode} ${issue}`));
       continue;
     }
     for (const rule of table[account.environment]) rules.set(ruleKey(rule), rule);

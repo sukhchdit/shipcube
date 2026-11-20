@@ -207,7 +207,7 @@ export interface TrackingEvent {
    * The carrier's original description (data-model `carrier_description`). Personal data (it may name a signatory or a
    * street): never logged, never shown on public tracking (DR-B31), stored for staff only.
    */
-  readonly description?: string;
+  readonly carrierDescription?: string;
 }
 
 export interface TrackingResult {

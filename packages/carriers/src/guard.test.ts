@@ -14,8 +14,14 @@ import type { CarrierContext } from './context.js';
 import { CarrierContractError, CarrierError } from './errors.js';
 import { guardAdapter, registrationIssues } from './guard.js';
 import { CARRIER_OPERATIONS, type CarrierOperation, DECLARED_OPERATIONS, OPTIONAL_OPERATIONS, REQUIRED_OPERATIONS } from './operations.js';
-import { createCarrierRegistry } from './registry.js';
-import { ALL_SUPPORTED, createFakeAdapter, FAKE_CARRIER, fakeCapabilities, fakeContext } from './tests/fake-adapter.js';
+import {
+  registryOf as createCarrierRegistry,
+  ALL_SUPPORTED,
+  createFakeAdapter,
+  FAKE_CARRIER,
+  fakeCapabilities,
+  fakeContext,
+} from './tests/fake-adapter.js';
 import { monitorNetwork, type NetworkMonitor } from './tests/network-monitor.js';
 
 /** A shallow copy of `adapter` without `key`. */

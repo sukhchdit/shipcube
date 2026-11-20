@@ -110,8 +110,8 @@ export {
   type SafeCause,
   safeCause,
 } from './errors.js';
-export { guardAdapter, type GuardOptions, LABEL_DROPPED_EVENT, registrationIssues, snapshotContext } from './guard.js';
-export { createLabelDocument, isZpl } from './labels.js';
+export { guardAdapter, type GuardOptions, LABEL_DROPPED_EVENT, LABEL_REFUSED_EVENT, registrationIssues, snapshotContext } from './guard.js';
+export { createLabelDocument, isPdf, isZpl } from './labels.js';
 export {
   type CarrierMappings,
   type CarrierMappingsInput,

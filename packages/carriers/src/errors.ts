@@ -3,10 +3,12 @@
  *
  * `CarrierError` carries a canonical code. Its message is the canonical English text of that code, never the carrier's
  * wording, so a problem response or customer e-mail built from it cannot echo raw carrier text. The capability guard
- * throws it for an unsupported operation, and `normaliseError` builds it from a carrier failure. The guard passes other
- * adapter failures through unchanged; the resilience gateway (TASK-132) converts every non-`CarrierError` failure to
- * `CARRIER_UNKNOWN_ERROR` (with `safeCause`) and treats a `CarrierContractError` thrown before the adapter is reached as
- * local and non-ambiguous.
+ * throws it for an unsupported operation and, as `CARRIER_UNKNOWN_ERROR`, for a contract error raised once the adapter
+ * was entered; `normaliseError` builds it from a carrier failure. A `CarrierContractError` that leaves the guard means
+ * the adapter was not entered: it is local and non-ambiguous (PR075-SEC-10). The guard passes other adapter failures
+ * through unchanged; the resilience gateway (TASK-132) converts every non-`CarrierError` failure to
+ * `CARRIER_UNKNOWN_ERROR` (with `safeCause`), and anything other than a `CarrierContractError` after a `createShipment`
+ * call is ambiguous.
  *
  * Every field is checked at run time, not only by the type: an unknown code becomes `CARRIER_UNKNOWN_ERROR`, a carrier
  * or operation outside its shape is dropped, the carrier's own error code survives only as a short safe code, and the
@@ -31,7 +33,14 @@ export interface SafeCause {
 export function safeCause(cause: unknown): SafeCause | undefined {
   if (cause === undefined || cause === null) return undefined;
   if (typeof cause !== 'object') return Object.freeze({ name: 'Error' });
-  const { name, code } = cause as { name?: unknown; code?: unknown };
+  let name: unknown;
+  let code: unknown;
+  try {
+    // A Proxy or a throwing getter must not turn error mapping into an unrelated error (R2-n3).
+    ({ name, code } = cause as { name?: unknown; code?: unknown });
+  } catch {
+    return Object.freeze({ name: 'Error' });
+  }
   return Object.freeze({
     name: typeof name === 'string' && SAFE_NAME.test(name) ? name : 'Error',
     ...(typeof code === 'string' && SAFE_CODE.test(code) ? { code } : {}),
