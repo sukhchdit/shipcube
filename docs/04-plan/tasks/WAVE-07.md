@@ -69,7 +69,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-197) | US-291 (M1 Must) Re-authentication primitive, `auth_time` and age-based step-up |
 | REQs | REQ-AUTH-020, REQ-AUTH-025 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-COND-01, SEC-P3-01, D-046, D-ARCH-017, D-ARCH-193, D-SD-007 |
+| Spikes / security / decisions | SEC-COND-01, SEC-P3-01, D-046, D-ARCH-017, D-ARCH-193, D-SD-007, D-SECPR040-01, D-SD-008 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-061, TASK-055 |
@@ -86,6 +86,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - API scenarios of US-291
 - SEC-TC-37 (step-up part): listed operations without proof -> 401 REAUTH_REQUIRED; auth_time > 12 h on member/invitation routes -> 401
 - RE-AUTHENTICATION CHECK PLACEMENT (ADR-0014 amendment 7; ADR-0006 as amended 2026-11-20; api/README sections 5 and 8; D-ARCH-193): the check is called by the tx slot (apps/api/src/platform/tx/execute.ts, lock api-tx-execute) after the idempotency claim and before load, never as a pipeline slot of its own; the proof is consumed there; a refusal releases the claim; tests: a retry with the same key and the consumed proof is replayed and consumes nothing; a new key with the consumed proof answers 401 REAUTH_REQUIRED; a keyed request refused with 401 leaves no idempotency row and the same key with a fresh proof executes; 422 IDEMPOTENCY_KEY_REUSED does not consume the proof; no call phase runs before the check; security-analyst confirms the placement in the security record of this task
+- SECURITY CONDITIONS T187-1 TO T187-6 (D-SECPR040-01, checked in the security round of this task): T187-1 consumption is one conditional UPDATE ... RETURNING bound to the actor, the session and the operation, in its own committed transaction, after the idempotency claim and before load; T187-2 a refusal releases the claim and is never stored: storedProblemOf stores every thrown 4xx except a 429, so the 401 REAUTH_REQUIRED is excluded explicitly in execute.ts; T187-3 the proof never enters the fingerprint, a stored body, an audit value or a log line; T187-4 a replay, a 409 or a 422 neither reads nor consumes a proof, and the ReauthProofConditional text of the contract is corrected (with QG-040-C3 (a)); T187-5 after a lease takeover the retry needs a fresh proof; T187-6 every new execution of the org.member.manage and payment_method.manage operations is checked, whatever its idempotency mode
 - Covers the scenarios of AT-US-291-01 … AT-US-291-13 that belong to its layer; US-291 closes in TASK-197
 
 **DoD notes**

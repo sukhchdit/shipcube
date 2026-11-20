@@ -6767,3 +6767,31 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **STATUS:** TASK-295 is merged (PR #79, `1ce81abd`). EFFECT-WAIVER is closed, with PR295-SEC-01 named as the open follow-up on TASK-015 part 015-C. **traceability v1.14:** the Design cells of REQ-API-009..011 name ADR-0014 amendments 5 to 9 and ADR-0013 amendment 6.
 - **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` shows 0 changes of branch, title, wave or batch; 40 rows changed (refs, plus the stories columns of TASK-040); one new row, TASK-296.
 - **Reversibility:** High (plan sources, the generator field, STATUS, traceability; no product code).
+
+### D-SD-008 · 2026-11-20 · senior-developer · Plan fold for D-SECPR040-01 (TASK-040 security round 1), TASK-040 code review R3-m1 and D-SECPR043-02 (PR043-SEC-08, R3-m2): the part 040-B security and purge conditions, proof (g), T187-1..6 on TASK-187, two merge prerequisites on TASK-049, the widened lint-twin line and two CODEOWNERS additions on TASK-015 part 015-C (plan regenerated: 296 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Trigger:** the orchestrator's addendum to the D-SD-007 fold. D-SECPR040-01 (`23e6a244`), code review round 3 of TASK-040 (`1f70221a`) and D-SECPR043-02 (`86ec0678`).
+- **Decision (cards):**
+  1. **TASK-040, part 040-B.** Three new lines:
+     - PART 040-B SECURITY CONDITIONS:
+       - PR040-SEC-01: HKDF-derived body and network keys with separate info labels.
+       - PR040-SEC-02: seal `{v, status, headers, body}`; the replayed `Content-Type` is JSON or problem+json only.
+       - PR040-SEC-04: the lease formula with a table test.
+       - PR040-SEC-05: FAILED entry plus WARN when `call` ran, pending product-manager.
+       - PR040-SEC-07: three contract pins — public = {recordConsent}; VIEW/DOWNLOAD = {emailShipmentDocuments}; `client_secret` = {checkoutOrder, confirmPayment, createPaymentMethodSetup}.
+       - PR040-SEC-09: release the key after a rendering failure.
+     - PART 040-B PURGE CONDITIONS, P-3 to P-5, naming P-1 as devops-engineer's item.
+     - PART 040-B PROOF (g): code review R3-m1, one `problemTypeBase` source in `defaultSlots` plus the composition test.
+  2. **The lint twin of R2-C5.** The BOUNDARIES RESOLVED-FILE POLICY line on TASK-047 and TASK-040 part 040-B now also names the `tests/`-folder rule, the `@platform/<pkg>/testing` specifier and the template-literal `import()` spelling.
+  3. **TASK-049.** Two merge prerequisites, each lapsing if an earlier commit closes it:
+     - PR043-SEC-08 widened by R3-m1: the closed-schema walk reads `whens`, `ordered`, custom rules, inverted patterns and default functions; the pattern probe set runs at catalogue load; `base64` only under `*_enc` keys.
+     - The PR043-SEC-02 tripwire of R3-m2.
+  4. **TASK-187.** T187-1 to T187-6, including the explicit exclusion of 401 `REAUTH_REQUIRED` from `storedProblemOf`.
+  5. **TASK-015 part 015-C (devops-engineer, PR64-SEC-09).** The CODEOWNERS ADDITIONS line gains:
+     - (4) `/apps/worker/src/platform/outbox/` and `/packages/shared/src/events/`;
+     - (5) `/apps/worker/src/platform/idempotency/` (P-1), before part 040-B merges.
+- **Not mine, routed onward:**
+  - qa-lead: SEC-TC-04 wording (the anonymous half on `recordConsent`; "no secret in clear").
+  - principal-architect: the PR040-SEC-03 decision, the ADR-0018 register row, data-model §10.4, the rotation note, and the `ReauthProofConditional` wording with QG-040-C3.
+  - product-manager: PR040-SEC-05 and the scope of D-PM-081.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 4 rows of `task-map.csv` changed (refs of TASK-015, 040, 049 and 187); no branch, title, wave or batch changed.
+- **Reversibility:** High.
