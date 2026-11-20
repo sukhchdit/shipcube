@@ -47,7 +47,7 @@ Conventions in this document: requirement IDs (`REQ-*`), domain rules (`DR-*`), 
 | P9 | Naming | `snake_case`, plural table names, singular column names, FK columns `<entity>_id`. Constraint names: `pk_<table>`, `fk_<table>__<column>`, `ux_<table>__<cols>` (unique index), `ix_<table>__<cols>` (index), `ck_<table>__<rule>`, `ex_<table>__<rule>` (exclusion). Prisma models are PascalCase singular mapped with `@@map`/`@map` (§7.4). | Brief |
 | P10 | Tenancy | Tenant-owned rows carry `org_id uuid NOT NULL` (nullable only on guest-capable tables) with RLS `ENABLE` + `FORCE` and a composite index leading with `org_id`. Every table belongs to exactly one class (§1.5). | ADR-0005, REQ-RLS-001/002/013, NFR-TENANT-001 |
 | P11 | Optimistic locking | Updates are `UPDATE … SET …, version = version + 1 WHERE id = $id AND version = $expected`; zero rows ⇒ 412 `CONCURRENCY_CONFLICT` (If-Match) or 409 `CONFLICT` (internal). A no-op update issues no statement, no version bump and no audit entry. | REQ-RLS-011, REQ-API-013, DR-A16, EC-A25/A26 |
-| P12 | Integrity in the database | Business invariants that are cheap to state declaratively are enforced in the database too (CHECK, partial UNIQUE, composite FK, exclusion constraints, immutability triggers); state machines and cross-row rules stay in the service layer, with the database holding the last line of defence where noted. *2026-11-19 (D-ARCH-154):* a reference between two organisation-keyed tables is always a composite foreign key through `org_id` (§4.7). | §4.10, NFR-DATA-001..004 |
+| P12 | Integrity in the database | Business invariants that are cheap to state declaratively are enforced in the database too (CHECK, partial UNIQUE, composite FK, exclusion constraints, immutability triggers); state machines and cross-row rules stay in the service layer, with the database holding the last line of defence where noted. *2026-11-19 (D-ARCH-154):* a reference between two organisation-keyed tables is always a composite foreign key through `org_id` (§4.7). *2026-11-19 (D-ARCH-162, D-ARCH-163):* on a GUEST_CAPABLE table it is a pair of composite keys, one per owner column, and every unique key of a TENANT or GUEST_CAPABLE table holds an owner column (§4.7). | §4.10, NFR-DATA-001..004 |
 | P13 | Files out of row | Documents, raw carrier payloads and gateway webhook payloads live in object storage; rows hold bucket, key (UUIDs only, no personal data), size, media type and SHA-256. | §4.10, REQ-DOC-006, REQ-CARR-018, REQ-PAY-003 |
 
 ### 1.2 Column classification vocabulary (classification registry)
@@ -149,8 +149,8 @@ All system-of-record data lives in one PostgreSQL 18 database (one schema `publi
 | `TENANT` | `NOT NULL`, FK `organisations` | ENABLE + FORCE; tenant branch + read-only operator branch (`app_is_operator()`) | Rows of `app.org_id`; verified operator staff (read) | shipments, orders, payments, documents, address_book_entries, saga tables |
 | `GUEST_CAPABLE` | nullable; `guest_token_hash` when null | as TENANT + guest branch | As TENANT, or the holder of the guest token | quotes, quote_packages, quote_options, quote_shares |
 | `USER_OWNED` | none, or `org_id` for user-private data within an org | ENABLE + FORCE; `user_id = app_actor_id()` (and `org_id = app_org_id()` where present) + operator read + org-member read on `users` | The user; verified operator staff (read) | users, user_credentials, sessions, refresh_tokens, one-time token tables, mfa_* (including `mfa_enrolment_codes`), reauth_proofs, notification_preferences, notification_log, saved_payment_methods, payment_gateway_customers, terms_acceptances, consent_records |
-| `GLOBAL` | none | none | Everyone (SELECT); writes only where listed in §4.4 | reference data, compliance packs, carriers, pricing config, roles, permissions, feature flags, number_sequences, notification_templates |
-| `SYSTEM` | none (or informational `org_id` on global index tables) | none | Only the owning module's repositories — **mechanically enforced from 2026-11-13 (PR #19 security review PR19-SEC-01; D-ARCH-080):** SYSTEM-class delegates are excluded from the top-level `TenantDb` (type and runtime: the guarded proxy throws `TenantDbAccessError` naming the port) and are reachable only through `systemDelegates(tx)` (`apps/api/src/platform/db/system-db.ts`; worker twin under `apps/worker/src/platform/db/`), whose importers the manifest-driven ESLint rule `platform/system-model-owner` restricts to the module whose table-class manifest declares the table (TASK-020 mechanism and negative fixture; first consumers TASK-040 `idempotency_keys`, TASK-043 `outbox_events`, TASK-047 `job_context`/`processed_events`, TASK-052 `login_attempt_counters`; GLOBAL catalogue delegates stay in `TenantDb`, read-only by grant); no personal data except hashes and the encrypted vault | outbox_events, processed_events, idempotency_keys, login_attempt_counters, gateway_webhook_events, global index tables (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`), `audit_*` (entries, stream heads, partitions, verifications, checkpoint heads, anchors, PII vault, data subjects), `bootstrap_migrations` (bootstrap-lane ledger, §8.3) |
+| `GLOBAL` | none | none | Everyone (SELECT); writes only where listed in §4.4 | reference data, compliance packs, carriers, pricing config, roles, permissions, feature flags, number_sequences, notification_templates, `operator_staff_grants` (2026-11-19, §3.2) |
+| `SYSTEM` | none (or informational `org_id` on global index tables) | none | Only the owning module's repositories — **mechanically enforced from 2026-11-13 (PR #19 security review PR19-SEC-01; D-ARCH-080):** SYSTEM-class delegates are excluded from the top-level `TenantDb` (type and runtime: the guarded proxy throws `TenantDbAccessError` naming the port) and are reachable only through `systemDelegates(tx)` (`apps/api/src/platform/db/system-db.ts`; worker twin under `apps/worker/src/platform/db/`), whose importers the manifest-driven ESLint rule `platform/system-model-owner` restricts to the module whose table-class manifest declares the table (TASK-020 mechanism and negative fixture; first consumers TASK-040 `idempotency_keys`, TASK-043 `outbox_events`, TASK-047 `job_context`/`processed_events`, TASK-052 `login_attempt_counters`; GLOBAL catalogue delegates stay in `TenantDb`, read-only by grant); no personal data except hashes and the encrypted vault | outbox_events, processed_events, idempotency_keys, login_attempt_counters, gateway_webhook_events, `job_executions` (2026-11-20, §3.5), global index tables (`tracking_index`, `gateway_refs`, `tracking_poll_schedule`), `audit_*` (entries, stream heads, partitions, verifications, checkpoint heads, anchors, PII vault, data subjects), `bootstrap_migrations` (bootstrap-lane ledger, §8.3) |
 
 Amended 2026-11-12 (SEC-P3-03, SEC-P3-14): `audit_anchors` and the bootstrap-lane ledger `bootstrap_migrations` join the SYSTEM allow-list; `mfa_enrolment_codes` is USER_OWNED. All audit-module tables are owned by `platform_audit_owner`, not `platform_migrator` (§4.4).
 
@@ -1217,6 +1217,8 @@ The REQ-RLS-001 "index leading with `org_id`" rule is satisfied by the PK `id`, 
 
 *Reserved row (2026-11-18, D-ARCH-151; ADR-0005 amendment 12; `rulings/wave-1-batch-1.1-rulings.md` §2).* The migration that creates this table inserts the operator organisation of §1.6 (`type = 'OPERATOR'`, `display_name = 'Operator'`, the SYSTEM actor in `created_by` and `updated_by`) after `ux_organisations__single_operator` and before `ENABLE` + `FORCE`. From then on the AP-ORG-02 index refuses every further OPERATOR insert, so no runtime path, seed or fixture creates one. A fixture that needs an operator member inserts a membership into the reserved organisation. `display_name` is ordinary profile data afterwards; brand strings in the UI and in e-mail come from `BRAND_*` only.
 
+*PARTNER organisations (2026-11-19, D-ARCH-166; PR65-SEC-04 (b)).* Below the service nothing stops a session from creating an organisation of type `PARTNER` with its own membership and a partner role link: `p_organisations__active` does not look at `type`, and the role-scope trigger admits partner roles there. The service refuses the type (`ORG_TYPE_NOT_ALLOWED`), and in M1 no route or permission gives such an organisation anything. The database backstop belongs to the M3 partner design, which decides how a partner organisation is provisioned; that design is not complete without one.
+
 #### `organisation_tax_references` · TENANT · SD: yes · mutable
 
 REQ-ORG-008 (tax references as type/value pairs). Columns: STD, SD; `org_id uuid N FK`; `reference_type text N CHECK (reference_type ~ '^[A-Z]{2}_[A-Z0-9_]+$')` (pack-defined codes such as `IN_GSTIN`, `GB_VAT`); `value text N` ≤ 64 (PER); `country_code char(2) N`. AP-ORG-05 list per org: `ix_organisation_tax_references__org ON (org_id, reference_type) WHERE deleted_at IS NULL`; unique `(org_id, reference_type, value) WHERE deleted_at IS NULL`.
@@ -1232,11 +1234,21 @@ REQ-ORG-003/005/011/012/013, DR-A05, EC-A15/A17.
 *2026-11-19 (D-ARCH-156; code review PR #65 S1; ADR-0005 amendment 13 item 29):* **lifecycle guard.** A membership row makes its user's profile row readable by the organisation (`p_users__org_member_read`, §4.3), and every session of the organisation may write this table. The 2026-11-14 ruling closed that for `INVITED` only. Trigger `trg_memberships__lifecycle_guard` (`AFTER INSERT OR UPDATE OF user_id, org_id, status`, row level, function `platform.memberships_lifecycle_guard()`: `SECURITY INVOKER`, fixed search path, assertion only) raises `P0001 MEMBERSHIP_LIFECYCLE_VIOLATION` unless:
 
 1. on insert, `user_id = platform.app_actor_id()` (the member is the actor of the transaction; no actor means refused);
-2. on insert, `status = 'ACTIVE'` (DR-A05; this is what keeps `INVITED` unwritten);
+2. on insert, `status = 'ACTIVE'` (DR-A05; this keeps `INVITED` unwritten by INSERT; for UPDATE see the D-ARCH-166 note below);
 3. on update, `user_id` and `org_id` are unchanged;
 4. on update, a `REMOVED` row keeps that status (DR-A05 "terminal"; REQ-ORG-003: re-adding a member is a new row).
 
 There is no exemption for the SYSTEM actor or for any role. `ACTIVE ↔ SUSPENDED` and the move to `REMOVED` stay service rules (REQ-ORG-012/013). It is an `AFTER` trigger so that RLS `WITH CHECK` answers a cross-tenant write first (§4.7).
+
+*2026-11-19 (D-ARCH-165; PR65-SEC-02 (b); ADR-0005 amendment 14 item 35; `rulings/wave-1-r-arch-34-operator-rulings.md` §3):* **operator rule.** Rule 1 makes every insert a self-insert. A session whose context names the operator organisation could therefore create its own ACTIVE membership there, and that row is what `platform.app_is_operator()` reads (§4.2). A later migration replaces the function (the trigger and its column list do not change) and adds:
+
+- **Rule 5, on insert:** a membership of an organisation of type `OPERATOR` needs a row in `operator_staff_grants` (below) for its `user_id`. An organisation the session cannot see counts as `OPERATOR` (fail closed). The refusal is `P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: an operator membership needs a staff grant`.
+
+The member is still the actor. Fixtures that plant an operator membership as the superuser with triggers off are unaffected; a test that inserts one as `platform_app` plants the grant first. Limits: a session that can set the context keys can name an existing staff member as its actor (T-35), and a context that wrongly names the operator organisation still shows that organisation's own rows.
+
+*2026-11-19 (D-ARCH-166; PR65-SEC-04 (a)):* **`INVITED` by UPDATE.** Rule 2 covers INSERT only, so until the same migration merges an UPDATE can still set `INVITED`. Nothing is exposed meanwhile, because `INVITED` is in neither read list (§4.3). The replacement adds:
+
+- **Rule 6, on update:** a row whose status was not `INVITED` cannot become `INVITED`.
 
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
@@ -1255,6 +1267,17 @@ There is no exemption for the SYSTEM actor or for any role. `ACTIVE ↔ SUSPENDE
 | AP-ORG-07 | Member list of an org (status filter, keyset by `created_at, id`) | `ix_memberships__org_status_created ON (org_id, status, created_at, id)` |
 | AP-ORG-08 | A user's memberships across orgs (`GET /me/organisations`, permission resolution per request, REQ-RBAC-008) | `ix_memberships__user_status ON (user_id, status) INCLUDE (org_id)` |
 | — | Target of the tenant-bound reference from `membership_roles` (§4.7, D-ARCH-154); also serves "membership by id within the organisation" | `ux_memberships__org_id_id ON (org_id, id)` |
+
+#### `operator_staff_grants` · GLOBAL (read-only at runtime) · SD: no · written by the provisioning lane only (added 2026-11-19)
+
+D-ARCH-165, PR65-SEC-02 (b), ADR-0005 amendment 14 item 35. One row per user who may hold a membership of an OPERATOR organisation (rule 5 of `memberships`).
+
+| Column | Type | Null | Default / constraint | Class |
+|---|---|---|---|---|
+| STD | | | `created_by` and `updated_by` = the SYSTEM actor | INT |
+| `user_id` | `uuid` | N | a logical reference to `users`, no foreign key: the lane writes the grant for the id of the user it has just created, and a grant for an id that is no user grants nothing | INT |
+
+`ux_operator_staff_grants__user_id ON (user_id)` (the guard's lookup; one grant per user). No RLS. `platform_app` holds `SELECT` only, because the lifecycle guard runs with the caller's rights; `platform_migrator` is the only writer. Writers: the demo seed (§9.3) and, at M5, `ops:staff-bootstrap`, both through a migrator connection and never from api or worker (REQ-RLS-005). Removing a grant does not remove a membership. Staff management in the admin app (M2, EPIC-B-207) needs a runtime writer and the removal of the grant when a staff member leaves; that is an ADR-0005 amendment.
 
 #### `membership_roles` · TENANT · SD: no (revocation via `revoked_at`) · mutable
 
@@ -1491,7 +1514,7 @@ Amended 2026-11-17 (A29; D-ARCH-149; PR61-SEC-03; amends D-TASK028-04): `kind = 
 
 ### 3.5 Platform module
 
-#### `outbox_events` · SYSTEM · SD: no · mutable (`published_at`, `attempts`) · hard-delete allow-listed (published > 7 d)
+#### `outbox_events` · SYSTEM · SD: no · mutable (`published_at`, `attempts`) · hard-delete allow-listed (published > 30 d; corrected 2026-11-19, D-ARCH-167: was 7 d)
 
 ADR-0004, REQ-PLAT-016/017, DR-A25, EC-A39. DDL in §6.1.
 
@@ -1515,6 +1538,31 @@ AP-PLAT-01 relay batch: `ix_outbox_events__unpublished ON (created_at, id) WHERE
 #### `processed_events` · SYSTEM · SD: no · insert-only · hard-delete allow-listed (> 30 d)
 
 Columns: STD; `consumer text N`; `event_id uuid N`; `processed_at timestamptz N DEFAULT now()`. `ux_processed_events__consumer_event ON (consumer, event_id)` (AP-PLAT-03, consumer dedupe inside the consumer's business transaction); `ix_processed_events__processed_at` for purge.
+
+#### `job_executions` · SYSTEM · SD: no · insert-only · purged 30 d after completion once its purge ships (added 2026-11-20)
+
+ADR-0013 §4, REQ-PLAT-014, US-010; TASK-039 (D-TASK039-03; code review R1-m1, R1-m7, R1-n8); D-ARCH-171. The idempotency ledger of job effects. Module `worker` (`tools/db/table-classes/worker.json`), reached only through the worker's SYSTEM accessor (§1.5), which stays unbound until TASK-047. No `org_id`, no RLS and no personal data: a job id holds internal identifiers only.
+
+| Column | Type | Null | Default / constraint | Class |
+|---|---|---|---|---|
+| STD | | | the full standard set although the table is insert-only; written by the runtime role, so the standard-columns guard applies (§7.6, C15) | INT |
+| `queue` | `text` | N | the named queue the job ran on; `CHECK (queue ~ '^[a-z][a-z0-9]*(-[a-z0-9]+)*$')` | INT |
+| `job_key` | `text` | N | the BullMQ job id: `<kind>.<id>[.<step>]`, or the scheduler's own id for a scheduled occurrence; `CHECK (char_length(job_key) BETWEEN 1 AND 200)` | INT |
+| `status` | `text` | N | `DEFAULT 'completed'`, `CHECK (status IN ('completed'))` | INT |
+| `result` | `jsonb` | Y | reserved by ADR-0013 §4; no writer sets it. If one does: identifiers, counts and codes only, never a payload or a personal value | INT |
+| `completed_at` | `timestamptz` | N | `DEFAULT now()` | INT |
+
+| AP | Query | Index |
+|---|---|---|
+| AP-PLAT-10 | Claim of a job inside the transaction of its effect | `ux_job_executions__queue_job_key ON (queue, job_key)` |
+| AP-PLAT-11 | Purge by age | `ix_job_executions__completed_at ON (completed_at)` |
+
+- **Use.** A processor claims `(queue, job id)` in the transaction of its effect (`INSERT … ON CONFLICT DO NOTHING`; Prisma `createMany` with `skipDuplicates`). The effect runs only when the claim inserted the row, and claim and effect commit together. A second delivery of the job finds the committed key and runs nothing. Outbox consumers additionally use `processed_events` (ADR-0004).
+- **Unique per queue** (code review R1-m1; amends the "`job_key UNIQUE`" of ADR-0013 §4). BullMQ scopes job ids per queue, and one payload kind can be a job of two queues: `shipment.<id>` on `documents` and on `tracking-poll`. A key unique across queues would make the second queue's job a duplicate and skip its effect without a trace. The first TASK-039 head had `ux_job_executions__job_key ON (job_key)`; its fix cycle replaces it before the migration merges.
+- **Grants.** `SELECT, INSERT` for `platform_app`. A row is written once and never updated. `DELETE` arrives with the purge, when the table joins the hard-delete allow-list (§4.4).
+- **Retention: 30 days after `completed_at`** (D-TASK039-03 left it open). The row has to outlive every way the same job id can be delivered again on its queue: a BullMQ retry or stall (minutes), an operator's retry of a failed job (7 days), a new enqueue after a dead letter (14 days) and a replayed outbox event (30 days after publishing; ADR-0004 item 6). Completion is never earlier than publishing, so an event that can still be replayed still has its row. It is the horizon of `processed_events`.
+- **A job id is one-shot on its queue for 30 days after it completed.** BullMQ ignores an add of the same id while the job is retained (24 hours completed, 7 days failed). After that an add creates a job, and the ledger skips its effect. A producer that needs the effect again uses a new `<step>` or occurrence (ADR-0013 amendment 3 item 11) and never waits for the purge.
+- **Purge.** The daily housekeeping job of TASK-043 deletes rows completed more than 30 days ago in batches of 5,000, with the outbox purge. Until it ships there is no purge, and no row either: the accessor is bound by TASK-047, which depends on TASK-043.
 
 #### `idempotency_keys` · SYSTEM · SD: no · mutable · hard-delete allow-listed (expired, and 5xx/429 outcomes)
 
@@ -1765,6 +1813,13 @@ Volume-tier discounts (REQ-PRICE-012, Could) count the org's shipments in BOOKED
 
 ADR-0005 guest branch, REQ-QUOTE-001..019, REQ-RLS-013, DR-B14, DR-B15, D-009, D-021, EC-A44, EC-B04/B05/B29. All four tables carry `org_id uuid NULL` and `guest_token_hash bytea NULL` with `ck_<t>__owner CHECK (num_nonnulls(org_id, guest_token_hash) = 1)` so a row is either guest-owned or org-owned, never both or neither. Children denormalise `org_id` and `guest_token_hash` from the parent so every RLS predicate is a column comparison (no join in the policy); the claim updates all four in one transaction (§4.3). `quote_packages` is guest-capable as well (listed by ADR-0005).
 
+*Amended 2026-11-19 (R-ARCH-34; PR293-SEC-03; D-ARCH-162, D-ARCH-163; ADR-0005 amendment 14 items 31 to 33; `rulings/wave-1-r-arch-34-operator-rulings.md` §2).* Nothing made a child's copy of the owner columns equal to its quote, so a guest row could name another owner's quote, and a unique key without an owner column told one owner what another holds. Two rules of §4.7 apply to all four tables, and the rows below are amended in place:
+
+- **Owner-bound references (T2-G).** `quotes` carries `ux_quotes__org_id_id ON (org_id, id)` and `ux_quotes__guest_token_hash_id ON (guest_token_hash, id)`. Each child references its quote through the pair `fk_<child>__org_id_quote_id (org_id, quote_id) → quotes (org_id, id)` and `fk_<child>__guest_token_hash_quote_id (guest_token_hash, quote_id) → quotes (guest_token_hash, id)`, with no single-column key. The owner CHECK leaves exactly one of the two checked for every row.
+- **An owner column in every unique key.** A uniqueness rule is one index per owner column.
+- **Reads and writes of a child carry the owner predicate** (`org_id = …` or `guest_token_hash = …`) next to `quote_id`, because the unique indexes lead with the owner column.
+- **The claim is one statement** (§4.3).
+
 #### `quotes` · GUEST_CAPABLE · SD: yes (saved quote deleted by `quote:delete`) · immutable after rating except claim/save/delete
 
 | Column | Type | Null | Default / constraint | Class |
@@ -1799,7 +1854,7 @@ ADR-0005 guest branch, REQ-QUOTE-001..019, REQ-RLS-013, DR-B14, DR-B15, D-009, D
 | `rating_status` | `text` | N | `DEFAULT 'IN_PROGRESS'`, `CHECK (rating_status IN ('IN_PROGRESS','COMPLETE'))` | INT |
 | `carrier_statuses` | `jsonb` | Y | final per-carrier `OK/NO_SERVICE/TIMEOUT/ERROR` + canonical codes and exclusion reasons (`WEIGHT_EXCEEDED`, `DIMENSION_EXCEEDED`, REQ-QUOTE-004) — snapshot | INT |
 | `rating_completed_at` | `timestamptz` | Y | | INT |
-| `requote_of_quote_id` | `uuid` | Y | FK `quotes(id)` (price difference, REQ-QUOTE-017) | INT |
+| `requote_of_quote_id` | `uuid` | Y | ~~FK `quotes(id)`~~ *2026-11-19 (D-ARCH-162):* `fk_quotes__requote_of_quote_id (org_id, requote_of_quote_id) → quotes (org_id, id)` and `ck_quotes__requote_org_only CHECK (requote_of_quote_id IS NULL OR org_id IS NOT NULL)` (rule T2-O, §4.7; a C16 (a) exception entry). Set only when the original belongs to the same organisation; a guest quote carries NULL (price difference, REQ-QUOTE-017) | INT |
 | `expires_at` | `timestamptz` | N | `created_at + QUOTE_TTL_HOURS` (24 h); `CHECK (expires_at > created_at)` | INT |
 
 | AP | Query | Index |
@@ -1808,6 +1863,7 @@ ADR-0005 guest branch, REQ-QUOTE-001..019, REQ-RLS-013, DR-B14, DR-B15, D-009, D
 | AP-QUO-02 | Saved quotes of the org, newest first, keyset `(saved_at DESC, id DESC)` (REQ-ACCT-005) | `ix_quotes__org_saved ON (org_id, saved_at DESC, id DESC) WHERE saved_at IS NOT NULL AND deleted_at IS NULL` |
 | AP-QUO-03 | Retention scan of unclaimed expired guest quotes (M4/M5 job; recorded only) | `ix_quotes__guest_expires ON (expires_at) WHERE org_id IS NULL` |
 | AP-QUO-04 | Tenant composite index required by REQ-RLS-001 (also "recent quotes of org") | `ix_quotes__org_created ON (org_id, created_at DESC, id DESC) WHERE org_id IS NOT NULL` |
+| — | Targets of the owner-bound references from the children, and of later T1 references into this table (§4.7; 2026-11-19, D-ARCH-162) | `ux_quotes__org_id_id ON (org_id, id)`; `ux_quotes__guest_token_hash_id ON (guest_token_hash, id)` |
 
 Expiry is derived (`now() > expires_at`), never stored as a state (DR-B14). Quote and option rows are not updated after `rating_status = 'COMPLETE'` except the claim columns, `saved_*` and `deleted_*`; the runtime grant on `quotes` is column-scoped accordingly (§4.4).
 
@@ -1817,13 +1873,13 @@ Expiry is derived (`now() > expires_at`), never stored as a state (DR-B14). Quot
 |---|---|---|---|---|
 | STD | | | | INT |
 | `org_id`, `guest_token_hash` | as parent | Y | owner CHECK | INT / SEC |
-| `quote_id` | `uuid` | N | FK `quotes(id)` | INT |
+| `quote_id` | `uuid` | N | ~~FK `quotes(id)`~~ the owner-bound pair (2026-11-19, D-ARCH-162) | INT |
 | `seq` | `smallint` | N | `CHECK (seq BETWEEN 1 AND 20)` | INT |
 | `package_type` | `text` | N | CHECK `package_type` (`PARCEL_BOX`, `ENVELOPE`; seam REQ-BOOK-028) | INT |
 | `weight_g` | `integer` | N | `CHECK (weight_g BETWEEN 100 AND 1000000)` (DR-B34) | INT |
 | `length_mm`, `width_mm`, `height_mm` | `integer` | N | `CHECK (… BETWEEN 10 AND 3000)` | INT |
 
-`ux_quote_packages__quote_seq ON (quote_id, seq)` (AP-QUO-05); `ix_quote_packages__org_quote ON (org_id, quote_id) WHERE org_id IS NOT NULL`.
+~~`ux_quote_packages__quote_seq ON (quote_id, seq)` (AP-QUO-05); `ix_quote_packages__org_quote ON (org_id, quote_id) WHERE org_id IS NOT NULL`.~~ *2026-11-19 (D-ARCH-163):* AP-QUO-05 is `ux_quote_packages__org_quote_seq ON (org_id, quote_id, seq) WHERE org_id IS NOT NULL` and `ux_quote_packages__guest_quote_seq ON (guest_token_hash, quote_id, seq)`. The first is also the tenant index of REQ-RLS-001.
 
 #### `quote_options` · GUEST_CAPABLE · SD: no · insert-only (+ claim columns)
 
@@ -1833,7 +1889,7 @@ REQ-QUOTE-007/009/012, REQ-PRICE-016, DR-B11, DR-B17.
 |---|---|---|---|---|
 | STD | | | | INT |
 | `org_id`, `guest_token_hash` | as parent | Y | owner CHECK | INT / SEC |
-| `quote_id` | `uuid` | N | FK | INT |
+| `quote_id` | `uuid` | N | ~~FK~~ the owner-bound pair (2026-11-19, D-ARCH-162) | INT |
 | `carrier_id`, `carrier_service_id`, `carrier_account_id` | `uuid` | N | FKs | INT |
 | `canonical_service_code`, `tier` | `text` | N | | INT |
 | `transit_min_days`, `transit_max_days` | `smallint` | Y | NULL ⇒ "estimated delivery unavailable" (REQ-DATA-009) | INT |
@@ -1860,15 +1916,15 @@ REQ-QUOTE-015, NFR-PRIV-004, EC-B29. The share row carries an allow-listed `publ
 |---|---|---|---|---|
 | STD | | | | INT |
 | `org_id`, `guest_token_hash` | | Y | owner CHECK | INT / SEC |
-| `quote_id` | `uuid` | N | FK | INT |
-| `share_token_hash` | `bytea` | N | SHA-256 of the ≥ 128-bit share token; `UNIQUE` | SEC |
+| `quote_id` | `uuid` | N | ~~FK~~ the owner-bound pair (2026-11-19, D-ARCH-162) | INT |
+| `share_token_hash` | `bytea` | N | SHA-256 of the ≥ 128-bit share token; `UNIQUE` (a global digest that no writer chooses: an entry of the C16 (b) exception map, §4.6) | SEC |
 | `public_snapshot` | `jsonb` | N | origin/destination country + city, packages (g/mm), content type, options with prices and transit; **no postcode, name, address, email, reference** (schema test against an allow-list, NFR-PRIV-004) | INT |
 | `expires_at` | `timestamptz` | N | = quote expiry | INT |
 | `revoked_at`, `revoked_by` | | Y | | INT |
 
 AP-QUO-07 anonymous read by token (inside `quote_share_resolve`): `ux_quote_shares__share_token_hash`; AP-QUO-08 shares of a quote: `ix_quote_shares__org_quote ON (org_id, quote_id) WHERE org_id IS NOT NULL`.
 
-Amendment (2026-11-12, SEC-P3-10). `createQuoteShare` **always mints a new token**. In the same transaction it sets `revoked_at`/`revoked_by` on the quote's previous active share (the previous link then resolves to 404) and inserts the new row. It never returns an existing token, which the server could not do anyway because it holds only `share_token_hash`. Backstop: `ux_quote_shares__quote_active ON (quote_id) WHERE revoked_at IS NULL` (at most one active share per quote). A concurrent second create fails this constraint and is retried once after re-reading. The route is `x-idempotency: not-applicable`, so the token never reaches `idempotency_keys`.
+Amendment (2026-11-12, SEC-P3-10). `createQuoteShare` **always mints a new token**. In the same transaction it sets `revoked_at`/`revoked_by` on the quote's previous active share (the previous link then resolves to 404) and inserts the new row. It never returns an existing token, which the server could not do anyway because it holds only `share_token_hash`. Backstop: ~~`ux_quote_shares__quote_active ON (quote_id) WHERE revoked_at IS NULL`~~ *(2026-11-19, D-ARCH-163)* `ux_quote_shares__org_quote_active ON (org_id, quote_id) WHERE revoked_at IS NULL` and `ux_quote_shares__guest_quote_active ON (guest_token_hash, quote_id) WHERE revoked_at IS NULL` (at most one active share per quote; with the single index a row of another owner could have taken the slot). A concurrent second create fails this constraint and is retried once after re-reading. The route is `x-idempotency: not-applicable`, so the token never reaches `idempotency_keys`.
 
 #### Amendment (2026-11-12, SEC-P3-32): revocation audit, mint cap, uniform 404
 
@@ -1886,7 +1942,7 @@ Amendment (2026-11-12, SEC-P3-10). `createQuoteShare` **always mints a new token
    ```
 
    - **Why the database and not Redis.** The count is exact, transactional with the mint and the revocation, survives a Redis flush, and needs no second store on the path. Revoked rows count too, because the cap bounds rows written, not active links.
-   - **Concurrency.** Two concurrent mints for the same quote are serialised by `ux_quote_shares__quote_active`: the second inserter waits on the unique index, fails when the first commits, and its single retry re-runs the count. The cap therefore cannot be overshot by a race.
+   - **Concurrency.** Two concurrent mints for the same quote are serialised by the owner's active-share index (`ux_quote_shares__org_quote_active` or `ux_quote_shares__guest_quote_active`, 2026-11-19): the second inserter waits on the unique index, fails when the first commits, and its single retry re-runs the count. The cap therefore cannot be overshot by a race.
    - **RLS.** The count runs in the caller's tenant or guest scope; every share of a quote has the quote's owner, so the caller sees all of them.
    - **Cost.** The index adds one B-tree entry per mint on a low-volume table. The probe reads at most 10 index entries. Without the cap, the 600/min `authenticated` class would let one user write about 36,000 revoked rows an hour.
 3. **Resolve: unknown, revoked, superseded and expired tokens look identical (D-055; settled by principal-architect, D-ARCH-032).** `quote_share_resolve(p_share_token_hash)` returns `(quote_id uuid, public_snapshot jsonb, expires_at timestamptz)` and selects `WHERE share_token_hash = $1 AND revoked_at IS NULL AND expires_at > pg_catalog.now()`, replacing the `revoked boolean` column of §4.5.
@@ -2540,16 +2596,21 @@ Anonymous shared-quote reads do not use a policy branch: they go through `quote_
 **Guest claim** (REQ-QUOTE-016, REQ-RLS-013, EC-A44, ADR-0005), executed with both `app.org_id` and `app.guest_token_hash` set. The guest branch makes the old row visible (`USING`), the tenant branch accepts the new row (`WITH CHECK`), and `org_id IS NULL` makes the claim once-only:
 
 ```sql
+-- One statement (amended 2026-11-19, D-ARCH-162): the children as data-modifying CTEs of the UPDATE of quotes.
+WITH p AS (UPDATE public.quote_packages SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1
+            WHERE quote_id = $quote AND org_id IS NULL),
+     o AS (UPDATE public.quote_options  SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1
+            WHERE quote_id = $quote AND org_id IS NULL),
+     s AS (UPDATE public.quote_shares   SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1
+            WHERE quote_id = $quote AND org_id IS NULL)
 UPDATE public.quotes
    SET org_id = $org, claimed_by_user_id = $user, claimed_at = now(),
        claimed_from_token_hash = guest_token_hash, guest_token_hash = NULL,
        updated_at = now(), updated_by = $user, version = version + 1
  WHERE id = $quote AND org_id IS NULL;
--- same transaction, the children (ADR-0005 amendment 4):
-UPDATE public.quote_packages SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1 WHERE quote_id = $quote AND org_id IS NULL;
-UPDATE public.quote_options  SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1 WHERE quote_id = $quote AND org_id IS NULL;
-UPDATE public.quote_shares   SET org_id = $org, guest_token_hash = NULL, updated_at = now(), updated_by = $user, version = version + 1 WHERE quote_id = $quote AND org_id IS NULL;
 ```
+
+*Amended 2026-11-19 (R-ARCH-34; D-ARCH-162; ADR-0005 amendment 14 item 32).* The claim used to be four statements in one transaction: the quote, then each child table. Each child is now bound to its quote through both owner columns (§4.7, T2-G), and no order of separate statements satisfies both keys: with the quote first the children still name the old guest key, and with the children first the quote does not yet carry the organisation. In one statement PostgreSQL runs the referential checks after all four updates (checked on PGlite, PostgreSQL 17.5, with `RESTRICT` keys; both orders of separate statements fail with `23503`). The affected-row count is that of the outer `UPDATE`, so `expectAffected(result, 1)` is unchanged. A child table that does not exist yet is left out (`quote_shares` joins with TASK-237), and a claim that leaves an existing child table out fails with `23503`, so no child row stays behind as a guest row of a claimed quote.
 
 Zero rows on `quotes` ⇒ the service re-reads by id under its own org scope: visible ⇒ already claimed by this org, idempotent 200; not visible ⇒ `quote_claim_state(id, token_hash)` (§4.5) returns `CLAIMED_ELSEWHERE` ⇒ 409 `QUOTE_ALREADY_CLAIMED`, or `UNKNOWN` ⇒ 404. After the claim the guest token stops working (REQ-QUOTE-016).
 
@@ -2797,6 +2858,8 @@ Grant matrix (rendered from `prisma/sql/grants.manifest.json` into each migratio
 | SYSTEM global index tables: `tracking_index`, `gateway_refs`, `tracking_poll_schedule` | `SELECT, INSERT, UPDATE` |
 | Other SYSTEM: `audit_stream_heads`, `audit_partitions`, `audit_chain_verifications`, `gateway_webhook_events`, ~~`reference_dataset_versions`~~, `data_migration_runs` | `SELECT, INSERT, UPDATE` |
 | `reference_dataset_versions` *(row split out 2026-11-13, PR13-SEC-04; D-ARCH-075)* | **`SELECT` only.** The seed CLI writes it as `platform_migrator` (owner); no runtime role writes it — the US-073 reconciler derives the last audited digest from `audit_entries` (§3.5). `prisma/sql/grants.manifest` carries one line; C5 asserts it; a `platform_app` `INSERT`/`UPDATE` probe → `42501`. A future runtime writer takes the §4.5 definer-function form, never a table grant or RLS on this SYSTEM table |
+| `operator_staff_grants` *(added 2026-11-19, D-ARCH-165)* | **`SELECT` only.** The provisioning lane writes it as `platform_migrator` (owner); no runtime role writes it (§3.2). `prisma/sql/grants.manifest` carries one line |
+| `job_executions` *(added 2026-11-20, D-ARCH-171)* | `SELECT, INSERT`: an insert-only ledger. `DELETE` arrives with its purge (TASK-043), when the table joins the hard-delete allow-list with the predicate of §10.5 |
 | `audit_entries` (parent only; never partitions) | `SELECT, INSERT` |
 | `audit_pii_vault`, `data_subjects` | `SELECT, INSERT` (`platform_erasure`: `SELECT, DELETE` on the vault, `UPDATE (erased_at, updated_at, updated_by, version)` on subjects) |
 | Functions | `EXECUTE` on `platform.app_org_id`, `app_actor_id`, `app_guest_token_hash`, `app_is_operator`, `ensure_audit_partitions` and exactly the §4.5 list (2026-11-12: including `job_context`, `sessions_for_user`, `mfa_enrolment_overdue_candidates`). *2026-11-13 (D-TASK016-01 decision 3, PR #11 security review §5 ruling 1, D-ARCH-071):* **`platform_definer` holds `EXECUTE` on `platform.app_actor_id()`** — the body of `app_is_operator()` calls it while running as the definer and `PUBLIC` holds no `EXECUTE` on the helpers; granted by the migrator in the `app_is_operator` migration **before** `SET ROLE platform_definer` (template `prisma/sql/function-templates/app-is-operator.sql`); C11's helper expectation for `app_actor_id` gains `platform_definer` when TASK-037 applies the template; no other helper is granted to the definer |
@@ -2826,7 +2889,7 @@ Every path that must read rows before a tenant/actor context exists, or must dis
 | `org_ids_page(p_after uuid, p_limit int)` | `setof uuid` | `organisations` | resumable backfills that iterate organisations (§8.5) |
 | `purge_expired_tokens(p_before timestamptz, p_limit int)` | `integer` (rows deleted) | `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens`, `mfa_challenges`, `reauth_proofs`, `mfa_enrolment_codes` (2026-11-12, SEC-P3-14) (definer-purge policy) | housekeeping (§10.5) |
 | `sessions_for_user(p_user_id uuid)` (listed 2026-11-12; ratified in §12 OI-25) | `setof uuid` (session IDs with `status = 'ACTIVE'`) | `sessions` | synchronous Redis revocation of another user's sessions (membership removal, user status change) |
-| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid)`; one row or none | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes` | every worker processor, before `withTenantTx` (ADR-0013 amendment, payload v2) |
+| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)`; one row or none (*`org_deleted` added 2026-11-20, D-ARCH-180*) | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes`; `organisations` for `org_deleted` | every worker processor, before `withTenantTx` (ADR-0013 amendments 1 and 4, payload v2) |
 | `mfa_enrolment_overdue_candidates(p_now timestamptz, p_limit int)` (**new 2026-11-12, SEC-P3-14**) | `setof uuid` (user IDs) | `organisations`, `memberships`, `users`, `mfa_totp` | `housekeeping` 24 h staff enrolment deadline (AP-ID-19) |
 
 Example (the others follow the same shape):
@@ -2866,61 +2929,91 @@ The worker resolves the tenant context of every job from PostgreSQL, never from 
 
 A guest quote (`quotes.org_id IS NULL`) returns `org_id = NULL`. Every processor whose queue requires a tenant treats a NULL `org_id` as non-retryable `MISSING_TENANT_CONTEXT` (ADR-0013 §2), and M1 has no worker job that writes guest-quote rows. The function never returns `guest_token_hash`, because a UUIDv7 ID is not a secret (P1) and returning the hash would turn any quote ID into guest access.
 
+*Amended 2026-11-20 (D-ARCH-180; ADR-0013 amendment 4): ownership, not liveness.* The function filters `deleted_at` on neither the row the job names nor that row's organisation, and it returns a fourth column, `org_deleted`.
+
+| The row | `org_id` | `org_deleted` | The job (ADR-0013 amendment 4) |
+|---|---|---|---|
+| does not exist (never did, forged id, purged) | no row is returned | | refused, `JOB_CONTEXT_NOT_FOUND` |
+| has no organisation | NULL | NULL | refused with `MISSING_TENANT_CONTEXT` on a queue that requires a tenant; runs without an organisation on `outbox-relay` and `notifications` |
+| belongs to a live organisation (the row itself may be a soft-deleted quote) | the organisation | false | runs |
+| belongs to a soft-deleted organisation | the organisation | true | runs, in that organisation's own tenant scope |
+
+- `org_deleted` is also true when `org_id` names no `organisations` row. The foreign keys of the TENANT tables rule that out, but `outbox_events.org_id` has no foreign key (§6.1), so the function does not rely on one.
+- A deleted organisation is not refused, because work in flight settles what already exists: a saga ends booked or compensated, money is captured or refunded, a pickup is cancelled with the carrier, a draft expires. The tenant policies of §4.3 compare `org_id` only, so the deleted organisation's own context reads and writes its rows as before. No job runs in a wider scope for this reason (§4.1: there is no cross-tenant scope for workers).
+- The runner passes the value to the processor as `orgDeleted`. Work for a deleted organisation is stopped where it starts: a candidate function that starts new business for a tenant selects live organisations only; one that settles, cancels, expires, backfills, retains or erases does not filter (`payment_sweeper_candidates`, `saga_due_candidates`, `void_retry_candidates`, `draft_expiry_candidates`, `org_ids_page`).
+
 ```sql
 SET ROLE platform_definer;   -- preferred form (ADR-0005 am. 10 item 9, PR7-SEC-09; block rewritten 2026-11-12, PR7-SEC-12 (e), D-ARCH-065):
                              -- the function is created already owned by platform_definer (CREATE on schema platform, am. 8 b), so
                              -- no OWNER TO is needed and the owner itself grants EXECUTE. Linter rule 15 accepts this form or
                              -- "grants before OWNER TO" (the auth_lookup_user_by_email example above), never OWNER TO before GRANT.
+                             -- Body rewritten 2026-11-20 (D-ARCH-180): the per-kind lookups select INTO variables instead of
+                             -- RETURN QUERY, so that one final query can add org_deleted. The lookups themselves are unchanged.
 CREATE FUNCTION platform.job_context(p_kind text, p_id uuid)
-RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid)
+RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp AS $$                 -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
 #variable_conflict use_column
 DECLARE
   c_system    constant uuid := '00000000-0000-7000-8000-000000000001';
   c_anonymous constant uuid := '00000000-0000-7000-8000-000000000002';
+  v_org   uuid;
+  v_type  text;
+  v_actor uuid;
 BEGIN
   CASE p_kind
     WHEN 'outbox_event' THEN
-      RETURN QUERY SELECT e.org_id,
-                          CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
-                          e.actor_id
-                     FROM public.outbox_events e WHERE e.id = p_id;
+      SELECT e.org_id,
+             CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
+             e.actor_id
+        INTO v_org, v_type, v_actor
+        FROM public.outbox_events e WHERE e.id = p_id;
     WHEN 'saga' THEN
-      RETURN QUERY SELECT s.org_id,
-                          CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          s.created_by
-                     FROM public.saga_executions s WHERE s.id = p_id;
+      SELECT s.org_id, CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END, s.created_by
+        INTO v_org, v_type, v_actor
+        FROM public.saga_executions s WHERE s.id = p_id;
     WHEN 'notification' THEN
-      RETURN QUERY SELECT n.org_id,
-                          CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          COALESCE(n.recipient_user_id, c_system)
-                     FROM public.notification_log n WHERE n.id = p_id;
-    WHEN 'shipment'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.shipments x WHERE x.id = p_id;
-    WHEN 'order'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.orders    x WHERE x.id = p_id;
-    WHEN 'pickup'        THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.pickups   x WHERE x.id = p_id;
-    WHEN 'document'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.documents x WHERE x.id = p_id;
-    WHEN 'payment'       THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.payments  x WHERE x.id = p_id;
-    WHEN 'quote'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.quotes    x WHERE x.id = p_id;
+      SELECT n.org_id,
+             CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
+             COALESCE(n.recipient_user_id, c_system)
+        INTO v_org, v_type, v_actor
+        FROM public.notification_log n WHERE n.id = p_id;
+    WHEN 'shipment'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.shipments x WHERE x.id = p_id;
+    WHEN 'order'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.orders    x WHERE x.id = p_id;
+    WHEN 'pickup'        THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.pickups   x WHERE x.id = p_id;
+    WHEN 'document'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.documents x WHERE x.id = p_id;
+    WHEN 'payment'       THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.payments  x WHERE x.id = p_id;
+    WHEN 'quote'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.quotes    x WHERE x.id = p_id;
     WHEN 'tracking_poll' THEN
-      RETURN QUERY SELECT s.org_id, 'SYSTEM_JOB'::text, c_system
-                     FROM public.tracking_poll_schedule t
-                     JOIN public.shipments s ON s.id = t.shipment_id
-                    WHERE t.id = p_id;
+      SELECT s.org_id, 'SYSTEM_JOB', c_system
+        INTO v_org, v_type, v_actor
+        FROM public.tracking_poll_schedule t
+        JOIN public.shipments s ON s.id = t.shipment_id
+       WHERE t.id = p_id;
     ELSE
       RAISE EXCEPTION USING ERRCODE = '22023',               -- invalid_parameter_value
                             MESSAGE = pg_catalog.format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
   END CASE;
+  IF NOT FOUND THEN
+    RETURN;                                                  -- the identifiers name nothing: JOB_CONTEXT_NOT_FOUND
+  END IF;
+  RETURN QUERY
+    SELECT v_org, v_type, v_actor,
+           CASE WHEN v_org IS NULL THEN NULL                 -- the row has no organisation
+                ELSE NOT EXISTS (SELECT 1 FROM public.organisations o
+                                  WHERE o.id = v_org AND o.deleted_at IS NULL)
+           END;
 END $$;
 REVOKE ALL ON FUNCTION platform.job_context(text, uuid) FROM PUBLIC;      -- redundant with the definer's global default privileges (am. 9), explicit
 GRANT EXECUTE ON FUNCTION platform.job_context(text, uuid) TO platform_app;
 RESET ROLE;
 ```
 
-- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`.
-- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job.
-- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50).
-- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3.
+- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`. *2026-11-20 (D-ARCH-180):* a soft-deleted row and a row of a soft-deleted organisation are rows, so neither ends there.
+- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job. *2026-11-20:* `org_deleted` adds one primary-key probe of `organisations` when the row has an organisation.
+- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50). *2026-11-20 (D-ARCH-180):* the cases of ADR-0013 amendment 4 item 23 for `org_deleted` and for a job of a soft-deleted organisation. The body above was run on PGlite with stub tables, without roles or row-level security (15 cases: live, deleted and missing organisation, no organisation, soft-deleted quote, unknown id, unknown kind, a hit and a miss in one statement).
+- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3. `organisations` already carries one (§4.3), so `org_deleted` needs no new policy.
+- **Return type.** The fourth column is part of the function from its first migration (TASK-047). `CREATE OR REPLACE` cannot change the return type of a function, so adding it later would have needed a second allow-listed function or a drop under the expand and contract rule.
 
 `mfa_enrolment_overdue_candidates(p_now, p_limit)` (SEC-P3-14) follows the candidate-function shape:
 
@@ -2944,7 +3037,7 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | Function | Why sensitive | Only caller |
 |---|---|---|
 | `auth_lookup_credential` | returns the password hash of any user ID | `apps/api/src/modules/identity/repository` |
-| `job_context` | maps any aggregate ID to its organisation and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
+| `job_context` | maps any aggregate ID to its organisation, says whether that organisation is deleted (2026-11-20, D-ARCH-180), and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
 | `sessions_for_user` | enumerates another user's session IDs | `apps/api/src/modules/identity/repository` (revocation service) |
 | `purge_expired_tokens` | deletes rows across users | `apps/worker` `housekeeping` processor |
 
@@ -2967,7 +3060,7 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | C13 | (2026-11-12, SEC-P3-03) Every audit object (the eight tables of §4.4, every `audit_entries_%` partition, the three audit functions) has owner `platform_audit_owner`. `platform_audit_owner` has `rolcanlogin = false` and **no row in `pg_auth_members`**, neither as a role granted to others nor as a member. `platform_migrator` owns no audit object. *Amended 2026-11-12 (SEC-P3-27 item 6, SEC-P3-33 item 10):* (a) schemas `public` and `platform` have owner `platform_schema_owner`, which has `rolcanlogin = false`; `platform_migrator` owns no schema. (b) The `pg_auth_members` rule for **both** `platform_audit_owner` and `platform_schema_owner` depends on who ran the bootstrap. **Locally** (superuser bootstrap): **no row**, neither as granted role nor as member. **On RDS (M5)**: the bootstrap master is not a superuser, and PostgreSQL 16+ automatically grants a role created by a `CREATEROLE` role to its creator with `admin_option = true`. So for each role there is **exactly one** row, with `roleid` = the role, `member` = the RDS master role, `admin_option = true`, `set_option = false`, `inherit_option = false`, and no other row in which the role is `roleid` or `member`. The master is passed to the test as `CATALOG_BOOTSTRAP_MASTER_ROLE`, empty locally. That row is break-glass, like the master credential itself (platform.md §4.3). SPK-08 verifies this RDS-parity assumption. *Amended 2026-11-12 (batch 0.2, SEC-P3-34 items 3 and 5, D-ARCH-045):* (c) `pg_database.datdba` for the current database is **not** `platform_migrator` (locally it is the bootstrap superuser; on RDS the master, passed as `CATALOG_BOOTSTRAP_MASTER_ROLE`); `platform_migrator` has `has_database_privilege(…, 'CREATE') = false` and `'CONNECT') = true`. (d) `pg_db_role_setting` for the current database has **no** database-wide row (`setrole = 0`) and exactly one row for the bootstrap role whose `setconfig` contains `search_path=pg_catalog, pg_temp`. The TASK-003 bootstrap suite asserts (c) and (d) at bootstrap time; C13 re-asserts them after every migration and in the restore rehearsal (§8.6 step 5) | `pg_class.relowner`, `pg_proc.proowner`, `pg_namespace.nspowner`, `pg_roles`, `pg_auth_members (roleid, member, admin_option, set_option, inherit_option)`, `pg_database.datdba`, `has_database_privilege`, `pg_db_role_setting (setdatabase, setrole, setconfig)` |
 | C14 | (2026-11-12, SEC-P3-03) Event triggers `platform_audit_ddl_guard_end` (`ddl_command_end`) and `platform_audit_ddl_guard_drop` (`sql_drop`) exist with `evtenabled = 'O'` and call `platform.audit_ddl_guard()`, which is **not** `SECURITY DEFINER`. `audit_anchors` has the UPDATE/DELETE row trigger and the TRUNCATE trigger. *Amended 2026-11-12 (SEC-P3-27):* (a) `platform.audit_forbid_mutation()`, `platform.audit_vault_guard()` and `platform.audit_ddl_guard()` have `prosecdef = false`, and `proconfig` holds exactly one `search_path` entry equal to **`search_path=pg_catalog, pg_temp`**. (b) The guard matches the schemas by OID. In a transaction that is rolled back, the test superuser runs `ALTER SCHEMA public RENAME TO c14_x` and then `ALTER SCHEMA platform RENAME TO c14_y`, each in its own savepoint. Each raises SQLSTATE `42501` with the guard's message. Privilege does not stop a superuser, so this proves the guard itself. The migrator-side negative test is SEC-TC-61 | `pg_event_trigger`, `pg_proc.prosecdef`, `pg_proc.proconfig` (same query as C11 with `p.oid IN (…three functions…)` in place of `p.prosecdef`), `pg_trigger`, rename probe |
 | C15 | (2026-11-13, PR26-SEC-03, D-ARCH-091; owner TASK-024, first instances TASK-037) **Standard-columns guard.** Every table that carries the full STD set (`id`, `created_at`, `updated_at`, `created_by`, `updated_by`, `version`), is not `runtimeReadOnly` in the table-class manifest and is not owned by `platform_audit_owner` has exactly one enabled (`tgenabled = 'O'`) row-level `BEFORE INSERT OR UPDATE` trigger `trg_<table>__std_columns` on `platform.std_columns_guard()`, and no other table has one. The function is owned by `platform_migrator`, is not `SECURITY DEFINER`, carries `proconfig` `{search_path=pg_catalog, pg_temp}` and a body without `current_setting(` / `set_config(`; no other trigger function assigns `NEW.id`, `created_at`, `created_by`, `updated_by` or `version`. A planted-forgery matrix as `platform_app` (forged `created_by`, `updated_by`, `version` on INSERT; `version` 1, `version + 2`, forged `updated_by`, changed `created_by`, changed `id` on UPDATE) raises `STD_COLUMNS_VIOLATION`, while the positive controls pass (§7.6) | `pg_trigger` (`tgfoid`, `tgtype`, `tgenabled`), `pg_proc`, rolled-back probes |
-| C16 | (2026-11-19, code review PR #65 R1-m1 (b), D-ARCH-154; default owner TASK-293, first instances TASK-037) **Tenant-bound references (§4.7).** Every foreign key in `public` whose referencing table and referenced table both carry an `org_id` column includes `org_id` on both sides at the same key position; or, where the referencing `org_id` is nullable, a second foreign key of the same pair of tables does. The exception map (exact constraint name → stated reason, looked up with a `Map`) starts empty. A planted, rolled-back single-column key between two probe tables is reported | `pg_constraint` (`contype = 'f'`) joined to `pg_attribute` on `org_id` for `conrelid` and `confrelid`; report when `array_position(conkey, child org_id attnum)` is NULL or differs from `array_position(confkey, parent org_id attnum)` → 0 rows |
+| C16 | (2026-11-19, code review PR #65 R1-m1 (b), D-ARCH-154; shipped by TASK-293, first instances TASK-037. *Amended 2026-11-19, PR65-SEC-01, PR293-SEC-03, D-ARCH-162, D-ARCH-163: arm (b) and P9-CK written down as shipped; guest-bound keys, the GUEST_CAPABLE scope and exclusion constraints are owned by TASK-051.*) **Tenant-bound references and tenant-scoped unique keys (§4.7).** **(a)** Every foreign key in `public` whose referencing and referenced tables both carry `org_id` is *org-bound*: `org_id` on both sides at the same key position. Two cases for a nullable referencing `org_id`. On a table without `guest_token_hash`, a single-column key may stay beside an org-bound key of the same table pair that holds its columns (T2-N). On a table with `guest_token_hash`, every key is org-bound or *guest-bound* (`guest_token_hash` on both sides at the same position); a guest-bound key has an org-bound sibling with the same remaining columns; an org-bound key has a guest-bound sibling or an entry in the exception map (T2-G, T2-O). **(b)** Every non-primary unique index and every exclusion constraint of a TENANT or GUEST_CAPABLE table that has `org_id` holds an owner column among its key columns: `org_id`, or `guest_token_hash` where the table has it. INCLUDE columns and expressions do not count. Each arm has an exception map (exact name → stated reason, looked up with a `Map`): for (a) the T2-O keys, for (b) the globally unique secret digests, first `ux_invitations__token_hash`. Every entry names a live object that the rule would otherwise report. Planted, rolled-back probes are reported for each refused shape, and the two PR #65 shapes are re-planted on the real tables. Limits: predicates of partial indexes are not compared, and USER_OWNED tables are out of scope. **P9-CK** (same suite; PR #66 code review R1-n2): every constraint named `ck_…` in a non-system schema is a CHECK, because the shadow rendering keeps a same-name `ck_…` replacement by its name alone | `pg_constraint` (`contype = 'f'`) joined to `pg_attribute` on `org_id` and `guest_token_hash` for `conrelid` and `confrelid`, comparing `array_position(conkey, …)` with `array_position(confkey, …)`; `pg_index` (`indisunique OR indisexclusion`, `NOT indisprimary`, the first `indnkeyatts` entries of `indkey`); `pg_constraint` by name (`contype = 'c'`) for P9-CK → 0 findings each |
 
 Amended 2026-11-12 (SEC-P3-03, SEC-P3-25, SEC-P3-26):
 - **C3.** The row was changed from "`TO platform_migrator` policies exist only on the tables in §4.5" to the `platform_definer` wording above.
@@ -3028,7 +3121,26 @@ ALTER TABLE public.<child> ADD CONSTRAINT fk_<child>__<x>_id
 - Prisma: `@@unique([orgId, id], map: "ux_<parent>__org_id_id")` on the parent and `@relation(fields: [orgId, <x>Id], references: [orgId, id], …)` on the child. `orgId` may be shared with the relation to `organisations`. The differ emits the two statements above (checked on 7.10 with `migrate diff --from-empty`).
 - In the migration that creates both tables the statements go after the indexes and before the RLS blocks. On existing tables it is an expand migration: the unique index `CONCURRENTLY` in its own file, then the key `NOT VALID`, then `VALIDATE` (§8.3 rules 5 and 6).
 
-**Rule T2: `org_id` nullable on the referencing side (GUEST_CAPABLE).** The single-column key stays, because with `org_id` NULL a composite key checks nothing, not even existence. The composite key is added beside it under the name `fk_<child>__org_id_<x>_id` and binds the row from the moment `org_id` is set. The claim of §4.3 updates the parent first and the children after it, which satisfies both keys (checked on a two-table probe on PGlite, 2026-11-19; the quote tables themselves are TASK-051). **Open:** binding guest rows through `guest_token_hash`. A guest row can today name a quote of another owner; it stays invisible to that owner and the claim does not touch it. Ruled before the quotes migration is written (risks.md R-ARCH-34).
+**Rule T2: `org_id` nullable on the referencing side** *(revised 2026-11-19, R-ARCH-34; D-ARCH-162; ADR-0005 amendment 14 item 31; `rulings/wave-1-r-arch-34-operator-rulings.md` §2. The first version kept the single-column key and added the composite key beside it for every such table. That left a guest row free to name another owner's parent, and made a foreign parent and an unknown id fail on different constraints.)*
+
+- **T2-G: the referencing table is GUEST_CAPABLE.** The reference is a pair of composite keys, one per owner column, and no single-column key:
+
+  ```sql
+  CREATE UNIQUE INDEX ux_<parent>__org_id_id           ON public.<parent> (org_id, id);
+  CREATE UNIQUE INDEX ux_<parent>__guest_token_hash_id ON public.<parent> (guest_token_hash, id);
+  ALTER TABLE public.<child> ADD CONSTRAINT fk_<child>__org_id_<x>_id
+    FOREIGN KEY (org_id, <x>_id) REFERENCES public.<parent> (org_id, id) ON DELETE RESTRICT ON UPDATE RESTRICT;
+  ALTER TABLE public.<child> ADD CONSTRAINT fk_<child>__guest_token_hash_<x>_id
+    FOREIGN KEY (guest_token_hash, <x>_id) REFERENCES public.<parent> (guest_token_hash, id) ON DELETE RESTRICT ON UPDATE RESTRICT;
+  ```
+
+  - The owner CHECK (`num_nonnulls(org_id, guest_token_hash) = 1`, §3.10) leaves exactly one owner column set, so exactly one key is checked for every row. Existence is always checked, and a row names only a parent of its own owner.
+  - A foreign parent and an unknown id fail on the same constraint: the guest key for a guest row, the organisation key for an organisation row.
+  - Both target indexes are plain. PostgreSQL does not accept a partial index as the target of a foreign key.
+  - Changing the owner of a parent and its children (the claim, §4.3) is one statement, because no order of separate statements satisfies both keys.
+  - Prisma: `@@unique([orgId, id])` and `@@unique([guestTokenHash, id])` on the parent, and two optional relations on the child that share `<x>Id`. `prisma validate` accepts it and the differ emits the four statements above (checked on 7.10).
+- **T2-O: a reference only organisation rows may hold.** `ck_<child>__<x>_org_only CHECK (<x>_id IS NULL OR org_id IS NOT NULL)` and the key through `org_id` alone, under the T1 name. Each such key is an entry of the C16 (a) exception map with the CHECK as its reason. First instance: `quotes.requote_of_quote_id`.
+- **T2-N: no `guest_token_hash` on the referencing table.** The single-column key stays, because with `org_id` NULL a composite key checks nothing, not even existence, and the composite key is added beside it as `fk_<child>__org_id_<x>_id`. No instance yet. Its two constraints would answer a foreign parent and an unknown id under different names; the error rule below gives both one response.
 
 **Outside the rule.** References to GLOBAL tables (`roles`, reference data), to `organisations` (the tenant key itself), to `users` (not tenant-owned; `memberships` has its own guard, §3.2), and the logical actor columns of P2.
 
@@ -3038,10 +3150,27 @@ ALTER TABLE public.<child> ADD CONSTRAINT fk_<child>__<x>_id
 |---|---|---|
 | `membership_roles (org_id, membership_id)` | `memberships (org_id, id)` | TASK-037 migration |
 | `memberships (org_id, invitation_id)` | `invitations (org_id, id)` | TASK-037 migration |
+| `quote_packages`, `quote_options`, `quote_shares`: `(org_id, quote_id)` and `(guest_token_hash, quote_id)` (T2-G) | `quotes (org_id, id)` and `quotes (guest_token_hash, id)` | planned: TASK-087, `quote_shares` with TASK-237 (§3.10) |
+| `quotes (org_id, requote_of_quote_id)` (T2-O) | `quotes (org_id, id)` | planned: TASK-087 |
 
 Every later table of §3 that references another organisation-keyed table follows T1 or T2 when its migration is written. Catalog test C16 (§4.6) is the gate.
 
-**Cost.** One unique index per referenced table: a 32-byte key, about 50 MB per million rows (estimate, not measured), and one more index insertion per parent insert. Nothing is added on the referencing table, and the referential check probes the composite index instead of the primary key.
+**Unique keys carry an owner column (2026-11-19; PR65-SEC-01, PR293-SEC-03 (a) and (c); D-ARCH-163; ADR-0005 amendment 14 item 33).** PostgreSQL checks a unique index while it inserts the index entry, before the referential check at the end of the statement. A unique key without an owner column therefore answers `23505` when another owner holds the value, and lets a foreign row take it.
+
+- **U1 (C16 (b)).** Every non-primary unique index and every exclusion constraint of a TENANT or GUEST_CAPABLE table has `org_id`, or on a GUEST_CAPABLE table `guest_token_hash`, among its key columns. The only exceptions are globally unique secret digests that no writer can choose, each listed with its reason.
+- **U2 (design rule, checked in review).** On a GUEST_CAPABLE table a uniqueness rule that must hold for guest rows and for organisation rows is two indexes, one per owner column, with the same remaining key columns and the same predicate. NULLs are distinct, so the index through `org_id` says nothing about guest rows and the other way round. The index through `org_id` leads with it (REQ-RLS-001) and may be partial on `org_id IS NOT NULL`.
+- A read of such a table carries the owner predicate, so that the owner-leading index serves it. The policies add the same predicate, but an OR of policies is not an index condition.
+- USER_OWNED tables are outside this rule. Their isolation key is the user, and the rule for them is written when the first one carries a unique business key.
+
+**One answer for a refused reference (2026-11-19; PR293-SEC-03 (b); D-ARCH-164; ADR-0005 amendment 14 item 34).**
+
+- `mapDbError` (`apps/api/src/platform/db/map-db-error.ts`) maps every `23503` to the same response, 500 `INTERNAL_ERROR` with reason `DB_ERROR`. It never reads the constraint name, the message or the detail.
+- No service, repository or module catalogue maps a foreign-key violation (`P2003`, or `23503` under a raw query) to a client-visible answer by constraint or field name.
+- A reference that a client supplies is resolved by a read under RLS before the write. A row of another owner and an absent row are then the same miss and get the route's catalogue answer.
+- A `23503` that still reaches the mapper means a service skipped that read. It is meant to fail the abuse suite, not to look like a clean miss.
+- A `23505` may be mapped by index name only for an index that U1 passes or lists.
+
+**Cost.** One unique index per referenced table: a 32-byte key, about 50 MB per million rows (estimate, not measured), and one more index insertion per parent insert. Nothing is added on the referencing table, and the referential check probes the composite index instead of the primary key. *2026-11-19:* a GUEST_CAPABLE parent carries a second target index, `(guest_token_hash, id)`: a 48-byte key, about 70 to 90 MB per million rows (estimate, not measured). On `quotes` that is one more index insertion on a path bounded by carrier calls. A later T1 reference into `quote_options` (594 M rows at Y5 without retention, §10.1) would cost about 30 GB for its `(org_id, id)` target; the task that adds it states the size it expects.
 
 **Assertion triggers on RLS tables.** `BEFORE ROW` triggers run before RLS `WITH CHECK`; `AFTER ROW` triggers run after it. A new trigger that only raises is therefore `AFTER ROW` unless it has a stated reason to run earlier: a cross-tenant write then fails as `42501` whatever the actor can see, and the generated isolation suite (C12) keeps proving `WITH CHECK` on the table. An `AFTER` trigger cannot change the row, so C15 (b) does not concern it. First instance: `trg_memberships__lifecycle_guard`; precedent: `trg_organisations__type_immutable`. The standard-columns guard (C15 fixes its shape), the de-claim guard and the two role-scope triggers stay `BEFORE`; the generated suite models them with traits.
 
@@ -3787,9 +3916,9 @@ UPDATE public.outbox_events SET published_at = now(), attempts = attempts + 1, u
 COMMIT;
 ```
 
-Purge (housekeeping, daily): `DELETE FROM public.outbox_events WHERE id IN (SELECT id FROM public.outbox_events WHERE published_at < now() - interval '7 days' ORDER BY published_at LIMIT 5000)` repeated until 0 rows. Consumers record `processed_events (consumer, event_id)` in their own business transaction with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the event was already handled (REQ-PLAT-017).
+Purge (housekeeping, daily): `DELETE FROM public.outbox_events WHERE id IN (SELECT id FROM public.outbox_events WHERE published_at < now() - interval '30 days' ORDER BY published_at LIMIT 5000)` repeated until 0 rows. *Corrected 2026-11-19 (D-ARCH-167): 30 days, as ADR-0004 item 6 decides; this section and §10.5 said 7 days and no decision recorded that. The horizon is not shorter than the life of a dead-letter record (14 days, ADR-0013 amendment 3), so a redriven `outbox_event` job still finds its row.* Consumers record `processed_events (consumer, event_id)` in their own business transaction with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the event was already handled (REQ-PLAT-017).
 
-**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. Rows are purged 7 days after publish, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
+**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. Rows are purged 30 days after publish *(corrected 2026-11-19, D-ARCH-167; was 7)*, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
 
 ### 6.2 Idempotency keys (REQ-API-009..011, DR-A20)
 
@@ -4175,7 +4304,7 @@ Fails the build when a migration file:
 7. Touches audit storage with `UPDATE`, `DELETE`, `TRUNCATE`, `DROP`, `DETACH PARTITION`, `DISABLE TRIGGER`, `NO FORCE ROW LEVEL SECURITY`, `DISABLE ROW LEVEL SECURITY` (REQ-AUDIT-015), or disables RLS on any table.
 8. Grants `DELETE` to `platform_app` on a table outside the allow-list, grants `BYPASSRLS`, `SUPERUSER`, or ownership to `platform_app`, or grants any privilege on a partition.
 9. Drops a policy without re-creating it in the same file; or creates a table without the RLS block / allow-list entry (cross-checked with C1). *Amended 2026-11-13 (PR11-SEC-03 item 2, PR11-SEC-07; D-ARCH-071, D-ARCH-072):* (a) **every `CREATE POLICY`** in `prisma/migrations/**` must equal, after whitespace normalisation, a statement of `renderRls(entry)` for its table's manifest entry — "policy not rendered from the templates" otherwise; there is no exemption file (the DR-A14 sets are templates, §4.3); the renderer's own output lints clean (owner TASK-024); (b) because files are not atomic (rule 5), a **`GRANT … TO platform_app` on an RLS-class table must come after that table's `ENABLE` + `FORCE ROW LEVEL SECURITY` and its policies in the same file** (fixture `grant-before-force`); a grant placed earlier would leave a granted table without RLS as a durable state when a later statement fails (TASK-016 fix cycle).
-10. Contains `UPDATE`/`DELETE`/`INSERT … SELECT` against an existing table without `data-changing: yes` (data-changing migrations trigger the backup guardrail, §8.6). Pure `INSERT` of new rows into reference tables by the seed is not a migration. *Clarified 2026-11-12 (TASK-013, D-ARCH-060; PR8-SEC-03, D-SEC-PR8-01):* a **generated seed migration** that only `INSERT … VALUES … ON CONFLICT ("id") DO NOTHING`s new rows into GLOBAL tables created earlier in the same or a previous migration (the authz `v<N>` seeds) is `data-changing: no` — it touches no existing row; a later authz migration that narrows a role (`DELETE FROM role_permissions …`), rewrites a description (`UPDATE`), **upserts (`INSERT … ON CONFLICT … DO UPDATE`) or `MERGE`s** is `data-changing: yes` and takes the §8.6 guardrail. The linter's `DATA_CHANGING` pattern covers the upsert and `MERGE` forms (TASK-016 or the PR #8 fix cycle, with a negative fixture). *Clarified 2026-11-18 (D-TASK037-03, D-ARCH-151; ADR-0005 amendment 12 item 25):* the same holds for **reserved rows of a table that the same file creates** — the two reserved `users` rows and the operator organisation of §1.6 in the TASK-037 migration. `INSERT … VALUES … ON CONFLICT ("id") DO NOTHING`, placed after the table's unique indexes and **before its `ENABLE` + `FORCE ROW LEVEL SECURITY`**, is `data-changing: no`. It fits the ordering principle below: the table has no runtime grant until the end of the file, so no prefix exposes the rows. After `FORCE`, PostgreSQL refuses the migrator's insert into an RLS table, so a later migration cannot add such a row and no linter rule is needed for that case.
+10. Contains `UPDATE`/`DELETE`/`INSERT … SELECT` against an existing table without `data-changing: yes` (data-changing migrations trigger the backup guardrail, §8.6). Pure `INSERT` of new rows into reference tables by the seed is not a migration. *Clarified 2026-11-12 (TASK-013, D-ARCH-060; PR8-SEC-03, D-SEC-PR8-01):* a **generated seed migration** that only `INSERT … VALUES … ON CONFLICT ("id") DO NOTHING`s new rows into GLOBAL tables created earlier in the same or a previous migration (the authz `v<N>` seeds) is `data-changing: no` — it touches no existing row; a later authz migration that narrows a role (`DELETE FROM role_permissions …`), rewrites a description (`UPDATE`), **upserts (`INSERT … ON CONFLICT … DO UPDATE`) or `MERGE`s** is `data-changing: yes` and takes the §8.6 guardrail. The linter's `DATA_CHANGING` pattern covers the upsert and `MERGE` forms (TASK-016 or the PR #8 fix cycle, with a negative fixture). *Clarified 2026-11-18 (D-TASK037-03, D-ARCH-151; ADR-0005 amendment 12 item 25):* the same holds for **reserved rows of a table that the same file creates** — the two reserved `users` rows and the operator organisation of §1.6 in the TASK-037 migration. `INSERT … VALUES … ON CONFLICT ("id") DO NOTHING`, placed after the table's unique indexes and **before its `ENABLE` + `FORCE ROW LEVEL SECURITY`**, is `data-changing: no`. It fits the ordering principle below: the table has no runtime grant until the end of the file, so no prefix exposes the rows. After `FORCE`, PostgreSQL refuses the migrator's insert into an RLS table, so a later migration cannot add such a row and no linter rule is needed for that case. *2026-11-20:* a top-level call of a routine that changes data counts as well; see the amendment "rule 10 call sites" at the end of this section.
 11. Lacks `SET lock_timeout` at the top when it alters an existing table. *Amended 2026-11-13 (PR11-SEC-07 item 1; D-ARCH-071):* the **session form only** — `SET lock_timeout = …` or `SET SESSION lock_timeout = …`; **`SET LOCAL lock_timeout` fails the rule** (fixture `set-local-lock-timeout`), because each statement of a migration file runs in its own implicit transaction (rule 5) and outside a transaction block `SET LOCAL` "emits a warning and otherwise has no effect" (PostgreSQL *SET*): the following `ALTER TABLE` would run with no lock timeout at all, the pile-up NFR-AVAIL-003 guards against. The session value persists on the deploy connection into later files, so a file that sets a value **above** the migrator role default (`3s`, §4.4) ends with `RESET lock_timeout`. *Sub-clause (c), added 2026-11-13 (PR #24 security r2 PR24-SEC-11; D-ARCH-099):* **a top-level transaction-control statement is refused in `migration.sql` and in `down.sql`** — `BEGIN`, `START TRANSACTION`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`, `SAVEPOINT`, `RELEASE`, `ROLLBACK TO`, `PREPARE TRANSACTION`, `COMMIT PREPARED`, `ROLLBACK PREPARED`, recognised as the first token of a statement by the statement splitter (never inside a dollar-quoted body, a `CASE … END` or a `BEGIN ATOMIC` body). Rule 5 says the statements of a file run one at a time outside any transaction block; a `BEGIN` would open a block that spans the following statements, and `SET lock_timeout = '10s'; BEGIN; RESET lock_timeout; ROLLBACK;` would then pass the tracker, which counted the `RESET`, while PostgreSQL reverts it and the raised value leaks into the next file. Tracking values across `BEGIN … ROLLBACK`, `SAVEPOINT` and `ROLLBACK TO` in a text linter would re-implement transaction semantics; a file has no legitimate use for them, so they are refused (message `rule 11c`; fixtures: that statement sequence fails, a file without transaction control and a transaction word inside a dollar-quoted body lint clean). Owner TASK-024, with the DO-body RESET asymmetry of PR24-SEC-03 and the setter-key half.
 
 **Non-atomic files — ordering principle (2026-11-13, PR11-SEC-07, D-ARCH-071).** Because `migrate deploy` applies statements one at a time and a failure leaves every earlier statement in place, **a migration is written so that every prefix of its statements leaves the schema safe**: `CREATE TABLE` → `ENABLE` + `FORCE ROW LEVEL SECURITY` → policies → grants (rule 9 b; `FORCE` with no policy is 0 rows, fail closed); a `SECURITY DEFINER` function is created *and granted* inside one `SET ROLE platform_definer; … RESET ROLE;` block (rule 15); data moves after structure. Recovery from a failed deploy is `down.sql` (idempotent against any prefix, rule 17) → `prisma migrate resolve --rolled-back <name>` (legitimate here: the migration **is** in the failed state, §8.4) → redeploy of the fixed file. No file may end inside `SET ROLE`.
@@ -4232,6 +4361,23 @@ L. **Lexical rule (PR43-SEC-03, PR43-SEC-11; D-TASK024-13, D-TASK290-01).** A fi
    - a block **opens** on the two words `BEGIN ATOMIC` at parenthesis depth 0 in a statement that starts with `CREATE [OR REPLACE] FUNCTION | PROCEDURE` — the top-level statement, or inside a block the current body statement (a nested routine);
    - a block **closes** only on `END` as the **first word of a body statement** (right after `ATOMIC` or after a body `;`). Every other `end` (a `CASE … END`, a label `AS end`, `t.end`, `SELECT 1 end`) and every `case` belongs to its statement, so no label can move a block boundary and no later top-level `END` can resynchronise one. CASE words are not counted at all.
    Narrower than psql on purpose (psql also counts a bare `BEGIN` and every `CASE`). PR43-SEC-11 (labels `case`, `t.case`, the bare label `case`, the alias `begin atomic`) is **closed by TASK-290**: those shapes split exactly as PostgreSQL 18 runs them, and the hostile statements after the routine are linted (fixtures `atomic-body-labels`; the PostgreSQL 18 agreement is `prisma/tests/migrations/split-statements.int.test.ts`: every piece of the split is one command under the extended protocol). *(Reconciled by TASK-290: the 2026-11-16 text prescribed a per-body-statement CASE depth failing closed to rule L at the semicolon; the grammar-exact close rule makes CASE depth unnecessary and splits the label shapes instead of refusing them — D-TASK290-01.)* Limit: a statement that the grammar places inside a body (after a bare label `end`, PostgreSQL's own reading) is part of the routine statement; PostgreSQL refuses any utility statement in a SQL function body at CREATE time (`0A000`), so such text never runs as a migration step.
+
+**Amendment (2026-11-20, TASK-293 as merged with PR #72, `f723fef`; PR66-SEC-01, PR66-SEC-02, PR293-SEC-01, -02 and -04; D-TASK293-02, -03, -07 and -10; routed by D-ORCH-139; D-ARCH-172): rule 10 call sites, the lone carriage return and lexer parity, written down as `tools/db/lint-migrations.ts` and `sql-text.ts` implement them.**
+
+- **Rule 10, call sites.** A routine body does not run when the routine is created. It runs when a migration calls the routine, and then it changes data as surely as a top-level statement.
+  - A routine is a *writing routine* when its definition holds a rule-10 form (in a dollar or string body, a `BEGIN ATOMIC` body, `RETURN QUERY`, `FOR … IN` or `OPEN … FOR` with DML, or dynamic SQL in a string literal), or when it calls a writing routine.
+  - A top-level statement that names a writing routine followed by `(` is data-changing and needs `data-changing: yes` (§8.6).
+  - The registry of routines is carried from file to file in migration order and never shrinks: `CREATE OR REPLACE` adds to what a name writes and calls, and `DROP` does not clear it. Whether a routine calls a writer is resolved when the call site is judged, so the order of the definitions does not matter. `ALTER … RENAME TO` and `SET SCHEMA` record the new name as calling the old one.
+  - Names are compared as parsed identifiers, non-ASCII letters included. An unqualified name matches every schema, and a name inside a string literal counts. This fails closed: a view or a column default that names a writer is reported, and so is prose in a string literal that reads like DML.
+  - Not a call: `GRANT`, `REVOKE`, `COMMENT ON`, `ALTER` or `DROP` of the routine, `CREATE TRIGGER`, and a `FUNCTION | PROCEDURE | ROUTINE <name>(` reference.
+  - **Stated limits, pinned by tests.** The rule does not see: a routine created in the bootstrap lane; a write reached only through `EXECUTE` of a string built at run time; a call through a computed name; a call in attribute notation (`SELECT t.w FROM t` calls `w(t)`); a writing trigger fired by a plain `INSERT … VALUES`; and, in text that does not lex, a quoted name that holds `;` (PR293-SEC-04). For a migration that defines a writing routine, the code review and the security record check `data-changing` by hand against this list.
+  - **Cast and aggregate (decided 2026-11-20, D-ARCH-172).** A writer used as a cast function (`CREATE CAST … WITH FUNCTION w`) or as an aggregate support function (`CREATE AGGREGATE a (SFUNC = w, …)`) was the other pair of limits (D-TASK293-10). No table, index or policy of this model needs either statement, so rule 14 refuses `CREATE CAST` and `CREATE AGGREGATE` outright in `prisma/migrations/**`, next to `CREATE OPERATOR` and `CREATE RULE`. Owner: TASK-034, the holder of the `tools/db` linter. Until that lands the two stay stated limits.
+- **Rule L, a lone carriage return.** A CR that is not followed by LF is a rule-L finding wherever it stands, a string literal included, and the file is still linted further. PostgreSQL ends a `--` comment at CR as well as at LF, so the text after a lone CR runs, while an editor shows it as part of the comment (PR66-SEC-01). `.gitattributes` normalises CRLF and leaves a lone CR alone.
+- **Lexer parity.** `sql-text.ts` follows the scanner of PostgreSQL 18 (`scan.l`), because the linter must see the statements PostgreSQL runs:
+  - a `$` right after an identifier character belongs to the identifier and opens no dollar quote;
+  - a dollar tag may hold non-ASCII letters;
+  - white space is ASCII only, so U+00A0, U+FEFF and U+3000 are identifier characters;
+  - an escape string continued across a newline keeps its escapes. It is refused: rule L at top level, and an escape string wherever it is nested (PR293-SEC-02). The migrations lane refuses every escape string as before.
 
 ### 8.4 Reversibility test: up → down → up (NFR-DATA-004)
 
@@ -4293,6 +4439,7 @@ REQ-DATA-001..017, REQ-RBAC-002/003/013, REQ-COMP-003/008, REQ-PRICE-020, REQ-NO
 - No legacy data is used anywhere; all demo data is synthetic (product brief §13 rule 9).
 - *Added 2026-11-18 (D-ARCH-151; ADR-0005 amendment 12 item 25):* the reference seed writes GLOBAL tables only. As `platform_migrator` it has no policy on an RLS table after `FORCE`: its insert into `users`, `organisations` or `memberships` is refused and its reads return no rows. The reserved rows of §1.6 come from the migration that creates their tables; every other row of an RLS table is written as `platform_app` through the services.
 - *Added 2026-11-19 (D-ARCH-156; ADR-0005 amendment 13 item 29):* "Seed actor = SYSTEM actor" above holds for the reference seed and for configuration changes. A transaction of the demo seed that inserts a `users` row or a `memberships` row runs with `app.actor_id` = that user: `p_users__own` requires it for the user, and `trg_memberships__lifecycle_guard` (§3.2) requires it for the membership. The seed never inserts a membership for a user under another actor.
+- *Added 2026-11-19 (D-ARCH-165; ADR-0005 amendment 14 item 35):* a row of `operator_staff_grants` (§3.2) is written by the provisioning lane as `platform_migrator`, through the migrator connection the seed CLI already opens, with the SYSTEM actor in `created_by` and `updated_by`. It is the one write of the demo seed that does not go through a service, and it touches no RLS table.
 
 ### 9.2 Reference seed
 
@@ -4332,7 +4479,7 @@ REQ-DATA-001..017, REQ-RBAC-002/003/013, REQ-COMP-003/008, REQ-PRICE-020, REQ-NO
 
 Users are created through the identity service (bcrypt cost from config) so that credentials, memberships, roles, audit entries and outbox events (`auth.email_verification` is suppressed for seeded verified users) are produced exactly as in production. Re-running finds users by email and orgs by seed id and changes nothing.
 
-*Added 2026-11-18 (D-ARCH-151).* A staff user takes two tenant transactions, because a transaction has one `app.org_id` (§4.1): the registration path in the context of the personal organisation, then the `ACTIVE` membership and the operator role in the context of `OPERATOR_ORG_ID`. A re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function lives in the service layer, not in `prisma/seed/demo`, because the first-staff command for production reuses it (ADR-0005 amendment 12 item 26, D-ARCH-153). *2026-11-19 (D-ARCH-156):* both transactions run with the staff user as `app.actor_id`, and so do the transactions that add the four further Acme users to Acme Exports (context = the organisation, actor = the member). The audit actor type and the run reference of a provisioning job are fields of the audit entry, not `app.actor_id`.
+*Added 2026-11-18 (D-ARCH-151).* A staff user takes two tenant transactions, because a transaction has one `app.org_id` (§4.1): the registration path in the context of the personal organisation, then the `ACTIVE` membership and the operator role in the context of `OPERATOR_ORG_ID`. A re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function lives in the service layer, not in `prisma/seed/demo`, because the first-staff command for production reuses it (ADR-0005 amendment 12 item 26, D-ARCH-153). *2026-11-19 (D-ARCH-156):* both transactions run with the staff user as `app.actor_id`, and so do the transactions that add the four further Acme users to Acme Exports (context = the organisation, actor = the member). The audit actor type and the run reference of a provisioning job are fields of the audit entry, not `app.actor_id`. *2026-11-19 (D-ARCH-165):* between the two transactions of a staff user the seed writes the staff grant for the new user id (§9.1). Without it the membership insert is refused (§3.2 rule 5). Only the eight staff users get a grant. The service-layer function takes the grant step as a port whose only implementation is in the seed lane, because api and worker never hold the migrator credential.
 
 ---
 
@@ -4359,8 +4506,9 @@ Baseline: the legacy aggregate shape (product brief Appendix A: 12,500 customers
 | `notification_log` | 4.4 M | 21 M | 58 M | 0.4 kB | 40 GB |
 | `audit_entries` | 50 M | 238 M | 660 M | 1.0 kB | ≈ 1.6 TB (10 indexes; ≈ 4–15 M rows per monthly partition) |
 | `audit_pii_vault` | 10 M (dedupe per subject/field/value) | 48 M | 132 M | 0.2 kB | 40 GB |
-| `outbox_events` | 20 M/yr flowing; ≤ 0.5 M resident (7-day purge) | — | — | 0.5 kB | < 1 GB |
+| `outbox_events` | 20 M/yr flowing; ≈ 1.6 M resident (30-day purge; *corrected 2026-11-19, D-ARCH-167: was ≤ 0.5 M at 7 days*) | — | — | 0.5 kB | ≈ 1 GB |
 | `idempotency_keys` | ≤ 0.1 M resident (24 h) | — | — | 1 kB | < 0.2 GB |
+| `job_executions` (2026-11-20) | one row per completed job; ≈ 1.6 M resident for every 20 M jobs a year (30-day purge), and the outbox alone flows 20 M a year | — | — | 0.2 kB | < 1 GB for every 20 M jobs a year, with its three indexes (estimate, not measured); without the purge it would grow by that much every month |
 | `audit_checkpoint_heads` (2026-11-12, hourly deltas) | ≈ 25 M (≈ 50–100 k/day: streams whose head moved in the hour) | ≈ 120 M | ≈ 330 M | 0.12 kB | ≈ 70 GB (candidate for monthly range partitions on `created_at` at M5, archived with the audit partitions) |
 | `audit_anchors` (2026-11-12) | 8,760 | 26 k | 44 k | 0.3 kB | < 20 MB |
 
@@ -4428,7 +4576,9 @@ Retention periods are data in the compliance packs (`RETENTION` section, NFR-PRI
 | Verification/reset tokens, MFA challenges, re-auth proofs | delete 7 days after expiry | same |
 | Refresh tokens | delete 7 days after expiry/revocation | same |
 | Idempotency keys | delete after 24 h | same |
-| Outbox events / processed events | delete 7 / 30 days after publish/processing | same |
+| Outbox events / processed events | delete 30 / 30 days after publish/processing (*corrected 2026-11-19, D-ARCH-167: the outbox figure was 7, against ADR-0004 item 6*) | same |
+| Job executions (idempotency ledger; added 2026-11-20, D-ARCH-171) | delete 30 days after completion, by the housekeeping purge of TASK-043; no row exists before TASK-047 binds the accessor | same |
+| BullMQ jobs in Valkey (not PostgreSQL; added 2026-11-19, ADR-0013 amendment 3, D-ARCH-159) | per queue: completed jobs 24 h / newest 10,000; failed jobs 7 days / newest 1,000; dead-letter records 14 days / newest 2,000 (BullMQ, the consumer and the hourly `queue-retention` sweep of TASK-039) | same |
 | Login attempt counters | delete 30 days after last failure | same |
 | Unclaimed expired guest quotes | kept (DR-B14: no deletion during the run) | delete after 90 days (OI-17) |
 | Drafts | CANCELLED after 30 days idle (REQ-ACCT-004); rows kept | anonymise after pack period |
@@ -4518,7 +4668,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A3 | SEC-P3-03 | Statement-text event trigger withdrawn; **`platform.audit_ddl_guard()`** on `ddl_command_end` (`pg_event_trigger_ddl_commands()`) and `sql_drop` (`pg_event_trigger_dropped_objects()`) matches by object identity, raises `audit objects are immutable (SEC-P3-03)` unless `current_user = 'platform_audit_owner'`; must not be `SECURITY DEFINER`. Row and statement triggers kept; `audit_anchors` and `audit_checkpoint_heads` TRUNCATE triggers added | §5.2, §4.6 C14 |
 | A4 | SEC-P3-03 | §5.5 becomes **"Hourly checkpoint and signed anchor"**: hourly `CHAIN_CHECKPOINT`, delta `audit_checkpoint_heads` (+ `head_occurred_at`), new table **`audit_anchors`** (dense `anchor_seq`, `prev_anchor_hash` chain, `anchor_hash`, algorithm `ECDSA_P256_SHA256`, `key_id`, DER `signature`) written in the same transaction; signing key `AUDIT_ANCHOR_SIGNING_KEY_REF` (worker only), verification keys `AUDIT_ANCHOR_PUBLIC_KEYS`; `AUDIT_CHECKPOINT_KEY` (HMAC) dropped; mandatory sink `AUDIT_ANCHOR_SINK` | §1.6, §1.7, §2.3, §3.4, §4.4, §5.5, §10.1 |
 | A5 | SEC-P3-03 | Verifier: every hourly run checks anchor-log integrity (`ANCHOR_MISSING`, security event `audit_anchor_missing`), signatures (`CHECKPOINT_SIGNATURE_INVALID`) and the anchored heads of the latest anchor (`CHECKPOINT_HEAD_MISMATCH`, `audit_chain_broken`); nightly checks all anchors since the previous nightly run; the "only if configured" wording is removed; new `failure_kind` values and `anchor_seq_from/_to` | §1.7, §3.4, §5.6 |
-| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
+| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (*a fourth column, `org_deleted`, from 2026-11-20: A34*) (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
 | A7 | SEC-P3-01 C1/C2, SEC-P3-11 | `sessions.authenticated_at` (the `auth_time` source, never changed by refresh); web absolute cap 30 days (admin 12 h) with a DB backstop CHECK; `refresh_tokens.expires_at = LEAST(now() + 30 min (admin) / 30 d (web), absolute)` | §3.1 `sessions`, `refresh_tokens` |
 | A8 | SEC-P3-14 (also §9.3 staff seed row) | `users.status_reason` (CHECK incl. `MFA_ENROLMENT_OVERDUE`) and `users.first_signed_in_at`; housekeeping suspends OPERATOR members without active TOTP 24 h after first sign-in via the new candidate function `mfa_enrolment_overdue_candidates`; new table **`mfa_enrolment_codes`** (chosen over a purpose value on an existing token table; reasons in §3.1); `password_reset_tokens.purpose` (`RESET`, `SET_PASSWORD` 24 h); seeded staff outside local have no `user_credentials` row | §1.5, §1.7, §2.1, §3.1, §4.3, §4.5 |
 | A9 | SEC-P3-08 item 1 | `<col>_key_id` sibling for every ciphertext and HMAC lookup column (renames `key_id` → `secret_ciphertext_key_id`, `ciphertext_key_id`, `value_ciphertext_key_id`; adds `code_hmac_key_id`, `ip_prefix_hmac_key_id`, `identifier_hmac_key_id`, `value_hmac_key_id`, `ip_hash_key_id`, `customer_ref_postcode_hmac_key_id`, `response_body_key_id`, `payload.token_enc_key_id`, M3 `credentials_ciphertext_key_id`; `pepper_key_id` reserved for SEC-P3-16); AES-256-GCM 96-bit nonce, 128-bit tag, AAD = JCS([table, column, row id or token, key_id]); `idempotency_keys.response_body` becomes ciphertext; `mfa_recovery_codes` aligned to ADR-0006 HMAC | §3.1, §3.4, §3.5, §3.8, §3.11, §3.16, §5.1, §5.4, §5.6, §5.7, §6.2, §10.4 |
@@ -4543,6 +4693,9 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A29 | PR #61 / TASK-028 rulings (code review R1-m3 (a)–(c), PR61-SEC-03/-07, D-TASK028-01/03/04; ADR-0007 amendment 13; D-ARCH-148..150) | **§3.4:** the three vault token columns of `audit_entries` are `INT (token)`; C10 unchanged. **§1.2, §10.4:** the registry lives in `packages/shared/src/classification`; the log redaction is tied to it by a coverage test. **§1.6, §3.4 `data_subjects`, §5.7, §10.5:** unattributed data subjects, one per UTC month, erased 12 months after the month ends by the EPIC-B-413 retention job; no revival of an erased subject; erasure by value. |
 | A30 | Wave-1 batch 1.1 rulings (PR #65 / TASK-037: D-TASK037-03/-04, D-ORCH-COORD-03 item 1; `rulings/wave-1-batch-1.1-rulings.md`; ADR-0005 amendment 12; D-ARCH-151, D-ARCH-153) | **§1.6, §3.2:** the operator organisation is a reserved row (`OPERATOR_ORG_ID` = `00000000-0000-7000-8000-000000000010`) of the migration that creates `organisations`, inserted before `FORCE`; it occupies `ux_organisations__single_operator`, so no runtime path, seed or fixture creates an OPERATOR organisation. **§4.3:** the creating paths cannot produce one. **§8.3 rule 10:** reserved rows of a table that the same file creates are `data-changing: no`. **§9:** the reference seed writes GLOBAL tables only; the reserved users and the operator organisation come from the migration; the demo seed adds staff memberships to the reserved organisation, two tenant transactions per staff user; `seedId('org:operator')` is withdrawn. The first staff user in production is a separate M5 command (risks.md R-ARCH-33). |
 | A31 | PR #65 / TASK-037 code review round 1 (R1-m1 (b), R1-n1, security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; ADR-0005 amendment 13; D-ARCH-154..157) | **§4.7 (new), §1.1 P12, §4.6 C16:** a reference between two organisation-keyed tables is a composite foreign key through `org_id` (rule T1; T2 where `org_id` is nullable); first instances `membership_roles → memberships` and `memberships → invitations`, each with `ux_<parent>__org_id_id`; new assertion triggers on RLS tables are `AFTER ROW`. **§3.2 `memberships`, §1.7, §4.3:** `trg_memberships__lifecycle_guard` (member = actor and `ACTIVE` at insert; `user_id` and `org_id` immutable; `REMOVED` terminal); "`created_by` = the inviter" at acceptance withdrawn (D-ARCH-157). **§3.2 `invitations`:** rows only in `BUSINESS_CUSTOMER` organisations. **§9.1, §9.3:** a seed transaction that inserts a user or a membership runs with that user as actor. Open: guest-side binding of GUEST_CAPABLE rows (risks.md R-ARCH-34). |
+| A32 | The two dispatch gates of D-SD-002 (R-ARCH-34 and PR293-SEC-03 before TASK-051; PR65-SEC-02 (b) before TASK-089), PR65-SEC-04 (a) and (b), the outbox horizon (`rulings/wave-1-r-arch-34-operator-rulings.md`; ADR-0005 amendment 14; D-ARCH-162..167) | **§4.7, §3.10, §4.3, §1.1 P12:** on a GUEST_CAPABLE table a reference is a pair of composite keys, one per owner column, with no single-column key (T2-G; T2-O for `quotes.requote_of_quote_id`); the claim is one statement; every unique key of a TENANT or GUEST_CAPABLE table holds an owner column, and a uniqueness rule is one index per owner column; a refused reference has one answer. **§4.6 C16:** arm (a) knows guest-bound keys, arm (b) and P9-CK are written down, (b) covers GUEST_CAPABLE tables and exclusion constraints (TASK-051). **§3.2, §1.5, §4.4, §9.1, §9.3:** new GLOBAL table `operator_staff_grants`, written by the provisioning lane as the migrator; lifecycle-guard rule 5 (an operator membership needs a grant) and rule 6 (`INVITED` not reachable by UPDATE), both in a later migration that replaces the function; the PARTNER backstop is deferred to M3; no users transition guard. **§3.5, §6.1, §10.1, §10.5:** the outbox purge horizon is 30 days, as ADR-0004 decides (the 7 days here were never decided). |
+| A33 | TASK-039 code review R1-m1, R1-m7 and R1-n8 (D-TASK039-03); the §8.3 wording routed by D-ORCH-139 (D-ARCH-171, D-ARCH-172) | **§3.5 (new entry), §1.5, §4.4, §10.1, §10.5:** `job_executions`, the idempotency ledger of job effects: SYSTEM, insert-only, unique on `(queue, job_key)`, purged 30 days after completion by the housekeeping job of TASK-043. **§8.3:** rule 10 call sites with their stated limits, the lone carriage return (rule L) and lexer parity are written down as TASK-293 shipped them; rule 14 is to refuse `CREATE CAST` and `CREATE AGGREGATE` (TASK-034). |
+| A34 | TASK-047 dispatch gate (D-SD-003 item 6, D-SD-004 item 8, D-PM-072; ADR-0013 amendment 4; D-ARCH-180) | **§4.5 `job_context`:** the function resolves ownership, not liveness. It filters `deleted_at` on neither the row nor its organisation and returns a fourth column `org_deleted` (true for a soft-deleted or missing organisation, NULL without an organisation). A job of a soft-deleted organisation runs in that organisation's own tenant scope; no refusal reason is added and no job runs in a wider scope. The body selects into variables and ends in one query (run on PGlite with stub tables). Candidate functions that settle, cancel, expire or backfill do not filter on the organisation's `deleted_at`. |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:

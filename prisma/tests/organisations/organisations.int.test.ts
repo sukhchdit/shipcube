@@ -1,6 +1,8 @@
 /**
  * Organisations and users against PostgreSQL 18 with the committed migrations (TASK-037; US-061, US-062; REQ-ORG-001..
- * 004, DR-A05, DR-A06, DR-A14; data-model §3.1, §3.2, §4.3, §7.6; PR26-SEC-03/04, D-ARCH-123; SEC-TC-74). Every case
+ * 004, DR-A05, DR-A06, DR-A14; data-model §3.1, §3.2, §4.3, §7.6; PR26-SEC-03/04, D-ARCH-123; SEC-TC-74; SEC-TC-76
+ * tenant-bound references and WITH CHECK, SEC-TC-77 invitation scope, SEC-TC-78 membership lifecycle guard: PR65-SEC-05,
+ * D-SEC-PR65-01, tagged by TASK-293 and required in `integration` by tools/quality/required-suites.json). Every case
  * runs in a rolled-back transaction; the statements live in `cases.ts` (fixture rows as the superuser with
  * `session_replication_role = replica`, the case itself as `platform_app` with the production context statement of
  * withTenantTx), so RLS, the standard-columns guard and the domain triggers decide exactly as at runtime. The one
@@ -37,6 +39,7 @@ import {
   secondMembership,
   secondOperator,
   stdColumns,
+  stdColumnsRemainder,
   SYSTEM,
   tenantBoundInvitationReference,
   tenantBoundRoleReference,
@@ -191,7 +194,7 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.remaining).toEqual([{ personal_owner_user_id: expect.any(String), deleted_at: null }]);
   });
 
-  it('[R1-m2] membership_roles and invitations: for an actor who is a member of A and B, WITH CHECK (not the role-scope guard) refuses org_id = B on INSERT and on a re-parenting UPDATE', async () => {
+  it('[SEC-TC-76] [R1-m2] membership_roles and invitations: for an actor who is a member of A and B, WITH CHECK (not the role-scope guard) refuses org_id = B on INSERT and on a re-parenting UPDATE', async () => {
     const result = await rolledBack(withCheckGuardedTables);
     expect(result['ownRows']).toBe('inserted'); // positive control: the same statements succeed for org A
     for (const key of ['membershipRoleInsertB', 'membershipRoleReparent', 'invitationInsertB', 'invitationReparent']) {
@@ -217,33 +220,33 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.forcedSeesA).toEqual({ organisation: false, memberships: false });
   });
 
-  it('[D-ARCH-154] T1: a role row of A naming B membership or an unknown one fails the tenant-bound key; A own membership passes', async () => {
+  it('[SEC-TC-76] [D-ARCH-154] T1: a role row of A naming B membership or an unknown one fails the tenant-bound key; A own membership passes', async () => {
     const result = await rolledBack(tenantBoundRoleReference);
     expect(result.foreign).toMatch(/^23503 .*fk_membership_roles__membership_id/);
     expect(result.unknown).toMatch(/^23503 .*fk_membership_roles__membership_id/);
     expect(result.own).toBe('ok');
   });
 
-  it('PR65-SEC-01: the live-grant index leads with org_id, so a role row of A naming a B membership with a live grant fails the tenant-bound key (23503), not the index (23505)', async () => {
+  it('[SEC-TC-76] [PR65-SEC-01] the live-grant index leads with org_id, so a role row of A naming a B membership with a live grant fails the tenant-bound key (23503), not the index (23505)', async () => {
     const result = await rolledBack(liveGrantIndexScope);
     expect(result.foreignWithLiveGrant).toMatch(/^23503 .*fk_membership_roles__membership_id/);
     expect(result.ownDuplicate).toMatch(/^23505 .*ux_membership_roles__membership_role_live/);
   });
 
-  it('[D-ARCH-154] T2:a membership of A naming B invitation fails the tenant-bound key; A invitation and none pass', async () => {
+  it('[SEC-TC-76] [D-ARCH-154] T2: a membership of A naming B invitation fails the tenant-bound key; A invitation and none pass', async () => {
     const result = await rolledBack(tenantBoundInvitationReference);
     expect(result.foreign).toMatch(/^23503 .*fk_memberships__invitation_id/);
     expect([result.own, result.none]).toEqual(['ok', 'ok']);
   });
 
-  it('[D-ARCH-155] T3: invitations only in BUSINESS_CUSTOMER organisations; an operator role link on an operator membership is unaffected', async () => {
+  it('[SEC-TC-77] [D-ARCH-155] T3: invitations only in BUSINESS_CUSTOMER organisations; an operator role link on an operator membership is unaffected', async () => {
     const result = await rolledBack(invitationOrgType);
     expect(result.operatorOrg).toMatch(/^P0001 ROLE_NOT_ALLOWED_FOR_ORG_TYPE/);
     expect(result.individualOrg).toMatch(/^P0001 ROLE_NOT_ALLOWED_FOR_ORG_TYPE/);
     expect([result.businessOrg, result.operatorRoleLink]).toEqual(['ok', 'ok']);
   });
 
-  it('[D-ARCH-156] T4/T5: a membership for another user is refused and that profile stays invisible; the own ACTIVE membership passes and a fellow member reads the row', async () => {
+  it('[SEC-TC-78] [D-ARCH-156] T4/T5: a membership for another user is refused and that profile stays invisible; the own ACTIVE membership passes and a fellow member reads the row', async () => {
     const result = await rolledBack(membershipMemberIsActor);
     expect(result.foreignMember).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: the member is not the actor$/);
     expect(result.foreignProfileRows).toBe(0);
@@ -251,7 +254,7 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result.fellowReadsRows).toBe(1);
   });
 
-  it('[D-ARCH-156] T6/T7/T8: created ACTIVE only, user_id fixed, REMOVED terminal; the lifecycle passes; a re-parent is refused by WITH CHECK, and by the guard when RLS is bypassed', async () => {
+  it('[SEC-TC-78] [D-ARCH-156] T6/T7/T8: created ACTIVE only, user_id fixed, REMOVED terminal; the lifecycle passes; a re-parent is refused by WITH CHECK, and by the guard when RLS is bypassed', async () => {
     const result = await rolledBack(membershipLifecycle);
     expect(result['createdSuspended']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: a membership is created ACTIVE$/);
     expect(result['createdInvited']).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: a membership is created ACTIVE$/);
@@ -279,5 +282,16 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result['forgedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.organisations \(UPDATE\)$/);
     expect(result['reparent']).toMatch(/^42501 /);
     expect(result['correct']).toBe('ok');
+  });
+
+  it('[SEC-TC-74] [PR43-SEC-07] remainder on the real tables: a version reset to 1 and both MERGE forms raise; back-dated timestamps pass; wrong stamps plus a foreign organisation meet the guard first, right stamps meet RLS', async () => {
+    const result = await rolledBack(stdColumnsRemainder);
+    expect(result['bumped']).toBe('ok'); // precondition: version 2, so the reset is a change
+    expect(result['resetToOne']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.organisations \(UPDATE\)$/);
+    expect([result['backdatedUpdate'], result['backdatedInsert']]).toEqual(['ok', 'ok']); // RR-18: timestamps unconstrained
+    expect(result['wrongStampsForeignOrg']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: updated_by on public\.memberships \(UPDATE\)$/);
+    expect(result['rightStampsForeignOrg']).toMatch(RLS_REFUSED);
+    expect(result['mergeMatchedForgedCreator']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: created_by on public\.organisations \(UPDATE\)$/);
+    expect(result['mergeNotMatchedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.memberships \(INSERT\)$/);
   });
 });

@@ -6,7 +6,7 @@ Tasks: **22** (S 3 / M 19; opus 8 / sonnet 14; demo-critical 20) in **6** batche
 
 **Exit check:** 72 of the 74 M0 DC stories complete and US-061 and US-062 partial (their demo-critical part, TASK-037, merged; completed by TASK-224 and TASK-231 in Wave 7, D-PM-068); PRD §6.1 steps executable manually in compose; lane B `wave` evidence; lane C `wave-end` run #2 green.
 
-**Stories completed in this wave (30):** US-003 (DC), US-008, US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
+**Stories completed in this wave (31):** US-003 (DC), US-008, US-010 (DC), US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
 
 ## Batches
 
@@ -150,7 +150,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-122 **DC** (M0 Must) Deterministic Mock carrier |
 | REQs | REQ-CARR-004 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | D-062, D-ARCH-084 |
+| Spikes / security / decisions | D-062, D-ARCH-084, D-SD-003, PR075-SEC-14, D-SECPR075-03, D-SD-004, PR076-SEC-06, D-SECPR076-01 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-075 |
@@ -165,6 +165,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-122 scenarios (same input -> same output; one shipment per client reference)
 - AT-US-008-03 Mock-carrier hop (D-062): every Mock adapter operation emits exactly one outbound carrier-call log line through the TASK-010 `outboundCallFields` allow-list with correlation_id = CarrierContext.correlationId and no request or response body, and the call record it returns carries that correlation ID so the saga carrier_call audit entry can cite it — this lands the PR #20 code review §5 rule "carrier adapters must use outboundCallFields" on the first adapter, which DHL, FedEx and UPS copy
 - D-ARCH-106 (ADR-0005 am. 11 item 21): the Mock latency scenario is the instrument of the runtime twin of the T-83 lint: the API test lanes run with DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS=1000, so a route that keeps a transaction open across a carrier call fails a test
+- AT-US-121-02 ON THE REAL MOCK (TASK-075 code review R1-n9): capabilityIssues runs on the real Mock declaration under the same AT id; TASK-075 proved the validator on a fake
+- LABEL FIXTURES (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): the adapter returns raw { format, content } and never builds a LabelDocument itself; every real PDF and ZPL label fixture of this adapter passes createLabelDocument and the sniffers (a blank or BOM lead byte and a %PDF- marker past offset 0 included in the fixture review)
+- PR076-SEC-06 (INFO, CWE-693; D-SECPR076-01): if this task adds the first subpath export to @platform/carriers (a ./testing entry for the Mock adapter is the likely one), it also adds the any-spelling control: a repository test that pins the carriers exports map to its entries and refuses app and package imports of the subpath outside tests, or a boundaries dependency.source arm (that one edits eslint.config.mjs and needs the lint lock from the orchestrator); if not, the line moves to the first task that adds one
 - AT-US-122-01 … AT-US-122-06: all 6 scenarios of US-122, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -178,7 +181,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-140 **DC** (M0 Must) Default margin pricing as itemised lines |
 | REQs | REQ-PRICE-003 |
 | NFRs | NFR-DATA-001 |
-| Spikes / security / decisions | D-010 |
+| Spikes / security / decisions | D-010, D-TASK075-02, D-TASK075-10, D-SD-003, D-ARCH-168 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-076, TASK-075 |
@@ -193,6 +196,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-140 scenarios (15 % default margin, itemised USD)
+- CARRIER MONEY IS ADR-0009 MONEY (TASK-075 code review R1-m6; D-TASK075-10): CarrierMoney in packages/carriers/src/canonical/types.ts becomes the Money shape of ADR-0009 section 3 from @platform/shared (amount as branded minor units, ISO 4217 currency), so the pricing boundary needs no field mapping; a shared carrier decimal string to minor units helper without parseFloat
+- CANONICAL VOCABULARIES TO packages/shared (D-TASK075-02, accepted for TASK-075 with the planned move; first consumer is this task): CARRIER_ERROR_CODES, TRACKING_STATUSES, DOCUMENT_FORMATS and the surcharge codes move from packages/carriers to packages/shared, with a parity test against the OpenAPI enums in packages/shared/src/api/types.gen.ts (ADR-0010 amendment 12 item 2; D-ARCH-168): packages/carriers re-exports each moved list so no adapter import changes; the request and response types of the port stay in packages/carriers; the moved lists go to the browser-safe side of packages/shared
 - AT-US-140-01 … AT-US-140-05: all 5 scenarios of US-140, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -390,7 +395,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-154 **DC** (M0 Must) Quote entity with 24 h expiry<br>US-173 **DC** (M0 Must) Shipment direction, content type and package type |
 | REQs | REQ-QUOTE-001, REQ-BOOK-027, REQ-BOOK-028 |
 | NFRs | NFR-DATA-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-083, TASK-051, TASK-029, TASK-070 |
@@ -404,6 +409,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-154 and US-173 scenarios
+- QUOTE TABLES AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10; rulings/wave-1-r-arch-34-operator-rulings.md section 2.8): ux_quotes__org_id_id and ux_quotes__guest_token_hash_id; quote_packages and quote_options reference quotes through the owner-bound pair with no single-column key; ux_quote_packages__org_quote_seq (partial on org_id IS NOT NULL) and ux_quote_packages__guest_quote_seq replace ux_quote_packages__quote_seq and ix_quote_packages__org_quote; requote_of_quote_id has the composite key through org_id, ck_quotes__requote_org_only and the entry fk_quotes__requote_of_quote_id in TENANT_REFERENCE_EXCEPTIONS; every read and write of a child carries the owner predicate next to quote_id; C16 is the gate
+- CANONICAL LISTS (ADR-0010 amendment 12 item 2; D-ARCH-168; data-model 1.7): a canonical list that packages/carriers already holds is moved to packages/shared and re-exported, never written a second time
 - AT-US-154-01 … AT-US-154-09: all 9 scenarios of US-154, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-173-01 … AT-US-173-07: all 7 scenarios of US-173, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -449,10 +456,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-050 **DC** (M0 Must) Seed demo organisations, users and Mock configuration<br>US-003 **DC** (M0 Must) One-command local environment<br>US-049 **DC** (M0 Must) Idempotent reference and demo seed framework |
 | REQs | REQ-DATA-003, REQ-PLAT-005, REQ-DATA-001, REQ-DATA-002 |
 | NFRs | NFR-OPS-001 |
-| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153, D-PM-070 |
+| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153, D-PM-070, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002, D-ARCH-165, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014 |
+| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014, TASK-051 |
 | Batch · locks | 2.4 · prisma-seed |
 | Branch | `feat/TASK-089-seed-demo-organisations-users-per` |
 | Priority | Must · demo-critical |
@@ -466,6 +473,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - US-003 completion: first `docker compose up` ends healthy and seeded within the NFR-OPS-001 budget
 - AT-US-049-05, -09, -10-1, -10-2 (D-061 item 2; this task COMPLETES US-049 — TASK-023 framework, TASK-014 AT-02; dependency on TASK-014 added): the real DemoUserProvisioner replaces the TASK-023 DEFERRED_PROVISIONER (D-TASK023-01 (04), temporary per D-ORCH-016 (2)); local/test create the demo users with the seeded passwords and send no link; staging creates staff without a password and sends one SET_PASSWORD link per staff user through the reset flow, visible in Mailpit, having read no SEED_* variable; the summary reports deferred = 0; no password or token value in stdout or logs (the TASK-023 fast-check secrecy properties are extended to the real provider; PR #13 n4: the planned SEED_* values and the decoded URL password are pushed into the redaction secrets set; PR13-SEC-08: planSecrets covers seeded-password plans only — set-password tokens never enter an error message, or the provisioner adds them to the redaction list); the TASK-023 test asserting created: 0, deferred: 14 is replaced; PR13-SEC-02 GATE: the assertNotLocalOnEcs refusal test (APP_ENV local|test with a non-empty ECS_CONTAINER_METADATA_URI / _V4 -> SEED_ENVIRONMENT_INVALID, exit 1 before connecting) exists on main before DEFERRED_PROVISIONER is replaced (met in PR #13 fix cycle 1; re-assert); PR #13 n3: the provisioner wiring passes a pg.Client, never a pg.Pool (BEGIN, the advisory lock and COMMIT must share one connection); the "demo data are present" clause of AT-US-049-02 and US-003 AT-01 close here
 - OPERATOR ORGANISATION IS NOT SEEDED (D-ARCH-151; ADR-0005 amendment 12; data-model 9.1 and 9.3 as amended 2026-11-18; supersedes D-TASK037-04): the one OPERATOR organisation exists from the TASK-037 migration in every environment; the demo seed resolves it by OPERATOR_ORG_ID from @platform/shared, never inserts or renames an organisation of type OPERATOR, and the seed id for the operator organisation is withdrawn; AT-US-061-01 is NOT owned here (it stays on TASK-037); US-050 scenario 1 is unchanged (the OPERATOR organisation has 8 users). A staff user takes two tenant transactions, because a transaction has one app.org_id: the registration path of TASK-049 in the context of the personal organisation, then the ACTIVE membership and the operator role through the organisations service in the context of OPERATOR_ORG_ID; a test shows that a re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function (user without credentials outside local and test, membership, role, SET_PASSWORD link) is exported from the service layer and is not private to prisma/seed/demo, because the M5 first-staff command reuses it (D-ARCH-153, R-ARCH-33); no raw SQL and no migrator connection writes users, organisations or memberships
+- OPERATOR STAFF GRANT (D-ARCH-165; rulings/wave-1-r-arch-34-operator-rulings.md section 3.4): per staff user the seed runs the registration path, then writes the grant through the migrator connection of the seed CLI (INSERT INTO public.operator_staff_grants ... ON CONFLICT (user_id) DO NOTHING, created_by and updated_by = the SYSTEM actor), then adds the ACTIVE membership and the operator role in the context of OPERATOR_ORG_ID with the staff user as actor; the staff-provisioning function exported from the service layer takes the grant step as a one-method port whose only implementation is in the seed lane, and a repository test shows no module under apps/ implements it; tests: a self-join into the operator organisation without a grant gives P0001, the provisioned join succeeds, a re-run after a failure between any two steps completes, and exactly the 8 staff users have a grant; the grant migration is TASK-051 (dependency added by D-SD-003), merged before this task opens its PR
+- MEMBER = ACTOR IN EVERY SEED TRANSACTION (rulings wave-1-pr65-r1 section 7; D-ARCH-156): every transaction that inserts a membership has app.actor_id = the member (the second staff transaction and the Acme members); the seed never inserts a membership for a user under another actor
 - AT-US-050-01 … AT-US-050-07: all 7 scenarios of US-050, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-003-01 … AT-US-003-04: all 4 scenarios of US-003, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-049-01 … AT-US-049-10: all 10 scenarios of US-049, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
@@ -482,7 +491,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-095 **DC** (M0 Must) Monthly partitions, indexes and partition-creation job |
 | REQs | REQ-AUDIT-016, REQ-AUDIT-017 |
 | NFRs | NFR-AUDIT-002 |
-| Spikes / security / decisions | D-ARCH-093, PR24-SEC-10, D-ARCH-099 |
+| Spikes / security / decisions | D-ARCH-093, PR24-SEC-10, D-ARCH-099, D-SECPR039-01, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-039, TASK-021 |
@@ -498,6 +507,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - US-095 job scenarios (current + 3 months always exist; failure raises health degradation)
 - SQUAT RUNBOOK (data-model §5.2 amendment of 2026-11-13; PR #24 code review R2-n1; D-ARCH-093): docs/07-ops/runbooks/audit-partition-squat.md says what the audit_partition_squatted event and the audit_partitions readiness unavailable mean (kind, reason, partition_name), carries the per-kind removal table — droppable by the migrator: type, enum, range/multirange, domain, composite type, sequence, procedure, aggregate; refused by the sql_drop branch and needing a superuser to suspend platform_audit_ddl_guard_drop, DROP, and ENABLE ALWAYS again in ONE transaction: table, view, materialised view, index, function — the post-checks (evtenabled A on both event triggers, ensure_audit_partitions(3) ok, readiness back to ok), the operator-log and second-reviewer requirement, and the rule that prisma/bootstrap/90-audit-ddl-guard.sql is never edited for a runbook change; rehearsed on a local database for one droppable kind and one table squat (the rehearsal transcript goes into the PR report)
 - CIC LEFTOVER SECTION OF THE RUNBOOK (PR24-SEC-10 LOW, PR #24 security r2; data-model §5.2 amendment of 2026-11-13, second block; D-ARCH-099): the runbook covers a refused CREATE INDEX CONCURRENTLY under an audit name — the guard refuses it with 42501, but the build phases are already committed and leave an INVALID (indisvalid false) migrator-owned index under the audit name, after which every other DDL by the migrator is refused by the end-of-command invariant and DROP INDEX is refused by sql_drop even for a superuser; detection: readiness audit_partitions unavailable with kind i, plus the audit_partition_squatted event; recovery with exactly ONE leftover: as the migrator ALTER INDEX the leftover RENAME TO a non-audit name, then DROP INDEX the renamed index; recovery with TWO OR MORE leftovers (renaming either is refused while the other remains; DROP INDEX a, b and DROP TABLE of the carrying table are refused) or whenever the rename is refused: cluster-superuser break-glass in ONE transaction — BEGIN; SET LOCAL event_triggers = off; DROP INDEX each leftover; COMMIT — never ALTER ROLE or ALTER DATABASE ... SET event_triggers; afterwards evtenabled = A on both event triggers, ensure_audit_partitions(3) succeeds and readiness is back to ok; the runbook also corrects the R2-n1 break-glass: with only the sql_drop trigger disabled, dropping ONE of several squats is still refused by the end-of-command invariant, so every squat is dropped in the same DROP command or the SET LOCAL form is used; prevention: DATABASE_MIGRATOR_URL exists only in the migrate/seed job environment (PR13-SEC-08) and a direct session with that credential is an operator-log event; at M5 whether the RDS master can set event_triggers is COND-G4-PROD M5 check (d), and until it is known the runbook states that the two-leftover recovery on RDS is unproven; rehearsed on a local database with one leftover and with two (transcript in the PR report)
+- SCHEDULE CONDITIONS (D-SECPR039-01 ruling on D-TASK039-01, conditions (i) to (iv)): for every schedule this task adds, (i) parameters come from code or configuration, never from the job; (ii) a destructive or non-idempotent handler applies its own policy predicate (purges by age), and if it writes it runs through idempotentProcessor keyed by the occurrence id; (iii) SCHEDULE_NAMES stays closed, with the one-queue check and the processor refusal kept, and a name of at most 47 characters; (iv) a run-now action goes through the scheduler, never as a hand-made repeat: job
 - AT-US-095-01 … AT-US-095-06: all 6 scenarios of US-095, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -511,7 +521,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-155 **DC** (M0 Must) Guest quoting with access token and rate limits |
 | REQs | REQ-QUOTE-002 |
 | NFRs | NFR-PERF-002, NFR-SEC-005 |
-| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134 |
+| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134, D-ARCH-175, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-041, TASK-044 |
@@ -531,6 +541,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the quote-token authenticator learns that X-Quote-Token is present only through presentedKinds(req.headers, route.auth) on getQuote and streamQuoteResults (when session is also present the bearer authenticator decides and the token header is never read, spy), builds the guest principal permissions with readonlySet holding exactly the quote read permissions the route needs, calls markCredentialsRead(res) together with its decision, and answers a missing or malformed token with 404 NOT_FOUND (A-078) whose private, no-store comes from the descriptor test ([session, quote-token] has no anonymous member), not from the authenticator; COMPANION CASE (ADR-0008 am. 6 item 1 (b)): on claimQuote, saveQuote and createShipment, whose auth set is exactly [session], x-quote-token is declared in schema.headers as the contract declares the QuoteToken header parameter there (route-metadata companion parity, 020-C), and the handler compares the SHA-256 of the presented value with the stored guest_token hash in constant time, never stores or logs the raw value and never treats it as authentication; on every other route schema.headers may not name it (defineRoute refuses it at module load); api tests: a bearer plus a token on getQuote ignores the token, a token alone yields a guest principal whose permissions view throws on mutation, a malformed token is 404 private, no-store, and claimQuote with a wrong token is 404 while the quote stays unclaimed
 - PR48-SEC-04 deny-404 (LOW; D-SEC-PR48-01 (4); D-ARCH-134; DUE before this task merges): the RBAC matrix generator gains the outcome deny-404 (REFUSALS[deny-404] = { status: 404, code: NOT_FOUND }, symbol 404, private, no-store); for a route whose auth set is exactly [session, quote-token] rule 1 gives deny-404 when no usable credential is presented (none, a refresh cookie, an expired bearer) and rule 2 gives a guest principal for a well-formed unknown token (the handler answers 404) and deny-404 for a malformed one — ADR-0008 am. 5 item 1 and A-078; the committed matrix is regenerated (the 8 cells of getQuote and streamQuoteResults change from 401), the D-ARCH-107 test title no longer calls 401 the expected answer, the US-155 wrong-token and missing-token api tests and the matrix agree, and the security record of this PR covers tests/generated/rbac (owned path)
 - RBAC MATRIX SEAM RETIREMENT, quote-token kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the quote-token branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents a real X-Quote-Token (a guest quote minted by the test) through the real authenticate slot; regenerated matrix, drift test green, the still-stubbed-kinds tripwire of TASK-052 passes
+- GUEST TOKEN COST (ADR-0016 amendment 12 item 4; D-ARCH-175): the guest authenticator does no I/O; it derives the token hash, and the quote row is matched by the handler query after the step-5 class limit; a refusal the authenticator raises itself is counted by the wrapper of TASK-041; test: a forged X-Quote-Token causes no database call before the public class limit has been consumed
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -541,10 +552,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging |
-| REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012 |
+| Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging<br>US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
+| REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-OBS-003, NFR-PERF-004, NFR-RES-005 |
-| Spikes / security / decisions | D-031, D-062, D-ARCH-084 |
+| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-084, TASK-085, TASK-088, TASK-079, TASK-047, TASK-040, TASK-043 |
@@ -560,8 +571,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-202 scenarios (DRAFT -> ... -> LABEL_READY; Mock carrier called exactly once)
 - AT-US-008-03 END TO END (D-062; this task COMPLETES US-008): one integration test titled with AT-US-008-03 POSTs the M0 booking with X-Correlation-Id: demo-booking-0001, runs the saga through the worker on the Mock carrier and asserts that exactly that value appears in the api log lines, every audit entry of the booking (STATE_TRANSITION entries and the carrier_call entry), the outbox row, the BullMQ payload v2, the worker log lines and the Mock carrier call record; US-008 reads Implemented only when TASK-010, TASK-029, TASK-035, TASK-043, TASK-079 and this task are merged
+- AT-US-010-01 (US-010 delivery split, D-SD-003; this task COMPLETES US-010): given the M0 mock-booking job for shipment S1, delivering the same job twice leaves exactly one Mock carrier shipment for S1 and exactly one audit entry for the booking transition; AT-US-010-02 to -06 are proven by TASK-039 and AT-US-010-07 by TASK-047
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - AT-US-202-01 … AT-US-202-07: all 7 scenarios of US-202, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -603,7 +617,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-156 **DC** (M0 Must) Quote input validation and package limits |
 | REQs | REQ-QUOTE-003, REQ-QUOTE-004 |
 | NFRs | NFR-SEC-009 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-170, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-091, TASK-070 |
@@ -617,6 +631,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-156 scenarios
+- BILLABLE-WEIGHT RULE BY ORIGIN (ADR-0009 amendment 2 item 4; D-ARCH-170; TASK-076 code review R1-m5): the rule passed to the billable-weight helper is chosen by countries.unit_system of the quote origin country (IMPERIAL for a US origin, METRIC otherwise), never by the unit of entry; test: the package of AT-US-139-04 entered in inches and in centimetres bills the same weight for the same origin, 12,701 g for a US origin and 13,000 g for a metric origin with the default rules
 - AT-US-156-01 … AT-US-156-12: all 12 scenarios of US-156, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -630,7 +645,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-203 **DC** (M0 Must) Saga idempotent replay and one carrier shipment |
 | REQs | REQ-BOOK-021 |
 | NFRs | NFR-RES-005, NFR-SCALE-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR039-SEC-03, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-092 |
@@ -643,6 +658,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-203 scenarios (same Idempotency-Key -> same order, no second booking; worker crash mid-step)
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - AT-US-203-01 … AT-US-203-07: all 7 scenarios of US-203, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

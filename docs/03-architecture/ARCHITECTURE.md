@@ -112,7 +112,7 @@ flowchart LR
     authn["Authenticator<br/>JWT ES256 verify, revocation check"]
     mfa[Staff MFA gate]
     authz["Authoriser<br/>membership → permissions, 5 s cache"]
-    rl["Rate limiter<br/>express-rate-limit + Redis"]
+    rl["Rate limiter<br/>fixed windows on Valkey"]
     val["Joi validator<br/>unknown fields rejected"]
     idem[Idempotency + If-Match]
     tx["withTenantTx<br/>set_config → repositories"]

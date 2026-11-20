@@ -166,7 +166,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-213 **DC** (M1 Must) Webhook verification, deduplication and replay |
 | REQs | REQ-PAY-011, REQ-PAY-012 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134 |
+| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-167, TASK-040 |
@@ -183,6 +183,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR32-SEC-14 / D-ARCH-110 (ADR-0008 am. 5 items 1 and 5): the Stripe and Mock-gateway signature authenticators read their signature header only on routes whose auth set contains signature (an Authorization header or a cookie on a webhook route is ignored) and build the provider principal only after the signature over the raw body verified: credential signature, authenticated false, no actor, a read-only permission view holding exactly the signature-only permission of the route; the permission gate change itself is TASK-020 part 020-B, this task adds api tests through the real authorise: a valid signature 200, an invalid signature or a stale timestamp 401 before the body is parsed, a session bearer on the webhook route 401 (credential outside the set), and a route whose principal lacks its permission 403
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the Stripe and Mock-gateway signature authenticators read Stripe-Signature or X-Mock-Signature themselves (signature is not a presentable kind) and only on routes whose auth set is [signature]; they never read authorization, cookie or x-quote-token (presentedKinds(req.headers, route.auth) is empty on a [signature] route and the authenticator does not consult those headers); the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, stale timestamp, missing header alike) and private, no-store on every 401 comes from the descriptor test ([signature] has no anonymous member); stripe-signature and x-mock-signature are in CREDENTIAL_HEADER_NAMES, so no webhook route can declare them in schema.headers (020-C PR38-SEC-03) and the handler reads the verified event from the body only; api tests: markCredentialsRead called once per request, a valid signature plus a bearer is 200 with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
+- SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
 - AT-US-213-01 … AT-US-213-11: all 11 scenarios of US-213, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -309,7 +310,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-247 **DC** (M1 Must) Public tracking lookup by tracking or order number |
 | REQs | REQ-TRACK-008, REQ-TRACK-012 |
 | NFRs | NFR-PERF-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR075-SEC-12, D-SECPR075-02, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-041 |
@@ -322,6 +323,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-247 scenarios
+- PR075-SEC-12 SENTINEL (INFO, CWE-359; D-SECPR075-02): a sentinel test plants a carrier free-text description (TrackingEvent.carrierDescription) and shows that it never appears in a public tracking response, whose description is the localised canonical text only
 - AT-US-247-01 … AT-US-247-09: all 9 scenarios of US-247, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

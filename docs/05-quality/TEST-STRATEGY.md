@@ -2,12 +2,12 @@
 
 | Field | Value |
 |---|---|
-| Version | 1.4 (P5 Wave 0, D-QA-016: §6 rule 2 states where `quality:trace` writes and that the evidence attachment hook is 015-B; map v1.1 counts 1,606 G3 scenarios) · 1.3 (P5 Wave 0, D-QA-015: qa-lead confirmed the v1.2 edits unchanged in substance; §7.10 `steady` and `audit-ab` rows aligned with D-ARCH-088/D-ORCH-033; §15 item 23 pins the W0-ACT-1 commit; §9.3 states that `required_from` is set at activation once TASK-015 ships it) · 1.2 (P5 Wave 0, sheet-fold-4: §4.2/§9.2 rule 8 checkpoint narrowing, §9.3 pending-decision and gate-table rows, §13 item 7, §15 items 23–24 — edited by principal-architect per D-ARCH-098) · 1.1 (W0-ACT-1: §9.1–§9.3 suite-activation protocol) |
-| Date | 2026-11-13 |
+| Version | 1.5 (P5 Wave 1, D-QA-021: the adopted SEC-TC set is 67 (01..64 and 76..78; TASK-293, PR #72) in §2, §6, §7.11, §9, §14 step 5 and §15 item 6; PR #72 code review R2-n3) · 1.4 (P5 Wave 0, D-QA-016: §6 rule 2 states where `quality:trace` writes and that the evidence attachment hook is 015-B; map v1.1 counts 1,606 G3 scenarios) · 1.3 (P5 Wave 0, D-QA-015: qa-lead confirmed the v1.2 edits unchanged in substance; §7.10 `steady` and `audit-ab` rows aligned with D-ARCH-088/D-ORCH-033; §15 item 23 pins the W0-ACT-1 commit; §9.3 states that `required_from` is set at activation once TASK-015 ships it) · 1.2 (P5 Wave 0, sheet-fold-4: §4.2/§9.2 rule 8 checkpoint narrowing, §9.3 pending-decision and gate-table rows, §13 item 7, §15 items 23–24 — edited by principal-architect per D-ARCH-098) · 1.1 (W0-ACT-1: §9.1–§9.3 suite-activation protocol) |
+| Date | 2026-11-19 |
 | Owner | qa-lead |
 | Consumers | senior-developer (task DAG and DoD), test-engineer, e2e-test-engineer, test-runner, accessibility-auditor, performance-engineer, security-analyst, devops-engineer, quality-gatekeeper (G3) |
 | Inputs | CLAUDE.md §2, §3, §6, §8; `docs/sdlc/BRIEF.md` §9, §11; `docs/01-requirements/NFR.md` v1.3, `PRD.md` §4 and §6, `stories/EPIC-*.md` v1.3; ADR-0023 (amendments A–H), ADR-0024 (+ amendment); `platform.md` §7; `nfr-strategy.md`; `nfr-traceability.md`; `threat-model.md` §10; `risks.md`; `docs/05-quality/security/P3-architecture-security-review.md` §9 and §14; `docs/02-ux/accessibility.md` §10 |
-| Companion files | [`tools/quality/required-suites.json`](../../tools/quality/required-suites.json) (required-suite manifest) · [`tests/security-test-cases.md`](tests/security-test-cases.md) (SEC-TC-01..64) · [`tests/e2e-journeys.md`](tests/e2e-journeys.md) (critical journeys) · [`tests/gherkin-test-map.md`](tests/gherkin-test-map.md) (every Must scenario → test ID and suite) · `../03-architecture/nfr-traceability.md` (Test(s) column: every NFR → tests, lane and evidence) |
+| Companion files | [`tools/quality/required-suites.json`](../../tools/quality/required-suites.json) (required-suite manifest) · [`tests/security-test-cases.md`](tests/security-test-cases.md) (SEC-TC-01..64 and 76..78) · [`tests/e2e-journeys.md`](tests/e2e-journeys.md) (critical journeys) · [`tests/gherkin-test-map.md`](tests/gherkin-test-map.md) (every Must scenario → test ID and suite) · `../03-architecture/nfr-traceability.md` (Test(s) column: every NFR → tests, lane and evidence) |
 | Decisions | D-QA-001 … D-QA-015 in `docs/sdlc/DECISIONS.md` |
 
 The purpose of this document is to make gate G3 decidable. It answers five questions for every obligation in the run: **what** is tested, **where** (lane A, B or C), **with which tool**, **against which threshold**, and **which evidence file** proves it. Section 15 is the checklist that quality-gatekeeper verifies.
@@ -69,7 +69,7 @@ Scores: impact (I) and likelihood (L) on a 1–5 scale; exposure = I × L. "Tier
 
 - **Generators first (R-ARCH-11).** RBAC matrix, audit generator, RLS cross-tenant generator, abuse generator and catalog tests are Wave 0 deliverables (T-QA-04, §16). Every later feature then gets T1 coverage for free, and a feature that lacks metadata fails the build.
 - **Demo-critical (DC) first.** The e2e journeys are built from the DC story set (PRD §7.1). Non-DC Must stories are verified by their `AT-` tests in the lower layers.
-- **Security cases are gates, not reports.** All 64 SEC-TC cases are `@security`, sit in zero-skip suites, and are listed in the manifest as `required_cases`. A missing case fails the evidence check (§9).
+- **Security cases are gates, not reports.** All 67 adopted SEC-TC cases (01..64 and 76..78) are `@security`, sit in zero-skip suites, and are listed in the manifest as `required_cases`. A missing case fails the evidence check (§9).
 
 ---
 
@@ -180,7 +180,7 @@ Stories whose Gherkin needs Firefox or WebKit are accepted at the wave end on th
 |---|---|---|
 | `AT-US-NNN-nn` | Acceptance test for scenario `nn` (1-based) of a story's Gherkin block; outline rows add `-<row>` | [gherkin-test-map.md](tests/gherkin-test-map.md) |
 | `NT-<CAT>-NNN-<x>` | Test of NFR `NFR-<CAT>-NNN`, part `x` (a, b, c…) | `nfr-traceability.md` Test(s) column |
-| `SEC-TC-NN` | Security test case 01–64 | [security-test-cases.md](tests/security-test-cases.md) |
+| `SEC-TC-NN` | Security test case 01–64 and 76–78 (adopted; 65–75 proposed) | [security-test-cases.md](tests/security-test-cases.md) |
 | `J-<area>-NN` | E2E journey (J-M0-*, J-M1-*, J-SEC-*, J-KB-*) | [e2e-journeys.md](tests/e2e-journeys.md) |
 
 **Rules (D-QA-002).**
@@ -189,7 +189,7 @@ Stories whose Gherkin needs Firefox or WebKit are accepted at the wave end on th
 2. `quality:trace` (Wave 0 task T-QA-02, merged in PR #35) reads every JUnit file of a run, extracts the IDs, and writes `ac-trace.json`. By default it writes `reports/ac-trace.json` (inside the repository root, outside the committed evidence tree; not yet git-ignored — the /reports/ entries in .gitignore and .prettierignore are an owned-path follow-up with TASK-015 part 015-B); a run directory under `docs/05-quality/tests/runs` accepts only the files `quality:heavy` hashed into its `summary.json`, so `check-evidence` rejects an `ac-trace.json` placed there by hand. The attachment hook that lets `quality:heavy` hash `ac-trace.json` and `flake-report.json` into a run is TASK-015 part 015-B (lane C, due before G3; D-SEC-PR35-02 correcting D-TASK277-03). Until then the trace output is read from `reports/`, and G3 evidence cites it after 015-B. The sections of the document:
    - **Must-AC coverage** = (G3-counted `AT-` IDs with at least one test, all of whose tests passed) ÷ (G3-counted `AT-` IDs in the map). At G3 the target is **100 %** (1,606 scenarios at map v1.1).
    - **NFR coverage** = NFRs with every listed `NT-` part passing (FULL rows) or with their "this run" evidence present (PARTIAL/DEFERRED rows).
-   - **SEC-TC coverage** = 64/64 present and passing, or recorded as "route absent" for the conditional cases (§7.11, D-QA-011).
+   - **SEC-TC coverage** = 67/67 (SEC-TC-01..64 and 76..78) present and passing, or recorded as "route absent" for the conditional cases (§7.11, D-QA-011).
 3. An ID in a test title that is not in the maps fails `quality:trace` (no orphan tests that pretend to cover something).
 4. When senior-developer creates tasks, each task lists the `AT-` IDs of its stories in its acceptance section. The DoD item "acceptance criteria demonstrated by tests" is checked against `ac-trace.json` of the task's lane B evidence (story-level, not yet gate-level).
 5. `traceability.md` keeps its REQ → Story structure. The Test(s) column there will point to the story's `AT-` ID range once senior-developer's Task(s) column is filled (follow-up FU-02 in the handoff), so the two agents do not edit the same table concurrently.
@@ -378,7 +378,7 @@ Full journey definitions, data setup and the `@live-sandbox` variants are in [e2
 - **Static and supply chain (lane A, every PR):** Semgrep with the project rules (raw SQL, outbound HTTP, `innerHTML`, country branches, writer import allow-list), Gitleaks on the PR diff, `npm audit --omit=dev --audit-level=high` + osv-scanner, `npm audit signatures`, licence per closure + 18-month rule + 7-day cooldown, lockfile source/integrity, install-flag and workflow policy checks. 0 Critical/High; Gitleaks 0.
 - **Images and DAST (lane B `wave`/`gate`, lane C):** Trivy image + config (0 Critical/High), ZAP baseline against the compose stack (0 High; Medium needs a tracked task; the rules file lists every ignored rule with a reason and a decision ID), Gitleaks over the full history (`gate`).
 - **Abuse cases:** generated IDOR and mass-assignment suite, fuzzing (fast-check) of bodies, queries and headers, rate-limit keying (XFF, IPv6 /64, path case), SSRF suite, CSRF/Origin, upload-like abuse on document routes (size, type, path traversal in names), share-token and guest-token handling.
-- **SEC-TC-01..64:** each case, its suite and the stories it gates are in [security-test-cases.md](tests/security-test-cases.md). Cases that depend on a Should/Could story (SEC-TC-08, part of 22, parts of 28, 30, parts of 37, parts of 53) assert either the behaviour (story shipped) or that the route is absent from the route registry and from OpenAPI (story not shipped). They are never skipped (D-QA-011).
+- **SEC-TC-01..64 and 76..78 (67 adopted):** each case, its suite and the stories it gates are in [security-test-cases.md](tests/security-test-cases.md). Cases that depend on a Should/Could story (SEC-TC-08, part of 22, parts of 28, 30, parts of 37, parts of 53) assert either the behaviour (story shipped) or that the route is absent from the route registry and from OpenAPI (story not shipped). They are never skipped (D-QA-011).
 - **P6 assessment:** security-analyst completes the ASVS 4.0.3 L2 per-item checklist (NFR-SEC-001) using these results.
 
 ---
@@ -412,7 +412,7 @@ docs/05-quality/
   TEST-STRATEGY.md                  this file (qa-lead)
   tests/
     (required-suites.json)          moved to tools/quality/required-suites.json in Wave 0 (T-QA-01, D-QA-001)
-    security-test-cases.md          SEC-TC-01..64 adoption (qa-lead)
+    security-test-cases.md          SEC-TC-01..64, 76..78 adoption (qa-lead)
     e2e-journeys.md                 journeys (qa-lead)
     gherkin-test-map.md             Must scenario → AT ID → suite (generated, qa-lead)
     DEFECTS.md                      defect register (qa-lead; hand-edited, §12)
@@ -581,7 +581,7 @@ At every wave end, after the wave's last merge to `main`:
 | CH-08 | Assistive-technology user | Critical journeys (QR-10) | Keyboard and screen-reader proxy across sign-in, quote, wizard, checkout, tracking |
 
 4. **Confirm** every Must AC (1,606 `AT-` IDs at map v1.1) has a passing automated test in the gate evidence.
-5. **Write** `docs/05-quality/tests/VERIFICATION-REPORT.md`: results per suite and lane, coverage vs targets, AC coverage %, NFR verification status per row (FULL verified / PARTIAL evidence / DEFERRED evidence), SEC-TC 64/64, open defects by severity, exploratory findings, and the qa-lead recommendation for G3 (never PASS with an open S1/S2 or a failing Must AC). quality-gatekeeper decides.
+5. **Write** `docs/05-quality/tests/VERIFICATION-REPORT.md`: results per suite and lane, coverage vs targets, AC coverage %, NFR verification status per row (FULL verified / PARTIAL evidence / DEFERRED evidence), SEC-TC 67/67, open defects by severity, exploratory findings, and the qa-lead recommendation for G3 (never PASS with an open S1/S2 or a failing Must AC). quality-gatekeeper decides.
 
 ---
 
@@ -596,7 +596,7 @@ quality-gatekeeper verifies each item against files in the repository at the gat
 | 3 | Lane C `release-candidate` | Run concluded `success` on `<G3>`; its `inventory.json` and `coverage-summary.json` committed (run dir with `profile: lane-c-release-candidate`), inventory consistent with item 2 | GitHub run URL in the report; committed lane C files |
 | 4 | Lane A on `<G3>` | `ci-gate` green for the last PR merged into `<G3>`; `security-integration` green for every security-critical PR of the run | PR checks listed in the report |
 | 5 | Zero-skip suites | Every zero-skip suite present with `skipped = 0` | Run dir JUnit files |
-| 6 | SEC-TC-01..64 | 64/64 present by name and passing, or (conditional cases) the route-absent assertion passing with the reason recorded | `ac-trace.json` `sec_tc` section; `security-test-cases.md` |
+| 6 | SEC-TC-01..64 and 76..78 | 67/67 present by name and passing, or (conditional cases) the route-absent assertion passing with the reason recorded. SEC-TC-74 is already a `required_cases` entry of `catalog-c1-c14` (PR #65) and is gated by the evidence check; its registry row still sits under "Proposed" until it moves to the adopted set, which makes this line 68/68 (D-QA-021) | `ac-trace.json` `sec_tc` section; `security-test-cases.md` |
 | 7 | Must AC | `ac-trace.json` Must-AC coverage = 100 % of G3-counted IDs in `gherkin-test-map.md` | `ac-trace.json`, map at `<G3>` |
 | 8 | Exit demos | J-M0-01..05 and J-M1-01 (× DHL_EXPRESS, FEDEX, UPS × en/es/fr) green on 6 projects in the gate run; 0 flaky in that run | `e2e-chromium/firefox/webkit.junit.xml` |
 | 9 | Coverage | Repository ≥ 85/75; `packages/pricing`, `packages/audit`, `packages/authz`, ledger-equivalent paths ≥ 95/95 | `coverage-summary.json` |

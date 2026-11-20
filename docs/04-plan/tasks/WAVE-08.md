@@ -464,7 +464,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-165 (M1 Should) Share a quote by link |
 | REQs | REQ-QUOTE-015 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-32, SEC-P3-10 |
+| Spikes / security / decisions | SEC-P3-32, SEC-P3-10, D-ARCH-162, D-ARCH-163, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-234 |
@@ -479,6 +479,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-165 scenarios
 - SEC-TC-53 (amended): two mints -> two tokens, first 404; CREATE + UPDATE audit; 11th mint/hour -> 429; three byte-identical 404 bodies
+- quote_shares AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10): the owner-bound pair; ux_quote_shares__org_quote_active and ux_quote_shares__guest_quote_active replace ux_quote_shares__quote_active; ux_quote_shares__share_token_hash is an entry of TENANT_UNIQUE_EXCEPTIONS with its reason; the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23503
 - AT-US-165-01 … AT-US-165-12: all 12 scenarios of US-165, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1109,7 +1110,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1126,6 +1127,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR32-SEC-14 / D-ARCH-110: the carrier signature authenticator builds the provider principal exactly as TASK-171 does (credential signature, no actor, only the signature-only permission of the route) and its api tests run through the real authorise (valid 200, invalid 401, a bearer on the route 401, a principal without the permission 403); SEC-TC-22 push half (D-ORCH-039; threat model T-72, AC-36; the half that TASK-172 cannot test while this route is absent): a validly signed PICKED_UP push is stored as a hint and does not block cancellation or refund until a track() poll confirms it
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
+- SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

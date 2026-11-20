@@ -21,7 +21,7 @@ Tasks: **38** (S 13 / M 25; opus 10 / sonnet 28; demo-critical 0) in **11** batc
 | 7.5 | TASK-202 Versioned seed-based pricing configuration<br>TASK-203 Schedule a pickup after booking; cancel pickup when a shipment is cancelled<br>TASK-204 Carrier tracking polling with adaptive intervals and stale flag<br>TASK-205 Fail-closed download audit | pkg-pricing, prisma-seed<br>mod-pickups<br>mod-tracking-poll<br>mod-documents-download |
 | 7.6 | TASK-206 Pricing property-based tests<br>TASK-207 Batch track calls per carrier account with backoff and pending handling<br>TASK-208 Mock carrier tracking scenarios on an injected clock<br>TASK-209 Drafts list, resume, delete and 30-day expiry | pkg-pricing-tests<br>mod-tracking-poll<br>pkg-carriers-mock<br>mod-shipments-drafts, web-account-drafts |
 | 7.7 | TASK-210 Rate-limit public tracking lookups<br>TASK-211 Tenant isolation on every account route<br>TASK-212 CI gate for template and variable parity across locales<br>TASK-213 Address only booking-organisation users | mod-tracking-public<br>tests-account-iso<br>notif-parity<br>mod-notifications |
-| 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs<br>infra-tf<br>tests-load<br>tests-web-perf |
+| 7.8 | TASK-214 Observability<br>TASK-215 Terraform modules and overlays validated with Checkov<br>TASK-216 k6 M1 profiles<br>TASK-217 Web performance gates | api-metrics, worker-metrics, infra-obs, infra-compose, worker-queues<br>infra-tf<br>tests-load<br>tests-web-perf |
 | 7.9 | TASK-218 M1 exit-demo journeys<br>TASK-224 Switch active organisation; organisation profile and creating a business organisation<br>TASK-282 Developer README and CONTRIBUTING<br>TASK-294 TASK-W0-FLAKE-3-F | e2e-demo<br>mod-organisations<br>docs-dev<br>quality-tools, tests-harness |
 | 7.10 | TASK-227 Invite members into a business organisation; accept an invitation | mod-organisations |
 | 7.11 | TASK-231 Manage members with last-Owner and individual-organisation safeguards | mod-organisations |
@@ -155,7 +155,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-293 (M1 Must) Anonymous rate-shopping budget and daily carrier quota guard |
 | REQs | REQ-CARR-022, REQ-CARR-023 |
 | NFRs | NFR-RES-007 |
-| Spikes / security / decisions | SEC-COND-02, SEC-COND-07, SEC-P3-02, SEC-P3-29, D-048 |
+| Spikes / security / decisions | SEC-COND-02, SEC-COND-07, SEC-P3-02, SEC-P3-29, D-048, D-ARCH-178, PR041-SEC-03, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-132, TASK-136, TASK-141, TASK-041 |
@@ -171,6 +171,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-293 scenarios
 - SEC-TC-41: at (100 - reserve) % anonymous fan-out stops; carrier_quota_pressure at 70 % and 90 %
 - SEC-TC-62: unverified = anonymous; quote-create 30/min; 10 % org share
+- ADMISSION STORE FAILURE (ADR-0010 amendment 13; D-ARCH-178; PR041-SEC-03): when the admission counters cannot be read or written, anonymous fan-out to the account and, for an account with CARRIER_DAILY_QUOTA above 0, rates-pool calls of verified callers are refused locally (LOCAL_REJECT, CARRIER_BUSY; cached results still served); transactional calls are never refused and are counted in process and added to the daily counter on recovery; store calls are bounded and share a breaker; event rate_limit_store_unavailable with scope carrier-admission at most once a minute; tests: with the store failing, a guest quote gets CARRIER_BUSY for the account and makes zero carrier calls, a booking still reaches the carrier, and the count of the outage is added afterwards; qa-lead adds this outage row to SEC-TC-41 when this task is dispatched
 - AT-US-293-01 … AT-US-293-15: all 15 scenarios of US-293, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -271,7 +272,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-167 (M1 Must) Expired quote and one-action re-quote<br>US-168 (M1 Must) Rate-relevant change creates a new quote |
 | REQs | REQ-QUOTE-017, REQ-QUOTE-018 |
 | NFRs | — |
-| Spikes / security / decisions | D-UX-015 |
+| Spikes / security / decisions | D-UX-015, D-ARCH-162, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-146, TASK-142, TASK-149 |
@@ -285,6 +286,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-167 and US-168 scenarios
+- requote_of_quote_id is set only when the original quote belongs to the same organisation (D-ARCH-162); a guest quote carries NULL (ck_quotes__requote_org_only)
 - AT-US-167-01 … AT-US-167-09: all 9 scenarios of US-167, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-168-01 … AT-US-168-08: all 8 scenarios of US-168, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -467,7 +469,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-157 (M1 Must) Quote widget units toggle and live billable weight |
 | REQs | REQ-QUOTE-005, REQ-QUOTE-006 |
 | NFRs | NFR-I18N-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-170, D-SD-004 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-125, TASK-076 |
@@ -480,6 +482,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-157 scenarios
+- the live billable weight uses the rule of the origin country unit system (REQ-QUOTE-006; ADR-0009 amendment 2 item 4; D-ARCH-170); the units toggle changes the displayed unit only; test: toggling units changes no weight beyond the unit conversion
 - AT-US-157-01 … AT-US-157-07: all 7 scenarios of US-157, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -551,7 +554,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-243 (M1 Must) Poll carrier tracking with adaptive intervals and stale flag |
 | REQs | REQ-TRACK-003 |
 | NFRs | NFR-RES-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-161, D-SD-003, D-SECPR039-01, PR039-SEC-03 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-172, TASK-039 |
@@ -564,6 +567,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-243 scenarios
+- RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job
+- SCHEDULE CONDITIONS (D-SECPR039-01 ruling on D-TASK039-01, conditions (i) to (iv)): for every schedule this task adds, (i) parameters come from code or configuration, never from the job; (ii) a destructive or non-idempotent handler applies its own policy predicate (purges by age), and if it writes it runs through idempotentProcessor keyed by the occurrence id; (iii) SCHEDULE_NAMES stays closed, with the one-queue check and the processor refusal kept, and a name of at most 47 characters; (iv) a run-now action goes through the scheduler, never as a hand-made repeat: job
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - AT-US-243-01 … AT-US-243-07: all 7 scenarios of US-243, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -817,11 +823,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-010, TASK-092, TASK-047 |
-| Batch · locks | 7.8 · api-metrics, worker-metrics, infra-obs |
+| Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
+| Batch · locks | 7.8 · api-metrics, worker-metrics, infra-obs, infra-compose, worker-queues |
 | Branch | `feat/TASK-214-observability-red-metrics-queue-breaker` |
 | Priority | Should |
 
@@ -830,15 +836,19 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Files / modules**
 - apps/{api,worker}/src/platform/telemetry/**
 - infra/local/{otel,prometheus.yml,grafana}/**
+- compose.yaml (observability profile; redis --maxmemory)
+- apps/worker/src/platform/queues/metrics.ts (Valkey memory and oldest-waiting-age gauges; ADR-0013 amendment 3 item 12)
 
 **Acceptance tests to write**
 - All US-013 scenarios
+- QUEUE AND VALKEY ALARMS (PR64-SEC-04; ADR-0013 amendment 3 items 12 to 14 and 16; D-ARCH-160; platform.md 8.2 and 8.5): (a) METRICS: the worker publishes platform_valkey_memory_used_bytes and platform_valkey_memory_max_bytes (used_memory and maxmemory of INFO memory; the worker ACL user has +info, the api user has not) and platform_queue_oldest_waiting_age_seconds{queue}, collected with the queue gauges under the same 2 s deadline and single-flight (PR64-SEC-03, PR64-SEC-12); when this task moves the worker metrics to @prometheus-io/client (ADR-0017 amendment 1) the names and label sets platform_queue_jobs{queue,state}, platform_queue_dead_letter_jobs{queue} and platform_queue_dead_lettered_total{queue} (the counter of TASK-039) do not change. (b) CEILING AND START-UP CHECK: compose.yaml adds --maxmemory ${REDIS_MAXMEMORY:-512mb} to the redis command (tools/compose/compose-stack.test.ts follows, and the amended note in platform.md 2.2 is then reduced to the command itself); at worker start maxmemory_policy of INFO memory must be noeviction or the worker refuses to start (ADR-0013 section 9), and a maxmemory of 0 logs WARN worker.valkey_maxmemory_unset when APP_ENV is not test. (c) FOUR ALERT RULES in the Prometheus rules of the compose observability profile, each with the labels severity and runbook: QueueDeadLetterNew = sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0, no for, severity page for the queues booking and payments and ticket for the others, RB-07; QueueDeadLetterDepthHigh = max by (queue) (platform_queue_dead_letter_jobs) >= 1600 (80 % of DEAD_LETTER_RETENTION.count), for 5m, page, RB-07; ValkeyMemoryHigh = max(platform_valkey_memory_used_bytes) / (max(platform_valkey_memory_max_bytes) > 0) >= 0.70, for 10m, ticket, RB-06; ValkeyMemoryCritical = the same ratio >= 0.85, for 5m, page, RB-06. TESTS: a lane A test pins the four names, expressions, for values and labels and derives 1600 from the exported DEAD_LETTER_RETENTION; a unit case for the start-up check (a policy other than noeviction refuses the start); the three new gauges appear on the worker /metrics in the integration suite
 - One trace spans API -> queue -> worker -> Mock carrier (NFR-OBS-003); no high-cardinality labels (NFR-OBS-002)
 - ADR-0023 am. J item 4, ADR-0017 am. 2 and D-ARCH-043 (PR1-SEC-07): add only the explicit OpenTelemetry instrumentations (http, undici, pg, ioredis, pino, express) and the AWS/container resource detectors, each through the cooldown, licence and age gates. Never re-add `@opentelemetry/auto-instrumentations-node` or the GCP/Azure/Alibaba detectors.
 - PR6-SEC-03 item 2 / PR6-SEC-12 c (ADR-0017 §4 allow-list; ADR-0010 am. 11 item 8; D-ARCH-068): client spans for carrier and gateway calls carry `server.address`, `http.request.method`, `http.response.status_code` and the adapter route template (`url.template`) only — `url.full`, `url.path`, `url.query` and the legacy `http.url`/`http.target` are excluded by the span-processor allow-list (or undici auto-instrumentation is disabled for the carrier dispatcher and manual spans are created); the in-memory exporter test asserts a `requestorName` sentinel and an account-number sentinel never appear in any span attribute Afterwards `npm audit --omit=dev` reports 0 and `npm ls gcp-metadata` is empty
 - PR #11 code review R3-m1 (ii) (first metrics task; D-ARCH-079): the leak counter sessionContextLeaks() exported by apps/api/src/platform/db/runtime.ts is published as the metric db_session_context_leak_total (api and worker) with an alert rule; the latched not-ready state stays visible in /health/ready
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
 - IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
+- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -855,7 +865,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-OPS-004, NFR-SCALE-003 |
-| Spikes / security / decisions | R-ARCH-13, D-002 |
+| Spikes / security / decisions | R-ARCH-13, D-002, D-ARCH-179, PR041-SEC-05, D-SD-004 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-015 |
@@ -869,6 +879,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - terraform fmt/validate and Checkov clean in lane A iac job; no apply step in ci.yml (policy test)
+- TRUST PROXY PIN (ADR-0016 amendment 12 item 9; D-ARCH-179; PR041-SEC-05): the api task definition sets TRUST_PROXY_HOPS=2; a Terraform test (or Checkov custom policy) fails unless that value, the CloudFront origin-facing prefix list on sg-alb and the ALB rule that refuses a request without X-Origin-Verify are all present; the post-deploy smoke step of PR041-SEC-05 (audit IP and access-log ip are never an ALB or CloudFront address) belongs to the first pipeline that deploys to a real target, a G4 precondition for a production release
 
 **DoD notes**
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
@@ -959,7 +970,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-081 (M1 Should) Switch active organisation<br>US-082 (M1 Should) Organisation profile and creating a business organisation<br>US-061 **DC** (M0 Must) Organisation types and the single operator organisation |
 | REQs | REQ-ORG-006, REQ-ORG-008, REQ-ORG-009, REQ-ORG-001 |
 | NFRs | — |
-| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131, D-PM-068, D-SD-001 |
+| Spikes / security / decisions | D-028, D-ARCH-152, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-056, TASK-100 |
@@ -976,6 +987,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-081 and US-082 scenarios
 - CONTRACT CHANGE FOR createOrganisation (D-ARCH-152: approved change request, exact YAML in rulings/wave-1-batch-1.1-rulings.md section 3.3, applied verbatim; api/README section 18 item 1: the contract changes in this PR, with the route): OrganisationCreateRequest gains the OPTIONAL property type - string, enum OPERATOR, BUSINESS_CUSTOMER, PARTNER, INDIVIDUAL, default BUSINESS_CUSTOMER; required and additionalProperties false do not change; OrganisationPatch stays without type; one more request example, type_refused; in api/README.md one line in the amendments list and the ORG_TYPE_NOT_ALLOWED row of section 11 reworded (a createOrganisation request for a type other than BUSINESS_CUSTOMER); npm run openapi:lint with 0 errors and npm run openapi:types, with the regenerated packages/shared/src/api/types.gen.ts in the same commit; the Joi schema mirrors the property (valid over the four values, default BUSINESS_CUSTOMER) and the handler passes the validated value to createOrganisation of TASK-037, which refuses everything but BUSINESS_CUSTOMER; the web form and its Zod schema never send type
 - US-061 SCENARIOS THAT NEED THE ROUTES (D-ORCH-COORD-03 item 3, D-ORCH-131; D-ARCH-152), with the IDs in the test titles: AT-US-061-02 at the response - POST with type PARTNER, OPERATOR and INDIVIDUAL each answers 422 ORG_TYPE_NOT_ALLOWED and the organisations row count is unchanged, a value outside the enum answers 400 VALIDATION_ERROR, a request without type creates a BUSINESS_CUSTOMER organisation; AT-US-061-03 at the response - PATCH with type answers 400 VALIDATION_ERROR with sub-code UNKNOWN_FIELD; AT-US-061-04 - an anonymous POST answers 401 AUTH_REQUIRED; AT-US-061-05 - the refused PARTNER attempt leaves one audit entry with outcome FAILED, action CREATE and entity organisation, written outside the rolled-back transaction (REQ-AUDIT-010 writes no entry for a 400, which is why type must pass the schema). COMPLETES US-061 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-061-01 and the service and database halves of AT-US-061-02/03); if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (the route-level scenarios move to US-082 as appended scenarios) and the task returns to ladder rung 2
+- PR65-SEC-02 (a) SWITCH ONLY INTO AN ACTIVE MEMBERSHIP (LOW, latent, CWE-269; D-SEC-PR65-01; D-ORCH-137; binding route condition): the organisation switch sets app.org_id only for an organisation in which the actor holds an ACTIVE membership, re-checked at the switch, never from a client value, a token claim or users.last_active_org_id alone; abuse case [PR65-SEC-02]: a customer switching to OPERATOR_ORG_ID gets 403 or 404 and no transaction opens with that context; createOrganisation is called with the creator as the transaction actor (rulings wave-1-pr65-r1 section 7; member = actor, D-ARCH-156)
 - AT-US-081-01 … AT-US-081-05: all 5 scenarios of US-081, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-082-01 … AT-US-082-07: all 7 scenarios of US-082, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-061-01 … AT-US-061-05: US-061 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037 the rest, with the IDs in the test titles; the story is accepted when all 5 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
@@ -1019,7 +1031,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-MAINT-002 |
-| Spikes / security / decisions | D-ARCH-158, D-ARCH-146, D-ORCH-113, D-ORCH-124, D-ORCH-125, D-ORCH-127, D-TASK020-99, D-TASK288-15, D-TASK288-20, D-SEC-PR53-02 |
+| Spikes / security / decisions | D-ARCH-158, D-ARCH-146, D-ORCH-113, D-ORCH-124, D-ORCH-125, D-ORCH-127, D-TASK020-99, D-TASK288-15, D-TASK288-20, D-SEC-PR53-02, D-ORCH-139, D-SECPR291-02, D-SD-002 |
 | Specialist · model | test-engineer · opus |
 | Complexity | M |
 | Depends on | TASK-291 |
@@ -1036,6 +1048,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - tools/quality/inventory.mjs (+ test) (part 294-B: reference runs come from tracked run directories only)
 - tools/test-support/{fs-lock.test.ts, lock-children.ts, fs-lock.ts} (part 294-B: PR #57 code review R3-n1, R3-n3 and R3-n2)
 - tools/deps/prisma-engines.int.test.ts (part 294-B: D-TASK288-20; one test file outside the locks of this task)
+- tests/generated/{loopback-scan.ts, loopback-ratchet.test.ts, loopback-fetch-allowlist.json} (part 294-B: PR #71 code review R2-n1, R2-n2, R1-n2, R1-n3)
 
 **Acceptance tests to write**
 - PARTS (D-ARCH-158): part 294-A is a measurement with a record and a decision — no product code and no tooling code, a docs-only PR; part 294-B is the code part, its own PR, and it does not wait for 294-A unless decision row 2 applies; neither part changes the product build, which stays ONE un-retried react-router build (workspace script, Dockerfiles, lane A, lane C): no wrapper script, no patch, fork or overrides entry for @react-router/dev and no change of the three prerendered paths (D-ARCH-146; ADR-0023 amendment O item 2)
@@ -1046,6 +1059,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - 294-B RETRY, ONLY UNDER ROW 2 (D-ARCH-146, unchanged): tools/quality/heavy.mjs repeats npm run build at most twice, ONLY when the output of the failed attempt carries the prerender request-timeout signature; build_clean is computed after the last attempt; a deterministic failure still fails three times; the attempt count is printed in the run log and in summary.md; no summary.json schema change (a machine-readable attempt count is a qa-lead follow-up with a schema bump); once it is on main the queue stops re-running on its own
 - 294-B LEFTOVERS ROUTED TO W0-FLAKE-3 AND NOT BUILT BY TASK-291 (D-ARCH-158): (a) D-ORCH-127 — the heavy.mjs pre-flight refuses untracked run directories under docs/05-quality with a named reason (today the queue script moves them aside), and tools/quality/inventory.mjs takes its reference runs from tracked run directories only (a leftover directory became the newest-only reference and failed the TASK-290 run); (b) PR #57 code review R3-n1 — the EBUSY rename hook in tools/test-support/fs-lock.test.ts gives up after a bound and the case asserts that the call count stayed small (a magnitude check, not a wall-clock bound), so the R2-m1 mutant fails in about a second instead of hanging lane A; (c) R3-n3 — the IDLE children of tools/test-support/lock-children.ts exit when their parent goes away (an ipc disconnect handler, a parent-pid poll or a lifetime cap), so a killed Jest worker leaves no node process on the host; (d) R3-n2 — the residual (ii) JSDoc of tools/test-support/fs-lock.ts states the outcome with the wx owner file; (e) D-TASK288-20 — tools/deps/prisma-engines.int.test.ts restores or keeps the verified engine when the download fails, so a network outage no longer leaves a worktree without its Prisma engine (D-ORCH-137)
 - DUE (D-ARCH-158): part 294-A before the lane B gate run of G3, earlier at the first idle-host window, and as the next queue job when the interim rule trips (a failed re-run, or its second use within 20 consecutive queue runs) — the prerender half does not need TASK-291 on main and then runs alone, the suite tables follow; part 294-B before G3; a red table in 294-A (3) is a defect against that suite for the holder of its lock, not a change in this task
+- 294-B ALSO CARRIES THE PR #71 REVIEW NITS (D-ORCH-139; PR-0071-TASK-291-code-review.md): (1) R2-n1 - pin the allow-list exactly, expect(ALLOW_LIST.map((e) => e.file)).toEqual(PINNED_CEILING), so a converted file that leaves the JSON leaves the pin in the same diff and a re-add is a pinned-test edit; (2) R2-n2 = R1-m1 (ii) - the loopback marker is name-based: either detect the bypass shapes of the review (template origins such as origin, url and baseUrl, base + path concatenation, [::1] without .listen(, destructured, bracket and .call forms of fetch) with a probe test per shape, or record the accepted limit in the scanner JSDoc and DECISIONS; (3) R1-n1 - the nested-read stall in tools/test-support/fs-lock.ts (a nested read in one process while a foreign writer is queued waits for the writer deadline): make a nested read in a process that already holds the read lock re-entrant, or state the limit with a test that shows the named failure; (4) R1-n2 - prisma/tests/ becomes a scan root and prisma/tests/spikes/spk04/runner.ts is listed with lock label prisma-core, or prisma/tests/spikes/ is excluded by name; (5) R1-n3 - strip comments with ts.createScanner (typescript is already a dependency) or state the regex limit in the JSDoc with the review probe as a test. The CODEOWNERS line /tests/generated/loopback-* stays; the pinned ceiling only shrinks (D-SECPR291-01)
+- CONSUMER.INT FALLBACK (D-ORCH-139): if TASK-039 has merged without the [AT-US-009-04] race fix of its card (assert the dead-letter record only after settledFailure), part 294-B makes that fix in apps/worker/src/platform/queues/consumer.int.test.ts with the assertions unchanged; otherwise this line lapses
 
 **DoD notes**
 - Part 294-A is docs-only (lane A light mode, no heavy-lane evidence of its own): raw timings are attached as tables, the record names what could not be observed, and it adds no suite, no assertion and no build flag; the reviewer checks the decision row against the tables
@@ -1061,7 +1076,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-083 (M1 Should) Invite members into a business organisation<br>US-084 (M1 Should) Accept an invitation |
 | REQs | REQ-ORG-010, REQ-ORG-011 |
 | NFRs | — |
-| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067, D-PM-068, D-SD-001 |
+| Spikes / security / decisions | SEC-COND-01, PR43-SEC-09, D-ARCH-123, D-067, D-PM-068, D-SD-001, D-ARCH-157, D-ARCH-154, D-ARCH-155, PR65-SEC-02, D-SEC-PR65-01, D-ORCH-137, D-SD-002 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-224, TASK-169, TASK-187 |
@@ -1076,8 +1091,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-083 and US-084 scenarios
-- INVITATION IS THE PENDING STATE (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a)): inviting writes only the invitations row (PENDING, token hash, expires_at, role, locale) and never a memberships row nor a lookup of the address against users; 409 ALREADY_MEMBER compares the lower-cased address with the ACTIVE or SUSPENDED members of the inviting organisation only; acceptance creates the membership directly as ACTIVE with created_by = the inviter and invitation_id set and marks the invitation ACCEPTED in one transaction (audit: CREATE membership + UPDATE invitation, no token value); the pending-invitation list is served to holders of org:member:invite only (not org:read); api tests: after an invite no memberships row exists for the address, an organisation member cannot read the users row of the invitee before acceptance (RLS probe) and can after it
+- INVITATION IS THE PENDING STATE (D-ARCH-123; product-manager D-067; PR43-SEC-09 (a)): inviting writes only the invitations row (PENDING, token hash, expires_at, role, locale) and never a memberships row nor a lookup of the address against users; 409 ALREADY_MEMBER compares the lower-cased address with the ACTIVE or SUSPENDED members of the inviting organisation only; acceptance creates the membership directly as ACTIVE with created_by = the accepting user (the actor of the acceptance transaction; D-ARCH-157 withdraws "created_by = the inviter", which platform.std_columns_guard refuses) and invitation_id set, the inviter being invitations.created_by reached through invitation_id and marks the invitation ACCEPTED in one transaction (audit: CREATE membership + UPDATE invitation, no token value); the pending-invitation list is served to holders of org:member:invite only (not org:read); api tests: after an invite no memberships row exists for the address, an organisation member cannot read the users row of the invitee before acceptance (RLS probe) and can after it
 - NOT CUTTABLE WHILE TASK-231 DEPENDS ON IT (D-PM-068): member management needs the invite route (AT-US-085-05, inviting into an INDIVIDUAL organisation), so this task merges before G3 together with TASK-224 and TASK-231; US-083 and US-084 stay Should, and product-manager may defer one of their scenarios that blocks the task while the route ships; senior-developer may later propose dropping the members -> invite dependency (D-PM-068 alternatives), which would return this task to rung 2
+- DISPATCH GATE (D-ARCH-157; D-ORCH-136/137): product-manager has updated the REQ-ORG-011 note and the two US-084 lines to "created_by = the accepting user, the invitation's created_by the inviter" before this task is dispatched; the AT-US-084 tests assert memberships.created_by = the accepting user and invitations.created_by = the inviter
+- PR65-SEC-02 (a) ACCEPTANCE ONLY FROM A PENDING INVITATION (LOW, latent, CWE-269; D-SEC-PR65-01; binding route condition): acceptance inserts a membership only for a PENDING, unexpired invitation of the context organisation addressed to the accepting user's verified e-mail, and grants exactly the invitation's role (the database does not bind the role to invitations.role_id); abuse cases [PR65-SEC-02]: an expired, accepted or revoked invitation, an invitation of another organisation, an unverified or different e-mail, and a tampered role each create no membership
+- RULINGS wave-1-pr65-r1 SECTION 7 (D-ARCH-155, D-ARCH-154): the service refuses an invitation into a non-BUSINESS_CUSTOMER organisation with 422 ORG_TYPE_RESTRICTION before the database does; acceptance runs as the accepting user; invitation_id must name an invitation of the same organisation (composite key)
 - AT-US-083-01 … AT-US-083-12: all 12 scenarios of US-083, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-084-01 … AT-US-084-08: all 8 scenarios of US-084, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -1092,7 +1110,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-04, D-SEC-PR65-01, D-ARCH-154, D-ORCH-137, D-SD-002 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-227, TASK-187 |
@@ -1112,6 +1130,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #8 code review R2-n2: property test — for every allowed (assigner, target) pair in ASSIGNABLE_BY, `target.permissions ⊆ assigner.permissions` on the shipped catalogue; a mutated catalogue where the Admin loses a permission the Viewer keeps fails the property
 - MEMBER LIST (D-ARCH-123; D-067): the member list holds ACTIVE and SUSPENDED memberships only (INVITED is reserved and never written); pending invitations are a separate list keyed by invitee e-mail (TASK-227), rendered only when the /me permissions include org:member:invite
 - US-062 SCENARIOS DEFERRED FROM TASK-037 (D-ORCH-COORD-03 item 3, accepted in D-ORCH-131): AT-US-062-05 (permission denied on assigning roles) and AT-US-062-06 (audit of a membership change) need mounted member routes and are proven here, with the IDs in the test titles. COMPLETES US-062 (D-PM-068); not cuttable; due before G3. TASK-037 carries the demo-critical part (AT-US-062-01 to -04 and the change record of AT-US-062-06) and TASK-049 the creation clause of AT-US-062-06 at registration; if this task is unmerged at the Wave 7 exit, product-manager applies the rung-4 fallback of D-PM-068 (AT-US-062-05 and -06 move to US-085 as appended scenarios) and the task returns to ladder rung 2
+- PR65-SEC-04 (d) ATTRIBUTION FROM THE ACTOR (INFO; D-SEC-PR65-01; PR #65 code review R2-n2, D-TASK037-27): membership_roles.granted_by and revoked_by, memberships.removed_by and accepted_by_user_id are derived from the transaction actor, never taken from the caller (today assignRole passes a caller-supplied grantedBy and the database binds only created_by and updated_by); one unit case per column with a mismatching caller value
+- RULINGS wave-1-pr65-r1 SECTION 7 (D-ARCH-154): LAST_OWNER and owner-cap counts may rely on membership_roles.org_id (composite key); a removed member is re-added as a new row and REMOVED is never reversed
 - AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: US-062 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037, TASK-049 the rest, with the IDs in the test titles; the story is accepted when all 6 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

@@ -33,7 +33,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-152) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
 | REQs | REQ-QUOTE-016, REQ-BOOK-001 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-162, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-091, TASK-052, TASK-059 |
@@ -48,6 +48,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-166 scenarios
 - US-171 API scenarios (claim is atomic; selected option preserved)
+- The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 (D-ARCH-162): a claim written as separate statements fails with 23503 by design
 - AT-US-166-01 … AT-US-166-08: all 8 scenarios of US-166, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-171-01 … AT-US-171-06 that belong to its layer; US-171 closes in TASK-152
 

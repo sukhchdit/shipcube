@@ -368,7 +368,7 @@ Feature: Named queues with retries and dead-letter queue
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-009
 - **Linked REQs:** REQ-PLAT-014, REQ-PLAT-015
 - **As an** operator **I want** duplicate job deliveries to have no second effect and scheduled jobs to fire once per interval across workers **so that** retries and scale-out are safe.
-- **Notes:** Payload always carries `org_id`, `actor_id`, `correlation_id`, idempotency key. Scheduled jobs needed by audit chain verification (REQ-AUDIT-013), partition pre-creation (REQ-AUDIT-017) and outbox relay fallback.
+- **Notes:** Every payload is payload v2 (ADR-0013 amendment 1): identifiers only, `{ v: 2, kind, id, correlation_id, trace_context }`, where `kind` and `id` name the authoritative row. A payload never carries `org_id`, `actor_id` or business data; the worker resolves the tenant context from PostgreSQL (`platform.job_context(kind, id)`, REQ-RLS-008, US-078). There is no separate idempotency-key field: the idempotency key of a job is its deterministic job ID, `<kind>.<id>` or `<kind>.<id>.<step>`, with completion recorded in `job_executions`. An enqueue with the ID of a retained job is ignored (completed jobs are retained 24 h, failed jobs 7 days), so a recurring key carries its occurrence as `<step>` (ADR-0013 amendment 3 items 7, 8 and 11). Scenario 3 is the producer's refusal before anything is written to the queue (not the HTTP `VALIDATION_ERROR` response); a missing `correlation_id` is the example, and a `kind` its queue does not accept or a malformed `id` is refused the same way. Scenario 4 is the refusal at dequeue, non-retryable with reason `PAYLOAD_INVALID`, of a job from which the worker can take no tenant context: it does not name its row, or it brings an `org_id` or `actor_id` of its own, which also raises the security event `job_context_mismatch` (REQ-SEC-012). Identifiers that resolve to no row or to no organisation are covered by US-078 (EC-A38). In scenario 7, "a job for org A" is a job whose `kind` and `id` name a row of org A. Scheduled jobs needed by audit chain verification (REQ-AUDIT-013), partition pre-creation (REQ-AUDIT-017) and outbox relay fallback. Wording amended by D-PM-072 (2026-11-19) after PR #64 security review PR64-SEC-10: these notes and the Given-steps of scenarios 3 and 4 previously described payload v1 (`org_id`, `actor_id` and an idempotency key in the payload), which was never implemented.
 
 #### Acceptance criteria
 ```gherkin
@@ -384,12 +384,12 @@ Feature: Idempotent job processing and scheduled jobs
     Then the queue holds one job
 
   Scenario: Payload without required context is rejected
-    Given a job payload missing org_id
+    Given a job payload missing correlation_id
     When it is enqueued
     Then enqueue fails with a validation error and nothing is queued
 
   Scenario: Job without tenant context is dead-lettered at the worker
-    Given a delivered job whose payload lacks actor_id
+    Given a delivered job whose payload lacks kind or id, or carries org_id or actor_id
     Then it is moved to the dead-letter queue without retries
 
   Scenario: Scheduled job fires once with three workers
