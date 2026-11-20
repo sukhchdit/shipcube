@@ -1708,7 +1708,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-027) | US-071 **DC** (M0 Must) RBAC matrix test generator |
 | REQs | REQ-RBAC-011 |
 | NFRs | NFR-SEC-011, NFR-TENANT-002 |
-| Spikes / security / decisions | PR48-SEC-01, PR48-SEC-03, PR48-SEC-05, PR48-SEC-06, D-SEC-PR48-01, D-ORCH-094, D-ORCH-099, D-ARCH-134, D-ARCH-137 |
+| Spikes / security / decisions | PR48-SEC-01, PR48-SEC-03, PR48-SEC-05, PR48-SEC-06, D-SEC-PR48-01, D-ORCH-094, D-ORCH-099, D-ARCH-134, D-ARCH-137, PR48-SEC-06, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-027 |
@@ -1730,6 +1730,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR48-SEC-03 (LOW; DUE before TASK-060 merges): the oracle (expectCell, generateMatrix, cellProblems and the rest) moves to the @platform/authz/matrix subpath and @platform/authz (the production entry) no longer exports it; no-restricted-imports refuses @platform/authz/matrix from non-test files and a boundaries arm refuses the resolved file from the app and package categories; fixtures: a production authorise importing the oracle fails lint, the generated suite passes
 - PR #48 R1-m4 (single owner, D-ARCH-137): observe() in runner.ts gets a per-request deadline (AbortSignal.timeout with its magnitude pinned per the D-SEC-PR53-02 rule) and a named transport error that identifies the cell (operation, caller) instead of aborting the 900 s contract layer anonymously
 - PR #48 R1-m2 + R1-n1/n3 + PR48-SEC-05 items 1-3 (truth in labelling): the seams resolve only DECLARED kinds, so the test titles and JSDoc say the matrix proves presentedKinds, the stub and authorise — not the authenticators and not the credential and actor gates of authorise (those stay with authorise.test.ts until the seams retire, D-ARCH-134); SEC-TC-01 gains the route-reached positive control (the caller with its own organisation first, x-rbac-matrix: authorised); path parameters inside a segment (/x/:orgId.json) are enumerated or refused; the matrix app exports the list of still-stubbed credential kinds so the TASK-052 tripwire can compare it with the mounted authenticators
+- NOTE FROM TASK-041 (D-SD-003): the matrix app passes no rateLimit option to createApp, so the step-0 and step-5 limiters are absent from the matrix runs (PR48-SEC-06 seam); the seam is retired when a matrix run needs real limits
 - Covers the scenarios of AT-US-071-01 … AT-US-071-05 that belong to its layer; US-071 closes in TASK-027
 
 **DoD notes**

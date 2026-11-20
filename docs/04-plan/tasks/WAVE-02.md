@@ -6,7 +6,7 @@ Tasks: **22** (S 3 / M 19; opus 8 / sonnet 14; demo-critical 20) in **6** batche
 
 **Exit check:** 72 of the 74 M0 DC stories complete and US-061 and US-062 partial (their demo-critical part, TASK-037, merged; completed by TASK-224 and TASK-231 in Wave 7, D-PM-068); PRD §6.1 steps executable manually in compose; lane B `wave` evidence; lane C `wave-end` run #2 green.
 
-**Stories completed in this wave (30):** US-003 (DC), US-008, US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
+**Stories completed in this wave (31):** US-003 (DC), US-008, US-010 (DC), US-032 (DC), US-049 (DC), US-050 (DC), US-095 (DC), US-097 (DC), US-098 (DC), US-121 (DC), US-122 (DC), US-124 (DC), US-126 (DC), US-138 (DC), US-139 (DC), US-140 (DC), US-154 (DC), US-155 (DC), US-156 (DC), US-173 (DC), US-197 (DC), US-198 (DC), US-199 (DC), US-200 (DC), US-201 (DC), US-202 (DC), US-203 (DC), US-278 (DC), US-279 (DC), US-280 (DC), US-282 (DC).
 
 ## Batches
 
@@ -150,7 +150,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-122 **DC** (M0 Must) Deterministic Mock carrier |
 | REQs | REQ-CARR-004 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | D-062, D-ARCH-084 |
+| Spikes / security / decisions | D-062, D-ARCH-084, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-075 |
@@ -165,6 +165,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-122 scenarios (same input -> same output; one shipment per client reference)
 - AT-US-008-03 Mock-carrier hop (D-062): every Mock adapter operation emits exactly one outbound carrier-call log line through the TASK-010 `outboundCallFields` allow-list with correlation_id = CarrierContext.correlationId and no request or response body, and the call record it returns carries that correlation ID so the saga carrier_call audit entry can cite it — this lands the PR #20 code review §5 rule "carrier adapters must use outboundCallFields" on the first adapter, which DHL, FedEx and UPS copy
 - D-ARCH-106 (ADR-0005 am. 11 item 21): the Mock latency scenario is the instrument of the runtime twin of the T-83 lint: the API test lanes run with DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS=1000, so a route that keeps a transaction open across a carrier call fails a test
+- AT-US-121-02 ON THE REAL MOCK (TASK-075 code review R1-n9): capabilityIssues runs on the real Mock declaration under the same AT id; TASK-075 proved the validator on a fake
 - AT-US-122-01 … AT-US-122-06: all 6 scenarios of US-122, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -178,7 +179,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-140 **DC** (M0 Must) Default margin pricing as itemised lines |
 | REQs | REQ-PRICE-003 |
 | NFRs | NFR-DATA-001 |
-| Spikes / security / decisions | D-010 |
+| Spikes / security / decisions | D-010, D-TASK075-02, D-TASK075-10, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-076, TASK-075 |
@@ -193,6 +194,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-140 scenarios (15 % default margin, itemised USD)
+- CARRIER MONEY IS ADR-0009 MONEY (TASK-075 code review R1-m6; D-TASK075-10): CarrierMoney in packages/carriers/src/canonical/types.ts becomes the Money shape of ADR-0009 section 3 from @platform/shared (amount as branded minor units, ISO 4217 currency), so the pricing boundary needs no field mapping; a shared carrier decimal string to minor units helper without parseFloat
+- CANONICAL VOCABULARIES TO packages/shared (D-TASK075-02, accepted for TASK-075 with the planned move; first consumer is this task): CARRIER_ERROR_CODES, TRACKING_STATUSES, DOCUMENT_FORMATS and the surcharge codes move from packages/carriers to packages/shared, with a parity test against the OpenAPI enums in packages/shared/src/api/types.gen.ts
 - AT-US-140-01 … AT-US-140-05: all 5 scenarios of US-140, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -390,7 +393,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-154 **DC** (M0 Must) Quote entity with 24 h expiry<br>US-173 **DC** (M0 Must) Shipment direction, content type and package type |
 | REQs | REQ-QUOTE-001, REQ-BOOK-027, REQ-BOOK-028 |
 | NFRs | NFR-DATA-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-083, TASK-051, TASK-029, TASK-070 |
@@ -404,6 +407,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-154 and US-173 scenarios
+- QUOTE TABLES AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10; rulings/wave-1-r-arch-34-operator-rulings.md section 2.8): ux_quotes__org_id_id and ux_quotes__guest_token_hash_id; quote_packages and quote_options reference quotes through the owner-bound pair with no single-column key; ux_quote_packages__org_quote_seq (partial on org_id IS NOT NULL) and ux_quote_packages__guest_quote_seq replace ux_quote_packages__quote_seq and ix_quote_packages__org_quote; requote_of_quote_id has the composite key through org_id, ck_quotes__requote_org_only and the entry fk_quotes__requote_of_quote_id in TENANT_REFERENCE_EXCEPTIONS; every read and write of a child carries the owner predicate next to quote_id; C16 is the gate
 - AT-US-154-01 … AT-US-154-09: all 9 scenarios of US-154, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-173-01 … AT-US-173-07: all 7 scenarios of US-173, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -449,10 +453,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-050 **DC** (M0 Must) Seed demo organisations, users and Mock configuration<br>US-003 **DC** (M0 Must) One-command local environment<br>US-049 **DC** (M0 Must) Idempotent reference and demo seed framework |
 | REQs | REQ-DATA-003, REQ-PLAT-005, REQ-DATA-001, REQ-DATA-002 |
 | NFRs | NFR-OPS-001 |
-| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153, D-PM-070, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002 |
+| Spikes / security / decisions | D-022, SEC-P3-14, D-061, PR13-SEC-02, PR13-SEC-08, D-ARCH-079, D-ARCH-151, D-ARCH-153, D-PM-070, PR65-SEC-02, D-SEC-PR65-01, D-ARCH-156, D-ORCH-137, D-SD-002, D-ARCH-165, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014 |
+| Depends on | TASK-023, TASK-037, TASK-049, TASK-079, TASK-080, TASK-013, TASK-014, TASK-051 |
 | Batch · locks | 2.4 · prisma-seed |
 | Branch | `feat/TASK-089-seed-demo-organisations-users-per` |
 | Priority | Must · demo-critical |
@@ -466,7 +470,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - US-003 completion: first `docker compose up` ends healthy and seeded within the NFR-OPS-001 budget
 - AT-US-049-05, -09, -10-1, -10-2 (D-061 item 2; this task COMPLETES US-049 — TASK-023 framework, TASK-014 AT-02; dependency on TASK-014 added): the real DemoUserProvisioner replaces the TASK-023 DEFERRED_PROVISIONER (D-TASK023-01 (04), temporary per D-ORCH-016 (2)); local/test create the demo users with the seeded passwords and send no link; staging creates staff without a password and sends one SET_PASSWORD link per staff user through the reset flow, visible in Mailpit, having read no SEED_* variable; the summary reports deferred = 0; no password or token value in stdout or logs (the TASK-023 fast-check secrecy properties are extended to the real provider; PR #13 n4: the planned SEED_* values and the decoded URL password are pushed into the redaction secrets set; PR13-SEC-08: planSecrets covers seeded-password plans only — set-password tokens never enter an error message, or the provisioner adds them to the redaction list); the TASK-023 test asserting created: 0, deferred: 14 is replaced; PR13-SEC-02 GATE: the assertNotLocalOnEcs refusal test (APP_ENV local|test with a non-empty ECS_CONTAINER_METADATA_URI / _V4 -> SEED_ENVIRONMENT_INVALID, exit 1 before connecting) exists on main before DEFERRED_PROVISIONER is replaced (met in PR #13 fix cycle 1; re-assert); PR #13 n3: the provisioner wiring passes a pg.Client, never a pg.Pool (BEGIN, the advisory lock and COMMIT must share one connection); the "demo data are present" clause of AT-US-049-02 and US-003 AT-01 close here
 - OPERATOR ORGANISATION IS NOT SEEDED (D-ARCH-151; ADR-0005 amendment 12; data-model 9.1 and 9.3 as amended 2026-11-18; supersedes D-TASK037-04): the one OPERATOR organisation exists from the TASK-037 migration in every environment; the demo seed resolves it by OPERATOR_ORG_ID from @platform/shared, never inserts or renames an organisation of type OPERATOR, and the seed id for the operator organisation is withdrawn; AT-US-061-01 is NOT owned here (it stays on TASK-037); US-050 scenario 1 is unchanged (the OPERATOR organisation has 8 users). A staff user takes two tenant transactions, because a transaction has one app.org_id: the registration path of TASK-049 in the context of the personal organisation, then the ACTIVE membership and the operator role through the organisations service in the context of OPERATOR_ORG_ID; a test shows that a re-run after a failure between the two finds the user by e-mail and adds the missing membership. The staff-provisioning function (user without credentials outside local and test, membership, role, SET_PASSWORD link) is exported from the service layer and is not private to prisma/seed/demo, because the M5 first-staff command reuses it (D-ARCH-153, R-ARCH-33); no raw SQL and no migrator connection writes users, organisations or memberships
-- DISPATCH GATE: OPERATOR-MEMBERSHIP DATABASE RULE (PR65-SEC-02 (b), LOW latent, CWE-269; D-SEC-PR65-01; D-ORCH-137): the orchestrator dispatches this task only after principal-architect has decided the database control for membership inserts into an organisation of type OPERATOR (for example platform.memberships_lifecycle_guard() refusing such an insert unless a provisioning fact exists that a non-operator cannot write, such as a staff grant by an actor for whom platform.app_is_operator() is true, with the migrator-run ops:staff-bootstrap as the only path for the first one, or a dedicated provisioning role), keeping member = actor; the staff provisioning of this task follows that rule, and its verification is probe P3 inverted (a self-join into the operator organisation gives P0001, a provisioned join succeeds)
+- OPERATOR STAFF GRANT (D-ARCH-165; rulings/wave-1-r-arch-34-operator-rulings.md section 3.4): per staff user the seed runs the registration path, then writes the grant through the migrator connection of the seed CLI (INSERT INTO public.operator_staff_grants ... ON CONFLICT (user_id) DO NOTHING, created_by and updated_by = the SYSTEM actor), then adds the ACTIVE membership and the operator role in the context of OPERATOR_ORG_ID with the staff user as actor; the staff-provisioning function exported from the service layer takes the grant step as a one-method port whose only implementation is in the seed lane, and a repository test shows no module under apps/ implements it; tests: a self-join into the operator organisation without a grant gives P0001, the provisioned join succeeds, a re-run after a failure between any two steps completes, and exactly the 8 staff users have a grant; the grant migration is TASK-051 (dependency added by D-SD-003), merged before this task opens its PR
 - MEMBER = ACTOR IN EVERY SEED TRANSACTION (rulings wave-1-pr65-r1 section 7; D-ARCH-156): every transaction that inserts a membership has app.actor_id = the member (the second staff transaction and the Acme members); the seed never inserts a membership for a user under another actor
 - AT-US-050-01 … AT-US-050-07: all 7 scenarios of US-050, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-003-01 … AT-US-003-04: all 4 scenarios of US-003, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
@@ -543,10 +547,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging |
-| REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012 |
+| Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging<br>US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
+| REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-OBS-003, NFR-PERF-004, NFR-RES-005 |
-| Spikes / security / decisions | D-031, D-062, D-ARCH-084 |
+| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-084, TASK-085, TASK-088, TASK-079, TASK-047, TASK-040, TASK-043 |
@@ -562,8 +566,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-202 scenarios (DRAFT -> ... -> LABEL_READY; Mock carrier called exactly once)
 - AT-US-008-03 END TO END (D-062; this task COMPLETES US-008): one integration test titled with AT-US-008-03 POSTs the M0 booking with X-Correlation-Id: demo-booking-0001, runs the saga through the worker on the Mock carrier and asserts that exactly that value appears in the api log lines, every audit entry of the booking (STATE_TRANSITION entries and the carrier_call entry), the outbox row, the BullMQ payload v2, the worker log lines and the Mock carrier call record; US-008 reads Implemented only when TASK-010, TASK-029, TASK-035, TASK-043, TASK-079 and this task are merged
+- AT-US-010-01 (US-010 delivery split, D-SD-003; this task COMPLETES US-010): given the M0 mock-booking job for shipment S1, delivering the same job twice leaves exactly one Mock carrier shipment for S1 and exactly one audit entry for the booking transition; AT-US-010-02 to -06 are proven by TASK-039 and AT-US-010-07 by TASK-047
 - AT-US-202-01 … AT-US-202-07: all 7 scenarios of US-202, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
