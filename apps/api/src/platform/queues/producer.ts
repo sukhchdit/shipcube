@@ -10,10 +10,22 @@
  * Without either the enqueue is refused (`JobProducerError`), so a job can never start a correlation chain of its own.
  * The payload is validated against the queue's schema before it is written, as the worker validates it at dequeue.
  *
+ * Trace context (PR #64 code review R2-n3; D-ORCH-134, D-SEC-PR64-02 keeps the strict payload check): W3C Trace Context
+ * 3.3.1.1 lets a `tracestate` carry empty list members (`a=b,,c=d`, `a=b,`) that payload v2 refuses. The producer checks
+ * an inbound `tracestate` with the payload's own check and DROPS a value that fails it (W3C: discard on a parse failure),
+ * keeping the `traceparent`, so a trace header can never refuse an enqueue. An invalid `traceparent` is still refused:
+ * the outbox writer stores only a valid one (TASK-043).
+ *
+ * Queues (PR #64 code review R2-n5, PR64-SEC-13; D-SEC-PR64-02): `queueFor` hands out queues the caller opened through
+ * a factory that attaches a class-only `error` listener. The one production caller, the worker's outbox relay, passes
+ * the worker queue runtime's `queueFor` (every queue from `openQueue` on the fail-fast `queue` connection profile); its
+ * AUTH-refusal test is apps/worker/src/platform/outbox/relay-queues.test.ts. This module never constructs a queue.
+ *
  * The Valkey `api` ACL user has no `~bull:*` key pattern (infra/local/valkey/users.acl; ADR-0013 am. 1 item 4): in the
  * deployed topology the worker's outbox relay is the producer, reaching this module through `@platform/api/runtime`.
  */
 import {
+  isTracestate,
   jobIdFor,
   jobOptions,
   type JobOptions,
@@ -23,6 +35,7 @@ import {
   QUEUES,
   type QueueName,
   type TraceContext,
+  TRACESTATE_MAX_LENGTH,
   validateJobPayload,
 } from '@platform/shared/queues';
 
@@ -62,6 +75,18 @@ export interface JobProducer {
 
 const requestCorrelationId = (): string | undefined => currentRequestContext()?.correlationId;
 
+/**
+ * The trace context as payload v2 carries it: a `tracestate` that payload v2 would refuse is dropped and the
+ * `traceparent` kept (W3C Trace Context: discard an unparsable `tracestate`; R2-n3). Fresh object; never throws.
+ */
+export function payloadTraceContext(traceContext: TraceContext | null | undefined): TraceContext | null {
+  if (traceContext === undefined || traceContext === null) return null;
+  const { traceparent, tracestate } = traceContext;
+  if (tracestate === undefined) return { traceparent };
+  const valid = typeof tracestate === 'string' && tracestate.length <= TRACESTATE_MAX_LENGTH && isTracestate(tracestate);
+  return valid ? { traceparent, tracestate } : { traceparent };
+}
+
 export function createJobProducer(options: JobProducerOptions): JobProducer {
   const contextCorrelationId = options.contextCorrelationId ?? requestCorrelationId;
   return {
@@ -73,7 +98,7 @@ export function createJobProducer(options: JobProducerOptions): JobProducer {
         kind: ref.kind,
         id: ref.id,
         correlation_id: correlationId,
-        trace_context: enqueueOptions.traceContext ?? null,
+        trace_context: payloadTraceContext(enqueueOptions.traceContext),
       };
       const checked = validateJobPayload(QUEUES[queue], payload);
       if (!checked.ok) throw new JobProducerError(`payload refused for queue ${queue}: ${checked.issues.join(', ')}`);

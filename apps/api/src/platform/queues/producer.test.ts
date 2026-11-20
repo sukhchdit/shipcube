@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { type JobOptions, type JobPayloadV2, jobOptions, type QueueName } from '@platform/shared/queues';
 
 import { runWithRequestContext, type RequestContext } from '../context/request-context.js';
-import { createJobProducer, JobProducerError, type ProducerQueue } from './producer.js';
+import { createJobProducer, JobProducerError, payloadTraceContext, type ProducerQueue } from './producer.js';
 
 const ID = '0193a5b2-7c1e-7d4a-9f3b-000000000f01';
 
@@ -80,5 +80,41 @@ describe('job producer (ADR-0013 §2 and amendment 1; D-062 AT-US-008-03 job-pay
     const traceContext = { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01` };
     const job = await producer.enqueue('notifications', { kind: 'notification', id: ID }, { traceContext });
     expect(job.payload.trace_context).toEqual(traceContext);
+  });
+});
+
+describe('[R2-n3] [D-ORCH-134] tracestate on enqueue (W3C Trace Context 3.3.1.1; D-SEC-PR64-02 keeps the strict payload check)', () => {
+  const traceparent = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`;
+
+  it.each([
+    ['an empty list member', 'a=b,,c=d'],
+    ['a trailing comma', 'a=b,'],
+    ['a value over 512 characters', `a=${'x'.repeat(511)}`],
+    ['a member without a key', '=b'],
+  ])('drops a tracestate with %s, keeps the traceparent, and enqueues the job', async (_label, tracestate) => {
+    const queues = fakeQueues();
+    const producer = createJobProducer({ queueFor: queues.queueFor, contextCorrelationId: () => 'demo-booking-0001' });
+    const job = await producer.enqueue('outbox-relay', { kind: 'outbox_event', id: ID }, { traceContext: { traceparent, tracestate } });
+    expect(job.payload.trace_context).toEqual({ traceparent });
+    expect(queues.added).toHaveLength(1);
+    expect(queues.added[0]?.data.trace_context).toEqual({ traceparent });
+  });
+
+  it('keeps a valid tracestate', async () => {
+    const queues = fakeQueues();
+    const producer = createJobProducer({ queueFor: queues.queueFor, contextCorrelationId: () => 'demo-booking-0001' });
+    const traceContext = { traceparent, tracestate: 'congo=t61rcWkgMzE, rojo=00f067aa0ba902b7' };
+    const job = await producer.enqueue('outbox-relay', { kind: 'outbox_event', id: ID }, { traceContext });
+    expect(job.payload.trace_context).toEqual(traceContext);
+  });
+
+  it('payloadTraceContext: null and undefined give null, a fresh object is returned, a non-string tracestate is dropped', () => {
+    expect(payloadTraceContext(null)).toBeNull();
+    expect(payloadTraceContext(undefined)).toBeNull();
+    const input = { traceparent };
+    const output = payloadTraceContext(input);
+    expect(output).toEqual(input);
+    expect(output).not.toBe(input);
+    expect(payloadTraceContext({ traceparent, tracestate: 7 as unknown as string })).toEqual({ traceparent });
   });
 });

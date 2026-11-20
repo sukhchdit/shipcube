@@ -23,7 +23,9 @@ export type JobKind = (typeof JOB_KINDS)[number];
  * The scheduled jobs (ADR-0013 §5; REQ-PLAT-015; D-TASK039-01). Each is one BullMQ Job Scheduler whose id is its name,
  * so N workers that register it at start hold one schedule. A scheduled job names no aggregate: it carries the schedule
  * payload `{ v: 2, schedule }` (scheduled-job.ts), never a kind, an id or tenant context, and its processor runs
- * SYSTEM-scope. Later housekeeping tasks (audit partitions, chain verification, purges) add their names here.
+ * SYSTEM-scope. Later housekeeping tasks (audit partitions, chain verification, purges) add their names here:
+ * `outbox-purge` (TASK-043) is the daily purge of published outbox events, processed events and job executions older
+ * than 30 days (ADR-0004 item 6; data-model §6.1, §10.5; D-ARCH-167, D-ARCH-171).
  *
  * Conditions of the security ruling D-SECPR039-01 on this contract, binding every schedule added here:
  * (i) a handler takes every parameter from code constants or configuration, never from the job;
@@ -36,7 +38,7 @@ export type JobKind = (typeof JOB_KINDS)[number];
  * (iv) an operator "run now" action enqueues through the scheduler (`upsertJobScheduler` or the same contract), never
  *      as a hand-made job with a `repeat:` id.
  */
-export const SCHEDULE_NAMES = ['queue-retention'] as const;
+export const SCHEDULE_NAMES = ['outbox-purge', 'queue-retention'] as const;
 export type ScheduleName = (typeof SCHEDULE_NAMES)[number];
 
 export interface QueueDefinition {

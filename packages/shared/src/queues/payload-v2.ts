@@ -39,6 +39,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const TRACEPARENT = /^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$/;
 const STEP = /^[a-z0-9_-]{1,40}$/;
 
+/** True for a W3C Trace Context level 1 `traceparent` (version 00, non-zero ids) as payload v2 accepts it. */
+export function isTraceparent(text: string): boolean {
+  return TRACEPARENT.test(text);
+}
+
 /**
  * Deterministic job ID from the business key (ADR-0013 §2, DR-A25): `<kind>.<id>` or `<kind>.<id>.<step>`. BullMQ 6
  * refuses a custom id with `:` unless it has exactly three parts, so `.` separates them (D-TASK035-02).
@@ -55,6 +60,8 @@ export function jobIdFor(ref: JobRef): string {
 const TRACESTATE_KEY = /^(?:[a-z][a-z0-9_*/-]{0,255}|[a-z0-9][a-z0-9_*/-]{0,240}@[a-z][a-z0-9_*/-]{0,13})$/;
 const TRACESTATE_VALUE = /^[\x20-\x2b\x2d-\x3c\x3e-\x7e]{0,255}[\x21-\x2b\x2d-\x3c\x3e-\x7e]$/;
 const TRACESTATE_MAX_MEMBERS = 32;
+/** Longest `tracestate` payload v2 accepts (the W3C 512-character limit). */
+export const TRACESTATE_MAX_LENGTH = 512;
 
 /**
  * True for a `tracestate` that follows the W3C grammar: at most 32 `key=value` members separated by commas (optional
@@ -79,7 +86,7 @@ export function isTracestate(text: string): boolean {
 const TRACE_CONTEXT = Joi.object({
   traceparent: Joi.string().pattern(TRACEPARENT).required(),
   tracestate: Joi.string()
-    .max(512)
+    .max(TRACESTATE_MAX_LENGTH)
     .custom((value: string, helpers) => (isTracestate(value) ? value : helpers.error('any.invalid'))),
 }).unknown(false);
 
