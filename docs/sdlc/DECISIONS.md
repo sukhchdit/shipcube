@@ -7378,3 +7378,31 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 
 
 ```
+
+### D-SECPR040-03 · 2026-11-20 · security-analyst · TASK-040 part 040-A supersede round = PASS_WITH_FOLLOW-UPS at `2abd665f` (branch `feat/TASK-040-idempotency-keys-v2`, one squash commit on main `f65d7955`); tree equality with the reviewed `e96bd979`, and a gitleaks emulation that finds nothing in the PR range (round 3 appended to `docs/05-quality/security/PR-pending-TASK-040-security-review.md` on main)
+- **Decision:** the round-2 verdict carries over to the supersede head unchanged. This carries out item (2) of D-SECPR040-02. No ref was moved and nothing was force-pushed. The old branch stays unpushed as the archive of the reviewed SHAs.
+- **Tree equality.**
+  - `tree(2abd665f)` equals `git merge-tree --write-tree e96bd979 f65d7955` (`a6b0bf97`).
+  - 0 code paths differ from `e96bd979` or from `93f0f126`.
+  - Ignoring `index` lines, the PR's net code diff equals `afb2b73c..e96bd979`; main changed no code path in between.
+  - The squash commit touches no document.
+  - Main's checker counts the same 39 owned paths (`--base f65d7955`), and the classifier selects the hosted job (36 paths).
+- **Gitleaks: the emulation, rebuilt after the scratch wipe.**
+  - **Method:** it follows v8.30.1 git mode. Each hunk is one fragment, and allowlists are applied with `regexTarget`, conditions, commits and stopwords. The repository's `.gitleaks.toml` is read from main.
+  - **Controls:** the literal fires; a `keyId` line is allow-listed.
+  - **Differential:** it reproduces exactly lane B's three findings on `4e1163aa..e96bd979`.
+  - **Result:** 0 findings on lane A's range `f65d7955..2abd665f` and on `origin/main..2abd665f` (3,720 added lines).
+  - **Unchanged:** the baseline and `.gitleaks.toml`.
+- **Record binding.** A simulation on a shared clone passes for `--base f65d7955 --head 2abd665f`; without this round it is `missing`.
+- **Owed:**
+  - lane B PASS on `2abd665f`, once Docker Desktop is back; earlier runs do not count for this head;
+  - the hosted `security-integration` job on the first `pull_request` event;
+  - the rename to `PR-<NNNN>-TASK-040-security-review.md` and the merge-ref check.
+- **Status unchanged:**
+  - PR040-SEC-01, -02 (narrowed), -04, -07 and -09 are due in the first pull request of part 040-B;
+  - PR040-SEC-03, -05, -06 and -08 are closed;
+  - P-1 to P-5 and T187-1 to T187-6 stand.
+- **Routed:**
+  - **orchestrator:** lane B, the push of the v2 branch, the rename.
+  - **security-analyst (self):** triage, if lane B's gitleaks-full reports anything on the v2 head.
+- **Reversibility:** High (a review record).
