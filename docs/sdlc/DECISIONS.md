@@ -4783,3 +4783,46 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **data-architect / devops:** PR041-SEC-04 (OI-15, TASK-214 alarms), PR041-SEC-05 (IaC pin and deploy smoke before G4; default 0 here or by devops), PR041-SEC-07 (data inventory).
   - **security-analyst:** PR041-SEC-06 at the next threat-model revision.
 - **Reversibility:** High (a review record; the routes bind tasks that have not started).
+
+### D-SECPR076-01 · 2026-11-20 · security-analyst · TASK-076 (pure pricing engine, integer money and rounding, billable weight; pricing-purity and money-arith lint; branch `feat/TASK-076-pure-pricing-engine-integer-money`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `e01979b` (record `docs/05-quality/security/PR-pending-TASK-076-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-076-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on `git archive` extracts of `e01979b` and `5145d52`: ESLint with each extract's real `eslint.config.mjs`, and type-stripped sources. No npm, Jest or Docker, and nothing was run in the PR worktree.
+- **The record is a merge condition.** The PR changes 23 owned paths (`eslint.config.mjs`, `tools/eslint-rules/**`, `tools/lint/**`, `tests/fixtures/lint/**`). Main's classifier gives `security_paths=false`, so the hosted `security-integration` job is not selected.
+- **Held:**
+  - **No lint control weakened.** An effective-configuration diff of base and head over 58 paths shows 0 weakened, with a mutation control. Only additions: `platform/pricing-purity` on the non-test `packages/pricing/src` paths, and one `no-restricted-imports` pattern (`^@platform/carriers/.+$`) on every path, nothing lost.
+  - **The carriers pattern reaches every `restrictedImportsExcept` block** (test files, hasher, Supertest helpers, S3 seam). Case variants, `export *` and `import =` are reported too.
+  - **Money in the engine.** Float, string and bigint costs are refused. Overflow is refused, and so is currency mismatch. The currency table is a `Map`: 10 inherited and near-miss spellings are refused. `allocate` conserves every unit over 20,000 fuzz cases.
+  - **Errors.** `MoneyError`/`PricingError` reach the client only as 500 `INTERNAL_ERROR`.
+  - **Secrets.** The over-approximating Gitleaks scan found 4 hits on i18n label-key lines, all false positives.
+- **New findings:**
+  - **PR076-SEC-01 (LOW, CWE-693).** The pricing-purity controls miss three things:
+    - (a) `uuidv7`/`uuidV7Timestamp` (clock plus randomness), imported from the allow-listed `@platform/shared` root;
+    - (b) any module under `packages/pricing/src/tests/`, which the rule does not lint and production code may import;
+    - (c) the respelling family of code review R1-m1: destructuring, aliases, `process.hrtime`/`uptime`/`argv`, `performance.timeOrigin`.
+    - **Fix.** A global-scope reference pass (`process`, `performance`, `crypto` and the global objects are always reported; `Date` and `Math` outside their pure forms), plus import refusals (`uuidv7` and namespace imports of the shared root; relative test-only specifiers). Validated on a scratch copy: 31 of 36 bypass probes are then reported, and the real sources, the `ok-*` fixtures and the existing `bad-*` fixtures are unchanged.
+  - **PR076-SEC-02 (LOW, CWE-1287).** The Money helpers check results, not operands:
+    - `add(0.5, 0.5)` returns 1;
+    - `sub('1050', '1')` returns 1049;
+    - `compare('9', '10')` returns 1;
+    - a `__proto__` currency passes `add`;
+    - `mulRatio`/`allocate` throw a raw `RangeError`.
+    - The engine is safe through its own `isMoney` calls; later callers are not (the stored snapshot, raw-SQL rows, payments).
+    - **Fix.** An `operand()` check at helper entry, and own-data reads in `isMoney`. Validated: of 114 probe rows, only the 19 forged-input rows change.
+  - **INFO items:**
+    - PR076-SEC-03: `'bps' in rate` and `isMoney` read inherited properties (CWE-1321).
+    - PR076-SEC-04: error messages interpolate the line code, rule key or currency before validation (log-only).
+    - PR076-SEC-05: `explanationEntry` validates one read of `effectMinor` and copies another.
+    - PR076-SEC-06: the carriers deep-import control has no any-spelling (boundaries) twin. Today `import()` is held by `import-x/no-unresolved`, because carriers exports `.` only.
+- **Code review twin** (`f938174`, APPROVED_WITH_NITS): concur with R1-m1 to R1-m5 and the NITs. No ruling conflicts. Security-side addition to R1-n10: the M2 task that prices from billable weight must derive or verify the volumetric weight (a forged `volumetricG: 1` is accepted today).
+- **Binding.** The single `Head` row names `e01979b`. Simulation with main's real checker: 10 of 10 as expected.
+  - Pass: the record at the head; the merge ref with the record on main; later commits to `packages/**` only.
+  - Fail: no record; `eslint.config.mjs` or `pricing-purity.mjs` changed after the head; the placeholder name; a later FAIL verdict; a `Head` row naming the base or a main commit.
+- **Conditions:**
+  - **C1.** Lane B at the pushed head: unit, negative fixtures, and the coverage gate with the `packages/pricing` and `packages/shared/src/money` quotes (PR40-SEC-05).
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A security delta round if the fix cycle changes an owned path or fixes PR076-SEC-01/-02.
+- **Routed:**
+  - **This PR's fix cycle, preferred:** PR076-SEC-01 (with R1-m1, while the `lint` lock is held), -02, -03, -04 and -05 (with R1-m3). If not fixed there: -01 is due before TASK-080, and -02 before TASK-085.
+  - **PR076-SEC-06:** the task that first adds a `@platform/carriers` subpath export.
+  - **R1-n10 (security side):** the M2 billable-weight pricing task.
+- **Reversibility:** High (a review record; the routes bind tasks that have not started).
