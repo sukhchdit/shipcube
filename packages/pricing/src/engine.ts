@@ -17,7 +17,7 @@ import { add, assertCurrencyCode, isMoney, isNegative, type Money, MoneyError, n
 import { validatedBillableWeight } from './billable-weight.js';
 import { PricingError } from './errors.js';
 import { baseFreightStep } from './lines/base-freight.js';
-import { chargeLine, EMPTY_STATE, explanationEntry, rejectedCandidateCount, warnings } from './state.js';
+import { chargeLine, checkedState, EMPTY_STATE, explanationEntry, rejectedCandidateCount, warnings } from './state.js';
 import {
   type ChargeLine,
   COST_SOURCES,
@@ -74,7 +74,7 @@ function totalsOf(lines: readonly ChargeLine[], currency: string): PriceTotals {
 export function runPricing(input: PricingInput, steps: readonly PricingStep[]): PricingResult {
   validateInput(input);
   const billableWeight = validatedBillableWeight(input.request.packages, input.request.billableWeight);
-  const state = steps.reduce((current, step) => step(input, current), EMPTY_STATE);
+  const state = steps.reduce((current, step) => checkedState(step(input, current)), EMPTY_STATE);
   const { sellCurrency } = input.request;
   const configVersion = input.config.version;
   // Re-validated and re-copied here as well, so no step can leave a float, a foreign currency or a mutable object.

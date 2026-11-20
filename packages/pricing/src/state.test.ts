@@ -132,4 +132,19 @@ describe('[R1-m3] runPricing validates the counts and warnings a step leaves', (
     expect(result.explanation.warnings).toEqual(['FX_STALE']);
     expect(Object.isFrozen(result.explanation.warnings)).toBe(true);
   });
+
+  it.each<[string, PricingStep]>([
+    ['a step that returns null', () => null as unknown as PricingState],
+    ['a state without lines', (_input, state) => ({ ...state, lines: undefined }) as unknown as PricingState],
+    ['a state without entries', (_input, state) => ({ ...state, entries: 'x' }) as unknown as PricingState],
+  ])('[R2-n5] refuses %s with PRICING_INPUT_INVALID, never a raw TypeError', (_name, step) => {
+    expect(codeOf(() => runPricing(pricingInput(), [baseFreightStep, step]))).toBe('PRICING_INPUT_INVALID');
+  });
+});
+
+describe('[R2-n4] inputs keys', () => {
+  it('refuses a __proto__ inputs key (JSON.parse can produce one) instead of dropping it', () => {
+    const inputs = JSON.parse('{"__proto__": null, "bps": 1500}') as ExplanationEntry['inputs'];
+    expect(codeOf(() => explanationEntry({ ...ENTRY, inputs }))).toBe('PRICING_INPUT_INVALID');
+  });
 });

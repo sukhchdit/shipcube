@@ -9,3 +9,7 @@ export const epoch = (): number => Date.UTC(2026, 10, 12) + Date.parse('2026-11-
 export const larger = (a: number, b: number): number => Math.max(a, b);
 
 export const fee = (): Money => money(100, 'USD');
+
+export const isDate = (value: unknown): boolean => value instanceof Date;
+
+export type NowReader = typeof Date.now;

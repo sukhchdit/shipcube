@@ -297,6 +297,12 @@ const RULES: readonly Violation[] = [
     "'value'",
   ],
   [
+    '[R2-M1] platform/money-arith (type-aware): a Minor-typed `+=` accumulator (`t += k`, `total += line.amount`)',
+    'typed/money-arith/packages/pricing/src/bad-minor-accumulator.ts',
+    ['platform/money-arith', 'platform/money-arith'],
+    'Arithmetic on the money minor-unit value',
+  ],
+  [
     '[PR #2 m10] platform/money-arith (type-aware): `+` on two Minor-branded values whose names the heuristic misses',
     'typed/money-arith/packages/pricing/src/bad-minor-brand.ts',
     'platform/money-arith',
@@ -328,6 +334,9 @@ const RULES: readonly Violation[] = [
         'bad-shared-namespace',
         '@platform/shared (whole module)',
       ],
+      ['[R2-n2] a string-named import specifier { "uuidv7" as id }', 'bad-shared-string-name-import', '@platform/shared uuidv7'],
+      ['[R2-n2] a string-named re-export { "uuidv7" as id } from', 'bad-shared-string-name-export', '@platform/shared uuidv7'],
+      ['[R2-n1] navigator (locale and environment)', 'bad-navigator', 'navigator.language'],
     ] as const
   ).map(([title, name, what]): Violation => [
     `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
@@ -1642,6 +1651,10 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     [
       '[PR #2 m10] platform/money-arith (type-aware): comparisons on Minor and arithmetic on plain numbers',
       'typed/money-arith/packages/pricing/src/ok-minor-compare.ts',
+    ],
+    [
+      '[R2-M1] platform/money-arith (type-aware): `s += m.amount` onto a string builds text',
+      'typed/money-arith/packages/pricing/src/ok-string-building.ts',
     ],
     ['[AT-US-138-02] platform/pricing-purity: new Date(input) and date arithmetic', 'rules/pricing-purity/packages/pricing/src/ok-pure.ts'],
     [

@@ -74,6 +74,14 @@ export function chargeLine(line: ChargeLine, sellCurrency: string): ChargeLine {
   return Object.freeze({ code, labelKey, source: source as ChargeLine['source'], amount, taxAmount, taxCode, informational });
 }
 
+/** The state a step returned, checked for shape before anything reads it (R2-n5): `lines` and `entries` arrays. */
+export function checkedState(state: unknown): PricingState {
+  if (!Array.isArray(own(state, 'lines')) || !Array.isArray(own(state, 'entries'))) {
+    invalid('a pricing step must return a state with lines and entries arrays');
+  }
+  return state as PricingState;
+}
+
 /** The state with the line appended. */
 export function appendLine(state: PricingState, line: ChargeLine, sellCurrency: string): PricingState {
   return Object.freeze({ ...state, lines: Object.freeze([...state.lines, chargeLine(line, sellCurrency)]) });
@@ -83,6 +91,8 @@ function inputsCopy(value: unknown, ruleKey: string): Readonly<Record<string, Ex
   if (typeof value !== 'object' || value === null || Array.isArray(value)) invalid(`explanation ${ruleKey}: inputs must be an object`);
   const copy: Record<string, ExplanationInput> = {};
   for (const [key, item] of Object.entries(value)) {
+    // A `__proto__` key (JSON.parse can produce one) would become a prototype write and vanish (R2-n4).
+    if (key === '__proto__') invalid(`explanation ${ruleKey}: __proto__ is not an inputs key`);
     const valid =
       item === null || typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item));
     if (!valid) invalid(`explanation ${ruleKey}: inputs hold strings, booleans, null or finite numbers only`);

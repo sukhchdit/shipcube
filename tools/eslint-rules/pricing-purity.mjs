@@ -21,17 +21,23 @@
  *  - relative specifiers into a `tests/`, `test/` or `__tests__/` folder or a `*.test.*` module: test helpers are
  *    outside this rule, so production code never imports them.
  *
- * Limits: a value that is not a global (an `Event().timeStamp`, `import.meta`, a timer callback) is not a clock read
- * this rule can see; `Intl` is `platform/no-tofixed-tolocalestring` and `new Function` is `no-implied-eval`.
+ * Not reported (they read no clock): `value instanceof Date` and type queries such as `typeof Date.now` (R2-n3).
+ *
+ * Limits: a value that is not a global (an `Event().timeStamp`, `import.meta`) is not a clock read this rule can see;
+ * timers (`setTimeout`, `setInterval`, `queueMicrotask`) schedule rather than read and are not reported; `Intl` is
+ * `platform/no-tofixed-tolocalestring` and `new Function` is `no-implied-eval`.
  */
 import { builtinModules } from 'node:module';
 
-const ALWAYS_IMPURE = new Set(['process', 'performance', 'crypto', 'globalThis', 'self', 'window', 'global']);
+const ALWAYS_IMPURE = new Set(['process', 'performance', 'crypto', 'navigator', 'globalThis', 'self', 'window', 'global']);
 const GLOBAL_OBJECTS = new Set(['globalThis', 'self', 'window', 'global']);
 const DATE_STATIC_ALLOWED = new Set(['UTC', 'parse']);
 const SHARED_ROOT = '@platform/shared';
-/** `@platform/shared` exports that read the clock or randomness (`ids/uuidv7.ts`: `uuid` v7). */
-const IMPURE_SHARED_EXPORTS = new Set(['uuidv7', 'uuidV7Timestamp']);
+/**
+ * `@platform/shared` exports that read the clock or randomness (`ids/uuidv7.ts`: `uuid` v7). Pinned by
+ * tools/lint/pricing-purity-shared.test.ts against the modules the shared root re-exports (code review R2-n6).
+ */
+export const IMPURE_SHARED_EXPORTS = new Set(['uuidv7', 'uuidV7Timestamp']);
 const TEST_SPECIFIER = /(?:^|\/)(?:tests?|__tests__)(?:\/|$)|\.test(?:\.[cm]?[jt]sx?)?$/u;
 const IO_PACKAGES = [
   'axios',
@@ -84,6 +90,32 @@ function memberOf(node) {
 }
 
 /**
+ * True under a TypeScript type query (`typeof Date.now` in a type position): a type, not a read.
+ * @param {import('estree').Node & { parent?: import('estree').Node }} node
+ * @returns {boolean}
+ */
+function inTypeQuery(node) {
+  for (
+    let current = node.parent;
+    current !== null && current !== undefined;
+    current = /** @type {{ parent?: import('estree').Node }} */ (current).parent
+  ) {
+    if (/** @type {{ type: string }} */ (current).type === 'TSTypeQuery') return true;
+  }
+  return false;
+}
+
+/**
+ * The name of a module specifier: an identifier, or a string-named specifier (`{ "uuidv7" as id }`; R2-n2).
+ * @param {import('estree').Identifier | import('estree').Literal} node
+ * @returns {string | null}
+ */
+function specifierName(node) {
+  if (node.type === 'Identifier') return node.name;
+  return typeof node.value === 'string' ? node.value : null;
+}
+
+/**
  * Whether a reference to `name` at `id` is one of the allowed pure forms.
  * @param {string} name
  * @param {import('estree').Identifier & { parent?: import('estree').Node }} id
@@ -91,6 +123,8 @@ function memberOf(node) {
  */
 function isAllowedUse(name, id) {
   const parent = id.parent;
+  if (name === 'Date' && parent?.type === 'BinaryExpression' && parent.operator === 'instanceof' && parent.right === id) return true;
+  if (inTypeQuery(id)) return true;
   if (name === 'Date') {
     if (parent?.type === 'NewExpression' && parent.callee === id) {
       return parent.arguments.length === 1 && parent.arguments[0]?.type !== 'SpreadElement';
@@ -174,14 +208,18 @@ export default {
         const specifiers = node.specifiers.filter((specifier) => !typeOnly(/** @type {never} */ (specifier)));
         const whole = specifiers.some((specifier) => specifier.type !== 'ImportSpecifier');
         const names = specifiers.flatMap((specifier) =>
-          specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' ? [specifier.imported.name] : [],
+          specifier.type === 'ImportSpecifier'
+            ? [specifierName(/** @type {never} */ (specifier.imported))].filter((name) => name !== null)
+            : [],
         );
         checkSource(node, node.source, whole, names);
       },
       ExportNamedDeclaration(node) {
         if (typeOnly(/** @type {never} */ (node))) return;
         const names = node.specifiers.flatMap((specifier) =>
-          !typeOnly(/** @type {never} */ (specifier)) && specifier.local.type === 'Identifier' ? [specifier.local.name] : [],
+          !typeOnly(/** @type {never} */ (specifier))
+            ? [specifierName(/** @type {never} */ (specifier.local))].filter((name) => name !== null)
+            : [],
         );
         checkSource(node, node.source, false, names);
       },

@@ -5,7 +5,16 @@ export { PRICING_STEPS, price, runPricing } from './engine.js';
 export { PRICING_ERROR_CODES, PricingError, isPricingError, type PricingErrorCode } from './errors.js';
 export { BASE_FREIGHT_CODE, BASE_FREIGHT_LABEL_KEY, baseFreightStep } from './lines/base-freight.js';
 export { applyRate, rateRatio, type Rate } from './rounding.js';
-export { EMPTY_STATE, appendEntry, appendLine, chargeLine, explanationEntry, rejectedCandidateCount, warnings } from './state.js';
+export {
+  EMPTY_STATE,
+  appendEntry,
+  appendLine,
+  chargeLine,
+  checkedState,
+  explanationEntry,
+  rejectedCandidateCount,
+  warnings,
+} from './state.js';
 export {
   COST_SOURCES,
   ENGINE_VERSION,

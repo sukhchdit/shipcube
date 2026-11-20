@@ -15,11 +15,19 @@
  * Limits: an explicit conversion strips the brand and the name (`Number(m.amount) + 1`, `+m.amount * 1`), so it is not
  * reported; `-m.amount` is `@typescript-eslint/no-unsafe-unary-minus`.
  */
+import ts from 'typescript';
 
 const MINOR_BRAND_PROPERTY = '__brand';
 const MINOR_BRAND_VALUE = 'Minor';
-/** TypeScript `TypeFlags.String | StringLiteral | TemplateLiteral | StringMapping`. */
-const STRING_LIKE_FLAGS = 4 | 128 | 134_217_728 | 268_435_456;
+
+/**
+ * True for `any` (TypeScript `TypeFlags.Any`, read from the installed compiler, not hard-coded).
+ * @param {import('typescript').Type} type
+ * @returns {boolean}
+ */
+function isAny(type) {
+  return (type.flags & ts.TypeFlags.Any) !== 0;
+}
 
 /**
  * True when the TypeScript type, or one of its union/intersection constituents, has `__brand: 'Minor'`.
@@ -125,14 +133,18 @@ export default {
     }
 
     /**
-     * True when type information shows the expression is a string (only with types; untyped files answer false).
+     * True when type information shows the expression is a string: assignable to `string` through the checker (code
+     * review R2-M1: never through hard-coded `TypeFlags` values, whose bits differ between TypeScript versions), and not
+     * `any` (which is assignable to everything). Untyped files answer false.
      * @param {import('estree').Node} node
      * @returns {boolean}
      */
     function isStringTyped(node) {
       if (checker === null || services?.esTreeNodeToTSNodeMap === undefined) return false;
       const tsNode = services.esTreeNodeToTSNodeMap.get(/** @type {never} */ (node));
-      return tsNode !== undefined && (checker.getTypeAtLocation(tsNode).flags & STRING_LIKE_FLAGS) !== 0;
+      if (tsNode === undefined) return false;
+      const type = checker.getTypeAtLocation(tsNode);
+      return !isAny(type) && checker.isTypeAssignableTo(type, checker.getStringType());
     }
 
     return {
@@ -145,7 +157,9 @@ export default {
       AssignmentExpression(node) {
         if (!ARITHMETIC_ASSIGN.has(node.operator)) return;
         // `text += …` builds a string (code review R1-m2 keeps it allowed); `total += line.amount` accumulates money.
-        if (node.operator === '+=' && (isStringish(node.right) || isStringTyped(node.left))) return;
+        // Exempt only a string left side that is not itself Minor-branded (R2-M1).
+        if (node.operator === '+=' && (isStringish(node.right) || (isStringTyped(node.left) && brandedName(unwrap(node.left)) === null)))
+          return;
         const name = moneyName(node.left) ?? moneyName(node.right);
         if (name !== null) context.report({ node, messageId: 'moneyArithmetic', data: { name } });
       },
