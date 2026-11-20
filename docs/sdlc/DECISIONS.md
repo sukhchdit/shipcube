@@ -4745,3 +4745,41 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - TASK-201: "the live billable weight uses the rule of the origin country unit system (REQ-QUOTE-006; ADR-0009 amendment 2 item 4; D-ARCH-170); the units toggle changes the displayed unit only; test: toggling units changes no weight beyond the unit conversion".
 - **Applied in:** ADR-0009 amendment 2 item 4 and a dated pointer in decision 4. Not a merge condition of TASK-076.
 - **Reversibility:** High until the first quote is priced.
+
+### D-SECPR041-01 · 2026-11-20 · security-analyst · TASK-041 (Valkey-backed rate limiting per class, RateLimit headers, trusted proxy chain and the T-39 per-actor denial budget; branch `feat/TASK-041-valkey-backed-rate-limiting-per`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `e6f484a` (record `docs/05-quality/security/PR-pending-TASK-041-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-041-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on a type-stripped `git archive` extract of `e6f484a` (real Express 5 and express-rate-limit 8.7.3 from the main checkout). No npm, Jest or Docker, nothing run in the PR worktree; the Lua scripts were read and emulated, and their real-Valkey proof is `rate-limit.int.test.ts` in lane B (C1).
+- **The record is a merge condition.** The PR changes 19 owned paths (17 under `/apps/api/src/platform/`, 2 under `/packages/audit/`). Main's classifier selects the hosted `security-integration` job (22 security-critical paths).
+- **Held (D-SECT39-01 items 1-6 as implemented):**
+  - **Shapes.** Closed `DenialMark` mapped by `capture.denied`; the crossing entry has no count; `suppressed_in_previous_window` only for a carry in 1..2^31-1, range-checked in the budget and in the capture; the api suite deep-equals the three stored shapes, and N+K denials from K IPs leave vault and `ip_hash` rows for N+1 entries only.
+  - **Keys, TTL, atomicity.** `rl:authz-denial{,-carry}:{org|system}:{actor | credential kind}`, every segment `^[A-Za-z0-9_-]{1,64}$`; constant scripts with keys and values as `KEYS`/`ARGV` (no script injection); `PEXPIRE` on the first take plus a TTL repair branch, so no key is ever TTL-less; cluster mode is disabled, so the two-key script cannot hit `CROSSSLOT`.
+  - **Answers and failures.** 403 for 1..N, one aggregated entry and 429 at N+1, 429 without a write after it, with `Retry-After` and the three `RateLimit-*` headers (the problem handler keeps them); a failed write answers 5xx; a failed opener write restores the claimed carry; only the AUTHZ_DENIED path spends the budget; seven malformed store replies all fall back safely; `rate_limit_store_unavailable` at most once a minute per scope with no host; the counter's only denial label is `authz-denial`; the startApi composition answers 429 at N+1.
+  - **PR61-SEC-12 closed.** 120,000 generated IPv4-mapped spellings unmap alike in `canonicalIp`, `coarseNetwork` and the limiter key; near misses are not unmapped (positive control: the pre-PR regex misses `::ffff:7f00:1`).
+  - **Trusted proxy chain.** Express 5, hops 0..5 against chains of 0..3 proxies: the real client exactly when hops equals the chain, a spoofed `req.ip` whenever hops exceeds it (14 of 14 control rows), one shared proxy address when it falls short; garbage values share the `unknown` key; `clientIpKey` is linear over 16 KiB.
+- **New findings:**
+  - **PR041-SEC-01 (LOW, CWE-407; = code review R1-m5).** The per-instance fallback stores scan every entry on each new key once they hold 50,000 windows: 1.2-1.6 ms per request against 0.013 ms. A client with a /48 can saturate an instance during a Valkey outage on the `auth`/`email-send` classes (latent: `moduleRegistry` is empty; the first such routes come with TASK-049).
+    - **Fix.** Bounded sweep plus O(1) eviction of the oldest-opened window, re-insert on window reopen; same for the denial store, and bound `carries` and `slots`. Validated on a scratch copy at 0.013 ms.
+  - **PR041-SEC-02 (LOW, CWE-770; = code review R1-m1 / S1).** The step-0 rule is chosen by header presence: any `Authorization`, refresh cookie or `X-Quote-Token` moves an IP from 120/min to 6,000/min. Today it widens the docs, fallback and OPTIONS paths and the `rate_limit_auth` log volume; with the real authenticators it lets forged credentials reach verification 50 times faster than ADR-0016 amendment 1 intends. MEDIUM if still open when TASK-052 merges.
+    - **Fix.** (a) This PR: non-module paths always use the anonymous rule, and the two overclaiming comments are reworded. (b) Before TASK-052: a failed-authentication budget (`rl:step0:authn-failed:<ip key>`, hit by the authn slot on a failed declared credential, checked at step 0 for credentialed requests), so valid credentials keep the NAT-fair ceiling.
+  - **INFO items:**
+    - PR041-SEC-03: the fail-open classes (REQ-SEC-006 as written) rely on the carrier layer's Valkey-backed admission (ADR-0010 amendment items 2-3), whose own store-failure mode must fall back or refuse, never fail open.
+    - PR041-SEC-04: per-/64 keys give a /48 holder 65,536 budgets and grow the `noeviction` key space (OI-15: `rl:*` key-count alarm, optional /48 aggregate rule).
+    - PR041-SEC-05: `TRUST_PROXY_HOPS` must equal the real chain; the schema default 1 fails silently towards spoofing; prefer default 0, pin 2 in the IaC together with the `sg-alb` prefix list and `X-Origin-Verify`, and smoke-test the audit IP after deploy.
+    - PR041-SEC-06: a late Valkey reply on a window opener loses the claimed carry (residual; threat model §10.4 H).
+    - PR041-SEC-07: client IPs live in Valkey keys for up to an hour and in the daily snapshots for 7 days (data inventory entry; keyed hash optional).
+    - PR041-SEC-08: a live composition without `rateLimit` is not refused at boot (defence in depth next to R1-m6).
+- **Earlier items:** PR56-SEC-03 (MEDIUM, T-39) closed at merge; PR61-SEC-12 closed; PR21-SEC-01 step 5 closed for anonymous clients (residual PR041-SEC-02 (a)); PR61-SEC-04 (CODEOWNERS) stays open with devops and gains `packages/config/src/schema.ts` and `packages/shared/src/logging/security-event.ts`.
+- **Code review twin** (`7d24349`, APPROVED_WITH_NITS): S1 → PR041-SEC-02, S2 → PR041-SEC-05, S3 → PR041-SEC-07, S4 (breaker) availability only, supported; R1-m2 and R1-m3 (security logging) concurred.
+- **Binding.** The single `Head` row names `e6f484a`. Simulation with main's real checker in a shared sparse clone, `--base 29fe2a1`: 10 of 10 as expected.
+  - Pass: the merge ref with the record committed on main (tip `71a2d36`); the record on the branch; a later commit to `app.ts` only.
+  - Fail: no record; the placeholder name; `rate-limit/store.ts` changed after the head; a later FAIL verdict; a `Head` row naming a main commit, `0d87b1a` or the merge base.
+- **Conditions:**
+  - **C1.** Lane B at the pushed head, including the first real-Valkey run of `rate-limit.int.test.ts`, and the hosted `security-integration` job.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A security delta round on a fix-cycle head that changes any owned path, `app.ts`, `start-api.ts` or `packages/config/src/schema.ts` (the checker voids the binding by itself only for owned paths).
+- **Routed:**
+  - **This PR's fix cycle, preferred:** PR041-SEC-01 (with R1-m5), PR041-SEC-02 (a), PR041-SEC-08 (with R1-m6). Otherwise PR041-SEC-01 is due before TASK-049 merges.
+  - **principal-architect:** PR041-SEC-02 (b) as part of the code twin's C1 ruling, implemented before TASK-052 merges; PR041-SEC-03 (ADR-0010 admission store-failure mode) before the first `public-quote`/`public-tracking` route; product-manager for A-053 and the AT-US-040-10 emission rule.
+  - **data-architect / devops:** PR041-SEC-04 (OI-15, TASK-214 alarms), PR041-SEC-05 (IaC pin and deploy smoke before G4; default 0 here or by devops), PR041-SEC-07 (data inventory).
+  - **security-analyst:** PR041-SEC-06 at the next threat-model revision.
+- **Reversibility:** High (a review record; the routes bind tasks that have not started).
