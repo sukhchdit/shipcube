@@ -154,6 +154,8 @@ No apostrophes, as plan-data needs.
 7. **TASK-215:** "TRUST PROXY PIN (ADR-0016 amendment 12 item 9; D-ARCH-179; PR041-SEC-05): the api task definition sets TRUST_PROXY_HOPS=2; a Terraform test (or Checkov custom policy) fails unless that value, the CloudFront origin-facing prefix list on sg-alb and the ALB rule that refuses a request without X-Origin-Verify are all present".
 8. **TASK-214:** "the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160".
 
+9. **TASK-041, acceptance line AT-US-087-04:** "hops or CIDRs of the edge" becomes "hops of the edge" (ADR-0016 amendment 12 item 9 narrows amendment 1 to a hop count; D-QG-001 QG-041-C3 (c); D-ARCH-181).
+
 Not a card, for devops-engineer: the first pipeline that deploys to a real target (not this run; `DEPLOY_TARGET_*` are blank) gets a post-deploy smoke step that sends one request through the public hostname and fails when the audit IP or the access-log `ip` of that request is an ALB or CloudFront address (PR041-SEC-05). It is a precondition of G4 for a production release.
 
 ## 7. Routed, not edited here
