@@ -36,7 +36,7 @@ TOTP RFC 6238 (6 digits, 30 s, SHA-1, ±1 step; `otplib` 13), secret encrypted a
 
 ### Re-authentication primitive (REQ-AUTH-020)
 
-`POST /auth/reauth` verifies password (or TOTP for MFA users) and returns a 5-min single-use proof bound to `sid` and an `action_scope` string; routes with `reauth: true` in metadata require header `X-Reauth-Proof`; used in M1 by recovery-code regeneration, TOTP disable and password change. The M2 signature record (reason + meaning) binds to the audit entry via `audit.reasonRequired`.
+`POST /auth/reauth` verifies password (or TOTP for MFA users) and returns a 5-min single-use proof bound to `sid` and an `action_scope` string; routes with `reauth: true` in metadata require header `X-Reauth-Proof`; used in M1 by recovery-code regeneration, TOTP disable and password change. The M2 signature record (reason + meaning) binds to the audit entry via `audit.reasonRequired`. *Amended 2026-11-20 (ADR-0014 amendment 7; D-ARCH-193): the proof is checked and consumed by the tx slot before `load`, and for a request that carries an `Idempotency-Key` after the claim of that key. A replay neither checks nor consumes a proof, and a 401 `REAUTH_REQUIRED` is not stored under the key. TASK-187 builds it; security-analyst confirms the placement there.*
 
 ### Sessions
 
