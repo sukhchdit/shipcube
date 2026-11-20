@@ -349,3 +349,100 @@ The code twin accepted D-TASK039-01 on code grounds and left the threat ruling t
   - **threat-model revision:** T-77 mitigation cites ADR-0013 amendment 3 once this PR merges.
 
 | Verdict | PASS_WITH_FOLLOW-UPS: nothing Critical, High or Medium is open for TASK-039 at `64eefab`. Two LOW (PR039-SEC-01, -02) are due in this PR's fix cycle, with a security delta round (C3). D-TASK039-01 is accepted with conditions (i) to (iv) |
+
+
+---
+
+# Round 2: security delta round at `766ae52` (condition C3)
+
+| Field | Value |
+|---|---|
+| Delta | `64eefab..766ae52`: the merge `9af4da9` of `origin/main` at `2960391` (the round-1 record commit) into the branch, plus the fix commit `766ae52`. The merge is a clean union: its tree `573ae11` equals `git merge-tree 64eefab 2960391`, and main had moved by docs commits only. The fix commit changes 19 files |
+| Head | 766ae5241fe170c0d9b8fdf83410adc951dcc338 |
+| Why a new binding | The fix changes the migration, so the round-1 binding to `64eefab` is void (round-1 simulation S8, and R2-S2 below) |
+| Lane A / lane B evidence | None for `766ae52`: the branch is not pushed. The coordinator reports a lane B job running in the PR worktree on the old head `64eefab`. That run is not evidence for this head |
+| Owned paths changed | The same 9 as round 1 (main's checker, `--base 2960391 --head 766ae52`, the merge base after `9af4da9`). Four of them change in the fix: `migration.sql`, `platform.prisma`, `prisma/tests/worker/job-executions.int.test.ts` and `tools/db/table-classes/worker.json`. The classifier still gives `security_paths=true` (8 trigger paths) |
+| Developer decisions | D-TASK039-07 to -12, as the coordinator and the code twin round 2 quote them (not in DECISIONS.md) |
+| Code review twin | Round 2 on main: `6ab40f28`, APPROVED_WITH_NITS (R2-n1 to R2-n4, all NITs) |
+| Reviewer / date | security-analyst, 2026-11-20, round 2. Same host rule and method as round 1: no npm, Jest, type-check, build or Docker. Probes ran on a `git archive` extract of `766ae52`, with the round-1 extract of `64eefab` run side by side as the positive control. Nothing ran in either PR worktree: the commits were read from the main checkout's object store. Line numbers come from single-file reads at `766ae52` |
+
+## R2.1 Summary
+
+Every round-1 finding is closed at `766ae52`, and so is the open half of PR64-SEC-11. Each closure is shown by a probe that gives the round-1 result on `64eefab` and the fixed result on `766ae52`. Nothing new is found above INFO.
+
+## R2.2 Closure of the round-1 findings
+
+| Finding | Fix at `766ae52` | Probe: `64eefab` (control) → `766ae52` | Status |
+|---|---|---|---|
+| PR039-SEC-01 (LOW) | `runWithDeadline` starts `work` as a promise job (`Promise.resolve().then(() => work(signal))`). Both `running` and `expired` carry a handler before anything can settle. The timer is created inside the `try` and cleared in `finally` (D-TASK039-07) | P2, child process, `deadlineMs: 200`. A processor that throws synchronously: exit 70 with an unhandled `JobDeadlineError` → exit 0, nothing unhandled. The async and hanging controls are unchanged on both heads. P2b, four shapes in one process (sync throw, non-promise return, resolve, late reject): 2 deadline timers left and 2 unhandled rejections → 0 and 0. The non-promise return was a second crash path in round 1 (`running.catch` on a number) | **Closed** |
+| PR039-SEC-02 (LOW) | `ux_job_executions__queue_job_key ON (queue, job_key)` replaces the single-column index, plus `ix_job_executions__completed_at`. Prisma has `@@unique([queue, jobKey])` and `@@index([completedAt])`, the same names and column order as the SQL (D-ARCH-171, D-TASK039-08) | P4c on PGlite. The same `shipment.<id>` on `documents`, then on `tracking-poll`: 1 and 0 rows → 1 and 1. A repeat on `documents`: 0 rows. The new int case and a unit case pin it | **Closed** |
+| PR039-SEC-03 (INFO) | `job.signal.throwIfAborted()` inside the transaction, after the effect (`idempotent-processor.ts`; D-TASK039-09) | P5b, the real handler and `idempotentProcessor` over a fake transaction whose writes count only on commit. Scenario A, a final attempt past its deadline: a dead-letter record and 1 committed effect → a record and 0 committed effects, so the record now tells the truth. Scenario B, a retry overlapping a hung attempt: 1 committed effect on both heads (`effect#1` committed late → `effect#1` rolled back, `effect#2` committed) | **Closed (a).** Residuals: (b) non-transactional work in a hung attempt (TASK-047 and the saga/carrier tasks, unchanged); a deadline that fires during COMMIT still commits, after which the retry finds the key and skips, so the effect stays at most once (code twin R2.3, accepted) |
+| PR039-SEC-04 (INFO) | The walk is breadth-first. More than 32 root keys, more than 256 examined keys, or more than 4 levels counts as a signal ("unexamined"). Keys are matched exactly (`org`/`organisation`/`tenant`/`actor`/`user` + `id`/`uuid`/`type`), by suffix, and by "contains `org` and ends in `id`" (D-TASK039-10) | P1. `on_behalf_of_org_id`, `owner_org_id`, `orgUuid`, `actor_user_id`, `user_id`, depth 6, a tenant key after 300 nested keys, and 300 root keys: all not flagged → all flagged. The listed spellings stay flagged, and the valid control stays clean. P8, the false-positive differential: 15,000 valid payloads over every kind (random UUIDs, correlation ids, steps, traceparent and tracestate) give 15,000 accepted and 0 flagged on both heads, and the valid scheduled occurrence is accepted. The cost stays bounded (keys are cut at 256 characters before folding; 200 calls with 1k, 8k and 64k-character hostile keys took about 58, 198 and 174 ms). 100,000 nested objects: 8 ms, flagged | **Closed.** INFO residual, not a new ID: a plural `org_ids` and homoglyph spellings (a Cyrillic `о`) are still not flagged. The payload is refused in every case, so only the event is missing |
+| PR039-SEC-05 (INFO) | `ck_job_executions__result_unset CHECK (result IS NULL)`. SELECT stays, and `worker.json` names its readers (operators, the TASK-043 purge) as data-model §4.4 and D-ARCH-171 say | P4c. A JSON value in `result` → `23514`, and so is the JSON `null` literal. Only SQL NULL passes, which is what the ledger writes. The first writer drops the CHECK in its own migration and states the column's content (the migration header says so) | **Closed** |
+
+## R2.3 PR64-SEC-11: the negative half is now proven at the key level
+
+The ACL case (`retention.int.test.ts`) no longer relies on a BullMQ `Queue` as `api`. It opens a raw ioredis client as `api`, with credentials generated per run, and asserts four things:
+- **The control:** `SET rl:acl-probe` returns `OK` (the user authenticates, and `~rl:*` is granted).
+- `SET bull:outbox-relay:acl-probe` and `HSET bull:outbox-relay:<job id>` reject with `/NOPERM.*key/i`.
+- The `INFO` denial is asserted separately, as a named fact.
+
+Valkey 8.1 source (`src/acl.c` `getAclErrorMessage`) gives the wording for each refusal:
+- a key refusal is `NOPERM No permissions to access a key` (the verbose form also names the key);
+- a command refusal is `User … has no permissions to run the '…' command`, which contains no "key".
+
+So the key assertions cannot be satisfied by the `INFO` denial. `src/commands/info.json` lists `INFO` under `DANGEROUS`. ioredis 6.0.0's ready check tolerates a NOPERM on `INFO` (`built/Redis.js:790`, a `console.warn`), so the client still becomes ready. If `~bull:*` were added to `api`, the `SET bull:…` assertion would fail: the case now sees the control it is meant to prove.
+
+The case was read, not run (lane B). **PR64-SEC-11 closes when lane B passes this case at `766ae52` or its successor.**
+
+## R2.4 Re-checked at `766ae52`
+
+- **Dequeue identity (P1).** 34 of 34 rows as in round 1. The aggregate check now uses `isJobIdOf`, which has the same step grammar as `jobIdFor`. `SCHEDULED_JOB_ID` admits schedule names of at most 47 characters: `<schedule>-<millis>` is then at most 64 characters and fits `CORRELATION_ID_PATTERN`. `SCHEDULE_NAME_PATTERN` and a test pin every `SCHEDULE_NAMES` entry to that bound.
+- **The migration (P3, P4c).**
+  - The linter gives 0 findings over both lanes, and the round-1 mutation controls give the same results.
+  - The guard block is byte-identical to `renderStdColumnsGuard`.
+  - `validateGrants` gives 0 problems: SELECT and INSERT only, matching the one `GRANT`.
+  - C10 is clean for `job_executions` (the control fires).
+  - On PGlite: the three indexes and five CHECKs exist as named; a foreign `created_by` → `P0001`; a 201-character key → `23514`; UPDATE and DELETE → `42501`; `down.sql` twice and then the migration again: OK, with 3 indexes.
+- **The ruling conditions of D-SECPR039-01** are on `SCHEDULE_NAMES` (`queue-definition.ts`) and referenced from `registerSchedules`:
+  - (i) to (iv) are stated as given;
+  - (iii) is enforced by the 47-character grammar and its test;
+  - the refusal of a registered processor on a schedule-only queue now runs before any connection is opened (`runtime.ts`), with a unit case.
+- **The sweep honours the job signal** (code review R1-n5, D-TASK039-11). It stops between queues, logs `worker.queue_retention_aborted` (counts only), and rejects with the abort reason. That rejection lands on the abandoned `running` promise, which has a handler.
+- **STALLED lines** (D-TASK039-12) run in a job log context only when the raw payload's `correlation_id` matches `CORRELATION_ID_PATTERN`; anything else is logged without context. The line names the class BullMQ persisted (`UnrecoverableError`), and the record keeps `NonRetryableError` (code twin R2-n3, a NIT).
+- **Secrets and logs.**
+  - The Gitleaks over-approximation over the 394 added lines gives 3 `generic-api-key` hits: `row.jobKey`, which the rule's `^[a-zA-Z_.-]+$` allowlist covers and whose entropy is below 3.5; a test UUID key with the stopword `000000`; `'tracking-poll'`, which the allowlist covers. The real rule suppresses all three. The runtime controls fired.
+  - The only new log event is `worker.queue_retention_aborted` (counts).
+
+## R2.5 Record binding and simulation (round 2)
+
+- **The binding.** This round's `Head` row names `766ae52`. The round-1 row (`64eefab`) stays in the file: the checker accepts the record when a `Head` row names a commit of the PR after which no owned path changed (R2-S1), and the voided round-1 row alone fails (R2-S2).
+- **Simulation.** Main's real checker ran in the same `--shared` sparse clone set-up as round 1, at main tip `4cb06f0` when the simulation ran. The record, with this round appended, was committed on the main tip as `PR-9999-TASK-039-security-review.md` and merged with the PR head (`merge-tree`, then `commit-tree`); the merge commit was checked out, and the checker ran with `--pr 9999 --head <PR head>`.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| R2-S1 Merge ref: the record with this round on the main tip, merged with `766ae52`; `--base` = the merge base `2960391` | pass | pass (a note says the `64eefab` row is voided by the migration change) |
+| R2-S1b The same with `--base 7da0e50`, the branch's original base | pass | pass |
+| R2-S2 Control: the round-1 record only (`Head` `64eefab`) | fail | fail (the migration changed after it) |
+| R2-S3 Control: a later `FAIL` verdict row | fail | fail (verdict FAIL) |
+| R2-S4 Control: the placeholder name `PR-pending-TASK-039-…` | fail | fail (`missing`) |
+| R2-S5 A fix commit after `766ae52` in `apps/worker` only | pass | pass |
+| R2-S6 Control: a fix commit after `766ae52` that changes the migration | fail | fail |
+| R2-S7 Control: this round's `Head` row names the merge `9af4da9` | fail | fail (the migration changed after it) |
+| R2-S8 Main renames the `PR-pending-…` file that the branch carries from `9af4da9` to `PR-9999-…` (with this round), merged with `766ae52` | pass | pass: a clean merge, and the merged tree holds only the renamed file |
+
+10 of 10 as expected. The file has two `Head` rows (one per round) and two `Verdict` rows. This round's `Verdict` row is the last table row of the file.
+
+## R2.6 Merge conditions and routes (replace section 9 of round 1)
+
+- **C1.** Lane B PASS at `766ae52` (or its successor): `retention.int` (the key-level ACL case, the STALLED case, AT-US-010-05/06), `consumer.int` and `prisma/tests/worker/job-executions.int` (the migration changed). Also the hosted `security-integration` job and lane A on the pushed head. The run in the PR worktree on `64eefab` does not count.
+- **C2.** Unchanged: rename the record, then confirm the merge ref contains it. The branch carries the round-1 file from the main merge `9af4da9`, unmodified, so a rename on main merges cleanly (R2-S8).
+- **No further security round is needed** unless an owned path changes after `766ae52`; the checker enforces that (R2-S6).
+- **Routes still open:**
+  - **TASK-047 and the saga and carrier tasks:** PR039-SEC-03 (b), the signal discipline before non-transactional steps; ruling conditions (i) and (ii) for their schedules.
+  - **TASK-043:** the `job_executions` purge, with its age predicate in its own SQL (D-ARCH-171).
+  - **devops:** PR64-SEC-09 (CODEOWNERS for `apps/worker/src/platform/{jobs,queues}/` and `packages/shared/src/queues/`).
+  - **The orchestrator (lane B):** PR64-SEC-11 closes on the lane B pass of its case.
+  - **INFO residual of PR039-SEC-04** (`org_ids`, homoglyphs): optional, whoever next changes `payload-v2.ts`.
+
+| Verdict | PASS_WITH_FOLLOW-UPS: round 2 at `766ae52`. PR039-SEC-01 to -05 are closed (SEC-03 with its residual (b) routed), and PR64-SEC-11 closes on the lane B pass of its key-level case. Nothing Critical, High or Medium is open |

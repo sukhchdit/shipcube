@@ -5110,3 +5110,33 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Applied in:** `docs/01-requirements/stories/EPIC-01-platform-foundation.md` (US-010 notes, two Given-steps), `docs/01-requirements/REQUIREMENTS.md` 1.13 (version line, REQ-PLAT-014, REQ-RLS-008, DR-A25, EC-A38), `docs/01-requirements/PRD.md` 1.14 (header, §11), this file (the "next entry" pointer in D-PM-068 now reads D-PM-073).
 - **Validation:** the AT-US-010-03 and AT-US-010-04 tests of TASK-039, with the IDs in their titles; SEC-TC-20 and SEC-TC-50 for the resolution and the identifiers-only assertions. Nothing was run for this entry: the requirement consistency script and the gherkin drift test were not executed (docs-only task, no shell), so the 434 / 91 / 293 counts are asserted from the edit shape (no row added or removed, no cell added), not measured.
 - **Reversibility:** High (wording only; the behaviour described is already merged with TASK-035, and each row is restorable from REQUIREMENTS.md 1.12).
+
+### D-SECPR039-02 · 2026-11-20 · security-analyst · TASK-039 security round 2 (delta `64eefab..766ae52`: main merge `9af4da9` plus fix commit `766ae52`, pre-push) = PASS_WITH_FOLLOW-UPS at code head `766ae52`; every round-1 finding closed (round appended to `docs/05-quality/security/PR-pending-TASK-039-security-review.md` on main; the rename per D-ORCH-136/138 is unchanged)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** As in round 1: static review and single-process Node 24 probes on a `git archive` extract of `766ae52`, with `64eefab` run side by side as the control, and the migration on PGlite 0.4.3. Nothing was run in either PR worktree.
+  - **The merge.** `9af4da9` is a clean union: its tree equals `git merge-tree 64eefab 2960391`.
+  - **The binding.** The fix changes the migration, so the round-1 binding is void. The new `Head` row names `766ae52`. The owned set is unchanged: 9 paths, 4 of them changed in the fix.
+- **Closed (probe on `64eefab` → `766ae52`):**
+  - **PR039-SEC-01.** A synchronously throwing processor: exit 70 with an unhandled `JobDeadlineError` → exit 0. Across four processor shapes: 2 leaked deadline timers and 2 unhandled rejections → 0 and 0. The non-promise return was a second crash path in round 1.
+  - **-02.** The same `shipment.<id>` on two queues: 1 and 0 rows → 1 and 1 (`ux_job_executions__queue_job_key`, D-ARCH-171).
+  - **-03 (a).** A final attempt past its deadline: a record and 1 committed effect → a record and 0 committed effects (`throwIfAborted` before commit). Residual: a deadline during COMMIT still commits, and the retry then skips, so the effect stays at most once.
+  - **-04.** Compound spellings, depth and key bounds: 8 gaps → all flagged. The false-positive differential gives 15,000 valid payloads accepted and 0 flagged on both heads. Still unflagged, the payload refused in every case: plural `org_ids` and homoglyphs (INFO residual).
+  - **-05.** `ck_job_executions__result_unset`: a JSON value in `result` → `23514`.
+  - **PR64-SEC-11, negative half.** A raw ioredis client as `api` with generated credentials: `SET rl:*` gives `OK` (control), `SET`/`HSET` on `bull:*` give `/NOPERM.*key/i`, and `INFO` is denied separately. Valkey 8.1 `getAclErrorMessage` confirms that the key wording ("No permissions to access a key") differs from the command wording. It closes on the lane B pass of the case.
+- **Re-checked.**
+  - The dequeue matrix gives 34 of 34.
+  - Schedule names are capped at 47 characters (`SCHEDULED_JOB_ID`, `SCHEDULE_NAME_PATTERN` and its test).
+  - Ruling conditions (i) to (iv) are stated on `SCHEDULE_NAMES`, and the processor refusal now runs before any connection opens.
+  - The migration: linter 0, rendered guard identical, grants 0 problems, C10 clean, PGlite indexes and CHECKs as named, down-up OK.
+  - The sweep stops on the job signal. STALLED lines get context only for a pattern-valid correlation id.
+  - Gitleaks over-approximation: 3 hits, all suppressed by the real rule's allowlist and stopwords.
+- **Binding simulation** with main's real checker, merge-ref form: 10 of 10 as expected. Pass: the merge ref with the record on the main tip (base `2960391` and `7da0e50`); a later fix in `apps/worker` only; a rename on main of the `PR-pending` file the branch carries from its main merge (a clean merge). Fail: round-1 record only; a later FAIL verdict; the placeholder name; a later migration change; a `Head` row naming the merge `9af4da9`.
+- **Conditions:**
+  - **C1.** Lane B PASS at `766ae52` or its successor: `retention.int` (the key-level ACL case and the STALLED case), `consumer.int` and `job-executions.int`. Also lane A and `security-integration` on the pushed head. The PR-worktree run on `64eefab` does not count.
+  - **C2.** Rename the record, then confirm the merge ref contains it (unchanged).
+  - No further security round is needed unless an owned path changes after `766ae52`; the checker enforces it.
+- **Still routed:**
+  - PR039-SEC-03 (b) and ruling conditions (i)/(ii): TASK-047 and the saga and carrier tasks.
+  - The `job_executions` purge: TASK-043.
+  - PR64-SEC-09: devops.
+- **Reversibility:** High (a review record).
