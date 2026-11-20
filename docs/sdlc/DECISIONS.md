@@ -5349,3 +5349,33 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - Nobody else: `api/README.md` §13 gains no event and no reason; the `gherkin-test-map.md` titles stand; SEC-TC-20 and T-73 are unaffected. security-analyst may add a case "a job of a deleted organisation stays in that organisation's scope" to its test list; AT-US-078-04 already proves it.
 - **Verified:** the function body of data-model §4.5, extracted from the document, was run on PGlite with stub tables (15 cases; no roles, no row-level security). The DR-A14 fence that `tools/db/render-rls-dr-a14.test.ts` reads is byte-identical before and after. Nothing else was run.
 - **Reversibility:** High before TASK-047 merges (documents only). After it, a refusal can still be added in the runner without a schema change, because `org_deleted` is already returned; removing the column would be an expand and a contract step.
+
+### D-SECPR076-02 · 2026-11-20 · security-analyst · TASK-076 security round 2 (delta round C3, `e01979b..82b5023`) = PASS_WITH_FOLLOW-UPS at the fix-cycle-2 head `82b5023` (round appended to `docs/05-quality/security/PR-pending-TASK-076-security-review.md` on main; rename at PR time as in D-SECPR076-01)
+- **Decision:** nothing Critical, High or Medium is open at `82b5023`.
+  - **Method.** The same host rule. Probes were measured on fix cycle 1 (`f6de957`) and again on fix cycle 2 (`82b5023`). Nothing ran in the PR worktree.
+- **Closed:**
+  - **PR076-SEC-01.** The 36 round-1 bypass probes give 31 reported, the same as the round-1 candidate; the 5 left are documented limits or other rules. 38 new probes were added.
+  - **PR076-SEC-02.** The 19 forged-input rows of the 114-row probe are refused, and every valid row is unchanged.
+  - **PR076-SEC-03 to -05.** Own-key rates; codes are interpolated only after validation; every field is copied once, then validated, then frozen.
+- **No fixture lost a finding.** The fixture harness script on `e01979b`, `f6de957` and `82b5023`: 0 findings lost or gained on existing files, and every new fixture reports only its rule. `eslint.config.mjs`, `index.mjs` and `lint-fixtures.mjs` are unchanged, so the round-1 effective-configuration diff stands.
+- **New on `f6de957`, closed at `82b5023`: PR076-SEC-08 (LOW, CWE-697).** This is code review R2-M1. The `money-arith` `+=` string exemption hard-coded TypeScript 5 `TypeFlags`. In TypeScript 6.0.3 those bits are Undefined | BigInt | Union | Intersection.
+  - Effect on `f6de957`: `Minor` accumulators (`total += x.amount` with `total` typed `Minor`), which `e01979b` reported, passed again, and string building was reported.
+  - Fix at `82b5023`: the checker's assignability to `string`, excluding `any` and `Minor`-branded left sides. Both shapes are reported again, string building is allowed, and a `string | number` left side is now reported.
+- **New: PR076-SEC-07 (INFO, CWE-693).** Residual purity bypasses.
+  - Closed at `82b5023`: string-named specifiers (code review R2-n2, graded INFO here) and `navigator`.
+  - Open:
+    - `@platform/shared/queues` (its `retryDelayMs` defaults to `Math.random`). The boundaries allow-list admits `@platform/shared/**`, and the rule matches the root only.
+    - `declare const Date` / `process` / `Math` shadowing.
+  - The new `IMPURE_SHARED_EXPORTS` pin covers the root's direct textual forms only. It missed mutants with a `globalThis.crypto` destructuring, a bare `Date()` and a transitive `uuidv7` import.
+  - A four-edit fix was validated on a scratch copy.
+- **Binding.** This round's `Head` row names `82b5023`, and its Verdict row is last. Simulation with main's real checker: 9 of 9 as expected.
+  - Pass: the merge ref with both rounds; a later `packages/**`-only change.
+  - Fail: the round-1-only record; a round-2 row naming `f6de957` or a main commit; an owned change after `82b5023`; a later FAIL verdict; no record; the placeholder name.
+- **Conditions:**
+  - **C1.** Lane B at `82b5023`, with the pricing and money coverage quotes.
+  - **C2.** Rename the record and confirm the merge ref contains it.
+  - **C3.** Another round only if an owned path changes after `82b5023`.
+- **Routed:**
+  - **PR076-SEC-07 open parts:** this PR if another fix cycle happens; otherwise before TASK-080.
+  - **PR076-SEC-06** and **R1-n10:** unchanged.
+- **Reversibility:** High (a review record).
