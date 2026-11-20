@@ -2889,7 +2889,7 @@ Every path that must read rows before a tenant/actor context exists, or must dis
 | `org_ids_page(p_after uuid, p_limit int)` | `setof uuid` | `organisations` | resumable backfills that iterate organisations (§8.5) |
 | `purge_expired_tokens(p_before timestamptz, p_limit int)` | `integer` (rows deleted) | `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens`, `mfa_challenges`, `reauth_proofs`, `mfa_enrolment_codes` (2026-11-12, SEC-P3-14) (definer-purge policy) | housekeeping (§10.5) |
 | `sessions_for_user(p_user_id uuid)` (listed 2026-11-12; ratified in §12 OI-25) | `setof uuid` (session IDs with `status = 'ACTIVE'`) | `sessions` | synchronous Redis revocation of another user's sessions (membership removal, user status change) |
-| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid)`; one row or none | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes` | every worker processor, before `withTenantTx` (ADR-0013 amendment, payload v2) |
+| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)`; one row or none (*`org_deleted` added 2026-11-20, D-ARCH-180*) | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes`; `organisations` for `org_deleted` | every worker processor, before `withTenantTx` (ADR-0013 amendments 1 and 4, payload v2) |
 | `mfa_enrolment_overdue_candidates(p_now timestamptz, p_limit int)` (**new 2026-11-12, SEC-P3-14**) | `setof uuid` (user IDs) | `organisations`, `memberships`, `users`, `mfa_totp` | `housekeeping` 24 h staff enrolment deadline (AP-ID-19) |
 
 Example (the others follow the same shape):
@@ -2929,61 +2929,91 @@ The worker resolves the tenant context of every job from PostgreSQL, never from 
 
 A guest quote (`quotes.org_id IS NULL`) returns `org_id = NULL`. Every processor whose queue requires a tenant treats a NULL `org_id` as non-retryable `MISSING_TENANT_CONTEXT` (ADR-0013 §2), and M1 has no worker job that writes guest-quote rows. The function never returns `guest_token_hash`, because a UUIDv7 ID is not a secret (P1) and returning the hash would turn any quote ID into guest access.
 
+*Amended 2026-11-20 (D-ARCH-180; ADR-0013 amendment 4): ownership, not liveness.* The function filters `deleted_at` on neither the row the job names nor that row's organisation, and it returns a fourth column, `org_deleted`.
+
+| The row | `org_id` | `org_deleted` | The job (ADR-0013 amendment 4) |
+|---|---|---|---|
+| does not exist (never did, forged id, purged) | no row is returned | | refused, `JOB_CONTEXT_NOT_FOUND` |
+| has no organisation | NULL | NULL | refused with `MISSING_TENANT_CONTEXT` on a queue that requires a tenant; runs without an organisation on `outbox-relay` and `notifications` |
+| belongs to a live organisation (the row itself may be a soft-deleted quote) | the organisation | false | runs |
+| belongs to a soft-deleted organisation | the organisation | true | runs, in that organisation's own tenant scope |
+
+- `org_deleted` is also true when `org_id` names no `organisations` row. The foreign keys of the TENANT tables rule that out, but `outbox_events.org_id` has no foreign key (§6.1), so the function does not rely on one.
+- A deleted organisation is not refused, because work in flight settles what already exists: a saga ends booked or compensated, money is captured or refunded, a pickup is cancelled with the carrier, a draft expires. The tenant policies of §4.3 compare `org_id` only, so the deleted organisation's own context reads and writes its rows as before. No job runs in a wider scope for this reason (§4.1: there is no cross-tenant scope for workers).
+- The runner passes the value to the processor as `orgDeleted`. Work for a deleted organisation is stopped where it starts: a candidate function that starts new business for a tenant selects live organisations only; one that settles, cancels, expires, backfills, retains or erases does not filter (`payment_sweeper_candidates`, `saga_due_candidates`, `void_retry_candidates`, `draft_expiry_candidates`, `org_ids_page`).
+
 ```sql
 SET ROLE platform_definer;   -- preferred form (ADR-0005 am. 10 item 9, PR7-SEC-09; block rewritten 2026-11-12, PR7-SEC-12 (e), D-ARCH-065):
                              -- the function is created already owned by platform_definer (CREATE on schema platform, am. 8 b), so
                              -- no OWNER TO is needed and the owner itself grants EXECUTE. Linter rule 15 accepts this form or
                              -- "grants before OWNER TO" (the auth_lookup_user_by_email example above), never OWNER TO before GRANT.
+                             -- Body rewritten 2026-11-20 (D-ARCH-180): the per-kind lookups select INTO variables instead of
+                             -- RETURN QUERY, so that one final query can add org_deleted. The lookups themselves are unchanged.
 CREATE FUNCTION platform.job_context(p_kind text, p_id uuid)
-RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid)
+RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp AS $$                 -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
 #variable_conflict use_column
 DECLARE
   c_system    constant uuid := '00000000-0000-7000-8000-000000000001';
   c_anonymous constant uuid := '00000000-0000-7000-8000-000000000002';
+  v_org   uuid;
+  v_type  text;
+  v_actor uuid;
 BEGIN
   CASE p_kind
     WHEN 'outbox_event' THEN
-      RETURN QUERY SELECT e.org_id,
-                          CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
-                          e.actor_id
-                     FROM public.outbox_events e WHERE e.id = p_id;
+      SELECT e.org_id,
+             CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
+             e.actor_id
+        INTO v_org, v_type, v_actor
+        FROM public.outbox_events e WHERE e.id = p_id;
     WHEN 'saga' THEN
-      RETURN QUERY SELECT s.org_id,
-                          CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          s.created_by
-                     FROM public.saga_executions s WHERE s.id = p_id;
+      SELECT s.org_id, CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END, s.created_by
+        INTO v_org, v_type, v_actor
+        FROM public.saga_executions s WHERE s.id = p_id;
     WHEN 'notification' THEN
-      RETURN QUERY SELECT n.org_id,
-                          CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          COALESCE(n.recipient_user_id, c_system)
-                     FROM public.notification_log n WHERE n.id = p_id;
-    WHEN 'shipment'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.shipments x WHERE x.id = p_id;
-    WHEN 'order'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.orders    x WHERE x.id = p_id;
-    WHEN 'pickup'        THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.pickups   x WHERE x.id = p_id;
-    WHEN 'document'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.documents x WHERE x.id = p_id;
-    WHEN 'payment'       THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.payments  x WHERE x.id = p_id;
-    WHEN 'quote'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.quotes    x WHERE x.id = p_id;
+      SELECT n.org_id,
+             CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
+             COALESCE(n.recipient_user_id, c_system)
+        INTO v_org, v_type, v_actor
+        FROM public.notification_log n WHERE n.id = p_id;
+    WHEN 'shipment'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.shipments x WHERE x.id = p_id;
+    WHEN 'order'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.orders    x WHERE x.id = p_id;
+    WHEN 'pickup'        THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.pickups   x WHERE x.id = p_id;
+    WHEN 'document'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.documents x WHERE x.id = p_id;
+    WHEN 'payment'       THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.payments  x WHERE x.id = p_id;
+    WHEN 'quote'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.quotes    x WHERE x.id = p_id;
     WHEN 'tracking_poll' THEN
-      RETURN QUERY SELECT s.org_id, 'SYSTEM_JOB'::text, c_system
-                     FROM public.tracking_poll_schedule t
-                     JOIN public.shipments s ON s.id = t.shipment_id
-                    WHERE t.id = p_id;
+      SELECT s.org_id, 'SYSTEM_JOB', c_system
+        INTO v_org, v_type, v_actor
+        FROM public.tracking_poll_schedule t
+        JOIN public.shipments s ON s.id = t.shipment_id
+       WHERE t.id = p_id;
     ELSE
       RAISE EXCEPTION USING ERRCODE = '22023',               -- invalid_parameter_value
                             MESSAGE = pg_catalog.format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
   END CASE;
+  IF NOT FOUND THEN
+    RETURN;                                                  -- the identifiers name nothing: JOB_CONTEXT_NOT_FOUND
+  END IF;
+  RETURN QUERY
+    SELECT v_org, v_type, v_actor,
+           CASE WHEN v_org IS NULL THEN NULL                 -- the row has no organisation
+                ELSE NOT EXISTS (SELECT 1 FROM public.organisations o
+                                  WHERE o.id = v_org AND o.deleted_at IS NULL)
+           END;
 END $$;
 REVOKE ALL ON FUNCTION platform.job_context(text, uuid) FROM PUBLIC;      -- redundant with the definer's global default privileges (am. 9), explicit
 GRANT EXECUTE ON FUNCTION platform.job_context(text, uuid) TO platform_app;
 RESET ROLE;
 ```
 
-- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`.
-- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job.
-- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50).
-- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3.
+- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`. *2026-11-20 (D-ARCH-180):* a soft-deleted row and a row of a soft-deleted organisation are rows, so neither ends there.
+- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job. *2026-11-20:* `org_deleted` adds one primary-key probe of `organisations` when the row has an organisation.
+- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50). *2026-11-20 (D-ARCH-180):* the cases of ADR-0013 amendment 4 item 23 for `org_deleted` and for a job of a soft-deleted organisation. The body above was run on PGlite with stub tables, without roles or row-level security (15 cases: live, deleted and missing organisation, no organisation, soft-deleted quote, unknown id, unknown kind, a hit and a miss in one statement).
+- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3. `organisations` already carries one (§4.3), so `org_deleted` needs no new policy.
+- **Return type.** The fourth column is part of the function from its first migration (TASK-047). `CREATE OR REPLACE` cannot change the return type of a function, so adding it later would have needed a second allow-listed function or a drop under the expand and contract rule.
 
 `mfa_enrolment_overdue_candidates(p_now, p_limit)` (SEC-P3-14) follows the candidate-function shape:
 
@@ -3007,7 +3037,7 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | Function | Why sensitive | Only caller |
 |---|---|---|
 | `auth_lookup_credential` | returns the password hash of any user ID | `apps/api/src/modules/identity/repository` |
-| `job_context` | maps any aggregate ID to its organisation and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
+| `job_context` | maps any aggregate ID to its organisation, says whether that organisation is deleted (2026-11-20, D-ARCH-180), and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
 | `sessions_for_user` | enumerates another user's session IDs | `apps/api/src/modules/identity/repository` (revocation service) |
 | `purge_expired_tokens` | deletes rows across users | `apps/worker` `housekeeping` processor |
 
@@ -4638,7 +4668,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A3 | SEC-P3-03 | Statement-text event trigger withdrawn; **`platform.audit_ddl_guard()`** on `ddl_command_end` (`pg_event_trigger_ddl_commands()`) and `sql_drop` (`pg_event_trigger_dropped_objects()`) matches by object identity, raises `audit objects are immutable (SEC-P3-03)` unless `current_user = 'platform_audit_owner'`; must not be `SECURITY DEFINER`. Row and statement triggers kept; `audit_anchors` and `audit_checkpoint_heads` TRUNCATE triggers added | §5.2, §4.6 C14 |
 | A4 | SEC-P3-03 | §5.5 becomes **"Hourly checkpoint and signed anchor"**: hourly `CHAIN_CHECKPOINT`, delta `audit_checkpoint_heads` (+ `head_occurred_at`), new table **`audit_anchors`** (dense `anchor_seq`, `prev_anchor_hash` chain, `anchor_hash`, algorithm `ECDSA_P256_SHA256`, `key_id`, DER `signature`) written in the same transaction; signing key `AUDIT_ANCHOR_SIGNING_KEY_REF` (worker only), verification keys `AUDIT_ANCHOR_PUBLIC_KEYS`; `AUDIT_CHECKPOINT_KEY` (HMAC) dropped; mandatory sink `AUDIT_ANCHOR_SINK` | §1.6, §1.7, §2.3, §3.4, §4.4, §5.5, §10.1 |
 | A5 | SEC-P3-03 | Verifier: every hourly run checks anchor-log integrity (`ANCHOR_MISSING`, security event `audit_anchor_missing`), signatures (`CHECKPOINT_SIGNATURE_INVALID`) and the anchored heads of the latest anchor (`CHECKPOINT_HEAD_MISMATCH`, `audit_chain_broken`); nightly checks all anchors since the previous nightly run; the "only if configured" wording is removed; new `failure_kind` values and `anchor_seq_from/_to` | §1.7, §3.4, §5.6 |
-| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
+| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (*a fourth column, `org_deleted`, from 2026-11-20: A34*) (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
 | A7 | SEC-P3-01 C1/C2, SEC-P3-11 | `sessions.authenticated_at` (the `auth_time` source, never changed by refresh); web absolute cap 30 days (admin 12 h) with a DB backstop CHECK; `refresh_tokens.expires_at = LEAST(now() + 30 min (admin) / 30 d (web), absolute)` | §3.1 `sessions`, `refresh_tokens` |
 | A8 | SEC-P3-14 (also §9.3 staff seed row) | `users.status_reason` (CHECK incl. `MFA_ENROLMENT_OVERDUE`) and `users.first_signed_in_at`; housekeeping suspends OPERATOR members without active TOTP 24 h after first sign-in via the new candidate function `mfa_enrolment_overdue_candidates`; new table **`mfa_enrolment_codes`** (chosen over a purpose value on an existing token table; reasons in §3.1); `password_reset_tokens.purpose` (`RESET`, `SET_PASSWORD` 24 h); seeded staff outside local have no `user_credentials` row | §1.5, §1.7, §2.1, §3.1, §4.3, §4.5 |
 | A9 | SEC-P3-08 item 1 | `<col>_key_id` sibling for every ciphertext and HMAC lookup column (renames `key_id` → `secret_ciphertext_key_id`, `ciphertext_key_id`, `value_ciphertext_key_id`; adds `code_hmac_key_id`, `ip_prefix_hmac_key_id`, `identifier_hmac_key_id`, `value_hmac_key_id`, `ip_hash_key_id`, `customer_ref_postcode_hmac_key_id`, `response_body_key_id`, `payload.token_enc_key_id`, M3 `credentials_ciphertext_key_id`; `pepper_key_id` reserved for SEC-P3-16); AES-256-GCM 96-bit nonce, 128-bit tag, AAD = JCS([table, column, row id or token, key_id]); `idempotency_keys.response_body` becomes ciphertext; `mfa_recovery_codes` aligned to ADR-0006 HMAC | §3.1, §3.4, §3.5, §3.8, §3.11, §3.16, §5.1, §5.4, §5.6, §5.7, §6.2, §10.4 |
@@ -4665,6 +4695,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A31 | PR #65 / TASK-037 code review round 1 (R1-m1 (b), R1-n1, security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; ADR-0005 amendment 13; D-ARCH-154..157) | **§4.7 (new), §1.1 P12, §4.6 C16:** a reference between two organisation-keyed tables is a composite foreign key through `org_id` (rule T1; T2 where `org_id` is nullable); first instances `membership_roles → memberships` and `memberships → invitations`, each with `ux_<parent>__org_id_id`; new assertion triggers on RLS tables are `AFTER ROW`. **§3.2 `memberships`, §1.7, §4.3:** `trg_memberships__lifecycle_guard` (member = actor and `ACTIVE` at insert; `user_id` and `org_id` immutable; `REMOVED` terminal); "`created_by` = the inviter" at acceptance withdrawn (D-ARCH-157). **§3.2 `invitations`:** rows only in `BUSINESS_CUSTOMER` organisations. **§9.1, §9.3:** a seed transaction that inserts a user or a membership runs with that user as actor. Open: guest-side binding of GUEST_CAPABLE rows (risks.md R-ARCH-34). |
 | A32 | The two dispatch gates of D-SD-002 (R-ARCH-34 and PR293-SEC-03 before TASK-051; PR65-SEC-02 (b) before TASK-089), PR65-SEC-04 (a) and (b), the outbox horizon (`rulings/wave-1-r-arch-34-operator-rulings.md`; ADR-0005 amendment 14; D-ARCH-162..167) | **§4.7, §3.10, §4.3, §1.1 P12:** on a GUEST_CAPABLE table a reference is a pair of composite keys, one per owner column, with no single-column key (T2-G; T2-O for `quotes.requote_of_quote_id`); the claim is one statement; every unique key of a TENANT or GUEST_CAPABLE table holds an owner column, and a uniqueness rule is one index per owner column; a refused reference has one answer. **§4.6 C16:** arm (a) knows guest-bound keys, arm (b) and P9-CK are written down, (b) covers GUEST_CAPABLE tables and exclusion constraints (TASK-051). **§3.2, §1.5, §4.4, §9.1, §9.3:** new GLOBAL table `operator_staff_grants`, written by the provisioning lane as the migrator; lifecycle-guard rule 5 (an operator membership needs a grant) and rule 6 (`INVITED` not reachable by UPDATE), both in a later migration that replaces the function; the PARTNER backstop is deferred to M3; no users transition guard. **§3.5, §6.1, §10.1, §10.5:** the outbox purge horizon is 30 days, as ADR-0004 decides (the 7 days here were never decided). |
 | A33 | TASK-039 code review R1-m1, R1-m7 and R1-n8 (D-TASK039-03); the §8.3 wording routed by D-ORCH-139 (D-ARCH-171, D-ARCH-172) | **§3.5 (new entry), §1.5, §4.4, §10.1, §10.5:** `job_executions`, the idempotency ledger of job effects: SYSTEM, insert-only, unique on `(queue, job_key)`, purged 30 days after completion by the housekeeping job of TASK-043. **§8.3:** rule 10 call sites with their stated limits, the lone carriage return (rule L) and lexer parity are written down as TASK-293 shipped them; rule 14 is to refuse `CREATE CAST` and `CREATE AGGREGATE` (TASK-034). |
+| A34 | TASK-047 dispatch gate (D-SD-003 item 6, D-SD-004 item 8, D-PM-072; ADR-0013 amendment 4; D-ARCH-180) | **§4.5 `job_context`:** the function resolves ownership, not liveness. It filters `deleted_at` on neither the row nor its organisation and returns a fourth column `org_deleted` (true for a soft-deleted or missing organisation, NULL without an organisation). A job of a soft-deleted organisation runs in that organisation's own tenant scope; no refusal reason is added and no job runs in a wider scope. The body selects into variables and ends in one query (run on PGlite with stub tables). Candidate functions that settle, cancel, expire or backfill do not filter on the organisation's `deleted_at`. |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:
