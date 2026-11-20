@@ -344,14 +344,50 @@ describe('[ADR-0004 am. 2 item 11] relay liveness gauges (D-ARCH-183 F7)', () =>
     expect(gauges(metrics.render())).toEqual([0, 4_000]);
   });
 
-  it('a tick that threw reports nothing: the timestamp stops', async () => {
+  it('[D-ARCH-188] a tick that threw after its claim keeps the lag it claimed; the timestamp stops', async () => {
     const metrics = createRelayMetrics();
     await relayWith(fakeDatabase([row(1, A, { age_seconds: 7 })]), metrics, 5_000_000).runOnce();
-    await expect(relayWith(fakeDatabase([row(2, B)], { commit: false }), metrics, 6_000_000).runOnce()).rejects.toThrow();
-    expect(gauges(metrics.render())).toEqual([7, 5_000]);
+    await expect(
+      relayWith(fakeDatabase([row(2, B, { age_seconds: 12 })], { commit: false }), metrics, 6_000_000).runOnce(),
+    ).rejects.toThrow();
+    expect(gauges(metrics.render())).toEqual([12, 5_000]);
     const text = metrics.render();
     expect(text).toContain('# TYPE platform_outbox_relay_oldest_pending_age_seconds gauge');
     expect(text).toContain('# TYPE platform_outbox_relay_last_tick_timestamp_seconds gauge');
+  });
+
+  it('[D-ARCH-188] the lag is set right after the claim, before the first enqueue: a tick held inside an enqueue already shows it', async () => {
+    const metrics = createRelayMetrics();
+    let release = (): void => undefined;
+    let entered = (): void => undefined;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const db = fakeDatabase([row(1, A, { age_seconds: 33 })]);
+    const relay = createOutboxRelay({
+      runner: db.runner,
+      producer: {
+        enqueue: () => {
+          entered();
+          return new Promise<never>((_resolve, reject) => {
+            release = () => reject(new Error('Connection is closed.'));
+          });
+        },
+      },
+      log: capture().log,
+      batchSize: 10,
+      pollIntervalMs: 500,
+      budgetMs: 2_500,
+      enqueueTimeoutMs: 1_250,
+      metrics,
+      wallMs: () => 9_000_000,
+    });
+    const tick = relay.runOnce();
+    await inside;
+    expect(gauges(metrics.render())).toEqual([33, 0]);
+    release();
+    expect(await tick).toMatchObject({ published: 0, failed: 1 });
+    expect(gauges(metrics.render())).toEqual([33, 9_000]);
   });
 });
 

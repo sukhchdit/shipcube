@@ -189,12 +189,14 @@ export function createOutboxRelay(options: OutboxRelayOptions): OutboxRelay {
     const started = monotonic();
     const context = systemContext(`outbox-relay-${String(wall())}`);
     const latencies: number[] = [];
-    let oldestPendingAgeSeconds = 0;
     const tick = await runner.withTenantTx(context, async (db): Promise<RelayTick> => {
       const lock = await db.$queryRaw<
         { locked: boolean }[]
       >`SELECT pg_catalog.pg_try_advisory_xact_lock(${RELAY_LOCK_KEY}::bigint) AS locked`;
-      if (lock[0]?.locked !== true) return { locked: false, claimed: 0, published: 0, failed: 0, full: false };
+      if (lock[0]?.locked !== true) {
+        metrics.pendingAge(0);
+        return { locked: false, claimed: 0, published: 0, failed: 0, full: false };
+      }
       const rows = await db.$queryRaw<RelayRow[]>`
         SELECT id::text AS id, correlation_id, trace_context, aggregate_type, aggregate_id::text AS aggregate_id,
                EXTRACT(EPOCH FROM (pg_catalog.clock_timestamp() - created_at))::float8 AS age_seconds
@@ -203,7 +205,8 @@ export function createOutboxRelay(options: OutboxRelayOptions): OutboxRelay {
          ORDER BY created_at, id
          LIMIT ${batchSize}::int
            FOR UPDATE SKIP LOCKED`;
-      oldestPendingAgeSeconds = rows.length === 0 ? 0 : Number(rows[0]?.age_seconds);
+      // The lag gauge is set before the first enqueue, so a tick held or failing inside one still reports it (D-ARCH-188).
+      metrics.pendingAge(rows.length === 0 ? 0 : Number(rows[0]?.age_seconds));
       const claimedAt = monotonic();
       const published: string[] = [];
       const failures: Failure[] = [];
@@ -246,7 +249,7 @@ export function createOutboxRelay(options: OutboxRelayOptions): OutboxRelay {
     for (const seconds of latencies) metrics.observeLatency(seconds);
     metrics.published(tick.published);
     metrics.failed(tick.failed);
-    metrics.tickEnded({ oldestPendingAgeSeconds, endedAtSeconds: wall() / 1_000 });
+    metrics.tickEnded(wall() / 1_000);
     return tick;
   };
 

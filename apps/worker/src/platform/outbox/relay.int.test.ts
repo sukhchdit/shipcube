@@ -52,6 +52,14 @@ const outbox = createTestOutbox(catalogue);
 
 let postgres: MigratedPostgres;
 let runtime: ActiveDatabaseRuntime<AppTransactionClient>;
+/**
+ * The runner of the F3 ordering test (D-ARCH-188): lock_timeout 10 s, not the 2 s integration default, so T1 is still
+ * waiting on the aggregate row lock when the test observes it in pg_stat_activity and releases T2. The statement and
+ * transaction timeouts are above it.
+ */
+let orderRuntime: ActiveDatabaseRuntime<AppTransactionClient>;
+/** Transaction-local lock_timeout of orderRuntime (at least 10 s, D-ARCH-188). */
+const ORDER_LOCK_TIMEOUT_MS = 10_000;
 let valkey: StartedTestContainer;
 let url: string;
 const log = createRuntimeLog('worker', { write: () => true }, { level: 'debug' });
@@ -169,10 +177,22 @@ beforeAll(async () => {
   url = `redis://${valkey.getHost()}:${String(valkey.getMappedPort(6379))}`;
   runtime = databaseRuntimeFromConfig(configFor(postgres.appUrl), 'worker', log);
   await runtime.startup();
+  orderRuntime = databaseRuntimeFromConfig(
+    {
+      ...configFor(postgres.appUrl),
+      DB_TX_LOCK_TIMEOUT_MS: ORDER_LOCK_TIMEOUT_MS,
+      DB_TX_STATEMENT_TIMEOUT_MS: 20_000,
+      DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 30_000,
+    },
+    'worker',
+    log,
+  );
+  await orderRuntime.startup();
 });
 
 afterAll(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  for (const resource of (orderRuntime as ActiveDatabaseRuntime<AppTransactionClient> | undefined)?.resources ?? []) await resource.close();
   for (const resource of (runtime as ActiveDatabaseRuntime<AppTransactionClient> | undefined)?.resources ?? []) await resource.close();
   await valkey?.stop();
   await postgres?.stop();
@@ -402,7 +422,8 @@ async function untilLockWaiter(): Promise<void> {
 /**
  * The interleaving of D-ARCH-185 F3: T1 begins; T2 begins, locks the aggregate row (`SELECT … FOR UPDATE` on a
  * published outbox row both may lock), inserts E2 and holds; T1 asks for the same lock and waits (seen in
- * pg_stat_activity); T2 commits; T1 gets the lock, inserts E1 and commits. Returns [E1, E2].
+ * pg_stat_activity); T2 commits; T1 gets the lock, inserts E1 and commits. Returns [E1, E2]. Both run on orderRuntime
+ * (lock_timeout 10 s, D-ARCH-188).
  */
 async function interleave(insert: (db: TenantDb<AppTransactionClient>, label: string) => Promise<string>): Promise<[string, string]> {
   const [lockRow] = await publishAll([randomUUID()], 'order-it-lockrow');
@@ -417,15 +438,16 @@ async function interleave(insert: (db: TenantDb<AppTransactionClient>, label: st
   const t1Began = gate();
   const t2Locked = gate();
   const t2Release = gate();
-  const t1 = runtime.tenantTx.withTenantTx(request('order-it-txn-0001'), async (db) => {
-    await db.$queryRaw`SELECT 1`;
+  const t1 = orderRuntime.tenantTx.withTenantTx(request('order-it-txn-0001'), async (db) => {
+    const [setting] = await db.$queryRaw<{ lock_timeout: string }[]>`SELECT pg_catalog.current_setting('lock_timeout') AS lock_timeout`;
+    expect(setting?.lock_timeout).toBe('10s');
     t1Began.open();
     await t2Locked.promise;
     await db.$queryRaw`SELECT id FROM public.outbox_events WHERE id = ${lockRow ?? ''}::uuid FOR UPDATE`;
     return insert(db, 'E1');
   });
   await t1Began.promise;
-  const t2 = runtime.tenantTx.withTenantTx(request('order-it-txn-0002'), async (db) => {
+  const t2 = orderRuntime.tenantTx.withTenantTx(request('order-it-txn-0002'), async (db) => {
     await db.$queryRaw`SELECT id FROM public.outbox_events WHERE id = ${lockRow ?? ''}::uuid FOR UPDATE`;
     const id = await insert(db, 'E2');
     t2Locked.open();

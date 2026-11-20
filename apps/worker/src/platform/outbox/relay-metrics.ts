@@ -10,8 +10,9 @@
  * - `platform_outbox_relay_published_total` / `platform_outbox_relay_failed_total` (counters): rows marked published,
  *   and enqueue attempts that failed (the row stays pending).
  * - `platform_outbox_relay_oldest_pending_age_seconds` (gauge, "relay lag"): the age of the first row of the claim in
- *   the last tick that held the lock; 0 when that tick claimed nothing and 0 after a tick without the lock. Read as the
- *   maximum over the workers.
+ *   the last tick that held the lock, set right after the claim and before the first enqueue (D-ARCH-188), so a tick
+ *   that then hangs or throws inside an enqueue still shows its lag; 0 when that tick claimed nothing and 0 after a
+ *   tick without the lock. Read as the maximum over the workers.
  * - `platform_outbox_relay_last_tick_timestamp_seconds` (gauge): the wall-clock time of the last tick that ended
  *   without an error, with or without the lock; 0 until the first one. A dead loop or an unreachable database shows
  *   as a value that stops.
@@ -20,21 +21,15 @@
 /** Histogram bucket bounds in seconds (the 500 ms poll and the NFR-PERF-004 2 s queue-wait budget sit inside). */
 export const RELAY_LATENCY_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60] as const;
 
-/** What a tick that ended without an error reports to the gauges. */
-export interface TickReport {
-  /** Age of the first claimed row; 0 when nothing was claimed or the lock was not taken. */
-  readonly oldestPendingAgeSeconds: number;
-  /** Wall-clock end of the tick, in seconds. */
-  readonly endedAtSeconds: number;
-}
-
 export interface RelayMetrics {
   /** Records one accepted enqueue `seconds` after its event was written. */
   observeLatency(seconds: number): void;
   published(count: number): void;
   failed(count: number): void;
-  /** Sets both gauges after a tick that ended without an error (a tick that threw reports nothing). */
-  tickEnded(report: TickReport): void;
+  /** The lag gauge: set right after the claim (age of its first row; 0 for none) and to 0 after a tick without the lock. */
+  pendingAge(seconds: number): void;
+  /** The last-tick gauge: the wall-clock end (seconds) of a tick that ended without an error (a tick that threw reports nothing). */
+  tickEnded(endedAtSeconds: number): void;
   render(): string;
 }
 
@@ -63,8 +58,10 @@ export function createRelayMetrics(): RelayMetrics {
     failed(n) {
       failed += finite(n);
     },
-    tickEnded({ oldestPendingAgeSeconds, endedAtSeconds }) {
-      oldestPendingAge = finite(oldestPendingAgeSeconds);
+    pendingAge(seconds) {
+      oldestPendingAge = finite(seconds);
+    },
+    tickEnded(endedAtSeconds) {
       lastTick = finite(endedAtSeconds);
     },
     render() {

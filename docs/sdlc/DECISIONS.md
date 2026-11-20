@@ -6027,3 +6027,121 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Trigger kept (A-112, R-16):** one event after launch that affects more than one user of an address reopens the two narrower designs of amendment 13 item 4.
 - **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.15 (REQ-SEC-005 note), `docs/01-requirements/ASSUMPTIONS.md` (A-112), `docs/01-requirements/PRD.md` 1.16 (§9 R-16, §11). DR-A22, NFR-SEC-005 and the US-040 notes are unchanged: they state the values, which did not change.
 - **Reversibility:** High.
+
+### D-SD-006 · 2026-11-20 · senior-developer · Plan fold for QG-043-C6 (D-QG-002; card lines of D-ARCH-183..187) with the US-011 split of D-PM-079, and the review routings of PR #77 (TASK-079), PR #78 (TASK-038) and PR #79 (TASK-295): the dispatcher is hosted on TASK-047 (now M), TASK-078 owns the 24 h `token_enc` housekeeping (plan regenerated: 295 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Trigger:** the orchestrator's fold request after D-QG-002 (`abd17e2d`) and the merges of PR #77 and #78. D-PM-079 is folded in the same commit because it moves the completion of US-011 onto the dispatcher host this entry chooses. It was still uncommitted in the shared checkout; its card items 1 and 2 are taken as written.
+- **Decision (cards in `docs/04-plan/generator/plan-data.mjs`, outputs regenerated):**
+  1. **TASK-043 (before it merges).**
+     - The planned path of D-TASK043-02 is `apps/worker/src/platform/outbox/**`; `processors/outbox-relay/**` is now the dispatcher, which belongs to TASK-047.
+     - The schema item names `processed_events` and the `job_executions` DELETE grant.
+     - One FIX CYCLE LINES entry carries F1 to F12 of D-ARCH-183, -184, -185 and -187 with their values and tests, plus the D-QG-002 observation that the lag gauge is set at the claim.
+     - The `[QG-043-C7 (a)]` two-session relay-lock test is on the card, with the AT-US-011-04 map note of C7 (c).
+     - D-PM-079 item 1: `us` [] and `part` US-011, and the SCENARIO OWNERSHIP line replaces "All US-011 scenarios".
+  2. **The dispatcher host is TASK-047**, as D-ARCH-184 proposed.
+     - It already runs an `outbox_event` job for AT-US-078-04 and owns the consumer, the job context and the worker runner twin. Every handler goes through the dispatcher, so it needs the context resolution first.
+     - It is in Wave 1, so US-011 (M0 Must DC) completes inside its band without a wave exception (D-PM-079).
+     - Its size goes from S to M. It gains the files `apps/worker/src/processors.ts` and `processors/outbox-relay/**`, plus `apps/api/src/platform/db/with-tenant-tx.ts` with the worker twin, so it gains the shared-file lock `api-tenant-db`. No other batch 1.4 card holds that lock; gen checks it.
+     - New lines: DISPATCHER (verbatim); DISPATCH GATE: FOLLOW-UP JOB RULE, a placeholder for QG-043-C2 that principal-architect must rule before dispatch, with the test of C2; CORRELATION GRAMMAR (verbatim); MERGE ORDER IN BATCH 1.4 (TASK-047 before TASK-049); `[AT-US-011-04]` consumer half, which completes US-011 (D-PM-079 item 2).
+     - Rejected: a new late dispatcher task. It would split the consumer from the context it must resolve, add a task to the full batch 1.4, and need its own US-011 completion.
+     - Rejected: TASK-078 as the host. It is Wave 2, it would carry US-011 to the edge of its band, and the dispatch of TASK-078 waits on QG-043-C3.
+  3. **Publishers.**
+     - TASK-049 carries EVENT TYPE SEQUENCING, as a merge prerequisite inside batch 1.4 (TASK-047 on main first), and the PUBLISH RULE.
+     - The same two rules go on every card whose plan adds an event file or publishes: TASK-059 (verify), TASK-084 (statemachine), TASK-087 (quote), TASK-092 (saga), TASK-099 (reset) and TASK-227 (invite).
+     - They are merge-order lines, not dependency edges, so dispatch is not delayed (D-SD-001).
+  4. **TASK-078.**
+     - HANDLER RULES (verbatim).
+     - DISPATCH GATE: TOKEN_ENC OVERWRITE OUTCOME, a placeholder for QG-043-C3 (principal-architect with security-analyst).
+     - **TOKEN_ENC HOUSEKEEPING OWNER.** TASK-078 builds the 24 h removal of `payload.token_enc`, taking `pg_advisory_xact_lock(478216878200)` in the transaction of its statement (D-ARCH-183), as a scheduled job under the D-SECPR039-01 conditions, with tests at 23 h and 25 h and against a held relay lock.
+     - Why TASK-078: it owns the overwrite after sending and the C3 alternative "accept the 24 h backstop", so the backstop and the rule it backs land in one PR and one security round.
+     - Window accepted: between the TASK-049 merge (first producer of `token_enc`) and the TASK-078 merge (Wave 2), unconsumed `token_enc` rows are bounded only by the 30-day outbox purge. This holds only on local and CI databases, because no deployed environment exists in Run 1, and TASK-078 merges before `v0.1.0-m0`.
+     - Rejected: TASK-049 as the owner. It is on the critical path, and a schedule there would edit the queue definitions that TASK-047 holds in the same batch.
+     - Rejected: TASK-043. Its fix cycle is limited to the D-QG-002 list.
+  5. **TASK-214:** OUTBOX ALARMS (verbatim), plus the D-QG-002 observations: an `absent()` arm (or a worker-down alarm) for OutboxRelayStalled, and the QueueDeadLetterNew page set.
+  6. **PR #77 routings.**
+     - TASK-097: PR079-SEC-01 (the transitive wire-boundary walk; owned file; due before TASK-135), PR079-SEC-02 (the latency wait capped at `deadlineAt`, sandbox-only directives), code review m2 (a tracking anchor on an injected clock; TASK-172 told), PR079-SEC-05 (refuse production contexts, pin the composition root), and the Mock half of m1 / PR079-SEC-03 (validate `maxCallRecords`) unless TASK-092 does it.
+     - TASK-135: a merge prerequisite on PR079-SEC-01.
+     - TASK-092: the CALL RECORD CHANNEL line (m1 / SEC-03 with principal-architect before dispatch). If the channel changes the Mock adapter, TASK-092 asks for the lock `pkg-carriers-mock`.
+     - TASK-132, 135, 139 and 140: PR079-SEC-04 (a throwing logger must not replace the outcome).
+     - TASK-083: code review n9 (orientation-free dimension eligibility).
+  7. **PR #78 routings, on TASK-046.**
+     - A merge prerequisite for PR038-SEC-01: (a) CODEOWNERS plus `LINT_CONTROL_PATHS` and `PROOF_BASE_DIRS`, with a devops pairing for those owned files, or (b) a move under `tools/stylelint-rules/`. Either way with the owned fixtures, with PR038-SEC-02 and with a security round.
+     - The SPACING SCALE line (R1-m1), enforced only after ux-designer amends tokens.md §2 and §5.
+     - Not carded, because no task builds runtime tenant themes in Run 1: the D-TASK038-06 port conditions (i) to (vi). They stay with principal-architect, as D-SECPR038-01 says.
+  8. **PR #79.** PR295-SEC-01, the root-overrides pin test, goes on TASK-015 part 015-C (devops-engineer), due before the next PR that changes the `prisma` or `@prisma/config` tuple, at the latest G3. TASK-295 is shown as PR #79 open. EFFECT-WAIVER closes when PR #79 merges; it is not closed here, because the PR was still open at commit time.
+  9. **Merges recorded.** STATUS rows for TASK-079 (PR #77, `8281055c`) and TASK-038 (PR #78, `4e1163aa`), and the TASK-043 fix-cycle row with its D-QG-002 merge conditions. traceability v1.12: REQ-CARR-004 and REQ-UI-001 are Implemented, and REQ-PLAT-011 notes the Mock hop. It sits above D-PM-079's v1.11, which product-manager commits.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` against the pre-fold file shows 0 changes of branch, title, wave or batch; 19 rows changed (refs; complexity and stories of TASK-047; stories of TASK-043); no new task.
+- **Commit hygiene:** the shared checkout held product-manager's uncommitted D-PM-079/080 edits in DECISIONS.md, traceability.md and `docs/01-requirements/**`. This commit stages index blobs built from HEAD plus my own edits only, so those edits stay in the working tree for product-manager to commit.
+- **Reversibility:** High (plan sources, generated outputs, STATUS, traceability; no code).
+
+### D-ARCH-188 · 2026-11-20 · principal-architect · QG-043-C1 (a) to (d) and QG-043-C7 (a) of D-QG-002, with its observations: the T-83 exception of the relay is noted in ADR-0005 together with how the lint treats the file, two stale statements are corrected, the advisory-lock table names the two session-level locks, and the limit of a held-back aggregate is stated (ADR-0004 amendment 3 items 19, 22 and 23; ADR-0005 amendment 11 notes at items 17 and 20; ADR-0013 amendment 5 item 26)
+- **Trigger:** D-QG-002 (`abd17e2d`), PASS_WITH_CONDITIONS on ADR-0004 amendment 2 and ADR-0013 amendment 5. QG-043-C1 is mine, documents only, due before TASK-043 merges; item 18 of QG-043-C7 (a) is mine as well. D-ARCH-189 and D-ARCH-190 answer QG-043-C2 and QG-043-C3.
+- **Decision, by condition:**
+  - **(a) ADR-0005 amendment 11.** A dated note at item 17 records the one exception (the relay tick enqueues inside its transaction) and answers the two reasons of that item: one connection per worker for at most `3W / 4`, SYSTEM scope and no audit lock; and an enqueue before a failed commit is repeated and absorbed, not undone. A dated note at item 20 says how the lint treats `relay.ts`: it is linted, its tick callback is an R1 root, and the rule reports nothing because the enqueue goes through the injected `producer`, which is not in `names`, and the Valkey call sits in another file in a function without a handle. The lint neither knows the exception nor guards it.
+  - **The lint change that follows** is due with the dispatcher task (TASK-047 by D-SD-006), under the lint lock: `producer` and `jobProducer` join `names`; `relay.ts` alone keeps the list without them through its own entry in `eslint.config.mjs`; the ratchet pins that entry to that one file; two negative fixtures. Nothing changes in the lint for TASK-043.
+  - **(b)** ADR-0013 Alternatives gets a pointer: the Redis lock in the consumer is not built. ARCHITECTURE.md §5.2 now draws the relay as a loop outside the processors and `outbox-relay` as the dispatcher.
+  - **(c)** data-model §6.1: "every advisory lock is a transaction-level one" is narrowed to the runtime role. The table gains a level column, the computed `hashtext` values and two session-level rows: the bootstrap lane (`7336135535684573681`, `tools/db/bootstrap.ts`) and Prisma Migrate's own lock (`72707369`). No two keys are equal.
+  - **(d)** ADR-0004 amendment 3 item 19: other aggregates go on only while the refused row and the later events of its aggregate fill less than one batch. One busy aggregate behind one refused row is enough to stop the relay. `OutboxRelayLag` pages about five and a half minutes after the first refusal, long before that.
+  - **QG-043-C7 (a).** Item 23 adds the lane B test of "one tick at a time".
+- **Observations of D-QG-002, adopted:**
+  - `OutboxRelayStalled` gains an `absent()` arm (ADR-0013 amendment 5 item 26).
+  - The lag gauge is set at the claim, not at the end of the tick.
+  - The relay-lag readiness component is the worker's alone (note at ADR-0017 §5).
+  - RB-06: the replay statement takes the relay lock, and `OutboxRelayLag` is expected during a replay (platform.md, two places).
+  - R-ARCH-37 carries the clock residual (risks.md 1.24).
+  - F3 runs with a `lock_timeout` of at least 10 s.
+  - A foreign key onto `outbox_events` is ruled out (D-ARCH-190).
+  - `QueueDeadLetterNew` pages for `outbox-relay` (D-ARCH-189).
+- **Recorded, not changed:** `published_at` can lie a few milliseconds before `created_at`, because the marks use the start of the tick. Nothing reads the difference, so the statements stay.
+- **Also aligned:** the ADR-0004 Context has a dated pointer to item 15, as D-PM-079 asked; R-ARCH-37 notes that product-manager confirmed order up to the enqueue (A-115).
+- **Change list for the TASK-043 fix cycle, added to F1 to F12:**
+  - F13 (lane B, QG-043-C7 (a)): while one relay's tick is held open inside an enqueue, a second relay's tick returns `locked: false` and claims nothing; after the first commits, every event was enqueued exactly once and in order.
+  - F3: its runner has a `lock_timeout` of at least 10 s.
+  - F7: the lag gauge is set right after the claim, before the first enqueue.
+- **Card lines for the next fold:**
+  - TASK-047, beside DISPATCHER: "T-83 LINT (ADR-0005 amendment 11 item 20, note of 2026-11-20; D-ARCH-188; needs the lint lock): producer and jobProducer join the names option of platform/no-external-calls-in-tenant-tx; apps/worker/src/platform/outbox/relay.ts alone keeps the default list through its own entry in eslint.config.mjs; tools/lint/tenant-tx-disable-ratchet.test.ts pins that the entry names exactly that file; negative fixtures: producer.enqueue inside a withTenantTx callback and inside a function that takes a TenantDb".
+  - TASK-214, in OUTBOX ALARMS: "OutboxRelayStalled has the absent() arm of ADR-0013 amendment 5 item 26; QueueDeadLetterNew pages for booking, payments and outbox-relay; the relay-lag readiness component exists on the worker only".
+  - The runbook task of P7 (RB-06): "the outbox replay takes pg_advisory_xact_lock(478216878200) in the transaction of its statement; OutboxRelayLag is expected during a replay; a relay standing still behind a refused row is repaired by a deploy, and as a last resort an operator marks the row published under the relay lock".
+- **Routed:** security-analyst (QG-043-C4): the two ADR-0005 notes are the text to concur with or to object to, and the T-83 row of the threat model follows before G3.
+- **What was run:** the two `hashtext` values on PGlite (PostgreSQL 17.5) and the bootstrap key in Node. Prisma's constant was found by a string search in the engine binaries of the locked version (`node_modules/prisma/build/schema_engine_bg.wasm`, `node_modules/@prisma/engines/`); I did not run a migration to watch the lock. The lint statement was read from `tools/eslint-rules/no-external-calls-in-tenant-tx.mjs` and `eslint.config.mjs` on main; the lint was not run.
+- **Applied in:** ADR-0004 (Context pointer; amendment 3 items 19, 22, 23; dated pointers in amendment 2 items 11 and 18); ADR-0005 amendment 11 items 17 and 20; ADR-0013 (Alternatives, item 14, amendment 5 items 25 and 26); ADR-0017 §5; ARCHITECTURE.md §5.2; data-model §6.1 and A36; platform.md §5.5, §8.5, §10.4 and the RB-06 row; risks.md 1.24.
+- **Reversibility:** High (documents; one lint entry later).
+
+### D-ARCH-189 · 2026-11-20 · principal-architect · QG-043-C2 of D-QG-002: follow-up jobs of an outbox handler are enqueued by the dispatcher, after the handler's commit and on every delivery, from references read from the database; `QueueDeadLetterNew` pages for `outbox-relay` (ADR-0004 amendment 3 item 20; ADR-0013 amendment 5 item 26)
+- **Trigger:** QG-043-C2, due before the dispatcher task is dispatched (TASK-047 by D-SD-006, whose card holds a placeholder line for this rule).
+- **What was wrong in my text:** amendment 2 item 12 said that a handler writes the row its follow-up job names, "so the enqueue can be repeated from the row", and that a handler which already committed "finds its claim and does nothing". It did not say who repeats the enqueue. A crash between the commit and the enqueue left a claim, a row and no job, and the retry skipped the handler. The booking saga chains its steps through outbox events, so the gap was on the saga's path; only the saga sweeper would have closed it.
+- **Decision:**
+  1. A handler has two parts. `apply` is the effect and runs only when the `processed_events` claim was inserted. `followUps` runs after the claim attempt on every delivery, in the same transaction, and reads the job references this event requires from rows in the database. It writes nothing.
+  2. The dispatcher enqueues the references after the commit, with no transaction open, with the deterministic job ids of ADR-0013 and the correlation id and trace context of the event job.
+  3. The event job completes only when every handler committed and every reference was accepted. A failed enqueue fails the event job, and BullMQ retries it.
+  4. On a second delivery `apply` is skipped and the references are enqueued again. BullMQ ignores a retained id, and the follow-up job's own `job_executions` claim absorbs a second run.
+  5. No handler holds the producer. The lint enforces it from the dispatcher task on (D-ARCH-188).
+  6. `QueueDeadLetterNew` pages for `outbox-relay`, and the deployment alarm `dlq-growth` covers it: a dead-lettered event job leaves rows without their jobs.
+- **Why:** it is "published only after accept", one hop later. The enqueue stays outside every transaction, so ADR-0005 amendment 11 item 17 needs no second exception. The source of the references is the database, so nothing depends on what a process remembered before it died.
+- **Alternatives rejected:**
+  - A transactional job row relayed by the relay onto the module's queue: the same guarantee with one mechanism, but the relay would again route to several queues and read more than identifiers, and TASK-043's table and relay would change after their review. It is the fallback.
+  - A sweep in every module as the only mechanism: the normal path would be polling. A sweep stays a backstop, and the saga has one.
+  - The handler enqueues inside its transaction: a second T-83 exception, and an enqueue before a failed commit would start a job for a row that does not exist.
+- **Card lines for the next fold:**
+  - TASK-047, in place of the placeholder "DISPATCH GATE: FOLLOW-UP JOB RULE": "FOLLOW-UP JOBS (ADR-0004 amendment 3 item 20; D-ARCH-189; QG-043-C2): a handler has apply (the effect, only when the processed_events claim was inserted) and followUps (runs after the claim attempt on every delivery, in the same transaction, and reads the job references queue, kind, id and optional step from rows in the database; it writes nothing); after the commit, with no transaction open, the dispatcher enqueues every reference through the job producer with the deterministic job id and the correlation id and trace context of the event job; the event job completes only when every handler committed and every reference was accepted; no handler holds the producer; tests: a failure between the handler's commit and the follow-up enqueue ends with the job enqueued once the event job is delivered again, and apply ran once; a second delivery after a success adds no second job".
+  - TASK-078 and every later handler task, in HANDLER RULES: "the handler is written as apply and followUps (ADR-0004 amendment 3 item 20); followUps never misses a row that still needs its job".
+- **Gate:** with this entry the architect's half of the TASK-047 dispatch gate is answered. quality-gatekeeper re-verifies at G3, and security-analyst sees the rule in its round on TASK-047.
+- **Not run:** nothing. The rule is a design for code that does not exist yet.
+- **Applied in:** ADR-0004 amendment 3 item 20 with a dated pointer at amendment 2 item 12; ADR-0013 item 14 and amendment 5 item 26; platform.md §5.5 and §8.5.
+- **Reversibility:** High before the dispatcher exists; Medium after, because handlers are written to the two-part shape.
+
+### D-ARCH-190 · 2026-11-20 · principal-architect · QG-043-C3 of D-QG-002: the `token_enc` overwrite after sending carries no `published_at` predicate — an unpublished row may be locked by a holder of the relay lock or by the consumer of its own event; the overwrite is by id with a row-count check; security-analyst confirms before TASK-078 (ADR-0004 amendment 3 item 21)
+- **Trigger:** QG-043-C3, due before TASK-078 is dispatched. The condition offered two ways: the overwrite checks its row count and is retried, or security-analyst accepts the 24 h backstop for the case in writing.
+- **What was wrong in my text:** amendment 2 item 14 gave the overwrite the predicate `published_at IS NOT NULL`, to keep "only a holder of the relay lock writes an unpublished row". The enqueue runs before the mark commits, so the notification can be sent while the row is still unpublished. The statement would then match no row and return without an error, and the token would stay until the 24 h housekeeping. That weakens what amendment 1 promised for SEC-P3-08.
+- **Decision:**
+  1. **The fourth order condition is restated.** An unpublished row is locked only by (i) a transaction that holds the relay lock, or (ii) the consumer of that row's own event.
+  2. **The overwrite is case (ii).** One `UPDATE … WHERE id = $event_id` through a port of the outbox module, without a `published_at` predicate, and with a check that exactly one row was updated. No row is a defect and fails the job.
+  3. The overwrite is a step of its own after the send is recorded, so a retry never sends twice. A wait on the relay's row lock that exceeds `lock_timeout` fails the step, and the job's retry runs it again.
+  4. Unchanged: the purge carries `published_at IS NOT NULL`; the 24 h housekeeping takes the relay lock; an outbox replay takes it too.
+  5. No foreign key references `outbox_events`: a referential check would lock the row.
+- **Why case (ii) is safe:** the consumer of an event runs only after the queue accepted that event's job, so the place of the event in the queue is fixed. If a tick passes over the row because the consumer holds it, the events that tick enqueues come after the job that already exists, and the next tick adds the row's job id again, which BullMQ ignores.
+- **Why neither offered way as written:** the first leaves a window that closes only by a retry; the second gives up part of a security promise for no gain. Without the predicate there is no window: while a tick holds the row the statement waits and then applies, and after a rolled-back tick it applies at once. The row-count check asked for by the first way is kept.
+- **Card lines for the next fold (TASK-078, which owns the overwrite and, by D-SD-006, the 24 h housekeeping):** "TOKEN OVERWRITE (ADR-0004 amendment 3 item 21; D-ARCH-190; QG-043-C3): after the send is recorded the consumer removes token_enc with one UPDATE by event id through a port under apps/*/src/platform/outbox, without a published_at predicate, and fails the job unless exactly one row was updated; the overwrite is a step of its own, so a retry never sends twice; tests: the token is removed (a) while an open relay tick still holds the event row and (b) after a relay tick that rolled back, the relay then publishes the row once and two events of the aggregate keep their order in the queue; an overwrite that updates no row fails the job; no column of this task is a foreign key onto outbox_events".
+- **Routed:** security-analyst confirms the rule before TASK-078 is dispatched (SEC-P3-08 item 1 is its finding). If it prefers one of the two ways of the condition, the item comes back to me. I did not ask it in this session: its record would have been written into the shared checkout while a plan fold was staged there.
+- **Not run:** nothing between two sessions. The claim that the statement waits for the tick and then applies rests on PostgreSQL's READ COMMITTED semantics until the TASK-078 test.
+- **Applied in:** ADR-0004 amendment 3 item 21 with dated pointers at amendment 1 and at amendment 2 item 14; data-model §3.5, §6.1 (fourth condition) and A36; risks.md 1.24 (R-ARCH-37 mitigation text).
+- **Reversibility:** High (one statement and one predicate; TASK-078 is not built).
