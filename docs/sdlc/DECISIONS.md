@@ -5246,3 +5246,53 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **For G3:** part 041-B merged before TASK-052 was dispatched; tests A3, A4, B1 (1) to (8) and B3 of the rulings file; the 2-replica run of NFR-SEC-005; the outage tests of TASK-190 and the SEC-TC-41 row; the TASK-215 pin; the rating of R-ARCH-36 (a) at TASK-055; `.env.example` line 26 (user, code review C5).
 - **No evidence note:** gate verdicts live in `docs/sdlc/gates/`; a verification under CLAUDE.md §5 has no file convention, so this entry is the record.
 - **Reversibility:** High (a verification record; it changes no artefact).
+
+### D-API-001 · 2026-11-20 · api-designer · README edits made on the orchestrator's authority by TASK-292 (§11 intro, §18; PR #69) and PR #65 (§11 internal row, `MEMBERSHIP_STATUS_NOT_WRITABLE`) are acknowledged as on main; standing rule for internal codes
+- **Decision:** both edits are accepted with no change. This closes the api-designer acknowledgement of D-ORCH-136, D-TASK292-05 (code review PR-0069 §3, including R1-m3) and D-TASK037-08 (the "acknowledged at the next sheet fold" line of the PR #65 entry).
+- **Checked against main (`940bff2`):**
+  - §11 intro: the catalogue is `packages/shared/src/errors/catalogue/` (14 module files plus `index.ts`, entries `status` and `title`). The parity test is `tests/generated/error-catalogue.test.ts`. `FRAMEWORK_ONLY_CODES` is exactly `METHOD_NOT_ALLOWED`, and each example's `type` is derived from its code. `EXEMPT_ERROR_CLASSES` names the same four classes as the README. The scan reads only a literal first argument. No `api:check-errors`/`api:sync-errors` script exists, and none is claimed. R1-m3, R1-n2 and R1-n3 are reflected.
+  - §18 step 2: `npm run test:contract` runs `tests/generated` and `tools/openapi` (unit project), as stated.
+  - The PR #65 row matches `ORGANISATION_INTERNAL_CODES` (`organisation-rules.ts:43`), and the code answers 500 `INTERNAL_ERROR`.
+- **Standing rule (it removes a per-PR acknowledgement):** D-TASK292-01 made the Values column of §11 "Codes that are not HTTP problem codes" a test input. So a task that introduces an internal-only code may add it to the "Internal / start-up only" row in its own PR without asking first, under three conditions: the code is not in the catalogue, it can surface only as 500 `INTERNAL_ERROR`, 503 or a non-HTTP status, and the Where cell names the throwing class and the task. api-designer acknowledges these at the next README fold. Any other README edit (a new HTTP code, a table row, §7/§13 semantics) still needs an api-designer decision or an orchestrator authorisation.
+- **Why:** the wording is accurate against the code, and keeping the parity arm and its doc in one PR stops them drifting (D-ORCH-136's reason).
+- **Alternatives:** re-word §11 on main now (rejected: a lane-B tooling input, which would make open PRs' evidence stale, and nothing in it is wrong).
+- **Reversibility:** High.
+
+### D-API-002 · 2026-11-20 · api-designer · TASK-076 (branch `feat/TASK-076-pure-pricing-engine-integer-money`, head `f6de9578`): the §11 internal-row additions `PRICING_INPUT_INVALID`, `COST_SOURCE_NOT_SUPPORTED`, `CURRENCY_UNKNOWN`, `MONEY_INVALID`, `RATE_INVALID` are acknowledged (D-TASK076-10)
+- **Decision:** accepted verbatim, as `git show f6de9578:docs/03-architecture/api/README.md` line 394 has it. The row falls under the standing rule of D-API-001.
+- **Checked:**
+  - The codes equal `PRICING_ERROR_CODES` (`packages/pricing/src/errors.ts`) plus `MONEY_ERROR_CODES` (`packages/shared/src/money/errors.ts`). `CURRENCY_MISMATCH` and `PRICING_CONFIG_INVALID` were already listed.
+  - Neither class is an `AppError`, so both surface as 500 `INTERNAL_ERROR` (code review r2, decisions 04 and 10).
+  - None of the five names collides with a catalogue code or an OpenAPI enum value.
+  - The cell cites D-TASK076-04 (the error model). D-TASK076-10 is the edit itself. Both are correct.
+- **Merge order:** TASK-041 edits §13 and §7, and TASK-076 edits §11, so the two are textually independent. Whichever merges second re-runs the unit lane, because the parity test reads the §11 row.
+- **Reversibility:** High.
+
+### D-API-003 · 2026-11-20 · api-designer · TASK-041: §13 runtime row `rate_limit_store_unavailable` (D-TASK041-09) acknowledged; the §7 text of rulings/wave-1-task-041-rulings.md §5.1 (part 041-A) and §5.2 (part 041-B) acknowledged; §13 `rate_limit_auth` names the class `authn-failed` with part 041-B
+- **§13 row (branch `feat/TASK-041-valkey-backed-rate-limiting-per` at `ba4d0aa`): accepted.** This closes code-review C2 and the api-designer half of QG-041-C1 for the row.
+  - The fields `store, scope` and the level `error` equal `SECURITY_EVENT_FIELDS` and `SECURITY_EVENT_LEVEL` on the branch. The emitters are `kit.ts` (`store: 'valkey'`), with no key, host or value.
+  - Two wording changes for the 041-A head. They do not block it: if they miss it, I fold them at the next README fold.
+    - (i) Replace "*api-designer to acknowledge.*" with "*acknowledged D-API-003.*".
+    - (ii) Replace "(security classes and the denial budget)" with "(the per-instance fallback set of ADR-0016 amendment 12 item 8, and the denial budget)", and "ADR-0016 item 8" with "ADR-0016 amendment 12 item 8". As written, "item 8" now reads as amendment 12's item and would be wrong for 041-A.
+  - The `carrier-admission` scope of TASK-190 (card line 6) widens the Source cell. That edit belongs to TASK-190, under the same acknowledgement pattern.
+- **§7 text: accepted.** §5.1 lands at the 041-A head and §5.2 with part 041-B, verbatim. Until then ADR-0016 amendment 12 prevails over README §7 (D-QG-001).
+  - Optional precision, my preference, not a condition: in §5.1, change "per IP for the public and authentication classes, per user for `authenticated`" to "keyed as the table below states". The `email-send` and `quote-create` keys are not per IP or per user only.
+  - If the PR touches the route-specific table, "in Redis" in the stream row may read "in Valkey". This is optional.
+- **`rate_limit_auth` and `authn-failed`: name it.** Event column and Extra-fields cell unchanged ("class, key type"), so SEC-TC-63 (event-set parity, allow-listed fields named in the cell) is unaffected. Only the Emitted-when cell changes:
+  - With part 041-A: "`auth` or `email-send` class limit hit; logged once per key and window, at the first refusal (a counter counts every refusal; §7)".
+  - With part 041-B, the full cell: "`auth` or `email-send` class limit hit, or (`class` = `authn-failed`) the failed authentication that spends the last unit of the per-IP failed-authentication budget of step 0 (§7); logged once per key and window, at the first refusal (a counter counts every refusal). `authn-failed` is a value of this event's `class` field only, never an `x-rate-limit-class`".
+  - Why: the catalogue promises a stable event schema to log consumers. Alert rules key on `class`, so an undocumented value would be silently missed, or mistaken for a route class.
+  - Alternatives: a separate event name (rejected: it changes the SEC-TC-63 set and REQ-SEC-012's named set for no consumer benefit, and rulings §4 B1 already chose `rate_limit_auth`); leaving it implicit (rejected, as above).
+- **Reversibility:** High (documentation; the values are already fixed by ADR-0016 amendment 12).
+
+### D-API-004 · 2026-11-20 · api-designer · Open README follow-ups prepared as a held patch, not committed (lane-B inputs): `.orch/held/api-designer-readme-fixes.patch` against main `940bff2`
+- **Decision:** the four fixes below are prepared as one patch (`git apply --check` clean on `940bff2`). The orchestrator lands it when no lane-B evidence is pending. The follow-ups close when it lands.
+  1. README §12 Retries and DLQ: `<queue>:dead` becomes `<queue>-dead`, with the retention of ADR-0013 amendment 3 (14 days, at most 2,000 records per queue).
+  2. README §13 `job_context_mismatch`:
+     - the reason is `PAYLOAD_INVALID` (what `job-handler.ts:128` logs) or `JOB_CONTEXT_NOT_FOUND` (TASK-047), not `PAYLOAD_TENANT_FIELD`;
+     - the Source cell cites ADR-0013 amendment 1, not amendment 2;
+     - the event name and allow-listed fields are unchanged, so SEC-TC-63 holds.
+  3. REQ-SEC-012 (REQUIREMENTS.md): "ADR-0013 am. 2" becomes "am. 1". This is a one-token citation fix that D-PM-072 left outside product-manager's edit. It is a separate hunk, so the orchestrator may drop it if product-manager prefers to land it.
+  4. openapi.yaml `acceptInvitation` description: "The membership `created_by` is the inviter" becomes the D-ARCH-157 wording (the accepting user is `created_by`, `invitation_id` is set, and the inviter is the invitation's `created_by`). The same sentence is changed in `packages/shared/src/api/types.gen.ts`.
+- **Validation:** the generated types are fresh against the patched contract (`checkGenerated` = no stale file; the unpatched contract reports it stale, as a control). Redocly lint is valid with the same 8 accepted warnings. No other test was run.
+- **Reversibility:** High.
