@@ -135,6 +135,16 @@ SPK-02's verdict was **UPS GO; FedEx and DHL Express FALLBACK for the named oper
        - The request and response types of the port (`RateRequest`, `RateQuote`, `RateResponse` and the others of `canonical/types.ts`) stay in `packages/carriers`. They belong to the port, and their consumers already depend on it. One of them moves only when a browser or pricing consumer needs it.
        - Until the move, no file outside `packages/carriers`, `apps/api` and `apps/worker` imports a vocabulary, and nobody copies a list.
 
+## Amendment (2026-11-20, TASK-041 security review PR041-SEC-03; D-ARCH-178)
+
+13. **The carrier admission controls never fail open (completes amendments 2, 3 and 10).** The anonymous token bucket, the daily quota guard and the organisation share keep their counters in Valkey. Amendments 2 and 3 did not say what happens when a counter cannot be read or written (an error, a timeout, `OOM` under `noeviction`, an open breaker). The HTTP classes in front of them partly fail open (ADR-0016 amendment 12 item 8), so without a rule a Valkey outage would become unbounded anonymous carrier traffic.
+    1. **Refuse what the control can refuse.** While the counters are unavailable, anonymous fan-out to the account (guests and unverified users) is refused locally, and so are rates-pool calls of verified callers to an account whose `CARRIER_DAILY_QUOTA` is above 0. The outcome is the `LOCAL_REJECT` class of amendment 4: `CARRIER_BUSY` for that carrier, cached results still served, the quote still created. An account with the guard off (`CARRIER_DAILY_QUOTA=0`, the Mock default) keeps serving verified callers.
+    2. **Never refuse a booking.** `transactional` calls continue, as amendment 3 says. They are counted in process and added to the day's counter when the store answers again. If that addition is lost, the counter is short by the bookings of the outage at most.
+    3. **No waiting.** The store calls are bounded by 250 ms and sit behind a breaker, as in ADR-0016 amendment 12 item 7, so a refusal costs no wait.
+    4. **Signal.** The runtime security event `rate_limit_store_unavailable` with `scope: carrier-admission`, at most once a minute per instance; the refusals count in `carrier_bulkhead_rejects_total`.
+    5. **Why refusal and not a per-instance fallback.** K replicas would multiply the anonymous bucket by K during the one period when the shared view is missing. What it risks is slow to recover: a carrier's daily quota is gone until 00:00 UTC (amendment 10), and carrier-side throttling is keyed by the egress IP that every replica shares (amendment 11 records a 10-minute FedEx penalty for its token service). Guests and rate shopping are the traffic the platform can pause; bookings are not.
+    6. **Owner and proof.** TASK-190, which builds the bucket and the guard. Tests: with the store failing, a guest quote gets `CARRIER_BUSY` for the account and makes no carrier call; a booking still reaches the carrier; the calls of the outage are added to the counter afterwards. SEC-TC-41 gains the outage row (qa-lead). Until TASK-190 the only carrier is the Mock, and the per-instance fallback of the `public-quote` and `public-tracking` classes is the guard.
+
 ## Reversibility
 
 High (adapters and wrapper are internal to `packages/carriers`).

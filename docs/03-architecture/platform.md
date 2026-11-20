@@ -406,7 +406,7 @@ An S3-only static origin was rejected: it would duplicate the header and CSP con
 | `/health/*`, `/metrics` | none (CloudFront Function returns 404) | — | Internal only. |
 | default (`*`) | ALB → Nginx tasks | `CachingDisabled` for HTML. Nginx `no-cache` is honoured. | Pre-rendered public pages are small, and HTML must reflect the current release. |
 
-- **Viewer security policy:** `TLSv1.2_2021`, HTTP→HTTPS redirect, ACM certificate in us-east-1. CloudFront sends the client IP in `CloudFront-Viewer-Address`. The API derives the client IP from it, or from `X-Forwarded-For` with `TRUST_PROXY_HOPS=2`. This matters for rate limits and audit IPs (OI-16, threat model).
+- **Viewer security policy:** `TLSv1.2_2021`, HTTP→HTTPS redirect, ACM certificate in us-east-1. The API derives the client IP from `X-Forwarded-For` with `TRUST_PROXY_HOPS=2` (CloudFront and the ALB are the two trusted hops). `CloudFront-Viewer-Address` is not read: one mechanism decides the client IP (ADR-0016 amendment 12 item 9, D-ARCH-179). The value is safe only while `sg-alb` admits nothing but the CloudFront origin-facing prefix list and the ALB refuses a request without `X-Origin-Verify`; a Terraform test pins the three together (TASK-215). The first pipeline that deploys to a real target adds a post-deploy smoke check that the audited IP of a request is not an ALB or CloudFront address (devops-engineer; a precondition of G4 for a production release, PR041-SEC-05). This matters for rate limits and audit IPs (OI-16, threat model).
 - **ALB:**
   - HTTPS listener with `ELBSecurityPolicy-TLS13-1-2-2021-06` (TLS 1.2 minimum, NFR-SEC-007). HTTP listener redirects only.
   - `sg-alb` admits the CloudFront origin-facing prefix list only, and a listener rule denies requests without a valid `X-Origin-Verify` header (403).
@@ -623,7 +623,7 @@ All tasks use `networkMode = awsvpc` (task-level SGs, ENI trunking enabled on th
 | `bootstrap` (one-off `RunTask`, once per environment; *added 2026-11-14, D-ARCH-117*) | 512 / 1024 | `tooling` image, `command: ["bootstrap"]` | none | `db/bootstrap` only (the only task definition that can read it; run by `cd.yml` after `infra-apply`, never from a terminal) | exit code | n/a |
 
 - **Logs:** log driver `awslogs` with `mode=non-blocking`, `max-buffer-size=25m`, group `/shipcube/<env>/<service>`, KMS `logs`. Pino writes JSON to stdout (NFR-OBS-001).
-- **Non-secret config** is plain environment variables: `APP_ENV`, `AWS_REGION`, `S3_BUCKET_*`, `OTEL_*`, `DEPLOY_COLOUR`, `TRUST_PROXY_HOPS=2`, `DB_POOL_MAX`.
+- **Non-secret config** is plain environment variables: `APP_ENV`, `AWS_REGION`, `S3_BUCKET_*`, `OTEL_*`, `DEPLOY_COLOUR`, `TRUST_PROXY_HOPS=2`, `DB_POOL_MAX`. `TRUST_PROXY_HOPS` has no usable default here: the schema default is 0 and the API refuses to start in staging and production unless the value is set and at least 1 (D-ARCH-179).
 - **IAM per task role:**
   - api: `s3:GetObject`/`PutObject` on `documents/*` and `raw-carrier-payloads/*`; `kms:GenerateDataKey`/`Decrypt` on `s3-data` and `app-envelope`; `xray:PutTraceSegments`/`PutSpans`; `logs:PutLogEvents` (EMF); `cloudwatch:PutMetricData` with a namespace condition.
   - worker: as api, plus `ses:SendRawEmail` (from-address condition) and `s3:PutObject` on `audit-archive/*` (Object Lock retention header required by bucket policy; M5).
@@ -1351,7 +1351,7 @@ These are **ranges, not quotes**, based on on-demand list prices for `us-east-1`
 | OI-13 | PD-05 (ALB health on `/health/live`) narrows REQ-PLAT-018 readiness to a deployment gate in AWS. | Confirm in the deployment ADR. api-designer documents both endpoints' consumers. | principal-architect, api-designer |
 | OI-14 | The SSE quote stream must resume on any replica (no stickiness). | api-designer specifies `Last-Event-ID` resume from persisted results. | api-designer |
 | OI-15 | BullMQ requires `noeviction`. Cache, rate-limit and revocation keys share the instance. | TTL on every non-queue key (lint and test), memory alarm at 70 %, split clusters at 10×. | data-architect, devops-engineer |
-| OI-16 | Client-IP derivation behind CloudFront + ALB (2 hops) and the compose edge (1 hop) for rate limits and audit IP. | `TRUST_PROXY_HOPS` config, with `CloudFront-Viewer-Address` preferred. threat-modeler adds spoofing cases. | threat-modeler, api-designer |
+| OI-16 | Client-IP derivation behind CloudFront + ALB (2 hops) and the compose edge (1 hop) for rate limits and audit IP. | `TRUST_PROXY_HOPS` config: 0 by default, 1 in Compose, 2 on AWS, required in staging and production. `CloudFront-Viewer-Address` is not read (**resolved 2026-11-20**, ADR-0016 amendment 12 item 9, D-ARCH-179; the hop matrix is in the TASK-041 security record §4.3). | threat-modeler, api-designer |
 | OI-17 | SES production access and the inbound-receiving region list are account-owner actions. | Track as M4/M5 tasks. Mailpit until then. | release-manager |
 
 ### 12.3 Security-review amendments (2026-11-12)
