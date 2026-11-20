@@ -374,3 +374,37 @@ FINDINGS: 0 BLOCKER, 0 MAJOR, 1 MINOR (R4-m1), 1 NIT (R4-n1)
 - Accepted alternative: commit-bound exact entries in `.gitleaks.toml` under D-SEC-PR45-01, delivered in their own PR before TASK-040's lane A.
 
 Under (a), the lane B run queued on `93f0f126` is not the PR's gitleaks evidence: merge condition 2 then applies to the superseding head, and this review owes a supersede round (a partition proof by SHA: `git diff --quiet e96bd979 <new head>` plus a check of the main delta).
+
+---
+
+# Supersede round: `feat/TASK-040-idempotency-keys-v2` at `2abd665f` (2026-11-20)
+
+This branch replaces `feat/TASK-040-idempotency-keys` for R4-m1, under D-SECPR040-02 route (2). The old branch stays as it is, unpushed, and is the archive of the reviewed SHAs. No ref was moved and nothing was force-pushed.
+
+```
+VERDICT: APPROVED_WITH_NITS (conditional), bound to 2abd665f (tree a6b0bf97)
+SUMMARY: 2abd665f is one commit on main's f65d7955. Its tree equals the clean merge of the round-4 head e96bd979 with
+  that base, and it differs from e96bd979 only in the 21 documentation files main changed meanwhile, each
+  blob-identical to main's. The round-4 verdict and findings carry over unchanged; R4-m1 is closed by this branch.
+```
+
+| Check (all by SHA, from the main checkout, no build) | Result |
+|---|---|
+| Shape | `git rev-list --parents -n1 2abd665f` gives one parent, `f65d7955`, which is an ancestor of `origin/main` (`git merge-base --is-ancestor`). Not a merge. |
+| Tree equality | `git rev-parse 2abd665f^{tree}` = `a6b0bf97`, and `git merge-tree --write-tree e96bd979 f65d7955` = `a6b0bf97`. **Equal**, and `git diff` between them is empty. |
+| Nothing but the squash differs | `git diff --name-only e96bd979 2abd665f` lists 21 files, all under `docs/`, and no code path. The set equals `git diff --name-only afb2b73c f65d7955` (main's delta since the round-4 head's last merge). For each of the 21 files the blob at `2abd665f` equals the blob at `f65d7955`. |
+| Literal gone from the range | The UUID literal of R4-m1 occurs 0 times in `git diff f65d7955 2abd665f` and 0 times in the commit message, so the new PR range holds no flagged line. |
+| Commit message | Conventional subject; 0 body lines over 100 characters. |
+| Current main | `origin/main` = `728599e0` (one docs commit after the base). `git merge-tree --write-tree 2abd665f origin/main` is clean. |
+
+**Binding.**
+- Rounds 1 to 4 reviewed `95945b7e` to `e96bd979`. Their code is byte-identical in `2abd665f`, so the round-4 verdict now binds to `2abd665f`: APPROVED_WITH_NITS, no BLOCKER or MAJOR open.
+- Open and routed to part 040-B, not blocking: R3-m1 and R2-n1 (ADR-0014 am. 10 and 16).
+- Open NITs: R4-n1 (data-model envelope fold), R2-n3, R2-n4.
+- Not re-run here, as in round 4 (disk then full): Jest, `tsc`, ESLint and Prettier. The test evidence is lane B on `2abd665f`.
+
+**Merge conditions (replace R4.4).**
+1. Lane B on PostgreSQL 18 green on `2abd665f`, including `gitleaks-full`, plus lane A with its PR-range gitleaks scan. The run queued on `93f0f126` is not this PR's evidence.
+2. A security-analyst record bound to `2abd665f`.
+3. The second of TASK-040 and TASK-043 to merge takes the four literal unions and settles R2-n4.
+4. Part 040-B carries R3-m1 and R2-n1.
