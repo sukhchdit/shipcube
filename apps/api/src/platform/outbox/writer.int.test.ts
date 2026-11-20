@@ -17,7 +17,9 @@ import { createApp } from '../../app.js';
 import type { AppTransactionClient } from '../db/index.js';
 import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../db/runtime.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
+import { closeLoopbackServer, fetchOnce } from '../routing/tests/loopback.js';
 import { createRuntimeLog } from '../runtime/log.js';
+import { TEST_LANE_TX_IDLE_TIMEOUT_MS } from '../tx/tests/runtime-twin.js';
 import type { OutboxDb } from './index.js';
 import { type MigratedPostgres, startMigratedPostgres } from './tests/migrated-postgres.js';
 import { createTestOutbox } from './tests/test-outbox.js';
@@ -65,7 +67,7 @@ const configFor = (url: string): Config =>
     DB_STATEMENT_TIMEOUT_MS: 25_000,
     DB_TX_STATEMENT_TIMEOUT_MS: 5_000,
     DB_TX_LOCK_TIMEOUT_MS: 2_000,
-    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: 15_000,
+    DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: TEST_LANE_TX_IDLE_TIMEOUT_MS,
   }) as unknown as Config;
 
 describe('[AT-US-008-03] outbox hop through the composed API on PostgreSQL 18', () => {
@@ -104,13 +106,13 @@ describe('[AT-US-008-03] outbox hop through the composed API on PostgreSQL 18', 
   }, 300_000);
 
   afterAll(async () => {
-    await new Promise<void>((resolve) => (server as Server | undefined)?.close(() => resolve()) ?? resolve());
+    if ((server as Server | undefined) !== undefined) await closeLoopbackServer(server);
     for (const resource of (runtime as ActiveDatabaseRuntime<AppTransactionClient> | undefined)?.resources ?? []) await resource.close();
     await (postgres as MigratedPostgres | undefined)?.stop();
   }, 60_000);
 
   it('[AT-US-008-03] [AT-US-011-01] the event commits with the handler transaction and carries the request X-Correlation-Id', async () => {
-    const response = await fetch(`${base}/fixtures/outbox-publish`, { headers: { 'X-Correlation-Id': CORRELATION } });
+    const response = await fetchOnce(`${base}/fixtures/outbox-publish`, { headers: { 'X-Correlation-Id': CORRELATION } });
     expect(response.status).toBe(200);
     expect(response.headers.get('x-correlation-id')).toBe(CORRELATION);
     const { id } = (await response.json()) as { id: string };
@@ -119,7 +121,7 @@ describe('[AT-US-008-03] outbox hop through the composed API on PostgreSQL 18', 
 
   it('[AT-US-011-02] a handler transaction that fails after the publish leaves no event', async () => {
     const before = await rows();
-    const response = await fetch(`${base}/fixtures/outbox-rollback`, { headers: { 'X-Correlation-Id': 'Client-Corr-0802' } });
+    const response = await fetchOnce(`${base}/fixtures/outbox-rollback`, { headers: { 'X-Correlation-Id': 'Client-Corr-0802' } });
     expect(response.status).toBeGreaterThanOrEqual(500);
     expect(await rows()).toEqual(before);
   });

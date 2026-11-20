@@ -13,8 +13,9 @@
  *   the last tick that held the lock, set right after the claim and before the first enqueue (D-ARCH-188), so a tick
  *   that then hangs or throws inside an enqueue still shows its lag; 0 when that tick claimed nothing and 0 after a
  *   tick without the lock. Read as the maximum over the workers.
- * - `platform_outbox_relay_last_tick_timestamp_seconds` (gauge): the wall-clock time of the last tick that ended
- *   without an error, with or without the lock; 0 until the first one. A dead loop or an unreachable database shows
+ * - `platform_outbox_relay_last_tick_timestamp_seconds` (gauge): the wall-clock time of the last tick that held the
+ *   relay lock and ended without an error; 0 until the first one (PR043-SEC-04: a tick without the lock does not count,
+ *   so a foreign holder of the key stops it on every worker). A dead loop, an unreachable database or a foreign holder shows
  *   as a value that stops.
  */
 
@@ -28,7 +29,7 @@ export interface RelayMetrics {
   failed(count: number): void;
   /** The lag gauge: set right after the claim (age of its first row; 0 for none) and to 0 after a tick without the lock. */
   pendingAge(seconds: number): void;
-  /** The last-tick gauge: the wall-clock end (seconds) of a tick that ended without an error (a tick that threw reports nothing). */
+  /** The last-tick gauge: the wall-clock end (seconds) of a tick that held the lock and ended without an error. */
   tickEnded(endedAtSeconds: number): void;
   render(): string;
 }
@@ -83,7 +84,7 @@ export function createRelayMetrics(): RelayMetrics {
         '# HELP platform_outbox_relay_oldest_pending_age_seconds Age of the oldest claimed pending event in the last locked tick.',
         '# TYPE platform_outbox_relay_oldest_pending_age_seconds gauge',
         `platform_outbox_relay_oldest_pending_age_seconds ${String(oldestPendingAge)}`,
-        '# HELP platform_outbox_relay_last_tick_timestamp_seconds Wall-clock time of the last relay tick that ended without an error.',
+        '# HELP platform_outbox_relay_last_tick_timestamp_seconds Wall-clock time of the last tick that held the relay lock and ended without an error.',
         '# TYPE platform_outbox_relay_last_tick_timestamp_seconds gauge',
         `platform_outbox_relay_last_tick_timestamp_seconds ${String(lastTick)}`,
       ];

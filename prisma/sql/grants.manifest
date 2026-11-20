@@ -28,11 +28,12 @@ platform_app INSERT public.job_executions
 platform_app DELETE public.job_executions
 
 # transactional outbox and consumer dedupe (TASK-043, migration 20261120000000_outbox_events; data-model §3.5, §4.4):
-# SYSTEM hard-delete allow-list. outbox_events is mutable (the relay sets published_at, attempts, last_error);
+# SYSTEM hard-delete allow-list. outbox_events is mutable only in the relay's columns (column-level UPDATE: published_at,
+# attempts, last_error and the guard columns; PR043-SEC-05, D-ARCH-197, ADR-0004 amendment 4 item 25);
 # processed_events is insert-only (no UPDATE). DELETE only by the outbox-purge job (published/processed > 30 days).
 platform_app SELECT public.outbox_events
 platform_app INSERT public.outbox_events
-platform_app UPDATE public.outbox_events
+platform_app UPDATE public.outbox_events (published_at, attempts, last_error, updated_at, updated_by, version)
 platform_app DELETE public.outbox_events
 platform_app SELECT public.processed_events
 platform_app INSERT public.processed_events

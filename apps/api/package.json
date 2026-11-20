@@ -11,11 +11,6 @@
       "types": "./dist/platform/routing/tests/timing.d.ts",
       "default": "./dist/platform/routing/tests/timing.js"
     },
-    "./testing/outbox": {
-      "@platform/source": "./src/platform/outbox/tests/test-outbox.ts",
-      "types": "./dist/platform/outbox/tests/test-outbox.d.ts",
-      "default": "./dist/platform/outbox/tests/test-outbox.js"
-    },
     "./runtime": {
       "@platform/source": "./src/platform/runtime/index.ts",
       "types": "./dist/platform/runtime/index.d.ts",

@@ -249,7 +249,9 @@ export function createOutboxRelay(options: OutboxRelayOptions): OutboxRelay {
     for (const seconds of latencies) metrics.observeLatency(seconds);
     metrics.published(tick.published);
     metrics.failed(tick.failed);
-    metrics.tickEnded(wall() / 1_000);
+    // PR043-SEC-04: only a tick that held the lock is liveness, so a foreign holder of the key stops the timestamp
+    // (OutboxRelayStalled fires) instead of keeping it fresh while rows age.
+    if (tick.locked) metrics.tickEnded(wall() / 1_000);
     return tick;
   };
 

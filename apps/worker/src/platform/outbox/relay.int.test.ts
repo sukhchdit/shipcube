@@ -22,7 +22,7 @@ import {
   type TenantContext,
   type TenantDb,
 } from '@platform/api/runtime';
-import { createTestOutbox } from '@platform/api/testing/outbox';
+import { createTestOutbox } from '@platform/api/testing';
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { Config } from '@platform/config';
 import { ANONYMOUS_ACTOR_ID } from '@platform/shared';
@@ -272,14 +272,66 @@ describe('[US-011] outbox writer on PostgreSQL 18', () => {
         'outbox_events DELETE',
         'outbox_events INSERT',
         'outbox_events SELECT',
-        'outbox_events UPDATE',
         'processed_events DELETE',
         'processed_events INSERT',
         'processed_events SELECT',
       ]);
+      // PR043-SEC-05 (D-ARCH-197): UPDATE on outbox_events is column-level, the relay's mark columns only.
+      const columns = await app.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.column_privileges WHERE table_name = 'outbox_events' AND grantee = $1 AND privilege_type = 'UPDATE' ORDER BY 1",
+        ['platform_app'],
+      );
+      expect(columns.rows.map((row) => row.column_name)).toEqual([
+        'attempts',
+        'last_error',
+        'published_at',
+        'updated_at',
+        'updated_by',
+        'version',
+      ]);
     } finally {
       await app.end();
     }
+  });
+
+  it('[PR043-SEC-05] as platform_app an UPDATE of org_id (or actor_id, payload) is refused with 42501; the relay marks still pass', async () => {
+    const [id] = await publishAll([randomUUID()], 'outbox-it-sec05');
+    const app = new pg.Client({ connectionString: postgres.appUrl });
+    await app.connect();
+    try {
+      for (const column of ['org_id', 'actor_id', 'payload', 'correlation_id']) {
+        await expect(app.query(`UPDATE public.outbox_events SET ${column} = ${column} WHERE id = $1`, [id])).rejects.toMatchObject({
+          code: '42501',
+        });
+      }
+    } finally {
+      await app.end();
+    }
+    // The claim and both mark statements (published and failed) run as platform_app through the relay.
+    const failing = createOutboxRelay({
+      runner: runtime.tenantTx,
+      producer: { enqueue: () => Promise.reject(new Error('Connection is closed.')) },
+      log,
+      batchSize: 100,
+      pollIntervalMs: 500,
+      budgetMs: 5_000,
+      enqueueTimeoutMs: 1_000,
+    });
+    expect(await failing.runOnce()).toMatchObject({ locked: true, claimed: 1, published: 0, failed: 1 });
+    expect(await relayOver(workerQueues()).runOnce()).toMatchObject({ published: 1, failed: 0 });
+    expect(await eventRows([id ?? ''])).toMatchObject([{ published: true, attempts: 2, last_error: null }]);
+  });
+
+  it('[PR043-SEC-05] ck_outbox_events__actor: an insert whose actor_id differs from created_by is refused with 23514', async () => {
+    await expect(
+      superuser((client) =>
+        client.query(
+          `INSERT INTO public.outbox_events (type, aggregate_type, aggregate_id, actor_id, payload, correlation_id, created_by, updated_by)
+           VALUES ('shipment.booked', 'shipment', gen_random_uuid(), $1, '{}'::jsonb, 'outbox-it-actor1', $2, $2)`,
+          [USER, ANONYMOUS_ACTOR_ID],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '23514', constraint: 'ck_outbox_events__actor' });
   });
 });
 

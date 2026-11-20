@@ -104,7 +104,7 @@ function validate(catalogue: EventCatalogue, event: OutboxEventInput<string>): V
 /**
  * The outbox over a catalogue. Not on the public barrels (code review m5): production code uses `outbox`, the closed
  * platform catalogue, so no module can publish an unreviewed type; tests reach this through the test-only export
- * `@platform/api/testing/outbox` (`createTestOutbox`).
+ * `@platform/api/testing` (`createTestOutbox`).
  */
 export function createOutbox<TCatalogue extends EventCatalogue>(catalogue: TCatalogue): Outbox<Extract<keyof TCatalogue, string>> {
   return {

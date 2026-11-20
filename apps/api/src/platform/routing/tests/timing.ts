@@ -82,3 +82,7 @@ export function recordAbortTimeouts(): { readonly calls: readonly number[]; rest
     },
   };
 }
+
+// The outbox over a test catalogue (TASK-043; code review m5, PR043-SEC-03): served from this `./testing` subpath, the
+// one test export prune-dist removes and the image preflight skips, so no second pruned export exists.
+export { createTestOutbox } from '../../outbox/tests/test-outbox.js';

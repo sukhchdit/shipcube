@@ -43,7 +43,10 @@ CREATE TABLE "public"."outbox_events" (
     CONSTRAINT "ck_outbox_events__aggregate_type" CHECK ("aggregate_type" ~ '^[a-z][a-z_]{0,62}$'),
     CONSTRAINT "ck_outbox_events__correlation_id" CHECK ("correlation_id" ~ '^[A-Za-z0-9-]{8,64}$'),
     CONSTRAINT "ck_outbox_events__attempts" CHECK ("attempts" >= 0),
-    CONSTRAINT "ck_outbox_events__last_error" CHECK (char_length("last_error") <= 500)
+    CONSTRAINT "ck_outbox_events__last_error" CHECK (char_length("last_error") <= 500),
+    -- The initiating actor is the transaction's actor, which the standard-columns guard pins to created_by
+    -- (PR043-SEC-05, D-ARCH-197, ADR-0004 amendment 4 item 25).
+    CONSTRAINT "ck_outbox_events__actor" CHECK ("actor_id" = "created_by")
 );
 
 CREATE INDEX "ix_outbox_events__unpublished" ON "public"."outbox_events"("created_at", "id") WHERE "published_at" IS NULL;
@@ -83,7 +86,10 @@ CREATE TRIGGER trg_processed_events__std_columns BEFORE INSERT OR UPDATE ON publ
   FOR EACH ROW EXECUTE FUNCTION platform.std_columns_guard();
 
 -- Runtime grants (data-model §4.4 SYSTEM hard-delete allow-list; prisma/sql/grants.manifest, C5).
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "public"."outbox_events" TO platform_app;
+-- outbox_events: UPDATE only on the relay's mark columns (PR043-SEC-05, D-ARCH-197); org_id, actor_id, type, payload and
+-- correlation_id are never updated by the runtime role.
+GRANT SELECT, INSERT, DELETE ON TABLE "public"."outbox_events" TO platform_app;
+GRANT UPDATE (published_at, attempts, last_error, updated_at, updated_by, version) ON TABLE "public"."outbox_events" TO platform_app;
 GRANT SELECT, INSERT, DELETE ON TABLE "public"."processed_events" TO platform_app;
 -- job_executions joins the hard-delete allow-list with its purge (D-ARCH-171; data-model §3.5, §10.5).
 GRANT DELETE ON TABLE "public"."job_executions" TO platform_app;

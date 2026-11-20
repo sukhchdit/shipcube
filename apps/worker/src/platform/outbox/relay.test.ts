@@ -334,14 +334,15 @@ describe('[ADR-0004 am. 2 item 11] relay liveness gauges (D-ARCH-183 F7)', () =>
     expect(gauges(metrics.render())).toEqual([42.5, 1_763_600_000]);
   });
 
-  it('a tick with the lock and no rows, and a tick without the lock, report 0 and move the timestamp', async () => {
+  it('[PR043-SEC-04] a tick with the lock and no rows reports 0 and moves the timestamp; a tick without the lock reports 0 and does not', async () => {
     const metrics = createRelayMetrics();
     await relayWith(fakeDatabase([row(1, A, { age_seconds: 9 })]), metrics, 1_000_000).runOnce();
     await relayWith(fakeDatabase([]), metrics, 2_000_000).runOnce();
     expect(gauges(metrics.render())).toEqual([0, 2_000]);
     await relayWith(fakeDatabase([row(1, A, { age_seconds: 9 })]), metrics, 3_000_000).runOnce();
     await relayWith(fakeDatabase([row(1, A)], { locked: false }), metrics, 4_000_000).runOnce();
-    expect(gauges(metrics.render())).toEqual([0, 4_000]);
+    // A foreign holder of the lock: the lag reads 0, and the last-tick timestamp stays at the last locked tick.
+    expect(gauges(metrics.render())).toEqual([0, 3_000]);
   });
 
   it('[D-ARCH-188] a tick that threw after its claim keeps the lag it claimed; the timestamp stops', async () => {
@@ -354,6 +355,27 @@ describe('[ADR-0004 am. 2 item 11] relay liveness gauges (D-ARCH-183 F7)', () =>
     const text = metrics.render();
     expect(text).toContain('# TYPE platform_outbox_relay_oldest_pending_age_seconds gauge');
     expect(text).toContain('# TYPE platform_outbox_relay_last_tick_timestamp_seconds gauge');
+  });
+
+  it('[PR043-SEC-04] ticks without the lock never move the last-tick gauge: after 61 s of them, time() - gauge > 60 (OutboxRelayStalled fires)', async () => {
+    const metrics = createRelayMetrics();
+    const start = 1_763_600_000_000;
+    // A tick with the lock and no rows moves the gauge.
+    await relayWith(fakeDatabase([]), metrics, start).runOnce();
+    expect(gauges(metrics.render())).toEqual([0, start / 1_000]);
+    // A foreign holder of the key: 61 s of ticks without the lock, one per poll interval.
+    let now = start;
+    for (let tick = 0; tick < 122; tick += 1) {
+      now += 500;
+      await relayWith(fakeDatabase([row(1, A, { age_seconds: 600 })], { locked: false }), metrics, now).runOnce();
+    }
+    const [lag, lastTick] = gauges(metrics.render());
+    expect(lastTick).toBe(start / 1_000);
+    expect(now / 1_000 - lastTick).toBeGreaterThan(60);
+    expect(lag).toBe(0);
+    expect(metrics.render()).toContain(
+      '# HELP platform_outbox_relay_last_tick_timestamp_seconds Wall-clock time of the last tick that held the relay lock',
+    );
   });
 
   it('[D-ARCH-188] the lag is set right after the claim, before the first enqueue: a tick held inside an enqueue already shows it', async () => {

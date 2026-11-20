@@ -75,7 +75,7 @@ export { createShutdown, DRAIN_TIMEOUT_MS, RESOURCE_CLOSE_TIMEOUT_MS, type Close
 // The tenant-transaction runner type (the worker's relay and purge run SYSTEM-scope transactions on it, TASK-043).
 export type { TenantContext, TenantDb, TenantTxRunner } from '../db/index.js';
 // The transactional outbox writer (TASK-043): worker processors publish follow-on events in their own transaction.
-// The closed platform catalogue only; the test factory is `@platform/api/testing/outbox` (code review m5).
+// The closed platform catalogue only; the test factory is `@platform/api/testing` (code review m5).
 export { outbox, OutboxWriteError, type Outbox, type OutboxDb, type OutboxEventInput, type PublishedEvent } from '../outbox/index.js';
 // The job producer (TASK-035): payload v2 on a named queue, correlation copied from the originating context. Used by
 // the worker's outbox relay (TASK-043); the api ACL user holds no `bull:*` keys.

@@ -30,14 +30,51 @@ export type ModuleEvents = Readonly<Record<string, EventDefinition>>;
 /** Event type to definition, over every module. */
 export type EventCatalogue = Readonly<Record<string, EventDefinition>>;
 
+/** The parts of a Joi `describe()` node the closed-schema walk reads. */
+interface SchemaNode {
+  readonly type?: string;
+  readonly flags?: { readonly unknown?: boolean; readonly only?: boolean };
+  readonly preferences?: { readonly allowUnknown?: boolean };
+  readonly patterns?: unknown;
+  readonly keys?: Readonly<Record<string, SchemaNode>>;
+  readonly items?: readonly SchemaNode[];
+  readonly rules?: readonly { readonly name: string }[];
+}
+
+/** Leaf types that cannot carry free text. */
+const SAFE_LEAVES: ReadonlySet<string> = new Set(['number', 'boolean', 'date']);
+/** String rules that bound a string to a grammar (an identifier, a timestamp, a ciphertext). */
+const BOUNDED_STRING_RULES: ReadonlySet<string> = new Set(['pattern', 'guid', 'isoDate', 'base64']);
+
 /**
- * True for a Joi object schema that refuses unknown keys. A schema declared `.unknown(true)` would override the
- * `allowUnknown: false` preference of `validateEventPayload` and let unreviewed keys into the outbox (code review m5).
+ * One node of the structural allow-list walk (PR043-SEC-01): no node may open the object (`flags.unknown`, an
+ * `allowUnknown` preference, `patterns`); an object needs explicit `keys`, all closed; an array exactly one closed
+ * `items` entry; a string a grammar rule or a `valid` list (`flags.only`); otherwise only number, boolean and date.
+ * `any`, `alternatives`, `link` and custom types are refused.
+ */
+function closedNode(node: SchemaNode): boolean {
+  if (node.flags?.unknown === true || node.preferences?.allowUnknown === true || node.patterns !== undefined) return false;
+  switch (node.type) {
+    case 'object':
+      return node.keys !== undefined && Object.values(node.keys).every(closedNode);
+    case 'array':
+      return node.items?.length === 1 && node.items.every(closedNode);
+    case 'string':
+      return node.flags?.only === true || (node.rules ?? []).some((rule) => BOUNDED_STRING_RULES.has(rule.name));
+    default:
+      return node.type !== undefined && SAFE_LEAVES.has(node.type);
+  }
+}
+
+/**
+ * True for a Joi object schema that is closed all the way down (PR043-SEC-01, code review m5): every key is declared,
+ * nothing accepts unknown keys or patterned keys at any depth, and every string leaf is bound to a grammar or a list.
+ * A payload carries identifiers, codes and a locale only (ADR-0004 item 1, SEC-P3-12), so an open object or a free
+ * string, which could hold an e-mail address in the SYSTEM table, is refused when the catalogue loads.
  */
 export function isClosedObjectSchema(schema: unknown): boolean {
-  if (!Joi.isSchema(schema)) return false;
-  const description = schema.describe() as { readonly type?: string; readonly flags?: { readonly unknown?: boolean } };
-  return description.type === 'object' && description.flags?.unknown !== true;
+  if (!Joi.isSchema(schema) || schema.type !== 'object') return false;
+  return closedNode(schema.describe());
 }
 
 /**
@@ -53,7 +90,7 @@ export function mergeEvents(modules: Readonly<Record<string, ModuleEvents>>): Ev
       if (!AGGREGATE_TYPE_PATTERN.test(definition.aggregateType))
         throw new Error(`Aggregate type of ${type} (${module}) is not a lower-case identifier`);
       if (!isClosedObjectSchema(definition.payload))
-        throw new Error(`Payload schema of ${type} (${module}) must be a closed Joi object (no .unknown(true))`);
+        throw new Error(`Payload schema of ${type} (${module}) must be a closed Joi object (declared keys, bounded values)`);
       const previous = owner.get(type);
       if (previous !== undefined) throw new Error(`Event type ${type} is declared by both ${previous} and ${module}`);
       owner.set(type, module);

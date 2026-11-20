@@ -44,7 +44,52 @@ describe('domain event catalogue (ADR-0004 item 5; TASK-043)', () => {
     const notObject = { aggregateType: 'shipment', payload: Joi.string() as unknown as Joi.ObjectSchema };
     expect(() => mergeEvents({ a: { 'shipment.booked': notObject } })).toThrow('must be a closed Joi object');
     expect(isClosedObjectSchema({})).toBe(false);
-    expect(isClosedObjectSchema(Joi.object({}).unknown(false))).toBe(true);
+  });
+
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const id = Joi.string().pattern(UUID).required();
+
+  it.each([
+    ['Joi.object() (no keys: Joi then allows any key)', Joi.object()],
+    ['Joi.object().keys() (no argument)', Joi.object().keys()],
+    ['a pattern of keys', Joi.object({}).pattern(/./, Joi.any())],
+    ['a nested object with unknown()', Joi.object({ meta: Joi.object().unknown() })],
+    ['a nested object without keys', Joi.object({ meta: Joi.object() })],
+    ['a nested any', Joi.object({ meta: Joi.any() })],
+    ['a nested allowUnknown preference', Joi.object({ meta: Joi.object({ id }).prefs({ allowUnknown: true }) })],
+    ['nested alternatives', Joi.object({ meta: Joi.alternatives().try(Joi.object().unknown(), Joi.string()) })],
+    ['an array without items', Joi.object({ list: Joi.array() })],
+    ['a free string value', Joi.object({ shipmentId: Joi.string() })],
+    ['a top-level unknown(true) (control)', Joi.object({ id }).unknown(true)],
+    ['a top-level allowUnknown preference (control)', Joi.object({ id }).options({ allowUnknown: true })],
+  ])('[PR043-SEC-01] mergeEvents refuses %s', (_label, schema) => {
+    expect(isClosedObjectSchema(schema)).toBe(false);
+    expect(() => mergeEvents({ a: { 'shipment.booked': { aggregateType: 'shipment', payload: schema } } })).toThrow(
+      'must be a closed Joi object',
+    );
+  });
+
+  it('[PR043-SEC-01] mergeEvents accepts identifier, locale-list, bounded-string, nested closed and closed-array payloads', () => {
+    const accepted = [
+      identifierPayload('a', 'b'),
+      Joi.object({ shipment_id: id, locale: Joi.string().valid('en', 'es', 'fr').required() }),
+      Joi.object({
+        token_enc: Joi.string().pattern(/^[A-Za-z0-9+/=]{16,512}$/),
+        token_enc_key_id: Joi.string().pattern(/^[a-z0-9-]{1,40}$/),
+      }),
+      Joi.object({
+        order: Joi.string().guid(),
+        at: Joi.string().isoDate(),
+        blob: Joi.string().base64(),
+        n: Joi.number(),
+        ok: Joi.boolean(),
+      }),
+      Joi.object({ meta: Joi.object({ id }), ids: Joi.array().items(id), when: Joi.date() }),
+    ];
+    for (const payload of accepted) {
+      expect(isClosedObjectSchema(payload)).toBe(true);
+      expect(Object.keys(mergeEvents({ a: { 'shipment.booked': { aggregateType: 'shipment', payload } } }))).toEqual(['shipment.booked']);
+    }
   });
 
   it('validates a payload closed and without conversion; issues name paths and rules, never values', () => {
