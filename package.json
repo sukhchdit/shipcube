@@ -104,6 +104,9 @@
   "overrides": {
     "openapi-typescript": {
       "typescript": "$typescript"
+    },
+    "@prisma/config": {
+      "effect": "3.22.4"
     }
   }
 }

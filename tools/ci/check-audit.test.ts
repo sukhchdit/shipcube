@@ -2,8 +2,8 @@
  * check-audit (TASK-007): US-048 / AT-US-048-06 (Critical/High fail in any closure), AT-US-048-07 (waiver with an
  * expiry; an expired waiver fails again), PR2-SEC-06 (watchlist), D-ARCH-003 rev 4 item 4 (a maintenance-excepted
  * package with a High/Critical advisory fails regardless). Fixtures are hand-written samples in the npm 11 audit
- * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs and the D-SECAUDIT-01/-02 (picomatch,
- * effect) GHSAs the advisories are synthetic.
+ * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs and the D-SECAUDIT-01 (picomatch)
+ * GHSA the advisories are synthetic.
  */
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -76,14 +76,10 @@ describe('gating', () => {
     expect(committed.watch.map((w) => w.id).sort()).toEqual(['GHSA-3g3m-2fjr-6pw4', 'GHSA-g3hv-75wg-m249', 'GHSA-gcqx-w48m-w2h4']);
     expect(committed.waivers.map((w) => [w.id, w.package, w.decision, w.granted, w.expires])).toEqual([
       ['GHSA-fc5q-39xc-vjpf', 'picomatch', 'D-SECAUDIT-01', '2026-11-18', '2027-02-12'],
-      ['GHSA-7589-6fvf-x4pw', 'effect', 'D-SECAUDIT-02', '2026-11-20', '2026-12-18'],
     ]);
   });
 
-  it.each([
-    ['D-SECAUDIT-01', 'GHSA-fc5q-39xc-vjpf', 'picomatch', '2026-11-18', '2027-02-12'],
-    ['D-SECAUDIT-02', 'GHSA-7589-6fvf-x4pw', 'effect', '2026-11-20', '2026-12-18'],
-  ])(
+  it.each([['D-SECAUDIT-01', 'GHSA-fc5q-39xc-vjpf', 'picomatch', '2026-11-18', '2027-02-12']])(
     '[%s] the committed waiver passes the dev-only High %s %s until its due date, then fails it again',
     (decision, id, pkg, granted, due) => {
       const advisory = mergeAdvisories([

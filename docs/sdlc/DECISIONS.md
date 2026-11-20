@@ -5724,3 +5724,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Still owed:** lane B on `7815e1c8` (code review C1); lane A on the pushed head; the rename of the record and the merge-ref check. A new round is needed only if an owned path changes after `7815e1c8`.
 - **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected: no wire module exists before TASK-135, so a due date before that merge is enough.
 - **Reversibility:** High. This is a review record only.
+
+### D-TASK295-01 · 2026-11-20 · devops-engineer · TASK-295: remove the effect audit waiver by a scoped override (route 2), not a Prisma bump
+- **Trigger:** D-SECAUDIT-02 forcing plan, due before 2026-12-18.
+- **Route check (step 1):** the latest stable Prisma is 7.10.1 (2026-10-15); there is no 7.10.2 or any later 7.x. `@prisma/config` 7.10.1 still declares `"effect": "3.20.0"` exactly. The only newer lines are 8.0.0-rc.x and 8.1.0-dev.x, a major bump that would need a principal-architect ADR-0001 check. So no bump inside 7.10.x fixes it, and the major bump was not taken.
+- **Decision (step 2):** root `package.json` gets `"overrides": { "@prisma/config": { "effect": "3.22.4" } }` next to the existing `openapi-typescript` override. 3.22.4 was published 2026-10-22 (29 days old, clears `min-release-age=7`); 3.22.5 (2026-11-19) is too young until 2026-11-26. The version is exact because `@prisma/config` pins it exactly and `save-exact=true` is the repository convention. 3.22.4 is above the patched floor 3.22.1 of GHSA-7589-6fvf-x4pw.
+- **Lockfile:** the single `node_modules/effect` tuple moves 3.20.0 to 3.22.4 (version, resolved, integrity). The `@hookform/resolvers` optional peer dedupes onto the same tuple, so exactly one effect remains. No package is added or removed. `npm install --package-lock-only` alone left the lockfile unchanged because npm treated the existing tuple as satisfying; `npm update effect --ignore-scripts` on an installed tree applied the override, and `npm ci` plus `npm ls effect --all` (exit 0) prove the committed lockfile.
+- **Reversibility:** High. Remove the override when a stable `@prisma/config` allows effect >= 3.22.1; the override and the lock tuple are the whole change.
+
+### D-TASK295-02 · 2026-11-20 · devops-engineer · TASK-295: the D-SECAUDIT-02 waiver is deleted in the same commit
+- The `GHSA-7589-6fvf-x4pw` entry leaves `tools/ci/advisory-watchlist.json`, and its row leaves both pins in `tools/ci/check-audit.test.ts` (the register assertion and the `it.each` due-date test). The picomatch waiver (D-SECAUDIT-01) and the PR67-SEC-02 production-closure test stay.
+- **Evidence:** `npm audit --json` on the new tree reports no `effect` finding; `check-audit.mjs --npm-audit` exits 0 (osv-scanner needs Docker and is left to lane A). Unit suites under `tools/ci` plus `tools/deps/prisma-engines` and `ignore-scripts` pass (32 suites, 1273 tests, `--maxWorkers=2`). `check-lockfile`, `check-dep-age --base origin/main` and `licence-check` pass. `npm run typecheck` is clean and `node tools/deps/prisma-cli.mjs validate` loads `prisma.config.ts` and validates the schema.
+
+### D-TASK295-03 · 2026-11-20 · devops-engineer · TASK-295: a lockfile change means full lane B; run it before merge
+- The Prisma CLI is the only consumer of `@prisma/config`; the migration, shadow and Testcontainers suites run it, so lane B (Docker) must prove that `prisma migrate`, `generate` and the migration linter still load the config on effect 3.22.4. Not run here (no Docker by instruction).
