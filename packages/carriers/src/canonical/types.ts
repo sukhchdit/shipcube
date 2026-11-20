@@ -123,7 +123,10 @@ export interface ShipmentRequest {
 
 /**
  * A label or document as bytes in a `document_format` (ADR-0010 am. 11 items 3 and 6). There is no URL field by
- * design: carrier-supplied URLs are never dereferenced and never shown to users. Build through `createLabelDocument`.
+ * design: carrier-supplied URLs are never dereferenced and never shown to users. In `createShipment`, return
+ * `{ format, content }` as decoded and let the capability guard check it: the guard drops an invalid label and keeps the
+ * shipment reference, whereas a throw after the carrier accepted the shipment loses it (R3-m1). Use
+ * `createLabelDocument` only where a throw is safe (`recoverLabel`, tests).
  */
 export interface LabelDocument {
   readonly format: DocumentFormat;

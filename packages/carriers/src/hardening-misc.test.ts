@@ -5,7 +5,7 @@ import { CARRIER_ERROR_MESSAGES } from './canonical/codes.js';
 import { createCarrierContext } from './context.js';
 import { type CarrierEgress, defineCarrierEgress, deriveCarrierEgressRules, type EgressAccount, egressIssues } from './egress.js';
 import { CarrierError, safeCause } from './errors.js';
-import { createLabelDocument, isZpl } from './labels.js';
+import { createLabelDocument, isPdf, isZpl } from './labels.js';
 import type { CarrierOperation } from './operations.js';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -176,6 +176,53 @@ describe('[R2-m1] label checks have no false negatives on real shapes', () => {
     expect(createLabelDocument('PDF_A4', bytes('\r\n%PDF-1.4 synthetic')).format).toBe('PDF_A4');
     expect(() => createLabelDocument('PDF_A4', bytes(`${' '.repeat(1024)}%PDF-1.4`))).toThrow('PDF_A4 content must be a PDF');
     expect(() => createLabelDocument('PDF_A4', bytes('%PDF%PD%'))).toThrow('PDF_A4 content must be a PDF');
+  });
+
+  it('[R3-n1] a header that starts at byte 1020 and ends past byte 1024 is accepted', () => {
+    expect(createLabelDocument('PDF_A4', bytes(`${'\n'.repeat(1020)}%PDF-1.7 synthetic`)).format).toBe('PDF_A4');
+  });
+});
+
+describe('[PR075-SEC-14] only blank or BOM bytes may precede a header', () => {
+  const BOM = [0xef, 0xbb, 0xbf];
+  const PNG_HEADER = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  it.each([
+    ['HTML, then %PDF- at byte 60', [...bytes(`<html><script>x</script>${' '.repeat(36)}%PDF-1.7`)]],
+    ['a PNG header, 32 bytes, then %PDF-', [...PNG_HEADER, ...new Array<number>(32).fill(0x41), ...bytes('%PDF-1.7')]],
+    ['ZPL, then %PDF- (a mislabel)', [...bytes('^XA^FDX^FS^XZ\n%PDF-1.7')]],
+  ])('refuses %s as a PDF', (_label, payload) => {
+    expect(() => createLabelDocument('PDF_4X6', Uint8Array.from(payload))).toThrow('PDF_4X6 content must be a PDF');
+  });
+
+  it.each([
+    ['LF, then a PDF holding ^xa', [0x0a, ...bytes('%PDF-1.7 binary ^xa data')]],
+    ['a BOM, then PNG bytes holding ^xa', [...BOM, ...PNG_HEADER, ...bytes('^xa')]],
+    ['a space, then HTML holding ^XA', [...bytes(' <html>^XA</html>')]],
+  ])('refuses %s as ZPL', (_label, payload) => {
+    expect(() => createLabelDocument('ZPL', Uint8Array.from(payload))).toThrow('ZPL content must be ZPL');
+  });
+
+  it('still accepts BOM- and CR/LF-led PDFs and a BOM-led ZPL', () => {
+    expect(createLabelDocument('PDF_4X6', Uint8Array.from([...BOM, ...bytes('%PDF-1.7')])).format).toBe('PDF_4X6');
+    expect(createLabelDocument('PDF_LETTER', bytes('\r\n%PDF-1.7')).format).toBe('PDF_LETTER');
+    expect(createLabelDocument('ZPL', Uint8Array.from([...BOM, ...bytes('^XA^FDX^FS^XZ')])).format).toBe('ZPL');
+  });
+
+  it('property: after any blank/BOM lead, a PNG, GIF, JPEG, BMP or markup header is neither ZPL nor PDF', () => {
+    const magics = [PNG_HEADER, [...bytes('GIF89a')], [0xff, 0xd8, 0xff, 0xe0], [...bytes('BM')], [...bytes('<svg')]];
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, ...BOM), { maxLength: 16 }),
+        fc.constantFrom(...magics),
+        fc.uint8Array({ maxLength: 32 }),
+        (lead, magic, tail) => {
+          const payload = Uint8Array.from([...lead, ...magic, ...bytes('^XA%PDF-'), ...tail]);
+          expect(isZpl(payload)).toBe(false);
+          expect(isPdf(payload)).toBe(false);
+        },
+      ),
+    );
   });
 });
 

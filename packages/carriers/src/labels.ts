@@ -4,12 +4,16 @@
  *    it survives only as a raw-payload `$blob` (am. 8) and is never offered to users;
  *  - the content is inline bytes. A string (a carrier `LabelURL`, `URL_ONLY` answer or base64 text) is refused: carrier
  *    supplied URLs are never dereferenced (PR6-SEC-06), and adapters decode base64 themselves;
- *  - PDF content carries `%PDF-` within its first 1024 bytes, and ZPL content holds a `^XA` command anywhere, with no
- *    PDF, raster or markup header, so a mislabelled payload cannot pass as either. The capability guard re-checks every
- *    label an adapter returns. Residual (TASK-101/135/139/140): every real-carrier ZPL and PDF fixture must pass these
- *    checks, because for carriers without `recoverLabel` a refused label is the only copy lost.
+ *  - only blank or BOM bytes may precede a header: PDF content starts with `%PDF-` after them (within the first 1024
+ *    bytes), and ZPL content has no PDF, raster or markup header after them and holds a `^XA` command anywhere. A raster
+ *    or markup payload therefore cannot pass as a PDF, and a document or raster header cannot pass as ZPL. Residuals:
+ *    EPL whose field data holds `^XA` passes as ZPL (D-TASK075-21); every real-carrier ZPL and PDF fixture must pass
+ *    these checks (TASK-101/135/139/140), because for carriers without `recoverLabel` a refused label is the only copy
+ *    lost. The capability guard re-checks every label an adapter returns.
  * `createLabelDocument` only checks and copies; it performs no I/O.
  */
+import { Buffer } from 'node:buffer';
+
 import { DOCUMENT_FORMATS, type DocumentFormat, isDocumentFormat } from './canonical/codes.js';
 import type { LabelDocument } from './canonical/types.js';
 import { CarrierContractError } from './errors.js';
@@ -29,32 +33,40 @@ const NOT_ZPL: readonly (readonly number[])[] = [
   [0x42, 0x4d],
   [0x3c],
 ];
-const CARET = 0x5e;
-const LOWER_X = 0x78;
-const LOWER_A = 0x61;
-/** PDF readers accept the `%PDF-` header within the first 1024 bytes (a BOM or CR/LF before it). */
-const PDF_HEADER_WINDOW = 1024;
+/** The `^XA` start-of-format command in every letter case. */
+const ZPL_START_COMMANDS = ['^XA', '^Xa', '^xA', '^xa'] as const;
+/** A document header must start within the first 1024 bytes (the PDF reader rule). */
+const LEADING_WINDOW = 1024;
+/** Bytes that may precede a document header: NUL, TAB, LF, FF, CR, space and the UTF-8 BOM bytes (PR075-SEC-14). */
+const LEADING: ReadonlySet<number> = new Set([0x00, 0x09, 0x0a, 0x0c, 0x0d, 0x20, 0xef, 0xbb, 0xbf]);
+
+/** Offset of the first byte that is not blank or BOM, bounded by the 1024-byte header window. */
+const firstSignificant = (bytes: Uint8Array): number => {
+  let index = 0;
+  while (index < bytes.length && index < LEADING_WINDOW && LEADING.has(bytes[index] ?? -1)) index += 1;
+  return index;
+};
 
 /**
- * ZPL: no foreign magic, and a `^XA` start-of-format command (any case) anywhere in the payload (PR075-SEC-03, R2-m1).
- * The whole payload is searched with native `indexOf`, so a long `~DG` graphic download before `^XA` is not a false
- * negative: for carriers without label recovery (DHL Express, FedEx) a refused label is the only copy lost.
+ * ZPL: after any blank/BOM lead, no foreign magic (PDF, PNG, GIF, JPEG, BMP, markup), and a `^XA` start-of-format
+ * command (any case) anywhere in the payload (PR075-SEC-03, R2-m1, PR075-SEC-14). The whole payload is searched with
+ * native `Buffer.includes`, so a long `~DG` graphic download before `^XA` is not a false negative: for carriers without
+ * label recovery (DHL Express, FedEx) a refused label is the only copy lost.
  */
 export function isZpl(bytes: Uint8Array): boolean {
-  if (NOT_ZPL.some((magic) => startsWith(bytes, magic))) return false;
-  for (let index = bytes.indexOf(CARET); index !== -1 && index + 2 < bytes.length; index = bytes.indexOf(CARET, index + 1)) {
-    if (((bytes[index + 1] ?? 0) | 0x20) === LOWER_X && ((bytes[index + 2] ?? 0) | 0x20) === LOWER_A) return true;
-  }
-  return false;
+  const body = bytes.subarray(firstSignificant(bytes));
+  if (NOT_ZPL.some((magic) => startsWith(body, magic))) return false;
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return ZPL_START_COMMANDS.some((command) => buffer.includes(command, 0, 'latin1'));
 }
 
-/** PDF: the `%PDF-` header within the first 1024 bytes (R2-m1). */
+/**
+ * PDF: `%PDF-` at the first byte that is not blank or BOM, starting within the first 1024 bytes (R2-m1, R3-n1). Any
+ * other data before the header (HTML, a PNG header, ZPL) is refused (PR075-SEC-14).
+ */
 export function isPdf(bytes: Uint8Array): boolean {
-  const window = bytes.subarray(0, PDF_HEADER_WINDOW);
-  for (let index = window.indexOf(PDF_MAGIC[0]); index !== -1; index = window.indexOf(PDF_MAGIC[0], index + 1)) {
-    if (startsWith(window.subarray(index), PDF_MAGIC)) return true;
-  }
-  return false;
+  const start = firstSignificant(bytes);
+  return start < LEADING_WINDOW && startsWith(bytes.subarray(start), PDF_MAGIC);
 }
 
 /** Builds a frozen label document; throws `CarrierContractError` for a non-document format or non-byte content. */
