@@ -5451,3 +5451,31 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - PR041-SEC-02 (b), -03 (HTTP side), -07 and the breaker: the part 041-B round.
   - Mine, before G3: threat model R-13, T-11, T-39 and T-93 aligned with amendment 12, plus PR041-SEC-06.
 - **Reversibility:** High (a review record; the routed items bind work not yet built).
+
+### D-SECAUDIT-02 · 2026-11-20 · security-analyst · GHSA-7589-6fvf-x4pw (effect ReDoS, High, devOptional closure only): 28-day audit waiver until 2026-12-18; no in-range bump, because Prisma pins effect 3.20.0 exactly (record `docs/05-quality/security/PR-pending-audit-effect-security-review.md`, committed on main and renamed with the PR number)
+- **Trigger:** the advisory was published on 2026-11-19 (effect `<= 3.22.0`, patched 3.22.1, CVSS 4.0 8.7, CWE-1333). Lane A's audit has failed on every PR since 2026-11-20 (first: PR #73, run 44679323524; D-ORCH-140).
+- **Correction to the routing premise:** the patched releases are not too new. 3.22.1 (2026-07-30) through 3.22.4 (2026-10-22) all clear `min-release-age=7`; only 3.22.5 (2026-11-19, installable from 2026-11-26T21:22Z) is younger. The blocker is `@prisma/config` 7.10.1, the latest stable, which declares `"effect": "3.20.0"` exactly. The dev tag 8.1.0-dev.12 has the same pin. `@hookform/resolvers`' optional `^3.10.3` peer dedupes onto the same single tuple. So **no in-range bump exists**. npm's suggested fix is a `prisma@6.12.0` downgrade.
+- **Decision:** waiver in `tools/ci/advisory-watchlist.json`: decision D-SECAUDIT-02, granted 2026-11-20, expires **2026-12-18**. The rule "expire when the patched version becomes installable" cannot apply, because that date is in the past. 28 days gives Prisma one patch cycle and forces the fallback otherwise.
+- **The change:** branch `chore/audit-waive-effect`, local commit `67c4c04` on `cb2ed535` in worktree `../Shipqube-audit-effect`. It is not pushed: the coordinator queues lane B, then pushes and opens the PR.
+  - `check-audit.test.ts` pins the waiver.
+  - The PR #67 due-date test becomes an `it.each` with one row per waiver.
+  - It **closes PR67-SEC-02** with a test that fails if any waived package has a production-closure tuple in the committed lockfile.
+- **Security r1 = PASS_WITH_FOLLOW-UPS.** 0 Critical/High open for the change. EFFECT-SEC-01 is the advisory, rated LOW in context and waived.
+- **Why the waiver is acceptable meanwhile:**
+  - **Not shipped.** effect is `devOptional`; the api and worker runtime stages use `--omit=dev --omit=optional`; nothing of ours imports `effect` or `@hookform/resolvers`, so no web or admin bundle has it.
+  - **Not reachable.** The vulnerable regex exists only for `Schema.TemplateLiteral`, which `@prisma/config` never builds; it decodes our own `prisma.config.ts` with Struct and String schemas.
+  - **Probe:** Prisma's real `loadConfigFromFile` with every string at 50,000 `:` characters takes 114 ms, while the advisory's template takes 1.7 s at 2,000 characters (cubic growth).
+- **Evidence:**
+  - `check-audit` matrix: head 0 (waived, 28 days); base 1; due date 1 (expired); grant date in the future 2; watch-only 1; 91-day span 2.
+  - Test file 30/30. Mutants: waiver removed (2 red), effect made production in the lockfile (1 red), waived package absent (1 red).
+  - Record simulation with a stand-in PR number passes, including an evidence commit on top. The pending file name does not pass, so the **rename is required**.
+- **Forcing plan (owner senior-developer, due before 2026-12-18):**
+  1. If a stable Prisma whose `@prisma/config` allows effect >= 3.22.1 has been out at least 7 days, bump `prisma`, `@prisma/client` and `@prisma/adapter-pg` together (beyond 7.10.x needs principal-architect's ADR-0001 check).
+  2. Otherwise add `"overrides": { "@prisma/config": { "effect": "<newest 3.22.x at least 7 days old>" } }` (3.22.4 now; 3.22.5 from 2026-11-26), followed by `npm install --package-lock-only` and full lane B. This is a same-major transitive override of the Prisma CLI's config package, not gate tooling, so PR2-SEC-06 does not bar it.
+  3. Remove the waiver, its test row and its pin in the same PR.
+  4. Renewing the waiver needs a new decision explaining why neither route was possible.
+- **INFO:**
+  - EFFECT-SEC-02: GHSA-fc5q-39xc-vjpf (D-SECAUDIT-01, picomatch) was **withdrawn** on 2026-11-18T15:38Z, so that waiver now matches nothing. It is harmless, and it is kept as a hedge until 2027-02-12.
+  - EFFECT-SEC-03: "dev closure" counts devOptional packages, which an install without `--omit=optional` would ship. Our runtime stages omit optional; keep that in any new runtime stage (TASK-014 owner).
+- **Owed before merge:** lane B `unit` evidence; a code review (I authored it); the record renamed to `PR-<n>-audit-effect-security-review.md` before the `pull_request` event that ci-gate should credit.
+- **Reversibility:** High. The waiver is one register entry, and it expires by itself.
