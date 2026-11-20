@@ -16,6 +16,7 @@ import { createRuntimeLog, type RuntimeLog } from '@platform/api/runtime';
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { deadLetterQueueName, type QueueName } from '@platform/shared/queues';
 import { type ConnectionOptions, Queue } from 'bullmq';
+import { Redis } from 'ioredis';
 import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainers';
 
 import { jobLogContext } from '../logging/job-context.js';
@@ -220,7 +221,8 @@ describe('[PR64-SEC-04] bounded retention (ADR-0013 am. 3; Valkey 8)', () => {
       return settle(queue, data);
     };
     const old = [await make(true), await make(false)];
-    await sleep(4_500);
+    // R1-n4: the fresh jobs have 10 s before they age out too, ample under lane-B load.
+    await sleep(12_000);
     const fresh = [await make(true), await make(false)];
     const captured = captureLog();
     const sweeper = createWorkerQueues({
@@ -229,7 +231,7 @@ describe('[PR64-SEC-04] bounded retention (ADR-0013 am. 3; Valkey 8)', () => {
       log: captured.log,
       processors: {},
       prefix,
-      retention: bounds(1_000, 1_000, 3),
+      retention: bounds(1_000, 1_000, 10),
     });
     cleanups.push(() => sweeper.close());
     const result = await sweeper.sweepRetention();
@@ -238,6 +240,29 @@ describe('[PR64-SEC-04] bounded retention (ADR-0013 am. 3; Valkey 8)', () => {
     for (const id of fresh) expect(await queue.getJob(id)).toBeDefined();
     expect((await records(deadLetter)).map((record) => record.job_id)).toEqual([fresh[0]]);
     expect(captured.lines().filter((line) => line['event'] === 'worker.queue_retention_swept')).toHaveLength(1);
+  });
+
+  it('[R1-m5][PR64-SEC-08] a job BullMQ fails itself after too many stalls gets a STALLED record and a worker.job_failed line; no processor runs', async () => {
+    const prefix = prefixOf();
+    const { queue, deadLetter } = openQueues(prefix);
+    const data = payload();
+    const jobId = keyOf(data);
+    await queue.add('outbox_event', data, { jobId, attempts: 5 });
+    // Exactly what BullMQ 6.7.0's moveStalledJobsToWait writes for a job stalled more than maxStalledCount.
+    const client = (await queue.getBackend().client) as unknown as { call(...args: string[]): Promise<unknown> };
+    await client.call('HSET', `${prefix}:outbox-relay:${jobId}`, 'defa', 'job stalled more than allowable limit');
+    let calls = 0;
+    const { captured } = consume(prefix, () => Promise.resolve(void (calls += 1)), bounds(10, 10));
+    const [record] = await until(async () => {
+      const found = await records(deadLetter);
+      return found.length === 1 ? found : undefined;
+    });
+    expect(calls).toBe(0);
+    expect(record).toMatchObject({ job_id: jobId, reason: 'STALLED', error: 'NonRetryableError' });
+    expect((await (await queue.getJob(jobId))?.getState()) ?? '').toBe('failed');
+    expect(captured.lines()).toContainEqual(
+      expect.objectContaining({ event: 'worker.job_failed', reason: 'STALLED', final: true, correlation_id: 'demo-booking-0001' }),
+    );
   });
 
   it('[AT-US-010-04] a delivered job whose payload lacks id is PAYLOAD_INVALID after one attempt and dead-lettered (no security event)', async () => {
@@ -316,7 +341,7 @@ describe('US-010 singleton scheduled jobs (ADR-0013 §5; REQ-PLAT-015; D-TASK039
 });
 
 describe('[PR64-SEC-11] the Valkey ACL users of infra/local/valkey/users.acl', () => {
-  it('the worker user processes a job end to end and runs one sweep; a Queue.add as the api user fails with NOPERM', async () => {
+  it('the worker user processes a job end to end and runs one sweep; the api user is refused every bull:* key (key-level NOPERM)', async () => {
     // Credentials generated here; the committed hashes are replaced, so no repository credential is used.
     const passwords = { api: randomBytes(24).toString('hex'), worker: randomBytes(24).toString('hex') };
     const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -348,9 +373,19 @@ describe('[PR64-SEC-11] the Valkey ACL users of infra/local/valkey/users.acl', (
     const sweeper = createWorkerQueues({ connection: workerConn, queueConnection: workerQueueConn, log: captureLog().log, processors: {} });
     cleanups.push(() => sweeper.close());
     await expect(sweeper.sweepRetention()).resolves.toMatchObject({ failedQueues: [] });
-    const apiQueue = new Queue('outbox-relay', { connection: queueConnectionOptions(at('api'), 'api-acl', 'queue') });
-    apiQueue.on('error', () => undefined);
-    cleanups.push(() => apiQueue.close());
-    await expect(apiQueue.add('outbox_event', payload(), { jobId: `outbox_event.${randomUUID()}` })).rejects.toThrow(/NOPERM/);
+    // R1-m3: a raw client as api, so the refusal comes from the key pattern (~bull:* is not granted) and not from
+    // BullMQ's INFO handshake. The control write on the api's own prefix proves the user authenticates and may write.
+    const api = new Redis(at('api'), { lazyConnect: true, maxRetriesPerRequest: 0, enableOfflineQueue: true });
+    api.on('error', () => undefined);
+    cleanups.push(async () => {
+      api.disconnect();
+      await Promise.resolve();
+    });
+    await api.connect();
+    await expect(api.set('rl:acl-probe', '1')).resolves.toBe('OK');
+    await expect(api.set('bull:outbox-relay:acl-probe', '1')).rejects.toThrow(/NOPERM.*key/i);
+    await expect(api.hset(`bull:outbox-relay:outbox_event.${randomUUID()}`, 'data', '{}')).rejects.toThrow(/NOPERM.*key/i);
+    // The INFO denial is separate and named: it is why a BullMQ Queue as api fails even before any key is touched.
+    await expect(api.info()).rejects.toThrow(/NOPERM/);
   });
 });

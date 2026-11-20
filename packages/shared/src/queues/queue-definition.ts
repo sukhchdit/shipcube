@@ -24,6 +24,17 @@ export type JobKind = (typeof JOB_KINDS)[number];
  * so N workers that register it at start hold one schedule. A scheduled job names no aggregate: it carries the schedule
  * payload `{ v: 2, schedule }` (scheduled-job.ts), never a kind, an id or tenant context, and its processor runs
  * SYSTEM-scope. Later housekeeping tasks (audit partitions, chain verification, purges) add their names here.
+ *
+ * Conditions of the security ruling D-SECPR039-01 on this contract, binding every schedule added here:
+ * (i) a handler takes every parameter from code constants or configuration, never from the job;
+ * (ii) a handler whose effect is destructive or not naturally idempotent applies its policy predicate itself (a purge
+ *      deletes by age, never "because a run started"), and if it writes, it runs through `idempotentProcessor` keyed by
+ *      the occurrence id, so a forged or early occurrence can only do what the policy already allows at that moment;
+ * (iii) this list stays a closed code list; the load-time one-queue check and the runtime refusal of a registered
+ *      processor on a schedule-only queue stay; a name has at most 47 characters (`SCHEDULE_NAME_PATTERN`), so
+ *      `<schedule>-<millis>` fits CORRELATION_ID_PATTERN;
+ * (iv) an operator "run now" action enqueues through the scheduler (`upsertJobScheduler` or the same contract), never
+ *      as a hand-made job with a `repeat:` id.
  */
 export const SCHEDULE_NAMES = ['queue-retention'] as const;
 export type ScheduleName = (typeof SCHEDULE_NAMES)[number];

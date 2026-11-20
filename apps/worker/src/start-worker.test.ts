@@ -10,11 +10,11 @@ import { readFileSync } from 'node:fs';
 import { createRuntimeServices, type ReadinessProbe, type RuntimeServices } from '@platform/api/runtime';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { CONFIG_EXIT_CODE, loadRuntimeConfigOrExit, type Config, type Secret } from '@platform/config';
+import { COMPLETED_RETENTION, DEAD_LETTER_RETENTION, FAILED_RETENTION } from '@platform/shared/queues';
 
 import { createWorkerHealthServer, type MetricsSource } from './platform/health/server.js';
 import type { WorkerQueues } from './platform/queues/runtime.js';
 import { PROCESSORS } from './processors.js';
-import { COMPLETED_RETENTION, DEAD_LETTER_RETENTION, FAILED_RETENTION } from '@platform/shared/queues';
 import {
   createProductionQueues,
   productionQueuesOptions,

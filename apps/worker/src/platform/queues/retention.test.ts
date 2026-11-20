@@ -1,11 +1,12 @@
 // Unit tests of the retention bounds (ADR-0013 am. 3 items 9, 10, 12; PR64-SEC-04, D-ARCH-159/160; TASK-039) with fake
 // queues: the record count trim (never a limit of 0), the hourly sweep's calls, repetition, logging and failure
-// handling, and the dead-lettered counter's series. consumer.int.test.ts runs them against Valkey 8.
+// handling, and the dead-lettered counter's series. retention.int.test.ts runs them against Valkey 8.
 import { createRuntimeLog } from '@platform/api/runtime';
 import { describe, expect, it } from '@jest/globals';
 import { QUEUE_NAMES, type QueueName } from '@platform/shared/queues';
 
 import { createDeadLetteredCounter, renderQueueMetrics, type QueueMetrics } from './metrics.js';
+import { createWorkerQueues } from './runtime.js';
 import {
   type CleanableQueue,
   PRODUCTION_RETENTION,
@@ -131,6 +132,45 @@ describe('[PR64-SEC-04] hourly queue-retention sweep (ADR-0013 am. 3 item 10)', 
     );
     expect(JSON.stringify(lines())).not.toContain('secret-ish');
     expect(lines()).toContainEqual(expect.objectContaining({ event: 'worker.queue_retention_swept', failedQueues: 1 }));
+  });
+});
+
+describe('[R1-n5] the sweep honours the job deadline', () => {
+  it('stops between queues once the signal is aborted, logs how far it got and rejects with the abort reason', async () => {
+    const controller = new AbortController();
+    const first = fakeQueue(0, () => {
+      controller.abort(new Error('deadline'));
+      return 0;
+    });
+    const second = fakeQueue(0);
+    const { log, lines } = capture();
+    const run = sweepRetention({
+      sources: [
+        { queue: 'booking', jobs: first, deadLetter: fakeQueue(0) },
+        { queue: 'payments', jobs: second, deadLetter: fakeQueue(0) },
+      ],
+      bounds: PRODUCTION_RETENTION,
+      log,
+      signal: controller.signal,
+    });
+    await expect(run).rejects.toThrow('deadline');
+    expect(second.calls).toEqual([]);
+    expect(lines()).toContainEqual(expect.objectContaining({ event: 'worker.queue_retention_aborted' }));
+  });
+});
+
+describe('[R1-n10] the runtime refuses a registered processor on a schedule-only queue', () => {
+  it('throws before any connection is opened', () => {
+    const { log } = capture();
+    expect(() =>
+      createWorkerQueues({
+        connection: {},
+        queueConnection: {},
+        log,
+        processors: { housekeeping: () => Promise.resolve() },
+        schedules: {},
+      }),
+    ).toThrow('queue housekeeping runs scheduled jobs; it takes no registered processor');
   });
 });
 

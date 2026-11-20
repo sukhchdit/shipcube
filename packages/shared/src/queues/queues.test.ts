@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from '@jest/globals';
 
+import { CORRELATION_ID_PATTERN } from '../correlation/correlation-id.js';
+
 import {
   BACKOFF_BASE_MS,
   BACKOFF_JITTER,
@@ -16,6 +18,11 @@ import {
   scheduledPayload,
   validateDequeuedJob,
   MAX_ISSUES,
+  carriesTenantContext,
+  isJobIdOf,
+  SCHEDULE_NAMES,
+  SCHEDULE_NAME_PATTERN,
+  SCHEDULED_JOB_ID,
   deadLetterQueueName,
   isJobPayloadV2,
   isQueueName,
@@ -277,12 +284,26 @@ describe('[PR64-SEC-04] retention bounds (ADR-0013 am. 3; D-ARCH-159)', () => {
 describe('[PR64-SEC-06] forgery signal and bounds of the payload check', () => {
   const relay = QUEUES['outbox-relay'];
 
-  it.each(['ORG_ID', 'OrgId', 'orgID', 'org-id', 'tenant_id', 'tenantId', 'organisation_id', 'organization_id', 'actorID', 'actor_type'])(
-    'flags %s as tenant context',
-    (key) => {
-      expect(validateJobPayload(relay, payload({ [key]: ID }))).toMatchObject({ ok: false, carriesTenantContext: true });
-    },
-  );
+  it.each([
+    'ORG_ID',
+    'OrgId',
+    'orgID',
+    'org-id',
+    'tenant_id',
+    'tenantId',
+    'organisation_id',
+    'organization_id',
+    'actorID',
+    'actor_type',
+    // PR039-SEC-04: compound spellings.
+    'on_behalf_of_org_id',
+    'orgUuid',
+    'user_id',
+    'targetTenantId',
+    'orgRefId',
+  ])('flags %s as tenant context', (key) => {
+    expect(validateJobPayload(relay, payload({ [key]: ID }))).toMatchObject({ ok: false, carriesTenantContext: true });
+  });
 
   it('flags a nested tenant key (trace_context.org_id), and does not flag a valid traced payload', () => {
     const nested = payload({ trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`, org_id: ID } });
@@ -305,9 +326,27 @@ describe('[PR64-SEC-06] forgery signal and bounds of the payload check', () => {
     expect(capped.issues).toHaveLength(MAX_ISSUES + 1);
     expect(capped.issues.at(-1)).toBe('(+5 more)');
     const huge = Object.fromEntries(Array.from({ length: 100_000 }, (_unused, index) => [`k${String(index)}`, index]));
-    const started = performance.now();
-    expect(validateJobPayload(relay, payload(huge))).toEqual({ ok: false, issues: ['(root): object.max'], carriesTenantContext: false });
-    expect(performance.now() - started).toBeLessThan(400);
+    // An oversized payload is refused without the schema, and flagged: no producer writes one (R1-m2).
+    expect(validateJobPayload(relay, payload(huge))).toEqual({ ok: false, issues: ['(root): object.max'], carriesTenantContext: true });
+  });
+
+  it('[R1-m2][PR039-SEC-04] examines every root key before anything nested, and flags a payload past the walk bounds as unexamined', () => {
+    // P1a: a root org_id behind a nested filler that alone exhausts the key budget.
+    const filler = Object.fromEntries(Array.from({ length: 300 }, (_unused, index) => [`f${String(index)}`, index]));
+    expect(carriesTenantContext({ a: filler, org_id: ID })).toBe(true);
+    // The same filler without any tenant key: past the budget, so flagged as unexamined.
+    expect(carriesTenantContext({ a: filler })).toBe(true);
+    // 300 root keys.
+    expect(carriesTenantContext(filler)).toBe(true);
+    // Past the depth bound.
+    expect(carriesTenantContext({ a: { b: { c: { d: { e: { f: 1 } } } } } })).toBe(true);
+    // Legitimate shapes stay clean.
+    expect(carriesTenantContext(payload())).toBe(false);
+    expect(
+      carriesTenantContext(payload({ trace_context: { traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`, tracestate: 'k=v' } })),
+    ).toBe(false);
+    expect(carriesTenantContext({ v: 2, schedule: 'queue-retention' })).toBe(false);
+    expect(carriesTenantContext(null)).toBe(false);
   });
 });
 
@@ -366,6 +405,22 @@ describe('[PR64-SEC-07] dequeue check: payload and job identity agree (D-TASK039
     ).toMatchObject({ ok: false, carriesTenantContext: true });
     // An aggregate payload on the schedule-only queue is still refused (no kinds).
     expect(validateDequeuedJob(housekeeping, { id: key, name: 'outbox_event', data: payload() }).ok).toBe(false);
+  });
+
+  it('[R1-n1] every schedule name fits the occurrence id grammar, so <schedule>-<millis> is a valid correlation id (D-SECPR039-01 (iii))', () => {
+    for (const name of SCHEDULE_NAMES) {
+      expect(name).toMatch(SCHEDULE_NAME_PATTERN);
+      expect(`${name}-${String(Number.MAX_SAFE_INTEGER)}`).toMatch(CORRELATION_ID_PATTERN);
+    }
+    const longest = `a${'b'.repeat(46)}`;
+    expect(SCHEDULED_JOB_ID.test(`repeat:${longest}:1`)).toBe(true);
+    expect(SCHEDULED_JOB_ID.test(`repeat:${longest}b:1`)).toBe(false);
+  });
+
+  it('[R1-n2] isJobIdOf shares the step grammar of jobIdFor', () => {
+    expect(isJobIdOf({ kind: 'saga', id: ID }, jobIdFor({ kind: 'saga', id: ID, step: 'book-carrier' }))).toBe(true);
+    expect(isJobIdOf({ kind: 'saga', id: ID }, `saga.${ID}.Bad`)).toBe(false);
+    expect(isJobIdOf({ kind: 'saga', id: ID }, `saga.${ID}.${'a'.repeat(41)}`)).toBe(false);
   });
 
   it('refuses a schedule declared on two queues at load time', () => {

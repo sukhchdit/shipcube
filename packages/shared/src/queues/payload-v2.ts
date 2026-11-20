@@ -134,16 +134,18 @@ export type PayloadValidation =
 export const MAX_ISSUES = 20;
 /** Own keys a payload may have before the check refuses it without running the schema (5 are allowed). */
 export const MAX_PAYLOAD_KEYS = 32;
-/** Bounds of the forgery-signal walk: nesting depth and keys examined. */
+/** Bounds of the forgery-signal walk: nesting depth and keys examined. Anything past them counts as a signal. */
 const SIGNAL_MAX_DEPTH = 4;
 const SIGNAL_MAX_KEYS = 256;
 
 /**
- * Tenant-context key spellings, compared after key folding (`normaliseKey`: NFKC, lower case, no
- * separators), so `ORG_ID`, `OrgId`, `orgID`, `org-id`, `tenant_id`, `organisation_id`, `actorID` and `actor_type` all
- * match (PR64-SEC-06).
+ * Tenant-context key spellings, compared after key folding (`normaliseKey`: NFKC, lower case, no separators), so
+ * `ORG_ID`, `OrgId`, `orgID`, `org-id`, `tenant_id`, `organisation_id`, `actorID` and `actor_type` all match
+ * (PR64-SEC-06), and so do compound spellings that END in a tenant key (`on_behalf_of_org_id`, `orgUuid`,
+ * `user_id`) or name an org with an id (`orgRefId`; PR039-SEC-04, code review R1-m2). Anchored, bounded, linear.
  */
-const TENANT_KEY = /^(?:org|organisation|organization|tenant|actor)(?:id|type)?$/;
+const TENANT_KEY_EXACT = /^(?:org|organisation|organization|tenant|actor|user)(?:id|uuid|type)?$/;
+const TENANT_KEY_SUFFIX = /(?:orgid|orguuid|organisationid|organizationid|tenantid|tenantuuid|actorid|actortype|userid|useruuid)$/;
 
 /**
  * Key folding for the tenant-key comparison, as the logger folds keys (NFKC, lower case, only [a-z0-9]); the first 256
@@ -157,27 +159,49 @@ function normaliseKey(key: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function isTenantKey(key: string): boolean {
+  const folded = normaliseKey(key);
+  return TENANT_KEY_EXACT.test(folded) || TENANT_KEY_SUFFIX.test(folded) || (folded.includes('org') && folded.endsWith('id'));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * The forgery signal (ADR-0013 am. 1 item 2; PR64-SEC-06): a tenant-context key at any depth (a bounded walk), or an
- * own `__proto__` key (which `JSON.parse` of the job data creates, and Joi's clone would silently drop).
+ * The forgery signal (ADR-0013 am. 1 item 2; PR64-SEC-06, PR039-SEC-04; D-TASK039-10): a tenant-context key at any
+ * depth, or an own `__proto__` key (which `JSON.parse` of the job data creates, and Joi's clone would silently drop).
+ * The walk is breadth-first, so every root key is examined before anything nested (the root holds at most
+ * MAX_PAYLOAD_KEYS keys, or the payload counts as a signal at once). It is bounded (depth and keys examined) and linear;
+ * a payload that exceeds a bound is flagged as UNEXAMINED rather than passed as clean: no producer writes one, so it is
+ * a forgery by construction.
  */
 export function carriesTenantContext(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (Object.keys(value).length > MAX_PAYLOAD_KEYS) return true;
+  let level: object[] = [value];
   let examined = 0;
-  const walk = (node: unknown, depth: number): boolean => {
-    if (depth > SIGNAL_MAX_DEPTH || typeof node !== 'object' || node === null) return false;
-    for (const key of Object.keys(node)) {
-      examined += 1;
-      if (examined > SIGNAL_MAX_KEYS) return false;
-      if (key === '__proto__' || TENANT_KEY.test(normaliseKey(key))) return true;
-      if (walk((node as Record<string, unknown>)[key], depth + 1)) return true;
+  for (let depth = 0; level.length > 0; depth += 1) {
+    if (depth > SIGNAL_MAX_DEPTH) return true;
+    const next: object[] = [];
+    for (const node of level) {
+      for (const key of Object.keys(node)) {
+        examined += 1;
+        if (examined > SIGNAL_MAX_KEYS) return true;
+        if (key === '__proto__' || isTenantKey(key)) return true;
+        const child = (node as Record<string, unknown>)[key];
+        if (typeof child === 'object' && child !== null) next.push(child);
+      }
     }
-    return false;
-  };
-  return walk(value, 0);
+    level = next;
+  }
+  return false;
+}
+
+/** True for `id` = `<kind>.<id>` or `<kind>.<id>.<step>` of this aggregate (the one step grammar of `jobIdFor`). */
+export function isJobIdOf(ref: { readonly kind: string; readonly id: string }, jobId: string): boolean {
+  const key = `${ref.kind}.${ref.id}`;
+  return jobId === key || (jobId.startsWith(`${key}.`) && STEP.test(jobId.slice(key.length + 1)));
 }
 
 /** Caps an issue list at MAX_ISSUES entries plus one summary entry. */

@@ -23,6 +23,7 @@
  * Tenant context is never read from the payload: processors resolve it from PostgreSQL (TASK-047); until then the
  * processors registered here are SYSTEM-scope.
  */
+import { CORRELATION_ID_PATTERN } from '@platform/shared';
 import { redactValue, securityEvent } from '@platform/shared/logging';
 import { DEAD_LETTER_RETENTION, type JobPayload, QUEUES, type QueueName, validateDequeuedJob } from '@platform/shared/queues';
 
@@ -115,21 +116,26 @@ export function persistedFailure(error: unknown): Error {
   return failure;
 }
 
-/** Runs `work` until it settles or `deadlineMs` passes, whichever is first; the signal fires at the deadline. */
+/**
+ * Runs `work` until it settles or `deadlineMs` passes, whichever is first; the signal fires at the deadline
+ * (D-TASK039-07; code review R1-M1, PR039-SEC-01). `work` is started as a promise job, so a processor that throws
+ * synchronously becomes a rejection like any other; both promises carry a handler before anything can settle, and the
+ * timer is cleared on every path, so neither a late processor rejection nor the deadline rejection is ever unhandled.
+ */
 export async function runWithDeadline(work: (signal: AbortSignal) => Promise<void>, deadlineMs: number): Promise<void> {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
-  const expired = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      const error = new JobDeadlineError(deadlineMs);
-      controller.abort(error);
-      reject(error);
-    }, deadlineMs);
-  });
-  const running = work(controller.signal);
-  // A processor that settles after its deadline must not become an unhandled rejection.
-  running.catch(() => undefined);
   try {
+    const running = Promise.resolve().then(() => work(controller.signal));
+    running.catch(() => undefined);
+    const expired = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new JobDeadlineError(deadlineMs);
+        controller.abort(error);
+        reject(error);
+      }, deadlineMs);
+    });
+    expired.catch(() => undefined);
     await Promise.race([running, expired]);
   } finally {
     clearTimeout(timer);
@@ -152,6 +158,10 @@ function createDeadLetterWriter(options: JobHandlerOptions) {
     }
   }
 
+  /**
+   * The write-time count trim. Concurrent writers read the same depth, so a burst can trim up to (writers - 1) records
+   * below the bound: bounded and harmless, the hourly sweep converges on the bound again (code review R1-n6).
+   */
   async function trim(): Promise<void> {
     try {
       const removed = await trimDeadLetter(deadLetter, keep);
@@ -254,16 +264,27 @@ export function createStalledFailureRecorder(
   options: Omit<JobHandlerOptions, 'processor' | 'deadlineMs'>,
 ): (job: Pick<HandledJob, 'id' | 'name' | 'data' | 'attemptsMade'>) => Promise<void> {
   const writeDeadLetter = createDeadLetterWriter({ ...options, processor: () => Promise.resolve() });
-  return async (job) => {
-    const attempts = Math.max(job.attemptsMade, 1);
+  const record = async (job: Pick<HandledJob, 'id' | 'name' | 'data'>, attempts: number): Promise<void> => {
     options.log.warn('worker.job_failed', {
       queue: options.queue,
       jobId: job.id ?? '',
       attempt: attempts,
       final: true,
       reason: 'STALLED',
-      error: 'NonRetryableError',
+      // What BullMQ persisted for it (the processor never ran, so no error class of its own exists).
+      error: 'UnrecoverableError',
     });
     await writeDeadLetter(job, new NonRetryableError('STALLED'), attempts);
+  };
+  return async (job) => {
+    const attempts = Math.max(job.attemptsMade, 1);
+    // The STALLED lines carry the job's correlation id like every other failure line, when its payload has a valid one
+    // (code review R1-n7); a refused or forged payload gets none.
+    const correlation = (job.data as { correlation_id?: unknown } | null | undefined)?.correlation_id;
+    if (typeof correlation === 'string' && CORRELATION_ID_PATTERN.test(correlation)) {
+      await runWithJobContext({ correlationId: correlation }, () => record(job, attempts));
+    } else {
+      await record(job, attempts);
+    }
   };
 }

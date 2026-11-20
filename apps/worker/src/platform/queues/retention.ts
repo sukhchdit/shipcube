@@ -97,6 +97,8 @@ export interface SweepOptions {
   readonly sources: readonly RetentionSource[];
   readonly bounds: RetentionBounds;
   readonly log: RuntimeLog;
+  /** The job's deadline signal: the sweep stops between queues once it is aborted (code review R1-n5). */
+  readonly signal?: AbortSignal;
   /** Test seams. */
   readonly batch?: number;
   readonly maxRounds?: number;
@@ -118,6 +120,10 @@ export async function sweepRetention(options: SweepOptions): Promise<SweepResult
   const totals = { failed: 0, completed: 0, deadLetterAged: 0, deadLetterTrimmed: 0 };
   const failedQueues: QueueName[] = [];
   for (const { queue, jobs, deadLetter } of sources) {
+    if (options.signal?.aborted === true) {
+      log.warn('worker.queue_retention_aborted', { ...totals, failedQueues: failedQueues.length });
+      options.signal.throwIfAborted();
+    }
     try {
       totals.failed += await cleanAged(jobs, bounds.failed.age * 1_000, 'failed', batch, maxRounds);
       totals.completed += await cleanAged(jobs, bounds.completed.age * 1_000, 'completed', batch, maxRounds);

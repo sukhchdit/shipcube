@@ -4,11 +4,14 @@
  * BullMQ delivers at least once: a worker killed after its effect committed but before BullMQ marked the job
  * completed has the job re-delivered (stalled-job detection), and an operator may retry a job. `idempotentProcessor`
  * makes a second delivery of the same job a no-op: inside the effect's own database transaction it first claims the
- * job key in `job_executions` (`INSERT … ON CONFLICT (job_key) DO NOTHING`, Prisma `createMany` with
- * `skipDuplicates`), and runs the effect only when the claim inserted the row.
+ * `(queue, job id)` in `job_executions` (Prisma `createMany` with `skipDuplicates`, a target-less
+ * `INSERT … ON CONFLICT DO NOTHING` that meets `ux_job_executions__queue_job_key`), and runs the effect only when the
+ * claim inserted the row. The key is unique per queue: BullMQ scopes job ids per queue, and one payload kind can be a
+ * job of two queues (data-model §3.5, D-ARCH-171; code review R1-m1, PR039-SEC-02).
  *
  * - The claim and the effect commit together or not at all: an effect that throws rolls the claim back, so the retry
  *   runs the effect again.
+ * - An attempt whose deadline passed rolls back even when its effect finished (`signal.throwIfAborted()` before commit).
  * - Two concurrent deliveries of one key: the second INSERT waits on the unique index until the first transaction ends;
  *   after a commit it inserts nothing (skipped), after a rollback it claims and runs.
  * - The job key is the BullMQ job id: `<kind>.<id>[.<step>]` (checked against the payload at dequeue, PR64-SEC-07) or
@@ -28,7 +31,7 @@ import { systemDelegates } from '../db/system-db.js';
 import { NonRetryableError } from '../queues/errors.js';
 import type { JobProcessor, ProcessorJob } from '../queues/job-handler.js';
 
-/** The `job_executions` row a claim inserts (data-model §3.5 as added by TASK-039). */
+/** The `job_executions` row a claim inserts (data-model §3.5, D-ARCH-171). */
 export interface JobExecutionRow {
   readonly jobKey: string;
   readonly queue: QueueName;
@@ -83,6 +86,10 @@ export function idempotentProcessor<TTx>(options: IdempotentProcessorOptions<TTx
     const ran = await transaction(job, async (tx) => {
       if (!(await ledger.claim(tx, { jobKey: job.id, queue: job.queue }))) return false;
       await effect(payload, job, tx);
+      // PR039-SEC-03 (D-TASK039-09): an attempt whose deadline passed has already been failed (and maybe dead-lettered)
+      // by the handler; throwing here, inside the transaction, rolls the claim and the effect back instead of committing
+      // them behind the failure. The retry then claims the key and runs the effect.
+      job.signal.throwIfAborted();
       return true;
     });
     if (!ran) log.info('worker.job_duplicate_skipped', { queue: job.queue, jobId: job.id, attempt: job.attemptsMade + 1 });

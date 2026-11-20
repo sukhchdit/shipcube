@@ -9,6 +9,7 @@ import { REDACTED } from '@platform/shared/logging';
 import { UnrecoverableError } from 'bullmq';
 
 import { jobLogContext } from '../logging/job-context.js';
+import { isDeferredFailure } from './consumer.js';
 import type { DeadLetterRecord } from './dead-letter.js';
 import { NonRetryableError } from './errors.js';
 import {
@@ -338,6 +339,31 @@ describe('[PR64-SEC-07] job identity and per-job deadline', () => {
     expect(h.lines).toContainEqual(expect.objectContaining({ event: 'worker.job_failed', reason: 'TRANSIENT', error: 'JobDeadlineError' }));
   });
 
+  it('[R1-M1][PR039-SEC-01] a processor that throws synchronously is a transient failure: no unhandled rejection, the deadline timer is cleared', async () => {
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', listener);
+    try {
+      const h = harness('outbox-relay', { deadlineMs: 20 });
+      let signal: AbortSignal | undefined;
+      const syncThrow: JobProcessor = (_payload, job) => {
+        signal = job.signal;
+        throw new Error('thrown before any await');
+      };
+      const error = await caught(h.handle({ data: payload() }, syncThrow));
+      expect(error.message).toBe('TRANSIENT');
+      expect(h.lines).toContainEqual(expect.objectContaining({ event: 'worker.job_failed', reason: 'TRANSIENT', error: 'Error' }));
+      // Well past the deadline: a timer left armed would have aborted the signal and rejected the deadline promise.
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(signal?.aborted).toBe(false);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+  });
+
   it('a processor that rejects after its deadline is no unhandled rejection', async () => {
     const h = harness('outbox-relay', { deadlineMs: 5 });
     const late = new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('late')), 30));
@@ -406,6 +432,11 @@ describe('[PR64-SEC-04][PR64-SEC-08] dead-letter write: counter, duplicate recor
 });
 
 describe('[PR64-SEC-08] a job BullMQ failed itself after too many stalls', () => {
+  it('isDeferredFailure is true only for a job BullMQ marked with a non-empty deferred failure', () => {
+    expect(isDeferredFailure({ deferredFailure: 'job stalled more than allowable limit' })).toBe(true);
+    for (const job of [{ deferredFailure: '' }, {}, { deferredFailure: 1 }, undefined, null]) expect(isDeferredFailure(job)).toBe(false);
+  });
+
   it('gets a worker.job_failed line (reason STALLED), a dead-letter record and a count', async () => {
     const added: DeadLetterRecord[] = [];
     const raw: string[] = [];
@@ -433,7 +464,9 @@ describe('[PR64-SEC-08] a job BullMQ failed itself after too many stalls', () =>
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(lines).toContainEqual(expect.objectContaining({ event: 'worker.job_failed', reason: 'STALLED', final: true }));
+    expect(lines).toContainEqual(
+      expect.objectContaining({ event: 'worker.job_failed', reason: 'STALLED', final: true, error: 'UnrecoverableError' }),
+    );
     expect(lines).toContainEqual(expect.objectContaining({ event: 'worker.dead_letter_trim_failed', error: 'Error' }));
   });
 });

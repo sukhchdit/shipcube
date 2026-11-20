@@ -13,7 +13,15 @@
 // Anything else is PAYLOAD_INVALID at dequeue. Pure; never throws.
 import Joi from 'joi';
 
-import { capIssues, carriesTenantContext, type JobPayloadV2, PAYLOAD_VERSION, structuralIssues, validateJobPayload } from './payload-v2.js';
+import {
+  capIssues,
+  carriesTenantContext,
+  isJobIdOf,
+  type JobPayloadV2,
+  PAYLOAD_VERSION,
+  structuralIssues,
+  validateJobPayload,
+} from './payload-v2.js';
 import type { QueueDefinition, ScheduleName } from './queue-definition.js';
 
 /** The payload of a scheduled job: the schedule's name, nothing else. */
@@ -34,8 +42,13 @@ export function scheduledPayload(schedule: ScheduleName): ScheduledJobPayload {
   return { v: PAYLOAD_VERSION, schedule };
 }
 
-/** BullMQ's id of a Job Scheduler occurrence: `repeat:<scheduler id>:<next millis>`. */
-const SCHEDULED_JOB_ID = /^repeat:([a-z][a-z0-9-]{0,62}):([1-9][0-9]{0,15})$/;
+/**
+ * BullMQ's id of a Job Scheduler occurrence: `repeat:<scheduler id>:<next millis>`. A schedule name has at most 47
+ * characters, so `<schedule>-<millis>` fits CORRELATION_ID_PATTERN (D-SECPR039-01 condition (iii), code review R1-n1).
+ */
+export const SCHEDULED_JOB_ID = /^repeat:([a-z][a-z0-9-]{0,46}):([1-9][0-9]{0,15})$/;
+/** The schedule-name grammar the occurrence id admits (queues.test.ts pins every SCHEDULE_NAMES entry to it). */
+export const SCHEDULE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,46}$/;
 
 /** The identity of a dequeued job. */
 export interface DequeuedJob {
@@ -112,11 +125,8 @@ function checkAggregateJob(definition: QueueDefinition, job: DequeuedJob): Deque
   const checked = validateJobPayload(definition, job.data);
   if (!checked.ok) return checked;
   const { payload } = checked;
-  const key = `${payload.kind}.${payload.id}`;
-  const id = job.id ?? '';
   const issues: string[] = [];
-  if (id !== key && !(id.startsWith(`${key}.`) && /^[a-z0-9_-]{1,40}$/.test(id.slice(key.length + 1))))
-    issues.push('(job id): kind.id.mismatch');
+  if (!isJobIdOf(payload, job.id ?? '')) issues.push('(job id): kind.id.mismatch');
   if (job.name !== payload.kind) issues.push('(job name): kind.mismatch');
   if (issues.length > 0) return { ok: false, issues, carriesTenantContext: false };
   return { ok: true, payload, correlationId: payload.correlation_id };

@@ -1,7 +1,7 @@
 // Unit tests of the job platform pieces of TASK-039 with fakes: schedule registration (one upsert per schedule with
 // the retention bounds in the template), the schedule dispatcher, the idempotent processor over a ledger
 // (REQ-PLAT-014), and the producer refusal of AT-US-010-03 (D-PM-072 wording). The Valkey and PostgreSQL halves are
-// consumer.int.test.ts, schedulers.int.test.ts and prisma/tests/worker/job-executions.int.test.ts.
+// consumer.int.test.ts, retention.int.test.ts and prisma/tests/worker/job-executions.int.test.ts.
 import { createJobProducer, createRuntimeLog, JobProducerError } from '@platform/api/runtime';
 import { describe, expect, it } from '@jest/globals';
 import { COMPLETED_RETENTION, FAILED_RETENTION, JOB_ATTEMPTS, type QueueName } from '@platform/shared/queues';
@@ -74,7 +74,10 @@ function fakeDatabase() {
   const ledger = createJobExecutionLedger<Tx>((tx) => ({
     createMany: ({ data, skipDuplicates }) => {
       expect(skipDuplicates).toBe(true);
-      const fresh = data.filter((row) => ![...committed, ...tx.rows].some((existing) => existing.jobKey === row.jobKey));
+      // ux_job_executions__queue_job_key: unique per (queue, job_key).
+      const fresh = data.filter(
+        (row) => ![...committed, ...tx.rows].some((existing) => existing.jobKey === row.jobKey && existing.queue === row.queue),
+      );
       tx.rows.push(...fresh);
       return Promise.resolve({ count: fresh.length });
     },
@@ -117,6 +120,30 @@ describe('[REQ-PLAT-014] idempotent job effects (job_executions)', () => {
     fail = false;
     await processor(payload, job({ attemptsMade: 1 }));
     expect(db.effects).toEqual([job().id]);
+  });
+
+  it('[R1-m1][PR039-SEC-02] the same job id on two queues is two jobs: both effects run', async () => {
+    const db = fakeDatabase();
+    const processor = idempotentProcessor({ ...db, log: quiet }, (_payload, delivered, tx) =>
+      Promise.resolve(void tx.effects.push(`${delivered.queue}/${delivered.id}`)),
+    );
+    const id = 'shipment.0193a5b2-7c1e-7d4a-9f3b-000000000f01';
+    await processor({ v: 2, schedule: 'queue-retention' }, job({ queue: 'documents', id }));
+    await processor({ v: 2, schedule: 'queue-retention' }, job({ queue: 'tracking-poll', id }));
+    expect(db.effects).toEqual([`documents/${id}`, `tracking-poll/${id}`]);
+  });
+
+  it('[PR039-SEC-03] an attempt whose deadline passed during the effect rolls back instead of committing behind its failure', async () => {
+    const db = fakeDatabase();
+    const controller = new AbortController();
+    const processor = idempotentProcessor({ ...db, log: quiet }, (_payload, delivered, tx) => {
+      tx.effects.push(delivered.id);
+      controller.abort(new Error('deadline'));
+      return Promise.resolve();
+    });
+    await expect(processor({ v: 2, schedule: 'queue-retention' }, job({ signal: controller.signal }))).rejects.toThrow('deadline');
+    expect(db.committed).toEqual([]);
+    expect(db.effects).toEqual([]);
   });
 
   it('refuses a job without a usable key (no id, or longer than the column allows)', async () => {

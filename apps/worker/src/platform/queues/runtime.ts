@@ -70,6 +70,13 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
   const { log } = options;
   const prefix = options.prefix === undefined ? {} : { prefix: options.prefix };
   const retention = options.retention ?? PRODUCTION_RETENTION;
+  // Refused before any connection is opened (D-SECPR039-01 condition (iii)).
+  if (options.schedules !== undefined) {
+    for (const name of QUEUE_NAMES) {
+      if ((QUEUES[name].schedules ?? []).length > 0 && options.processors[name] !== undefined)
+        throw new Error(`queue ${name} runs scheduled jobs; it takes no registered processor`);
+    }
+  }
   const queues = QUEUE_NAMES.map((name) => ({
     queue: name,
     jobs: openQueue(name, { connection: options.queueConnection, ...prefix }, log),
@@ -82,17 +89,22 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
   };
   const deadLettered = createDeadLetteredCounter(QUEUE_NAMES);
 
-  const sweep = (): Promise<SweepResult> =>
-    sweepRetention({ sources: queues, bounds: retention, log, ...(options.sweepBatch === undefined ? {} : { batch: options.sweepBatch }) });
+  const sweep = (signal?: AbortSignal): Promise<SweepResult> =>
+    sweepRetention({
+      sources: queues,
+      bounds: retention,
+      log,
+      ...(signal === undefined ? {} : { signal }),
+      ...(options.sweepBatch === undefined ? {} : { batch: options.sweepBatch }),
+    });
 
   const processors: Partial<Record<QueueName, JobProcessor>> = { ...options.processors };
   if (options.schedules !== undefined) {
     for (const name of QUEUE_NAMES) {
       if ((QUEUES[name].schedules ?? []).length === 0) continue;
-      if (processors[name] !== undefined) throw new Error(`queue ${name} runs scheduled jobs; it takes no registered processor`);
       processors[name] = createScheduleProcessor({
-        'queue-retention': async () => {
-          await sweep();
+        'queue-retention': async (job) => {
+          await sweep(job.signal);
         },
       });
     }
@@ -149,7 +161,7 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
       if (options.schedules !== undefined) registerUntilDone();
     },
     registerSchedules: register,
-    sweepRetention: sweep,
+    sweepRetention: () => sweep(),
     metrics() {
       // Single-flight (PR64-SEC-12): a scrape while a collection is pending joins it, so collections that wait for a
       // connection that never became ready do not pile up.

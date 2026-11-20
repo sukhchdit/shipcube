@@ -42,7 +42,9 @@ export function scheduleTemplate(schedule: ScheduleName): ScheduleTemplate {
 }
 
 /**
- * Upserts every schedule on its queue (idempotent). `every` overrides intervals (test seam). Rejects on the first
+ * Upserts every schedule on its queue (idempotent). The schedules and their handlers follow the conditions (i)-(iv) of
+ * D-SECPR039-01, stated on SCHEDULE_NAMES (queue-definition.ts): handler parameters from code only, policy predicates
+ * in the handler, a closed list of names of at most 47 characters, and "run now" only through the scheduler. `every` overrides intervals (test seam). Rejects on the first
  * failed upsert; the runtime retries the whole registration.
  */
 export async function registerSchedules(

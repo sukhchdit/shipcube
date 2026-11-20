@@ -110,6 +110,8 @@ export {
 } from './job-options.js';
 export {
   isScheduledPayload,
+  SCHEDULE_NAME_PATTERN,
+  SCHEDULED_JOB_ID,
   scheduledPayload,
   validateDequeuedJob,
   type DequeueCheck,
@@ -119,6 +121,7 @@ export {
 } from './scheduled-job.js';
 export {
   carriesTenantContext,
+  isJobIdOf,
   isJobPayloadV2,
   JOB_ID_PATTERN,
   MAX_ISSUES,
