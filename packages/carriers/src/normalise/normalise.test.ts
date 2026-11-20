@@ -20,9 +20,7 @@ import {
   normaliseError,
   normaliseServices,
   normaliseSurcharge,
-  normaliseTrackingEvents,
   UNMAPPED_SERVICE_EVENT,
-  UNMAPPED_TRACKING_EVENT,
   UNPRINTABLE_CODE,
 } from './normalise.js';
 
@@ -154,7 +152,7 @@ describe('[AT-US-124-04] an unmapped error becomes CARRIER_UNKNOWN_ERROR', () =>
   it('[AT-US-124-04] a mapped error also never carries the raw carrier text', () => {
     const error = normaliseError(DHL, { message: 'Invalid postal code', cause: new Error('upstream 400') });
     expect(error.message).toBe(CARRIER_ERROR_MESSAGES.POSTCODE_INVALID);
-    expect(error.cause).toBeInstanceOf(Error);
+    expect(error.cause).toEqual({ name: 'Error' });
     expect(mapErrorCode(DHL, {})).toBe('CARRIER_UNKNOWN_ERROR');
   });
 
@@ -166,22 +164,6 @@ describe('[AT-US-124-04] an unmapped error becomes CARRIER_UNKNOWN_ERROR', () =>
         expect(error.message).toBe(CARRIER_ERROR_MESSAGES[error.code]);
       }),
     );
-  });
-});
-
-describe('tracking events', () => {
-  it('maps known event codes to the canonical taxonomy and drops and logs unknown ones', () => {
-    const { logger, lines } = captureLogger();
-    const events = [{ code: 'PU' }, { code: 'ZZ' }, { code: 'OK' }, { code: 'ZZ' }];
-    const kept = normaliseTrackingEvents(DHL, events, (event) => event.code, scope(logger));
-    expect(kept.map(({ status }) => status)).toEqual(['PICKED_UP', 'DELIVERED']);
-    expect(lines).toEqual([
-      {
-        event: UNMAPPED_TRACKING_EVENT,
-        fields: { carrier: 'DHL_EXPRESS', account: 'acct-1', accountCode: 'DHL_PLATFORM_SANDBOX', eventCode: 'ZZ' },
-      },
-    ]);
-    for (const { status } of kept) expect(TRACKING_STATUSES).toContain(status);
   });
 });
 

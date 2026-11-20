@@ -44,7 +44,8 @@ export interface CarrierContextInput {
 
 const ACCOUNT_ID = /^[A-Za-z0-9-]{1,64}$/u;
 const ACCOUNT_CODE = /^[A-Z][A-Z0-9_]{1,63}$/u;
-const LOCALE = /^[a-z]{2,3}(?:-[A-Z]{2})?$/u;
+/** Language with an optional region (`en`, `en-US`, `es-419`); scripts are not used by the Platform locales. */
+const LOCALE = /^[a-z]{2,3}(?:-(?:[A-Z]{2}|\d{3}))?$/u;
 /** DR-B29 directives are short `key=value;...` strings; the Mock parser (TASK-079/US-123) validates the vocabulary. */
 const MOCK_SCENARIO_MAX = 512;
 const DEFAULT_LOCALE = 'en';

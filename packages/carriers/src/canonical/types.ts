@@ -4,7 +4,17 @@
  * millimetres as integers (DR-B15), money as integer minor units with an ISO 4217 code (no floating point on money).
  * Carrier wire formats live inside their adapter folder and are never exported from the package (REQ-CARR-001).
  */
-import type { CarrierErrorCode, ContentType, Direction, DocumentFormat, ServiceTier, SurchargeCode, TrackingStatus } from './codes.js';
+import type {
+  CarrierErrorCode,
+  ContentType,
+  Direction,
+  DocumentFormat,
+  Incoterm,
+  PackageType,
+  ServiceTier,
+  SurchargeCode,
+  TrackingStatus,
+} from './codes.js';
 
 /** Integer minor units with an ISO 4217 currency (`{ amountMinor: 12345, currency: 'USD' }` = USD 123.45). */
 export interface CarrierMoney {
@@ -31,6 +41,7 @@ export interface Party {
 }
 
 export interface PackageSpec {
+  readonly packageType: PackageType;
   readonly weightG: number;
   readonly lengthMm: number;
   readonly widthMm: number;
@@ -47,6 +58,8 @@ export interface RateRequest {
   readonly shipDate: string;
   /** Declared customs value for dutiable shipments. */
   readonly declaredValue?: CarrierMoney;
+  /** Duties payer to price for (REQ-CUST-005); DAP when absent. */
+  readonly incoterm?: Incoterm;
 }
 
 /** One canonical surcharge line. `raw` keeps the carrier's original label of a `CARRIER_OTHER` line (REQ-CARR-007). */
@@ -71,9 +84,10 @@ export interface RateQuote {
 }
 
 /**
- * A `getRates` answer. `quotes` is the brief's `RateQuote[]`; `noServiceReason` explains an empty answer (US-122: a
- * request outside the carrier's limits returns no services with a reason, not an exception; US-123 `rates=empty` is
- * `NO_SERVICE`). It is present only when `quotes` is empty.
+ * A `getRates` answer. `quotes` is the brief's `RateQuote[]`; an empty `quotes` is the per-carrier status NO_SERVICE
+ * (REQ-CARR-008), and `noServiceReason` may say why (US-122: a request outside the carrier's limits returns no services
+ * with reason WEIGHT_EXCEEDED, not an exception). It is meaningful only when `quotes` is empty; the TASK-101 contract
+ * suite (REQ-CARR-011) asserts that invariant per adapter.
  */
 export interface RateResponse {
   readonly quotes: readonly RateQuote[];
@@ -99,6 +113,8 @@ export interface ShipmentRequest {
   readonly contentType: ContentType;
   readonly direction: Direction;
   readonly shipDate: string;
+  /** Duties payer (REQ-CUST-005): DAP by default, DDP only where the service declares `ddp`. */
+  readonly incoterm: Incoterm;
   /** Formats requested; an adapter returns only document formats (REQ-DOC-002). */
   readonly labelFormats: readonly DocumentFormat[];
   readonly customsItems?: readonly CustomsItem[];
@@ -122,11 +138,21 @@ export interface CarrierShipmentRef {
   readonly clientReference?: string;
 }
 
+/** Piece-level result of a create call (data-model `shipment_packages.tracking_number`, `carrier_package_ref`). */
+export interface ShipmentPackageResult {
+  /** 1-based position of the package in `ShipmentRequest.packages`. */
+  readonly seq: number;
+  readonly trackingNumber?: string;
+  readonly carrierPackageRef?: string;
+}
+
 export interface ShipmentConfirmation {
   readonly ref: CarrierShipmentRef;
   readonly serviceCode: string;
   /** Labels the create call returned; a format missing here is obtained through `recoverLabel` (REQ-DOC-002). */
   readonly labels: readonly LabelDocument[];
+  /** Per-package references, for carriers that return piece-level numbers (multi-package UPS/FedEx shipments). */
+  readonly packages?: readonly ShipmentPackageResult[];
   readonly charge?: CarrierMoney;
 }
 
@@ -160,15 +186,28 @@ export interface PickupConfirmation {
   readonly closeTime: string;
 }
 
-/** A tracking event; location is city level at most (guardrail: no personal data beyond city on public tracking). */
+/**
+ * A tracking event (REQ-TRACK-001/005). An event whose carrier code has no mapping is kept as `IN_TRANSIT` with
+ * `unmapped: true`, never dropped (US-241). Location is city level at most (guardrail: no personal data beyond city on
+ * public tracking).
+ */
 export interface TrackingEvent {
   readonly status: TrackingStatus;
+  /** True when the carrier code had no canonical mapping (status is then `IN_TRANSIT`; TASK-168 meters it). */
+  readonly unmapped: boolean;
   /** ISO 8601 with offset where the carrier gives one. */
   readonly occurredAt: string;
   readonly city?: string;
   readonly countryCode?: string;
   /** The carrier's own event code (diagnosis only). */
   readonly carrierEventCode?: string;
+  /** The carrier's event identifier: the REQ-TRACK-005 de-duplication key. */
+  readonly carrierEventId?: string;
+  /**
+   * The carrier's original description (data-model `carrier_description`). Personal data (it may name a signatory or a
+   * street): never logged, never shown on public tracking (DR-B31), stored for staff only.
+   */
+  readonly description?: string;
 }
 
 export interface TrackingResult {

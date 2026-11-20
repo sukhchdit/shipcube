@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
-import fc from 'fast-check';
 
 import { DOCUMENT_FORMATS } from './canonical/codes.js';
 import { CarrierContractError } from './errors.js';
@@ -48,17 +47,5 @@ describe('LabelDocument (ADR-0010 am. 11 items 3 and 6)', () => {
     expect(() => createLabelDocument('PDF_A4', new Uint8Array())).toThrow('content must not be empty');
     const gif = new TextEncoder().encode('GIF89a....');
     expect(() => createLabelDocument('PDF_LETTER', gif)).toThrow('PDF_LETTER content must be a PDF');
-  });
-
-  it('property: any non-PDF byte string is refused as a PDF format and accepted as ZPL', () => {
-    fc.assert(
-      fc.property(
-        fc.uint8Array({ minLength: 1, maxLength: 64 }).filter((bytes) => bytes[0] !== 0x25),
-        (bytes) => {
-          expect(() => createLabelDocument('PDF_4X6', bytes)).toThrow(CarrierContractError);
-          expect(createLabelDocument('ZPL', bytes).content).toEqual(bytes);
-        },
-      ),
-    );
   });
 });

@@ -15,7 +15,7 @@
  *    with a sandbox and a production context reaches the sandbox and the production base, and no global flag changes it.
  * Carrier-supplied URLs (label links, tracking pages) are never rules and are never dereferenced.
  */
-import type { CarrierEnvironment } from './canonical/codes.js';
+import { type CarrierEnvironment, isCarrierEnvironment } from './canonical/codes.js';
 import type { CarrierAccountRef, CarrierContext } from './context.js';
 import { CarrierContractError } from './errors.js';
 
@@ -69,8 +69,8 @@ function prefixIssues(prefixes: unknown, path: string): string[] {
   const issues: string[] = [];
   prefixes.forEach((prefix, index) => {
     const at = `${path}.pathPrefixes[${String(index)}]`;
-    if (typeof prefix !== 'string' || !PATH_CHARS.test(prefix)) issues.push(`${at} must be an absolute path of [A-Za-z0-9._~-/]`);
-    else if (ENCODED_SEPARATOR.test(prefix)) issues.push(`${at} must not contain encoded separators`);
+    if (typeof prefix === 'string' && ENCODED_SEPARATOR.test(prefix)) issues.push(`${at} must not contain encoded separators`);
+    else if (typeof prefix !== 'string' || !PATH_CHARS.test(prefix)) issues.push(`${at} must be an absolute path of [A-Za-z0-9._~-/]`);
     else if (prefix.split('/').some((segment) => segment === '.' || segment === '..')) issues.push(`${at} must not contain dot segments`);
     else if (prefix.includes('//')) issues.push(`${at} must not contain empty segments`);
   });
@@ -78,10 +78,39 @@ function prefixIssues(prefixes: unknown, path: string): string[] {
   return issues;
 }
 
-/** Every defect of a carrier `EGRESS` table; empty when every rule is exact and listed under its own tier. */
+const TABLE_KEYS: ReadonlySet<string> = new Set(['sandbox', 'production']);
+const RULE_KEYS: ReadonlySet<string> = new Set(['origin', 'pathPrefixes', 'tier']);
+
+/**
+ * A sandbox prefix (an entry ending in `/`) must not cover any production entry on the same origin (PR075-SEC-02 (a)):
+ * otherwise a production endpoint becomes reachable as a sandbox-tier rule that no production refusal sees. An exact
+ * path listed in both tiers (a shared token endpoint) stays allowed; the credentials decide its tier. The reverse
+ * overlap (a production prefix covering the sandbox one, DHL `/mydhlapi/` vs `/mydhlapi/test/`) is resolved by the
+ * OutboundHttpClient's most-specific-entry tier rule (TASK-113).
+ */
+function crossTierIssues(egress: CarrierEgress): string[] {
+  const issues: string[] = [];
+  egress.sandbox.forEach((sandboxRule, index) => {
+    for (const productionRule of egress.production.filter(({ origin }) => origin === sandboxRule.origin)) {
+      for (const entry of sandboxRule.pathPrefixes.filter((prefix) => prefix.endsWith('/'))) {
+        for (const other of productionRule.pathPrefixes.filter((prefix) => prefix.startsWith(entry))) {
+          issues.push(`EGRESS.sandbox[${String(index)}] ${entry} reaches the production entry ${other} on ${sandboxRule.origin}`);
+        }
+      }
+    }
+  });
+  return issues;
+}
+
+/**
+ * Every defect of a carrier `EGRESS` table; empty when the schema is closed (no unknown table or rule key), every rule
+ * is exact and listed under its own tier, and no sandbox prefix covers a production entry.
+ */
 export function egressIssues(egress: unknown): string[] {
   if (typeof egress !== 'object' || egress === null) return ['EGRESS must be an object with sandbox and production lists'];
-  const issues: string[] = [];
+  const issues = Object.keys(egress)
+    .filter((key) => !TABLE_KEYS.has(key))
+    .map((key) => `EGRESS.${key} is not an environment (sandbox | production)`);
   for (const environment of ['sandbox', 'production'] as const) {
     const rules = (egress as Partial<Record<CarrierEnvironment, unknown>>)[environment];
     if (!Array.isArray(rules)) {
@@ -95,18 +124,23 @@ export function egressIssues(egress: unknown): string[] {
         return;
       }
       const { origin, pathPrefixes, tier } = rule as Partial<Record<keyof EgressRule, unknown>>;
+      for (const key of Object.keys(rule).filter((name) => !RULE_KEYS.has(name))) issues.push(`${path}.${key} is not a rule field`);
       issues.push(...originIssues(origin, path), ...prefixIssues(pathPrefixes, path));
       if (tier !== environment) issues.push(`${path}.tier must be "${environment}" (the environment it is listed under)`);
     });
   }
+  if (issues.length === 0) issues.push(...crossTierIssues(egress as CarrierEgress));
   return issues;
 }
 
-/** Throws `CarrierContractError` naming every defect of `egress`; returns it unchanged otherwise. */
+/** A frozen copy holding the three rule fields only. */
+const freezeRule = ({ origin, pathPrefixes, tier }: EgressRule): EgressRule =>
+  Object.freeze({ origin, pathPrefixes: Object.freeze([...pathPrefixes]), tier });
+
+/** Throws `CarrierContractError` naming every defect of `egress`; returns a frozen copy otherwise. */
 export function defineCarrierEgress(carrierCode: string, egress: CarrierEgress): CarrierEgress {
   const issues = egressIssues(egress);
   if (issues.length > 0) throw new CarrierContractError(`invalid EGRESS for ${carrierCode}`, issues);
-  const freezeRule = (rule: EgressRule): EgressRule => Object.freeze({ ...rule, pathPrefixes: Object.freeze([...rule.pathPrefixes]) });
   return Object.freeze({
     sandbox: Object.freeze(egress.sandbox.map(freezeRule)),
     production: Object.freeze(egress.production.map(freezeRule)),
@@ -133,6 +167,10 @@ export function deriveCarrierEgressRules({ accounts, egress, appEnv }: DeriveEgr
   const issues: string[] = [];
   const rules = new Map<string, EgressRule>();
   for (const account of accounts.filter(({ enabled }) => enabled)) {
+    if (!isCarrierEnvironment(account.environment)) {
+      issues.push(`account ${account.code} has an environment other than sandbox or production`);
+      continue;
+    }
     if (account.environment === 'production' && appEnv !== 'production') {
       issues.push(`account ${account.code} has environment production, which is refused unless APP_ENV=production`);
       continue;
@@ -154,7 +192,7 @@ export function deriveCarrierEgressRules({ accounts, egress, appEnv }: DeriveEgr
     issues.push('a production-tier egress rule is refused unless APP_ENV=production');
   }
   if (issues.length > 0) throw new CarrierContractError('carrier egress refused', [...new Set(issues)]);
-  return Object.freeze(derived.map((rule) => Object.freeze({ ...rule, pathPrefixes: Object.freeze([...rule.pathPrefixes]) })));
+  return Object.freeze(derived.map(freezeRule));
 }
 
 /**

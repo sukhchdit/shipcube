@@ -176,7 +176,7 @@ describe('time helpers', () => {
     );
   });
 
-  it('isIanaTimeZone accepts zone names the runtime knows and refuses offsets and unknown names', () => {
+  it('isIanaTimeZone (interim heuristic, TASK-124 owns exact zone validation) accepts known zones and Area/Location names, refuses offsets and unknown areas', () => {
     expect(isIanaTimeZone('Asia/Kolkata')).toBe(true);
     expect(isIanaTimeZone('America/Argentina/Buenos_Aires')).toBe(true);
     expect(isIanaTimeZone('UTC')).toBe(true);

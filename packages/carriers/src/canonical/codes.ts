@@ -82,6 +82,14 @@ export type Direction = (typeof DIRECTIONS)[number];
 export const CONTENT_TYPES = ['DOCUMENT', 'PARCEL'] as const;
 export type ContentType = (typeof CONTENT_TYPES)[number];
 
+/** Data-model `package_type` (REQ-BOOK-028; `PALLET`/`FREIGHT` are later seams). */
+export const PACKAGE_TYPES = ['PARCEL_BOX', 'ENVELOPE'] as const;
+export type PackageType = (typeof PACKAGE_TYPES)[number];
+
+/** Incoterms the Platform offers (REQ-CUST-005: DAP by default, DDP where the service declares it). */
+export const INCOTERMS = ['DAP', 'DDP'] as const;
+export type Incoterm = (typeof INCOTERMS)[number];
+
 /** Carrier account environment: a property of the account, never a global flag (REQ-CARR-001, brief §4.3). */
 export const CARRIER_ENVIRONMENTS = ['sandbox', 'production'] as const;
 export type CarrierEnvironment = (typeof CARRIER_ENVIRONMENTS)[number];
@@ -107,6 +115,8 @@ export const isDocumentFormat = memberOf(DOCUMENT_FORMATS);
 export const isDirection = memberOf(DIRECTIONS);
 export const isContentType = memberOf(CONTENT_TYPES);
 export const isCarrierEnvironment = memberOf(CARRIER_ENVIRONMENTS);
+export const isPackageType = memberOf(PACKAGE_TYPES);
+export const isIncoterm = memberOf(INCOTERMS);
 
 export const isCarrierCode = (value: unknown): value is string => typeof value === 'string' && CARRIER_CODE_PATTERN.test(value);
 

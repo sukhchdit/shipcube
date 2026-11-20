@@ -39,7 +39,7 @@ const account = (overrides: Partial<EgressAccount> = {}): EgressAccount => ({
 const rateRequest: RateRequest = {
   origin: { countryCode: 'US', postalCode: '10001' },
   destination: { countryCode: 'IN', postalCode: '400001' },
-  packages: [{ weightG: 2000, lengthMm: 300, widthMm: 200, heightMm: 100 }],
+  packages: [{ packageType: 'PARCEL_BOX', weightG: 2000, lengthMm: 300, widthMm: 200, heightMm: 100 }],
   contentType: 'PARCEL',
   direction: 'EXPORT',
   shipDate: '2026-11-20',
@@ -92,15 +92,22 @@ describe('[AT-US-121-04] the environment is read from the account, not a global 
     ]);
   });
 
-  it('[AT-US-121-04] a sandbox context never yields a URL outside its sandbox prefixes, a production context never one inside them', () => {
+  it('[AT-US-121-04] property: for plain relative paths, a sandbox context stays inside its sandbox prefix and a production context outside it unless the path itself names the sandbox segment', () => {
     fc.assert(
       fc.property(fc.stringMatching(/^[a-z][a-z0-9/-]{0,30}$/u), (path) => {
+        // A production path that starts with the sandbox segment lands inside the sandbox prefix (shared origin, nested
+        // prefixes, DHL /mydhlapi/ vs /mydhlapi/test/): see the overlap example below; TASK-113 decides that case.
+        fc.pre(!path.startsWith('test/') && path !== 'test');
         const sandbox = new URL(path, egressBase(FAKE_EGRESS, { environment: 'sandbox' })).pathname;
         const production = new URL(path, egressBase(FAKE_EGRESS, { environment: 'production' })).pathname;
         expect(sandbox.startsWith('/v1/test/')).toBe(true);
         expect(production.startsWith('/v1/test/')).toBe(false);
       }),
     );
+  });
+
+  it('overlap: with nested prefixes on one origin, a production base plus "test/..." reaches the sandbox prefix; the base alone does not prevent it (TASK-113 most-specific-entry tier rule, TASK-132 carrierUrl)', () => {
+    expect(new URL('test/rates', egressBase(FAKE_EGRESS, { environment: 'production' })).pathname).toBe('/v1/test/rates');
   });
 
   it('an environment without a prefix rule has no base', () => {
@@ -153,7 +160,7 @@ describe('EGRESS tables are exact (ADR-0010 am. 11 item 6)', () => {
     ['not a URL', { origin: 'carrier' }, 'is not a URL'],
     ['a non-string origin', { origin: 7 }, 'origin must be a string'],
     ['a relative prefix', { pathPrefixes: ['v1/'] }, 'must be an absolute path'],
-    ['an encoded separator', { pathPrefixes: ['/v1%2f/'] }, 'must be an absolute path'],
+    ['an encoded separator', { pathPrefixes: ['/v1%2f/'] }, 'must not contain encoded separators'],
     ['a dot segment', { pathPrefixes: ['/v1/../admin/'] }, 'must not contain dot segments'],
     ['an empty segment', { pathPrefixes: ['/v1//x/'] }, 'must not contain empty segments'],
     ['no prefix', { pathPrefixes: [] }, 'must be a non-empty array'],

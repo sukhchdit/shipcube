@@ -27,7 +27,7 @@ function omit(adapter: object, key: string): Record<string, unknown> {
 
 const address = { countryCode: 'US', postalCode: '10001', city: 'New York' };
 const party = { name: 'Synthetic Sender', address };
-const pkg = { weightG: 2000, lengthMm: 300, widthMm: 200, heightMm: 100 };
+const pkg = { packageType: 'PARCEL_BOX' as const, weightG: 2000, lengthMm: 300, widthMm: 200, heightMm: 100 };
 const rateRequest: RateRequest = {
   origin: address,
   destination: { countryCode: 'IN', postalCode: '400001' },
@@ -46,6 +46,7 @@ const shipmentRequest: ShipmentRequest = {
   direction: 'EXPORT',
   shipDate: '2026-11-20',
   labelFormats: ['PDF_4X6'],
+  incoterm: 'DAP',
 };
 const shipmentRef: CarrierShipmentRef = { trackingNumber: 'FAKE0001' };
 const pickupRequest: PickupRequest = {
@@ -274,7 +275,7 @@ describe('[AT-US-121-06] an adapter missing a required operation is rejected at 
     expect(registrationIssues(createFakeAdapter({ capabilities: fakeCapabilities({ maxTrackingNumbersPerCall: 0 }) })).issues).toEqual([
       'maxTrackingNumbersPerCall must be an integer 1..1000',
     ]);
-    expect(() => guardAdapter({ ...createFakeAdapter(), code: 7 } as unknown as CarrierAdapter)).toThrow('carrier adapter (no code)');
+    expect(() => guardAdapter({ ...createFakeAdapter(), code: 7 } as unknown as CarrierAdapter)).toThrow('carrier adapter (invalid code)');
   });
 });
 

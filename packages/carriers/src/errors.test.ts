@@ -8,7 +8,7 @@ describe('CarrierError', () => {
     const cause = new Error('socket hang up');
     const error = new CarrierError('TIMEOUT', { carrier: 'UPS', operation: 'getRates', carrierErrorCode: '250003', cause });
     expect(error.message).toBe(CARRIER_ERROR_MESSAGES.TIMEOUT);
-    expect(error.cause).toBe(cause);
+    expect(error.cause).toEqual({ name: 'Error' });
     expect(error.toJSON()).toEqual({ code: 'TIMEOUT', carrier: 'UPS', operation: 'getRates', carrierErrorCode: '250003' });
     expect(JSON.stringify(error)).not.toContain('socket hang up');
     expect(isCarrierError(error)).toBe(true);

@@ -32,7 +32,13 @@ export {
   type Direction,
   DOCUMENT_FORMATS,
   type DocumentFormat,
+  type Incoterm,
+  INCOTERMS,
   isCarrierCode,
+  isIncoterm,
+  isPackageType,
+  PACKAGE_TYPES,
+  type PackageType,
   isCarrierEnvironment,
   isCarrierErrorCode,
   isContentType,
@@ -70,6 +76,7 @@ export type {
   ServicePoint,
   ServicePointQuery,
   ShipmentConfirmation,
+  ShipmentPackageResult,
   ShipmentRequest,
   SurchargeLine,
   TrackingEvent,
@@ -94,9 +101,17 @@ export {
   type EgressRule,
   type EgressTier,
 } from './egress.js';
-export { CarrierContractError, CarrierError, type CarrierErrorJson, type CarrierErrorOptions, isCarrierError } from './errors.js';
-export { guardAdapter, registrationIssues } from './guard.js';
-export { createLabelDocument } from './labels.js';
+export {
+  CarrierContractError,
+  CarrierError,
+  type CarrierErrorJson,
+  type CarrierErrorOptions,
+  isCarrierError,
+  type SafeCause,
+  safeCause,
+} from './errors.js';
+export { guardAdapter, type GuardOptions, LABEL_DROPPED_EVENT, registrationIssues, snapshotContext } from './guard.js';
+export { createLabelDocument, isZpl } from './labels.js';
 export {
   type CarrierMappings,
   type CarrierMappingsInput,
@@ -114,6 +129,7 @@ export {
   mapService,
   mapTrackingStatus,
   MAX_RAW_LABEL_LENGTH,
+  MAX_UNMAPPED_WARNINGS,
   type NormaliseLogger,
   type NormaliseScope,
   normaliseError,
@@ -122,6 +138,7 @@ export {
   normaliseTrackingEvents,
   UNMAPPED_SERVICE_EVENT,
   UNMAPPED_TRACKING_EVENT,
+  UNMAPPED_TRACKING_STATUS,
   UNPRINTABLE_CODE,
 } from './normalise/normalise.js';
 export {

@@ -1,17 +1,19 @@
 /**
  * Normalisation at the adapter boundary (REQ-CARR-007, US-124, ADR-0010 §Interface). Pure functions over a carrier's
- * mapping tables (mappings.ts); the only side effect is one structured warning per dropped item through the injected
- * logger port. The policies:
- *  - service: mapped -> canonical code and tier; unmapped -> dropped from customer results and logged once with the
- *    carrier, the account and the service code (AT-US-124-02);
+ * mapping tables (mappings.ts); the only side effect is structured warnings through the injected logger port. The
+ * policies:
+ *  - service: mapped -> canonical code and tier; unmapped -> dropped from customer results and logged with the carrier,
+ *    the account and the service code (AT-US-124-02);
  *  - surcharge: mapped -> canonical code; unmapped -> `CARRIER_OTHER` with the carrier's label kept in `raw`
  *    (AT-US-124-03);
  *  - error: mapped -> canonical code; unmapped -> `CARRIER_UNKNOWN_ERROR`; the result is a `CarrierError` whose message
- *    comes from the canonical code, never from the raw carrier text (AT-US-124-04);
- *  - tracking event: mapped -> canonical status; unmapped -> dropped and logged, never guessed (the taxonomy and its
- *    state mapping are DR-B18 / TASK-168).
- * Log lines carry codes only (carrier, account, the carrier's code when it has a safe shape), never labels, messages
- * or bodies, which may echo personal data.
+ *    comes from the canonical code and whose cause is reduced to `{ name, code? }`, never raw carrier text
+ *    (AT-US-124-04, ADR-0010 am. 11 item 8);
+ *  - tracking event: mapped -> canonical status; unmapped -> `IN_TRANSIT` with `unmapped: true`, never dropped
+ *    (REQ-TRACK-001, US-241; TASK-168 increments `tracking_unmapped_event_total` from the flag).
+ * Warn lines carry codes only (carrier, account, the carrier's code when it has a safe shape), never labels,
+ * descriptions, messages or bodies, which may echo personal data. At most `MAX_UNMAPPED_WARNINGS` distinct codes are
+ * logged per call, then one summary line with the count (PR075-SEC-07).
  */
 import type { PlatformLogger } from '@platform/shared/logging';
 
@@ -22,7 +24,7 @@ import { CarrierError } from '../errors.js';
 import type { CarrierOperation } from '../operations.js';
 import { type CarrierMappings, lookupKey, type MappedService } from './mappings.js';
 
-/** The logger port of the normalisers (the platform logger satisfies it). */
+/** The logger port of the normalisers and the guard (the platform logger satisfies it). */
 export type NormaliseLogger = Pick<PlatformLogger, 'warn'>;
 
 /** Who the normalised answer belongs to: the account of the call (from `CarrierContext.account`). */
@@ -33,6 +35,8 @@ export interface NormaliseScope {
 
 export const UNMAPPED_SERVICE_EVENT = 'carrier.service.unmapped';
 export const UNMAPPED_TRACKING_EVENT = 'carrier.tracking_event.unmapped';
+/** Distinct unmapped codes logged per call before the rest is summarised in one line. */
+export const MAX_UNMAPPED_WARNINGS = 20;
 
 /** A carrier code is logged only in this shape; anything else is logged as `UNPRINTABLE_CODE`. */
 const LOGGABLE_CODE = /^[A-Za-z0-9_.:-]{1,64}$/u;
@@ -42,12 +46,31 @@ export const MAX_RAW_LABEL_LENGTH = 120;
 
 const loggableCode = (value: unknown): string => (typeof value === 'string' && LOGGABLE_CODE.test(value) ? value : UNPRINTABLE_CODE);
 
-/** Control characters and line breaks never survive into a stored label. */
+/** Control, format (bidi, zero-width) and separator characters, and lone surrogates, never survive into a stored label. */
+const UNSAFE_LABEL_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]+/gu;
+const LONE_SURROGATE = /\p{Cs}/gu;
 const sanitiseLabel = (label: string): string =>
-  label
-    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
-    .trim()
-    .slice(0, MAX_RAW_LABEL_LENGTH);
+  label.replace(UNSAFE_LABEL_CHARS, ' ').trim().slice(0, MAX_RAW_LABEL_LENGTH).replace(LONE_SURROGATE, '');
+
+/**
+ * Logs each distinct unmapped code once, up to `MAX_UNMAPPED_WARNINGS`, then reports the remainder in one summary
+ * line when `flush` is called.
+ */
+function unmappedReporter(event: string, codeField: string, mappings: CarrierMappings, scope: NormaliseScope) {
+  const seen = new Set<string>();
+  const base = { carrier: mappings.carrierCode, account: scope.account.id, accountCode: scope.account.code };
+  return {
+    report(code: unknown): void {
+      const printable = loggableCode(code);
+      if (seen.has(printable)) return;
+      seen.add(printable);
+      if (seen.size <= MAX_UNMAPPED_WARNINGS) scope.logger.warn(event, { ...base, [codeField]: printable });
+    },
+    flush(): void {
+      if (seen.size > MAX_UNMAPPED_WARNINGS) scope.logger.warn(event, { ...base, unmappedCount: seen.size, logged: MAX_UNMAPPED_WARNINGS });
+    },
+  };
+}
 
 /** The canonical service of a carrier service code, or undefined when unmapped. */
 export function mapService(mappings: CarrierMappings, carrierServiceCode: unknown): MappedService | undefined {
@@ -55,10 +78,7 @@ export function mapService(mappings: CarrierMappings, carrierServiceCode: unknow
   return key === undefined ? undefined : mappings.services.get(key);
 }
 
-/**
- * Keeps the entries whose service code is mapped, each with its canonical service; drops the others and logs each
- * distinct unmapped code once per call.
- */
+/** Keeps the entries whose service code is mapped, each with its canonical service; drops and logs the others. */
 export function normaliseServices<T>(
   mappings: CarrierMappings,
   entries: readonly T[],
@@ -66,24 +86,14 @@ export function normaliseServices<T>(
   scope: NormaliseScope,
 ): { readonly entry: T; readonly service: MappedService }[] {
   const kept: { readonly entry: T; readonly service: MappedService }[] = [];
-  const logged = new Set<string>();
+  const reporter = unmappedReporter(UNMAPPED_SERVICE_EVENT, 'serviceCode', mappings, scope);
   for (const entry of entries) {
     const code = serviceCodeOf(entry);
     const service = mapService(mappings, code);
-    if (service !== undefined) {
-      kept.push({ entry, service });
-      continue;
-    }
-    const printable = loggableCode(code);
-    if (logged.has(printable)) continue;
-    logged.add(printable);
-    scope.logger.warn(UNMAPPED_SERVICE_EVENT, {
-      carrier: mappings.carrierCode,
-      account: scope.account.id,
-      accountCode: scope.account.code,
-      serviceCode: printable,
-    });
+    if (service === undefined) reporter.report(code);
+    else kept.push({ entry, service });
   }
+  reporter.flush();
   return kept;
 }
 
@@ -95,7 +105,7 @@ export interface CarrierSurcharge {
   readonly amount: CarrierMoney;
 }
 
-/** A canonical surcharge line; an unmapped surcharge is `CARRIER_OTHER` with its label in `raw`. */
+/** A canonical surcharge line; an unmapped surcharge is `CARRIER_OTHER` with its sanitised label in `raw`. */
 export function normaliseSurcharge(mappings: CarrierMappings, surcharge: CarrierSurcharge): SurchargeLine {
   const byCode = lookupKey(surcharge.code);
   const byLabel = lookupKey(surcharge.label);
@@ -112,6 +122,7 @@ export interface CarrierFailure {
   /** The carrier's message; used for matching only, never kept. */
   readonly message?: string;
   readonly operation?: CarrierOperation;
+  /** Underlying failure; only its class name and a safe code are kept (`safeCause`). */
   readonly cause?: unknown;
 }
 
@@ -126,7 +137,7 @@ export function mapErrorCode(mappings: CarrierMappings, failure: Pick<CarrierFai
   );
 }
 
-/** The `CarrierError` of a carrier failure; its message is the canonical text, the raw carrier message is dropped. */
+/** The `CarrierError` of a carrier failure; the message is the canonical text, the raw message and cause text are dropped. */
 export function normaliseError(mappings: CarrierMappings, failure: CarrierFailure): CarrierError {
   return new CarrierError(mapErrorCode(mappings, failure), {
     carrier: mappings.carrierCode,
@@ -142,31 +153,28 @@ export function mapTrackingStatus(mappings: CarrierMappings, carrierEventCode: u
   return key === undefined ? undefined : mappings.trackingEvents.get(key);
 }
 
-/** Keeps the events whose code is mapped, each with its canonical status; drops and logs the others (once per code). */
+/** Status of an event whose carrier code has no mapping (REQ-TRACK-001). */
+export const UNMAPPED_TRACKING_STATUS: TrackingStatus = 'IN_TRANSIT';
+
+/**
+ * One canonical status per input event, in order, never dropping one: a mapped code gives its status with
+ * `unmapped: false`; an unmapped code gives `IN_TRANSIT` with `unmapped: true` and a warn line (codes only, never the
+ * event's description).
+ */
 export function normaliseTrackingEvents<T>(
   mappings: CarrierMappings,
   events: readonly T[],
   eventCodeOf: (event: T) => unknown,
   scope: NormaliseScope,
-): { readonly event: T; readonly status: TrackingStatus }[] {
-  const kept: { readonly event: T; readonly status: TrackingStatus }[] = [];
-  const logged = new Set<string>();
-  for (const event of events) {
+): { readonly event: T; readonly status: TrackingStatus; readonly unmapped: boolean }[] {
+  const reporter = unmappedReporter(UNMAPPED_TRACKING_EVENT, 'eventCode', mappings, scope);
+  const result = events.map((event) => {
     const code = eventCodeOf(event);
     const status = mapTrackingStatus(mappings, code);
-    if (status !== undefined) {
-      kept.push({ event, status });
-      continue;
-    }
-    const printable = loggableCode(code);
-    if (logged.has(printable)) continue;
-    logged.add(printable);
-    scope.logger.warn(UNMAPPED_TRACKING_EVENT, {
-      carrier: mappings.carrierCode,
-      account: scope.account.id,
-      accountCode: scope.account.code,
-      eventCode: printable,
-    });
-  }
-  return kept;
+    if (status !== undefined) return { event, status, unmapped: false };
+    reporter.report(code);
+    return { event, status: UNMAPPED_TRACKING_STATUS, unmapped: true };
+  });
+  reporter.flush();
+  return result;
 }
