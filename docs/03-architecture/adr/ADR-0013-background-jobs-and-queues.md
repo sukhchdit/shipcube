@@ -230,7 +230,7 @@ Items continue at 27.
     - **What it does.** Every hour it deletes the `idempotency_keys` rows whose `expires_at` has passed, in batches of 5,000. The statement, the batch bound and the clock note are in ADR-0014 amendment 8 and data-model §6.2.
     - **Why it is a schedule of its own** and not a fourth table of the daily `outbox-purge`: a stored response may hold personal data and is kept for 24 hours. A daily purge would let it live for up to 48.
     - **§5 said "housekeeping hourly"** as if housekeeping were one schedule. As built, each purge is a schedule with its own interval: `queue-retention` hourly (TASK-039), `outbox-purge` daily (TASK-043), `idempotency-purge` hourly. A later purge (expired tokens, MFA challenges, drafts) names its own interval in the same way.
-    - **Conditions.** The four conditions of D-SECPR039-01 bind it, as they bind every schedule: parameters from code, the age predicate in the statement, a name of the closed list, occurrences only from the scheduler.
+    - **Conditions.** The four conditions of D-SECPR039-01 bind it, as they bind every schedule: parameters from code, the age predicate in the statement, a name of the closed list, occurrences only from the scheduler. *Completed 2026-11-20 (QG-040-C1 (a); ADR-0014 amendment 12; D-ARCH-201): condition (ii) has a second half, and it binds too. The handler writes, so each batch runs through `idempotentProcessor`, keyed by the occurrence id and the batch number, as the batches of `outbox-purge` do.*
     - **Failure.** A dead-lettered occurrence is reported by `QueueDeadLetterNew` as a ticket (item 14). No metric and no alarm are added.
 
 ## Reversibility

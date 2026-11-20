@@ -45,6 +45,15 @@ Card data must never touch Platform servers (hosted fields; SAQ A). Stripe first
    - **Defence in depth.** The Stripe **test** account has the Radar rule "Block if CVC verification fails" enabled (recorded here as configuration, not code). Radar ignores `unavailable`/`unchecked`, which is why the application rule above is the control and Radar only the backstop.
    - Verification: SEC-TC-37 (amended, review §14.5): `fail`/`unavailable` → `FAILED/AUTHENTICATION_FAILED`, authorisation voided, no saga, `cvc_recollection_failed`; `pass` → `AUTHORISED`; after `createReauthProof` the retry has `cvc_recollection_required=false`; same outcome on the webhook path. Requirement side: REQ-PAY-010 already lists `AUTHENTICATION_FAILED`; no new REQ.
 
+## Amendment (2026-11-20, what the checkout does before its write, and the client secret in a stored response: QG-040-C2 of D-QG-003, D-PM-083, PR040-SEC-03 and PR040-SEC-08; ADR-0003 amendment of this date; ADR-0014 amendments 13 and 15; D-ARCH-202, D-ARCH-204)
+
+5. **Gateway calls of an API request.**
+   - **`checkoutOrder` creates the intent and does not confirm it.** Its `call` phase runs before the transaction that writes the payment row. If that transaction does not commit, no row names the intent, so the intent must bind nobody: no hold is placed there, with the Mock gateway as with Stripe (ADR-0003 rule (j)). §1 lets `authorise` return `AUTHORISED`; in this phase the intent is returned unconfirmed, with its client secret, and never as `AUTHORISED`. The hold comes with the confirmation, which acts on an intent that a committed payment row names: the browser's, with the client secret of the committed response, or a server-side one, in `confirmPayment` or in a worker step that follows `order.checkout_started`. TASK-085 gives the interface and the Mock gateway the two steps; TASK-092 and TASK-170 use them.
+   - **The key of the checkout call is `auth:<order_id>:<order_version>:<attempt>`** (ADR-0003 rule (k)). Stripe compares the parameters of a repeated key with those of the first request and refuses the request when they differ. A key without the order version would therefore refuse the checkout of an order whose amount changed after an earlier call that never got its payment row.
+   - **`confirmPayment`** retrieves the intent and voids the authorisation when amendment 4 requires it. Both act on an intent that a committed row names, and the state is derived from the gateway again by the next confirmation, webhook or sweep.
+   - **Every state-changing call carries its key** (§1), in the API and in the worker. A 5xx of the API releases the request's idempotency key, so the same call can be made again; the key is what makes that one effect (PR040-SEC-08).
+   - **Stored client secrets.** The responses of `checkoutOrder`, `confirmPayment` and `createPaymentMethodSetup` carry the client secret of the intent, and the idempotency store keeps them for a replay: encrypted, bound to the caller's scope, at most 25 h (ADR-0014 amendment 15; PR040-SEC-03 accepted). Nothing else stores or logs a client secret.
+
 ## Reversibility
 
 High (adapter boundary).
