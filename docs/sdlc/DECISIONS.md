@@ -4901,3 +4901,50 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **Unchanged from round 1:** -02 (b) TASK-113; -02 (c) orchestrator; -04 (b) TASK-132 (plus the ruling-2 wording: a `CarrierContractError` leaving the guard means the adapter was not entered); -09 TASK-113 and TASK-128.
   - **Public tracking task:** the PR075-SEC-12 sentinel test.
 - **Reversibility:** High (a review record; the fixes are local to `packages/carriers`).
+
+### D-SECPR039-01 · 2026-11-20 · security-analyst · TASK-039 (idempotent job processing, singleton scheduled jobs, bounded queue retention; branch `feat/TASK-039-idempotent-job-processing-singleton-scheduled`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `64eefab`; D-TASK039-01 accepted with conditions (record `docs/05-quality/security/PR-pending-TASK-039-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-039-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on type-stripped `git archive` extracts of `64eefab` and `7da0e50`, and the migration on PGlite 0.4.3 (PostgreSQL 17.5). No npm, Jest or Docker, and nothing was run in the PR worktree.
+- **The record is a merge condition.** The PR changes 9 owned paths (`/prisma/`, `/tools/db/`, `/apps/api/src/platform/`), and main's classifier selects the hosted `security-integration` job (8 trigger paths).
+- **Held:**
+  - **Dequeue identity.** 34 of 34 rows as designed. Scheduled occurrences need the closed `{ v: 2, schedule }` payload of a schedule declared on that queue, name = schedule and id `repeat:<schedule>:<millis>` naming the same schedule. Aggregate jobs need id `<kind>.<id>[.<step>]` of the payload and name = kind.
+  - **The migration.** The linter gives 0 findings, and its mutation controls fire. The guard block is byte-identical to the renderer's output. The grants manifest validates, and C10 is clean. On PGlite: one claim then none; a foreign `created_by` and `version` 2 refused by the standard-columns guard; the CHECKs hold; UPDATE, DELETE and TRUNCATE give 42501.
+  - **The claim is in the effect's transaction.** A unique-index-wait fake with an overlapping retry gives one effect.
+  - **`clean()`** is never called with a limit of 0: two call sites, a guarded surplus of 1 or more, and the constant batch of 1,000.
+  - **Dead-letter records** stay redacted and bounded: a 100,000-key payload gives 3,118 bytes, and the message is at most 500 characters.
+  - **No secrets.** The ACL case generates its credentials. New log lines carry classes, counts and ids only. The 4 Gitleaks over-approximation hits are all suppressed by the real rule's stopwords.
+  - **Ownership.** Only `apps/worker/src/platform/**` may reach `jobExecution`.
+- **Ruling on D-TASK039-01: accepted.**
+  - **Why.** The id form is BullMQ 6.7.0's own (`getSchedulerNextJobId`, `addJobScheduler-11.lua`, `updateJobScheduler-12.lua`). The payload carries nothing a handler could act on. A schedule belongs to one queue (load-time check), and a schedule-only queue refuses a registered processor.
+  - **The residual.** A `bull:*` writer can forge an occurrence. That runs the idempotent sweep earlier with code constants, which adds no capability: such a writer can already delete or add any job directly. The control is the ACL: the `api` user has no `~bull:*`, and ElastiCache users carry it at M5 (T-73, T-92).
+  - **Conditions for every later schedule:**
+    - **(i)** Parameters come from code or configuration, never from the job.
+    - **(ii)** A destructive or non-idempotent handler applies its own policy predicate (purges by age). If it writes, it runs through `idempotentProcessor` keyed by the occurrence id.
+    - **(iii)** `SCHEDULE_NAMES` stays closed, with the one-queue check and the processor refusal kept, and names of at most 47 characters so `<schedule>-<millis>` fits `CORRELATION_ID_PATTERN` (code review R1-n1).
+    - **(iv)** A "run now" action goes through the scheduler, never as a hand-made `repeat:` job.
+- **New findings:**
+  - **PR039-SEC-01 (LOW, CWE-755; code review R1-M1).** `runWithDeadline` arms its timer before it calls the processor. A processor that throws synchronously leaves the timer armed. Its rejection is unhandled at the deadline, and the process handlers exit the worker with 1. That happens on every attempt of the job (probe: exit at the deadline).
+    - **Fix.** `const running = (async () => work(signal))()` before the timer. Validated on a scratch copy.
+  - **PR039-SEC-02 (LOW, CWE-694; R1-m1).** `ux_job_executions__job_key` is global, but BullMQ ids are per queue, and `shipment` is a kind of both `documents` and `tracking-poll`. A completed `shipment.<id>` on one queue silently skips the other queue's effect (PGlite: 0 rows).
+    - **Fix.** A unique index on `(queue, job_key)` while the migration is unmerged. Validated on PGlite. D-ARCH-171 (written in parallel) requires the same index, with the ADR-0013 §4 note and a purge index; I concur.
+  - **INFO items:**
+    - PR039-SEC-03: after the deadline an effect can still commit, and non-transactional work can overlap the retry. Fix: `job.signal.throwIfAborted()` after the effect in `idempotentProcessor`; signal discipline in TASK-047 and the saga and carrier tasks.
+    - PR039-SEC-04: the forgery signal misses compound spellings (`on_behalf_of_org_id`, `owner_org_id`, `orgUuid`, `user_id`) and anything past its depth or key bounds. Count an exceeded bound as a signal (with R1-m2).
+    - PR039-SEC-05: `result` JSONB is reserved with no writer, but writable and classified INTERNAL (optional `CHECK (result IS NULL)`; the first writer brings its classification). SELECT is not needed by the claim. Growth is settled by D-ARCH-171: 30 days, TASK-043 purges; I concur.
+- **Earlier items:**
+  - **Closed when this PR merges:** PR64-SEC-04 (all four retention mechanisms and the counter are pinned).
+  - **Closed:** PR64-SEC-06 as scoped, PR64-SEC-07 (job-identity half), PR64-SEC-08 and PR64-SEC-12.
+  - **PR64-SEC-11 stays open.** Its negative half gets `NOPERM` from BullMQ's connection-time `INFO` (in `@dangerous`, which the `api` user lacks), not from the `~bull:*` key restriction (code review R1-m3). It closes with a key-level assertion.
+  - **PR64-SEC-09 stays open,** with new unowned paths: `apps/worker/src/platform/jobs/`, `queues/{retention,job-handler,runtime}.ts` and `packages/shared/src/queues/{scheduled-job,payload-v2}.ts`.
+- **Binding.** The single `Head` row names `64eefab`. Simulation with main's real checker in merge-ref form: 10 of 10 as expected. Pass: the merge ref with the record committed on the main tip; a fix commit after the head in `apps/worker` or `packages/shared/src/queues` only; the record on the branch. Fail: no record; the placeholder name; a later FAIL verdict; a `Head` row naming the base or the main tip; a fix commit that changes the migration.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at the pushed head.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A security delta round on the fix-cycle head. The PR039-SEC-02 fix changes the migration and voids this binding anyway.
+- **Routed:**
+  - **This PR's fix cycle:** PR039-SEC-01, -02 (the D-ARCH-171 card line), -03 (a), -04, -05 (`result`, optional), and PR64-SEC-11 (negative half).
+  - **principal-architect:** nothing further; D-ARCH-171 covers the key scope, the purge and the data-model entries (R1-m7).
+  - **TASK-043:** the `job_executions` purge with its age predicate in its own SQL (ruling condition (ii)).
+  - **TASK-047 and the saga and carrier tasks:** PR039-SEC-03 (b); ruling conditions (i) and (ii) for their schedules.
+  - **devops:** PR64-SEC-09.
+- **Reversibility:** High (a review record; the ruling binds schedules that do not exist yet).
