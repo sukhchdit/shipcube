@@ -4826,3 +4826,41 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **PR076-SEC-06:** the task that first adds a `@platform/carriers` subpath export.
   - **R1-n10 (security side):** the M2 billable-weight pricing task.
 - **Reversibility:** High (a review record; the routes bind tasks that have not started).
+
+### D-ARCH-171 · 2026-11-20 · principal-architect · TASK-039 code review R1-m7, R1-m1 and R1-n8: `job_executions` enters the data-model (§3.5, §1.5) as a SYSTEM insert-only ledger unique on `(queue, job_key)`, purged 30 days after completion by the housekeeping job of TASK-043
+- **Trigger:** `docs/05-quality/reviews/PR-pending-TASK-039-code-review.md` R1-m7 (four places cite "data-model §3.5 as added by TASK-039" and no such entry existed), R1-m1 (key scope), R1-n8 (no purge); developer decision D-TASK039-03 deferred the retention. Read on the branch at `64eefab`: the migration `20261119000000_job_executions`, its `down.sql`, `worker.json`, the Prisma model, the classification row and `idempotent-processor.ts`.
+- **Decision:**
+  1. **data-model §3.5 gains the entry** as the migration ships it: the standard columns, `queue`, `job_key`, `status` (`completed` only), `result` (reserved, no writer) and `completed_at`; class SYSTEM, module `worker`; `SELECT, INSERT` for `platform_app`. §1.5, §4.4, §10.1 and §10.5 name it.
+  2. **Unique per queue:** `ux_job_executions__queue_job_key ON (queue, job_key)` replaces `ux_job_executions__job_key` before the migration merges (the review's option (a)). ADR-0013 §4 said "`job_key UNIQUE`" and carries a dated note.
+  3. **Retention: 30 days after `completed_at`.** Purge index `ix_job_executions__completed_at`.
+  4. **A job id is one-shot on its queue for those 30 days.** A producer that needs the effect again uses a new `<step>` or occurrence (ADR-0013 amendment 3 item 11).
+  5. **Purge owner: TASK-043**, in the daily housekeeping job it builds for the outbox (D-SD-003). `DELETE` for `platform_app` and the `hardDelete` manifest flag ship with that purge, not before.
+- **Why 30 days:** the row must outlive every way the same job id can be delivered again on its queue: a BullMQ retry or stall (minutes), an operator's retry of a failed job (7 days), a new enqueue after a dead letter (14 days), a replayed outbox event (30 days after publishing, D-ARCH-167). Completion is never earlier than publishing, so an event that can still be replayed still has its row. It equals the horizon of `processed_events`.
+- **Why per queue:** BullMQ scopes job ids per queue, and `shipment` is a payload kind of `documents` and of `tracking-poll`. A key unique across queues would skip the second queue's effect without a trace, which for an idempotency ledger is a lost effect.
+- **Why TASK-043 and not TASK-047:** one job then holds every PostgreSQL purge horizon, and it exists before a row can: TASK-047, which binds the accessor, depends on TASK-043.
+- **Alternatives rejected:**
+  - `job_key = <queue>/<job id>` with the single-column index (the review's option (b)): the column `queue` already holds the scope, and the index change is free while the file is unmerged.
+  - 7 or 14 days: a replayed outbox event between day 15 and day 30 would run its effect twice.
+  - No purge ("forever"): about 1.6 million rows for every 20 million jobs a month, and an id blocked for good.
+  - The `DELETE` grant in TASK-039's migration now: a privilege without a user.
+- **Card lines for the next fold:**
+  - TASK-039, fix cycle: "LEDGER KEY PER QUEUE AND PURGE INDEX (code review R1-m1, R1-m7, R1-n8; D-ARCH-171; data-model 3.5 job_executions): the unique index is ux_job_executions__queue_job_key ON (queue, job_key) and replaces ux_job_executions__job_key before the migration merges (Prisma @@unique([queue, jobKey])); add ix_job_executions__completed_at ON (completed_at) in the same file; test: the same job id claimed on two queues runs both effects; the citations of data-model 3.5 now point at an existing entry". If the fix cycle has passed, the purge owner adds the second index as a concurrent index in its own file.
+  - TASK-043, add to its PURGE line: "and job_executions rows completed more than 30 days ago (D-ARCH-171; data-model 3.5 and 10.5): the migration grants DELETE on job_executions to platform_app, worker.json gains hardDelete and grants.manifest the line; batches of 5,000; a test shows a row completed 29 days ago stays".
+- **Applied in:** data-model §1.5, §3.5, §4.4, §10.1, §10.5, A33; ADR-0013 §4 (one note).
+- **Not verified:** nothing was run. The volume figure is an estimate from §10.1.
+- **Reversibility:** High until the migration merges; afterwards the key change is an expand and a contract step.
+
+### D-ARCH-172 · 2026-11-20 · principal-architect · data-model §8.3 as TASK-293 shipped it (rule 10 call sites with their stated limits, the lone carriage return under rule L, lexer parity), and rule 14 is to refuse `CREATE CAST` and `CREATE AGGREGATE` in migrations (the open option of D-TASK293-10)
+- **Trigger:** the wording routed to me by D-SECPR293-01/02 and D-ORCH-139, still owed after D-ARCH-163; the option D-ORCH-139 left with the architect.
+- **Decision:**
+  1. **§8.3 gains an amendment** that describes, from `tools/db/lint-migrations.ts` and `sql-text.ts` on main:
+     - the call-site half of rule 10 (writing routines, the registry carried across files, name matching that fails closed, what is not a call);
+     - its stated limits;
+     - a lone CR as a rule-L finding;
+     - the scanner facts the lexer follows.
+  2. **Rule 14 refuses `CREATE CAST` and `CREATE AGGREGATE` outright in `prisma/migrations/**`**, next to `CREATE OPERATOR` and `CREATE RULE`. Owner TASK-034, the holder of the `tools/db` linter (D-SD-002). Until it lands the two shapes stay stated limits, as D-TASK293-10 pinned them.
+- **Why refuse instead of following the call:** a writer used as a cast function or as an aggregate support function runs through syntax that names no routine (`x::type`, `a(…)`). No table, index or policy of the data-model needs either statement, and neither occurs in the migrations or the bootstrap lane today (searched). Two refused statement starts close two limits; attribute notation stays a limit.
+- **Card line for the next fold (TASK-034):** "RULE 14 REFUSES CREATE CAST AND CREATE AGGREGATE (D-ARCH-172; D-TASK293-10; PR293-SEC-01 rows 4 and 5): add both statement starts to REFUSED_OBJECTS of tools/db/lint-migrations.ts with one failing fixture each; the two stated limits and their pin rows go; attribute notation stays a stated limit". Not a gate.
+- **Applied in:** data-model §8.3 (pointer at rule 10, amendment before §8.4), A33.
+- **Not verified:** nothing was run; the text follows the linter's own documentation comments and the PR #72 records.
+- **Reversibility:** High.
