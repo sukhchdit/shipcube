@@ -1,0 +1,19 @@
+/* Tokens only: variables, the 4/8 px grid scale, keywords and component-local custom properties. */
+.card {
+  --card-gap: var(--space-2);
+  margin-inline: auto;
+  margin-block-start: 0;
+  padding-block: 0.5rem;
+  padding-inline: 24px;
+  gap: var(--card-gap);
+  inset-inline-start: calc(var(--space-4) * 2);
+  inline-size: 100%;
+  border: var(--border-width-hairline) solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-e1);
+  outline-color: currentcolor;
+  background-image: url('data:image/svg+xml;utf8,<svg fill="%23ff0000"/>');
+  --tw-ring-offset-width: 1px;
+}
