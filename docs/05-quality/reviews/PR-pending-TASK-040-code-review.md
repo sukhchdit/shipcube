@@ -129,3 +129,98 @@ There is an ownership problem the architect must settle. The owner map gives `id
 - m3: REQ-AUDIT-010 gaps for idempotency conflicts and claim-phase 5xx.
 - m2: PER ciphertext retained beyond 24 h until a purge exists. The SYSTEM owner map blocks a worker purge.
 - `idem_key` is stored in clear and is client-chosen. Confirm it is never logged. Today the only log lines are the two `settleClaim` warnings in `execute.ts:406,412`, which carry the error class and the status only.
+
+
+---
+
+# Round 2: head `d0a82a24` (2026-11-20)
+
+- **Commits reviewed:** `b281e5f3`, `5ab1f903` and `d0a82a24`, on top of `95945b7e`. Decisions are in the `d0a82a24` body: D-TASK040-03 revised, -06 amended, -08 corrected, -11 and -12 new.
+- **Rulings now on main:**
+  - product-manager: D-PM-081 and D-PM-082 (`164be6b0`; REQ-AUDIT-010 amended, A-116);
+  - principal-architect: ADR-0014 amendments 5 to 9, D-ARCH-191..195 (`91ec18cf`).
+- **Coordinator heads-up:** D-ARCH-195 (ADR-0014 am. 6) requires a stored 4xx to be the **rendered problem document as sent, `correlation_id` included**. The `{code, detail, errors}` form that this head re-renders on replay is therefore superseded. Fix cycle 2 is changing it, so I do not rule on that form here.
+
+```
+VERDICT: CHANGES_REQUESTED (procedural: M2 is superseded by D-ARCH-195 and is re-checked in round 3; nothing else blocks)
+SUMMARY: M1 is closed. I re-ran the round-1 probe as the new [M1] tests: a failed DOWNLOAD entry now releases the key
+  and the retry executes. m3, m4, m5, m6, n1, n3, n4 and n6 are closed. D-PM-081 is implemented and tested.
+  m1, m2 and m7 are closed by rulings (D-ARCH-191/192/193) and carried to part 040-B. n5 is closed by D-ARCH-194.
+  New: 4 NITs. Round 3 = the D-ARCH-195 storage form, the merge of main, F5/F6, and lane B on the final head.
+FINDINGS: 0 BLOCKER, 1 MAJOR (M2, superseded: re-check in round 3), 0 new MINOR, 4 new NIT
+```
+
+## R2.1 What I verified myself
+
+I ran nothing in `../Shipqube-TASK-040`, which is busy with lane B.
+
+**Set-up.** I worked in a `git archive d0a82a24` extract taken from the main checkout. Its `node_modules` was a junction to the idle `Shipqube-TASK-039` worktree, whose lock is byte-identical to the branch lock (md5 `4a24da81…`). I added `@platform/*` junctions inside the extract so that every workspace link resolved to the extract's own sources. I generated the Prisma client inside the extract. I pointed each `tsBuildInfoFile` into the extract. Afterwards I removed the junctions and the extract. The TASK-039 worktree is unchanged: still 748 entries and a clean `git status`.
+
+| Check | Result |
+|---|---|
+| Jest `unit` + `api` (`--maxWorkers=2`) over `platform/idempotency`, `errors/`, `pipeline-guards`, `db/system-db`, `contract/x-idempotency`, `grants-manifest`, `tx/`, `audit/capture` | 19 suites, **326 of 327 passed**. The one failure is the fast-check property `AT-US-007-03 … any thrown value … answers the same generic 500` in `problem-handler.api.test.ts`, at 17.8 s under parallel load. Neither that test nor the problem handler is changed by this branch. It passed 2 of 2 when re-run alone (62/62). It is load timing, not this change. |
+| Route metadata, classification (tools and shared), root scripts, table classes | 6 suites, **121 passed** |
+| `tsc -b` over shared, config, authz, audit, pricing, carriers, api, worker, prisma, tests/{generated,helpers,factories,api,contract} and tools | clean |
+| ESLint `--max-warnings 0` on every `.ts` file changed from main | clean |
+| Prettier `--check --ignore-unknown` on every changed file | clean |
+| Coverage of `tx/execute.ts` and `platform/idempotency/*` (the tests above) | **100 % of lines** in every file. Round 1's uncovered `execute.ts:412-413` and `store.ts:212-214` are now covered. |
+| M1 probe (round 1) against the new head | Now pinned by the tests `[M1] … completes its key after the fail-closed entry` and `[M1] a failed DOWNLOAD entry answers 503 AUDIT_UNAVAILABLE, releases the key, and the retry runs and writes the entry`. In the code (`execute.ts` after the handler commit), `audit.afterCommit` runs first, a failure releases the pending claim and rethrows, and only a success completes it. |
+| Merge-tree against `origin/main` (`af4a1b48`) | **clean** |
+| Merge-tree against TASK-043 (`da996002`) | Unchanged from round 1: the 4 one-line literal unions plus `DECISIONS.md`. The copied helper `idempotency/tests/migrated-postgres.ts` sits at a path of its own, so it causes no conflict, only duplication with the TASK-043 copy. |
+
+**Not re-run:** `store.int.test.ts`, `idempotency-keys.int.test.ts` and the C15 literal. They need Docker, so they belong to lane B.
+
+## R2.2 Round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 | **Closed** | `execute.ts`: `audit.afterCommit` before `settleClaim` for a pending (read-only) claim; a failure releases it and rethrows. Two API tests cover it, and the order of events is asserted. |
+| M2 | **Superseded by D-ARCH-195; re-check in round 3** | This head stores a thrown 4xx (closing the defect that a thrown 4xx released the key: `storedProblemOf` follows `classifyThrown`, and a DbError 4xx such as 403 `RLS_WRITE_REJECTED`, 404 or 409 is stored, while every retryable DbError is a 503 and is released). It then re-renders the problem on replay with a new `correlation_id`. ADR-0014 am. 6 now requires the rendered document as sent, rendered once. **Round 3 checks:** (a) the stored body is the exact document of the first response, its `correlation_id` included, and the replay sends it byte for byte with its own `X-Correlation-Id` header; (b) the tx slot renders it with the same `buildProblem` inputs as the problem handler, including the configured `typeBase` (a test in which a non-default type base survives a replay); (c) `Retry-After` is never stored; (d) the `Content-Type` stored-header allow-list (am. 6 lists it) cannot turn a handler's own returned `application/problem+json` result into an unreadable 500. Today's `replayedProblemOf` would throw `IdempotencyReplayError` for a returned problem body that is not of the `{code, detail, errors}` shape. Add a test: a returned 4xx with its own `Content-Type: application/problem+json` is replayed as returned. |
+| m1 production wiring | **Closed by ruling** (D-ARCH-191, D-PM-082; ADR-0014 am. 9) | Part 040-B is defined with its proofs (a) to (f). The refusal at mount stays the control until then. |
+| m2 purge | **Closed by ruling** (D-ARCH-192; am. 8) | Worker `idempotency-purge`, hourly, batches of 5,000, owner entry widened to `apps/*/src/platform/idempotency/**`. Ships in 040-B or before it. |
+| m3 audit of protocol refusals | **Closed** (D-PM-081, REQ-AUDIT-010 amended) | No entry for 409 and 422, each logged `api.idempotency_conflict` with the code and correlation id. The key is never logged (asserted against the serialised log lines). An unreadable replay gives 500 with an ERROR event `api.idempotency_replay_unreadable {error, reason}` and no FAILED entry. A failed claim on a new request writes exactly one FAILED entry (`[D-PM-081 (c)]`). |
+| m4 lease | **Closed** | `idempotencyLeaseMs`: the lease is max(30 s, max(call deadline, 2 × (maxWait + timeout) + FAILED wait) + 5 s), taken from the runner's own `transactionOptions`. It is renewed before `call` (when there is a `load`) and before the handler transaction (when there is a `load` or a `call`), conditional on the version. A lost claim answers 409 before the next phase. Both the sizing and the renewals are tested. The application clock stays, with skew covered by the margin (D-TASK040-06 amended). See R2-n1 and R2-n3. |
+| m5 uncovered lines | **Closed** | 100 % line coverage; a failed-release test; a two-round fall-through test. The `refuse` seam is removed. |
+| m6 statement mirror | **Closed** | `store.int.test.ts` runs `store.ts` itself on PostgreSQL 18: begin, complete, replay, concurrent begin, renew, takeover, release, expiry and the stored problem. It is pending lane B. Duplicated helper: R2-n4. |
+| m7 order around the claim | **Closed by ruling** (D-ARCH-193; am. 7) | The design is accepted. The order goes into the file headers in 040-B; TASK-096 and TASK-187 carry it. |
+| n1 | Closed | The registry block now sits above the invitations comment. |
+| n2 | Closed | D-TASK040-08 corrected. |
+| n3 | Closed | `concretePathOf(template, validated params)`. Safe because `defineRoute` requires the `schema.params` keys to equal the path parameters and limits segments to `[a-z0-9._-]` or `:name` (`define-route.ts:323,540-543`), so no parameter can be missing or a wildcard. The `[n3]` test replays across a trailing slash and a percent-encoded id. |
+| n4 | Closed | ERROR event `api.idempotency_replay_unreadable` with the class and a fixed reason only. |
+| n5 | Closed by ruling | D-ARCH-194 (am. 5). |
+| n6 | Closed | No client network means no scope. An `optional` route runs without idempotency; a `required` one answers 503 with its FAILED entry and logs `api.idempotency_scope_unavailable` (D-TASK040-11). |
+
+## R2.3 New findings (round 2)
+
+| ID | Severity | File:line | Issue | Suggested fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `execute.ts` `idempotencyLeaseMs` | The sizing counts two transactions after the last renewal. The read-only (VIEW/DOWNLOAD) path runs three: the handler transaction, the fail-closed entry, the completion. It also leaves out the admission wait that comes before the pool's `maxWait` (≤ 250 ms by default). With the defaults the 30 s floor and the 20 s call deadline dominate, so there is no exposure. With a raised `DB_TX_*` budget (up to 120 s) the read-only path can outlive the lease. A takeover then re-runs that route's `afterCommit` effect (the e-mail of `emailShipmentDocuments`). | Use `3 × (maxWait + timeout + admission wait)`, and pin it in `idempotency-lease.test.ts`. |
+| R2-n2 | NIT | `execute.ts` `renew` (lost claim) | A claim lost at the renewal **before the handler** answers 409 `IDEMPOTENCY_IN_PROGRESS` with no FAILED entry, but `call` (an external effect) has already run (test `[m4] a key taken over during call …`). Amended REQ-AUDIT-010 excepts refusals "before the handler runs", which this literally is, but here the business action was attempted. This only happens when the sizing invariant is broken (a pause longer than the lease plus the margin). | Write the FAILED entry when the claim is lost after `call` (the attempt is real), or record in D-PM-081 that this case is covered. security-analyst to confirm. |
+| R2-n3 | NIT | `execute.ts` `run` | A route with `load` and `call` now uses five transactions (claim, load, renew, renew, handler) where it used three. Each takes a bulkhead admission. The cost is acceptable and the correctness gain is real. | Optional: skip the renewal before the handler when less than half the lease has passed since the last one. |
+| R2-n4 | NIT | `apps/api/src/platform/idempotency/tests/migrated-postgres.ts` | A copy of TASK-043's `outbox/tests/migrated-postgres.ts` (stated in its header). Two copies of the container/bootstrap harness will drift, for example in the pinned image digest. | Whichever of TASK-040 and TASK-043 merges second moves both suites onto one shared helper. Name the owner in DECISIONS. |
+
+## R2.4 Rulings on the new and revised decisions
+
+| Decision | Ruling |
+|---|---|
+| D-TASK040-03 (revised) | Partly done. Storing thrown 4xx is right and matches am. 6. The storage form is superseded by D-ARCH-195 (round 3). |
+| D-TASK040-06 (amended) | Accepted with R2-n1. Version-conditional writes keep the stored state correct under skew. |
+| D-TASK040-08 (corrected) | Accepted. |
+| D-TASK040-11 (no scope without a client network) | Accepted. Better than a shared scope, and the `required` route's 503 has its FAILED entry. |
+| D-TASK040-12 (template path) | Accepted. The path grammar of `defineRoute` makes it total. |
+| D-TASK040-04 (HKDF network key) | Still open for the security record, as ADR-0014 am. 5 records. |
+
+## R2.5 Merge conditions (replace §5)
+
+1. Round 3 on the fix-cycle-2 head: the D-ARCH-195 storage form against the M2 re-check list above, comment fixes F5/F6, and the merge of main, proved as a pure union.
+2. Lane B on PostgreSQL 18 green on the final head for `store.int.test.ts`, `idempotency-keys.int.test.ts` and the C15 literal. Diff coverage clean.
+3. The second of TASK-040 and TASK-043 to merge takes the four literal unions (§1) and settles R2-n4.
+4. A security-analyst record on the final head, covering D-TASK040-04 and R2-n2.
+5. Part 040-B, including the purge, as ruled in ADR-0014 am. 8 and 9. It does not block this part.
+
+## R2.6 Good
+
+- The M1 fix keeps one error path: the entry, then the release or the completion. Its tests assert the order of events, not just the statuses.
+- The lease is derived from the runner's own `transactionOptions` instead of a constant, and renewals are version-conditional. A lost claim is answered before `call` can run twice.
+- The D-PM-081 tests serialise every log line and assert that neither the key nor the body appears.
+- `storedProblemOf` reuses `classifyThrown`, so stored and rendered failures cannot disagree on the status.
