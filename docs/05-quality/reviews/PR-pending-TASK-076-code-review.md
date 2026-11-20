@@ -253,3 +253,86 @@ Same host rule. The setup was a `git archive f6de9578` copy (`review/T076-cr/cop
 - The purity rule is now a scope-based pass rather than a list of member spellings, so new spellings of the same global are reported by construction. Its "Limits" header is honest.
 - `state.ts` reads each field exactly once and validates the copy, which defeats accessor tricks by design rather than by probe. Messages interpolate a code only after validating it.
 - `operand()` gives every Money helper the same input contract as its output contract, and the own-data-property reads close the inherited and getter routes.
+
+---
+
+# Round 3 (delta `f6de9578..82b50233`, one commit), 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | `82b50233` (`fix(lint): money-arith string exemption via the checker; purity and state residuals`), on `f6de9578` |
+| Delta | 14 files, +196 / -15: `tools/eslint-rules/{money-arith,pricing-purity}.mjs`; `packages/pricing/src/{state,engine,index}.ts` and `state.test.ts`; new `tools/lint/pricing-purity-shared.test.ts`; 5 new fixtures, 1 extended (`ok-pure.ts`); `negative-fixtures.test.ts` rows |
+| Claims | Closes R2-M1 and R2-n1..n6 (R2-n7 through R2-M1). Decisions D-TASK076-16..18. Security round 2 (`c6bbed87`) is bound to `82b5023`: PASS_WITH_FOLLOW-UPS. Its PR076-SEC-07 open parts (the `@platform/shared/queues` subpath; `declare const Date/process/Math` shadowing) are routed by security-analyst. Lane B on this head is queued. |
+
+## R3.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-M1 is closed. The string test now goes through checker.isTypeAssignableTo(type, string) (not any), and a
+         Minor-branded left side is never exempt. Two fixtures kill a revert to the round-2 flags. R2-n1..n7 are closed.
+         No false positive on the 90 real files; typed-lint cost is still about 5 ms. One NIT on the scope of the new pin test.
+```
+
+## R3.2 Verification performed
+
+Same host rule. The setup was a `git archive 82b50233` copy (`review/T076-cr/copy3`) with a node_modules junction to the worktree, which sits at `82b50233` and is clean. Nothing ran in the worktree except a read-only `prettier --check`. The copy and junction were removed afterwards, and the worktree still has 748 node_modules entries.
+
+- **Type-check:** `tsc -p` over `packages/shared/src` and `packages/pricing/src` (scratch tsconfig, noEmit): exit 0.
+- **Lint on the real sources:** type-aware ESLint with the repository config on the 90 files of `packages/shared/src` and `packages/pricing/src`, plus both rules, `negative-fixtures.test.ts` and the new pin test: **0 messages**. Per-rule time: `money-arith` 4.9 ms and `pricing-purity` 2.1 ms in total, against `import-x/no-cycle` 1307 ms.
+- **Fixture harness:** `lint-fixtures.mjs`, 24.2 s:
+  - `bad-minor-accumulator` reports 2 (`t += k`, `total += line.amount`).
+  - `ok-string-building` is clean.
+  - `bad-navigator` and both `bad-shared-string-name-*` files report `pricing-purity`.
+  - `ok-pure` (now also `instanceof Date` and `typeof Date.now`) is clean.
+  - Every earlier typed row is unchanged.
+- **Mutant** (round-2 flags `4 | 128 | 1<<27 | 1<<28` restored and the brand guard removed): `bad-minor-accumulator` reports 0 (the row expects 2) and `ok-string-building` reports 1 (expected clean). **Both new rows kill it.**
+- **Format:** `prettier --check` on the 14 changed files: clean.
+- **Pin test emulation** (the test's regex and index parser, run with node on the copy):
+  - 14 re-exported modules, of which only `./ids/uuidv7.js` matches.
+  - Its value exports equal `{ANONYMOUS_ACTOR_ID, OPERATOR_ORG_ID, SYSTEM_ACTOR_ID, isUuidV7, uuidV7Timestamp, uuidv7}`.
+  - The index has no `export *`, and no other re-exported module imports `ids/`. So the pin passes today.
+- **money-arith probes** (`zz-arith3.ts`, real config):
+  - **Allowed:** `s += m.amount` with `s` a string, a literal-union string, or a narrowed `string | undefined`.
+  - **Reported:** `t += 5` and `t += k` (`t: Minor`), `total += x.amount`, `t -= 1` and `t *= 2` on Minor, and `x += m.amount` with `x: any` (not exempt, by design).
+  - **Not reported:**
+    - `cents += 1` after `as number`: a documented limit.
+    - A `never`-typed left side: `restrict-plus-operands` reports it.
+- **pricing-purity probes** (`zz-purity4/5.ts`):
+  - **Allowed:** `v instanceof Date`, `typeof Date.now` / `typeof process.env` in types, and `<X extends typeof Date.now>`.
+  - **Reported:**
+    - `Date instanceof Object` (Date on the left);
+    - `navigator.language` and `globalThis.navigator`;
+    - `(Date as DateConstructor).now()` and `Date!.now()` (wrappers do not hide the global);
+    - `export { 'uuidv7' as id } from '@platform/shared'` and `import { "uuidV7Timestamp" as ts }`.
+  - **Why `inTypeQuery` is safe:** a `TSTypeQuery` can only contain an entity name and type arguments, never a value expression, so walking all ancestors cannot exempt runtime code.
+- **State:** `checkedState` runs after every step, so a `null` state or one missing `lines`/`entries` throws PRICING_INPUT_INVALID. A `__proto__` inputs key is refused rather than dropped. Both have rows in `state.test.ts` (lines 137, 146). I did not re-run Jest; lane B on `82b5023` is the binding evidence.
+
+## R3.3 Findings
+
+| ID | Severity | File:line | Issue | Suggested fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `tools/lint/pricing-purity-shared.test.ts:16-40` | The pin scans only the source text of each module named in an `export { … } from './x.js'` block. Three cases escape it: <br>- a re-exported pure-looking wrapper that calls an impure sibling (`export const newId = () => uuidv7()` in another module); <br>- an `export * from` line; <br>- a clock read spelled outside the regex (`Date()` called, or `globalThis['crypto']`). <br>Each would pass. All three are absent today (emulation above). | Follow each re-exported module's relative imports transitively before matching. Fail on any `export *` in the shared index. Or state the direct-text scope in the header. |
+
+The NITs not taken from rounds 1 and 2 stay at the developer's discretion: R1-n1, R1-n2, R1-n4, R1-n6, R1-n10. R1-n5 and R1-n8/n11 are routed to TASK-066, product-manager and qa-lead.
+
+The PR076-SEC-07 open parts (the `@platform/shared/queues` subpath outside the shared-root name check; `declare const Date/process/Math` creating a module-scope binding that the global pass then skips) belong to security-analyst. They are routed "this PR if another cycle happens, else before TASK-080". I agree with that routing and do not raise them again.
+
+## R3.4 Round-2 closure
+
+| Item | Status |
+|---|---|
+| R2-M1 `+=` string exemption | **Closed.** The checker assignability test is used with `any` excluded, the Minor-branded left side is never exempt, both directions have fixtures, and the mutant is killed. |
+| R2-n1 navigator / timers | **Closed.** `navigator` is in `ALWAYS_IMPURE`, and the timers are named in "Limits". |
+| R2-n2 string-named specifiers | **Closed.** `specifierName` reads `Literal.value`, with fixtures for import and re-export. |
+| R2-n3 `instanceof Date` / type queries | **Closed.** Both are exempt with a fixture, and `Date` as the left operand is still reported. |
+| R2-n4 `__proto__` inputs key | **Closed.** It is refused with PRICING_INPUT_INVALID and has a test. |
+| R2-n5 state shape | **Closed.** `checkedState` runs after every step and has a test. |
+| R2-n6 deny-list pin | **Closed**, with the scope NIT R3-n1. |
+| R2-n7 exemption fixtures | **Closed** (`ok-string-building`, `bad-minor-accumulator`). |
+
+## R3.5 Merge conditions (replace §R2.5)
+
+1. Lane B evidence on `82b50233` (queued): unit including `negative-fixtures`, `pricing-purity-shared` and `state`, plus the coverage gate. The PR body quotes the pricing and money 95/95 figures from that run (PR40-SEC-05 / D-ARCH-115).
+2. Security record bound to the head: **met** (`c6bbed87`, PASS_WITH_FOLLOW-UPS, PR076-SEC-07 routed).
+3. Architect ruling R1-m4: **met** (D-ARCH-169, `71a2d36`).
+4. Merge order with TASK-075: whichever PR merges second re-runs `negative-fixtures` on the union, because the AT-US-121-05 deep-import fixtures live in this PR.
