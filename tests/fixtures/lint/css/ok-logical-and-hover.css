@@ -6,6 +6,6 @@
 
 @media (hover: hover) and (pointer: fine) {
   .button:hover {
-    background: blue;
+    background: var(--color-bg-subtle);
   }
 }

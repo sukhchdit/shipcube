@@ -1520,24 +1520,26 @@ ADR-0004, REQ-PLAT-016/017, DR-A25, EC-A39. DDL in §6.1.
 
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
-| STD | | | | INT |
+| STD | | | the full standard set. `created_at` is the insert time on the database clock (`clock_timestamp()`), which the writer sets together with `updated_at`; the column default, the transaction start, is not used for this table (2026-11-20, ADR-0004 amendment 2 item 13) | INT |
 | `type` | `text` | N | dotted lower-case catalogue name; `CHECK (type ~ '^[a-z_]+\.[a-z_]+$')` | INT |
-| `aggregate_type` | `text` | N | | INT |
-| `aggregate_id` | `uuid` | N | | INT |
+| `aggregate_type` | `text` | N | taken from the event catalogue, never from the caller; `CHECK (aggregate_type ~ '^[a-z][a-z_]{0,62}$')` | INT |
+| `aggregate_id` | `uuid` | N | the aggregate the event is about, and the unit of the order rule (§6.1) | INT |
 | `org_id` | `uuid` | Y | **authoritative** tenant context of every job derived from the event; read by `platform.job_context('outbox_event', id)` (§4.5), never copied into the BullMQ payload (amended 2026-11-12, SEC-P3-12); this table is on the non-RLS allow-list | INT |
 | `actor_id` | `uuid` | N | initiating actor, returned by `job_context` | INT |
 | `payload` | `jsonb` | N | IDs, codes, recipient locale (REQ-I18N-008); never PER values (schema-validated per type). One-time e-mail tokens travel only as `token_enc` (base64 AES-256-GCM under `OUTBOX_PAYLOAD_KEY`) with the sibling field `token_enc_key_id`; AAD = (`outbox_events`, `payload.token_enc`, `id`, `token_enc_key_id`) (amended 2026-11-12, SEC-P3-08 item 1; §12 `token_enc`) | INT (`token_enc` registered SEC) |
-| `correlation_id` | `text` | N | | INT |
+| `correlation_id` | `text` | N | the `app.correlation_id` of the writing transaction; the relay copies it into the job unchanged (D-062). `CHECK (correlation_id ~ '^[A-Za-z0-9-]{8,64}$')`: the ADR-0016 §15 grammar, as on `audit_entries`, so every row can be relayed (2026-11-20, ADR-0004 amendment 2 item 16) | INT |
 | `trace_context` | `text` | Y | W3C `traceparent` | INT |
 | `published_at` | `timestamptz` | Y | | INT |
-| `attempts` | `integer` | N | `DEFAULT 0` | INT |
-| `last_error` | `text` | Y | ≤ 500, no payload echo | INT |
+| `attempts` | `integer` | N | `DEFAULT 0`, `CHECK (attempts >= 0)`; +1 for every enqueue attempt of the relay, accepted or failed | INT |
+| `last_error` | `text` | Y | ≤ 500; the error class name of the last failed attempt, never a message or a payload; NULL once published | INT |
 
-AP-PLAT-01 relay batch: `ix_outbox_events__unpublished ON (created_at, id) WHERE published_at IS NULL`; AP-PLAT-02 purge: `ix_outbox_events__published_at ON (published_at) WHERE published_at IS NOT NULL`. Per-aggregate order (REQ-PLAT-017) holds because the relay publishes in `(created_at, id)` order and a single relay instance holds the batch lock (`FOR UPDATE SKIP LOCKED` lets a second instance take the next batch; BullMQ `jobId = event id` dedupes a crash replay).
+AP-PLAT-01 relay batch: `ix_outbox_events__unpublished ON (created_at, id) WHERE published_at IS NULL`; AP-PLAT-02 purge: `ix_outbox_events__published_at ON (published_at) WHERE published_at IS NOT NULL`; `ix_outbox_events__aggregate ON (aggregate_type, aggregate_id, created_at)` (ADR-0004 item 1: the events of one aggregate in order, for support and replay).
+
+*Corrected 2026-11-20 (TASK-043 code review M1; ADR-0004 amendment 2 items 13 to 15; D-ARCH-185).* This paragraph said that per-aggregate order "holds because the relay publishes in `(created_at, id)` order and a single relay instance holds the batch lock (`FOR UPDATE SKIP LOCKED` lets a second instance take the next batch …)". Both halves were wrong. With `created_at` at its default, the transaction start, two transactions on one aggregate sort in the order in which they began, not in the order in which they committed. And a second relay that takes the next batch can enqueue a later event of an aggregate before an earlier one. Per-aggregate order (REQ-PLAT-017) holds under the four conditions of §6.1 "Order": the writer sets `created_at` to the insert time; the publishing transaction holds the row lock of the aggregate when it publishes; one relay tick runs at a time; and only a holder of the relay lock writes an unpublished row (*restated the same day in §6.1: or the consumer of the row's own event*). The order is that of the enqueue. BullMQ `jobId = outbox_event.<event id>` dedupes a crash replay.
 
 #### `processed_events` · SYSTEM · SD: no · insert-only · hard-delete allow-listed (> 30 d)
 
-Columns: STD; `consumer text N`; `event_id uuid N`; `processed_at timestamptz N DEFAULT now()`. `ux_processed_events__consumer_event ON (consumer, event_id)` (AP-PLAT-03, consumer dedupe inside the consumer's business transaction); `ix_processed_events__processed_at` for purge.
+Columns: STD; `consumer text N`; `event_id uuid N`; `processed_at timestamptz N DEFAULT now()`. `ux_processed_events__consumer_event ON (consumer, event_id)` (AP-PLAT-03, consumer dedupe inside the consumer's business transaction); `ix_processed_events__processed_at` for purge. `consumer` is the handler name of ADR-0004 amendment 2 item 12, with `CHECK (consumer ~ '^[a-z][a-z0-9_.-]{0,62}$')`. *2026-11-20 (D-TASK043-04; D-ARCH-186): `platform_app` holds `SELECT, INSERT, DELETE` and no `UPDATE` (§4.4). A claim is written once.*
 
 #### `job_executions` · SYSTEM · SD: no · insert-only · purged 30 d after completion once its purge ships (added 2026-11-20)
 
@@ -2854,12 +2856,13 @@ Grant matrix (rendered from `prisma/sql/grants.manifest.json` into each migratio
 | `feature_flags`, `feature_flag_overrides` | `SELECT, INSERT, UPDATE` |
 | `number_sequences` | `SELECT`, `UPDATE (next_value, updated_at, updated_by, version)` |
 | `coupons` | `SELECT`, `UPDATE (redeemed_count, updated_at, updated_by, version)` |
-| SYSTEM hard-delete allow-list: `idempotency_keys`, `outbox_events`, `processed_events`, `login_attempt_counters` | `SELECT, INSERT, UPDATE, DELETE` (DELETE used only by housekeeping with the retention predicates of §10.5) |
+| SYSTEM hard-delete allow-list: `idempotency_keys`, `outbox_events`, ~~`processed_events`~~, `login_attempt_counters` | `SELECT, INSERT, UPDATE, DELETE` (DELETE used only by housekeeping with the retention predicates of §10.5) |
+| `processed_events` *(row split out 2026-11-20, D-TASK043-04; D-ARCH-186)* | `SELECT, INSERT, DELETE`, no `UPDATE`: the table is insert-only. A consumer claims with `INSERT … ON CONFLICT DO NOTHING` and never changes the row. `DELETE` is used only by the `outbox-purge` job with the predicate of §10.5. `prisma/sql/grants.manifest` carries the line; a `platform_app` `UPDATE` probe → `42501` |
 | SYSTEM global index tables: `tracking_index`, `gateway_refs`, `tracking_poll_schedule` | `SELECT, INSERT, UPDATE` |
 | Other SYSTEM: `audit_stream_heads`, `audit_partitions`, `audit_chain_verifications`, `gateway_webhook_events`, ~~`reference_dataset_versions`~~, `data_migration_runs` | `SELECT, INSERT, UPDATE` |
 | `reference_dataset_versions` *(row split out 2026-11-13, PR13-SEC-04; D-ARCH-075)* | **`SELECT` only.** The seed CLI writes it as `platform_migrator` (owner); no runtime role writes it — the US-073 reconciler derives the last audited digest from `audit_entries` (§3.5). `prisma/sql/grants.manifest` carries one line; C5 asserts it; a `platform_app` `INSERT`/`UPDATE` probe → `42501`. A future runtime writer takes the §4.5 definer-function form, never a table grant or RLS on this SYSTEM table |
 | `operator_staff_grants` *(added 2026-11-19, D-ARCH-165)* | **`SELECT` only.** The provisioning lane writes it as `platform_migrator` (owner); no runtime role writes it (§3.2). `prisma/sql/grants.manifest` carries one line |
-| `job_executions` *(added 2026-11-20, D-ARCH-171)* | `SELECT, INSERT`: an insert-only ledger. `DELETE` arrives with its purge (TASK-043), when the table joins the hard-delete allow-list with the predicate of §10.5 |
+| `job_executions` *(added 2026-11-20, D-ARCH-171)* | `SELECT, INSERT`: an insert-only ledger. `DELETE` arrives with its purge (TASK-043), when the table joins the hard-delete allow-list with the predicate of §10.5. *2026-11-20 (D-ARCH-186): the TASK-043 migration grants it with the `outbox-purge` job, so from that migration on the grant is `SELECT, INSERT, DELETE`; there is still no `UPDATE`* |
 | `audit_entries` (parent only; never partitions) | `SELECT, INSERT` |
 | `audit_pii_vault`, `data_subjects` | `SELECT, INSERT` (`platform_erasure`: `SELECT, DELETE` on the vault, `UPDATE (erased_at, updated_at, updated_by, version)` on subjects) |
 | Functions | `EXECUTE` on `platform.app_org_id`, `app_actor_id`, `app_guest_token_hash`, `app_is_operator`, `ensure_audit_partitions` and exactly the §4.5 list (2026-11-12: including `job_context`, `sessions_for_user`, `mfa_enrolment_overdue_candidates`). *2026-11-13 (D-TASK016-01 decision 3, PR #11 security review §5 ruling 1, D-ARCH-071):* **`platform_definer` holds `EXECUTE` on `platform.app_actor_id()`** — the body of `app_is_operator()` calls it while running as the definer and `PUBLIC` holds no `EXECUTE` on the helpers; granted by the migrator in the `app_is_operator` migration **before** `SET ROLE platform_definer` (template `prisma/sql/function-templates/app-is-operator.sql`); C11's helper expectation for `app_actor_id` gains `platform_definer` when TASK-037 applies the template; no other helper is granted to the definer |
@@ -3881,44 +3884,91 @@ Amended 2026-11-17 (A29; D-ARCH-149; ADR-0007 amendment 13 item 5), all three ow
 ```sql
 CREATE TABLE public.outbox_events (
   id             uuid PRIMARY KEY DEFAULT uuidv7(),
-  created_at     timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  created_at     timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),   -- the writer sets both to the insert time: "Order" below
   created_by     uuid NOT NULL, updated_by uuid NOT NULL, version integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   type           text NOT NULL CONSTRAINT ck_outbox_events__type CHECK (type ~ '^[a-z_]+\.[a-z_]+$'),
-  aggregate_type text NOT NULL,
+  aggregate_type text NOT NULL CONSTRAINT ck_outbox_events__aggregate_type CHECK (aggregate_type ~ '^[a-z][a-z_]{0,62}$'),
   aggregate_id   uuid NOT NULL,
   org_id         uuid,
   actor_id       uuid NOT NULL,
   payload        jsonb NOT NULL,
-  correlation_id text NOT NULL,
+  correlation_id text NOT NULL CONSTRAINT ck_outbox_events__correlation_id CHECK (correlation_id ~ '^[A-Za-z0-9-]{8,64}$'),
   trace_context  text,
   published_at   timestamptz,
-  attempts       integer NOT NULL DEFAULT 0,
+  attempts       integer NOT NULL DEFAULT 0 CONSTRAINT ck_outbox_events__attempts CHECK (attempts >= 0),
   last_error     text CONSTRAINT ck_outbox_events__last_error CHECK (char_length(last_error) <= 500)
 );
 CREATE INDEX ix_outbox_events__unpublished ON public.outbox_events (created_at, id) WHERE published_at IS NULL;
 CREATE INDEX ix_outbox_events__published_at ON public.outbox_events (published_at) WHERE published_at IS NOT NULL;
+CREATE INDEX ix_outbox_events__aggregate ON public.outbox_events (aggregate_type, aggregate_id, created_at);
 ALTER TABLE public.outbox_events SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.02);
 ```
 
-Relay (worker `outbox-relay`, every 500 ms, batches of 100):
+*Amended 2026-11-20 (TASK-043 as built and its code review round 1; ADR-0004 amendment 2; D-ARCH-183, D-ARCH-185, D-ARCH-187): the three row checks and the aggregate index above, and the writer statement, the tick, the order rule and the advisory-lock keys below.*
+
+Writer (`outbox.publish(db, event)`; one statement inside the business transaction):
 
 ```sql
-BEGIN;
-SELECT id, type, aggregate_type, aggregate_id, org_id, actor_id, payload, correlation_id, trace_context
+INSERT INTO public.outbox_events (type, aggregate_type, aggregate_id, org_id, actor_id, payload, correlation_id, trace_context,
+                                  created_at, updated_at, created_by, updated_by)
+SELECT $type, $aggregate_type, $aggregate_id, platform.app_org_id(), ctx.actor, $payload,
+       pg_catalog.current_setting('app.correlation_id', true), $traceparent, ctx.at, ctx.at, ctx.actor, ctx.actor
+  FROM (SELECT COALESCE(platform.app_actor_id(), $anonymous) AS actor, pg_catalog.clock_timestamp() AS at) AS ctx
+RETURNING id;
+```
+
+The caller supplies the type, the aggregate id, the payload and optionally a `traceparent`. The organisation, the actor and the correlation id come from the context of the transaction, and the aggregate type from the catalogue. `ctx.at` is read once, so `created_at = updated_at`.
+
+Relay tick (in every worker; `OUTBOX_RELAY_POLL_INTERVAL_MS` = 500, batches of `OUTBOX_RELAY_BATCH_SIZE` = 100; one SYSTEM-scope transaction; bounds in ADR-0004 amendment 2 item 10):
+
+```sql
+BEGIN;   -- the context statement of §4.1 comes first
+SELECT pg_catalog.pg_try_advisory_xact_lock(478216878200::bigint) AS locked;   -- false: another relay is in its tick; end here
+SELECT id, correlation_id, trace_context, aggregate_type, aggregate_id,
+       EXTRACT(EPOCH FROM (pg_catalog.clock_timestamp() - created_at))::float8 AS age_seconds
   FROM public.outbox_events
  WHERE published_at IS NULL
  ORDER BY created_at, id
  LIMIT 100
  FOR UPDATE SKIP LOCKED;
--- enqueue each to BullMQ with jobId = id (dedupes a replay after a crash, EC-A39)
-UPDATE public.outbox_events SET published_at = now(), attempts = attempts + 1, updated_at = now(), updated_by = $system, version = version + 1
- WHERE id = ANY($published_ids);
+-- one enqueue per row, in this order, on outbox-relay with jobId = outbox_event.<id> (dedupes a replay after a crash, EC-A39);
+-- a row whose enqueue failed holds back the later rows of its aggregate; a transport failure ends the loop over the rows
+UPDATE public.outbox_events SET published_at = now(), attempts = attempts + 1, last_error = NULL,
+       updated_at = now(), updated_by = $system, version = version + 1
+ WHERE id = ANY($published_ids) AND published_at IS NULL;
+UPDATE public.outbox_events SET attempts = attempts + 1, last_error = $error_class,
+       updated_at = now(), updated_by = $system, version = version + 1
+ WHERE id = ANY($failed_ids) AND published_at IS NULL;
 COMMIT;
 ```
 
+**Order (ADR-0004 amendment 2 items 13 to 15).** Events of one aggregate are enqueued in the order in which their transactions changed it, under four conditions:
+
+| Condition | Held by |
+|---|---|
+| `created_at` is the insert time, not the transaction start | the writer statement above |
+| The transaction holds the row lock of the aggregate when it publishes: it publishes after its write of the aggregate row, or after `SELECT … FOR UPDATE` on it | the caller. This is a convention the writer cannot check (risks.md R-ARCH-37) |
+| One relay tick at a time | the advisory lock of the tick |
+| An unpublished row is locked only by a transaction that holds the relay lock, or by the consumer of that row's own event, whose job the queue has already accepted (*restated 2026-11-20, ADR-0004 amendment 3 item 21, QG-043-C3, D-ARCH-190; this row said that the `token_enc` overwrite carries `published_at IS NOT NULL`*) | the purge below carries `published_at IS NOT NULL`; the 24 h `token_enc` housekeeping and an outbox replay (RB-06) take the relay lock first; the `token_enc` overwrite after sending is the one consumer write: by id, without a `published_at` predicate, with a row-count check; no foreign key references `outbox_events`, because a referential check would lock the row |
+
+The order is that of the enqueue. BullMQ does not keep it through processing, so a handler reads the current state of the aggregate and never derives state from the order of events.
+
+**Advisory-lock keys.** *Corrected 2026-11-20 (QG-043-C1 (c); D-ARCH-188): the first sentence said "every advisory lock is a transaction-level one", and the table had four rows. Two session-level locks exist outside the runtime role.* Every advisory lock that the runtime role `platform_app` takes is a transaction-level one (`pg_advisory_xact_lock`, `pg_try_advisory_xact_lock`); the `TenantDb` guard refuses the session forms. The provisioning lanes take two session-level locks, each on a connection of its own that ends with the lane. The single-`bigint` keys in use:
+
+| Key | Level | Held by |
+|---|---|---|
+| `hashtext('audit:partitions')::bigint` (`-1615848645`) | transaction | `platform.ensure_audit_partitions` (§5.3) |
+| `hashtext('audit:anchors')::bigint` (`-1802342845`) | transaction | the anchor writer (§5.5) |
+| `4821950023` | transaction | the reference seed, as `platform_migrator` (`prisma/seed/framework/runner.ts`) |
+| `478216878200` | transaction | the outbox relay tick; the 24 h `token_enc` housekeeping; an outbox replay (RB-06) |
+| `7336135535684573681` (the first 8 bytes of SHA-256 of `platform:bootstrap-lane`, as a signed `bigint`) | **session** (`pg_advisory_lock`) | the bootstrap lane (`tools/db/bootstrap.ts`), on its privileged connection; it serialises concurrent runners and is released when that connection closes |
+| `72707369` | **session** | Prisma Migrate, inside its schema engine, on the migrator's connection during `migrate deploy` and `migrate dev`. It is not our code; the constant was found in the engine binaries of the locked Prisma version |
+
+A `hashtext` key lies in the `int4` range; the two values were computed on PostgreSQL 17.5. A fixed key of ours is above 2^31 and is added to this table by the change that introduces it. Prisma's key is the one fixed key inside the `int4` range. No two keys of the table are equal. A lock per row, such as the per-order lock of threat-model R-19, uses the two-key form `(int4, int4)`, which is a key space of its own.
+
 Purge (housekeeping, daily): `DELETE FROM public.outbox_events WHERE id IN (SELECT id FROM public.outbox_events WHERE published_at < now() - interval '30 days' ORDER BY published_at LIMIT 5000)` repeated until 0 rows. *Corrected 2026-11-19 (D-ARCH-167): 30 days, as ADR-0004 item 6 decides; this section and §10.5 said 7 days and no decision recorded that. The horizon is not shorter than the life of a dead-letter record (14 days, ADR-0013 amendment 3), so a redriven `outbox_event` job still finds its row.* Consumers record `processed_events (consumer, event_id)` in their own business transaction with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the event was already handled (REQ-PLAT-017).
 
-**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. Rows are purged 30 days after publish *(corrected 2026-11-19, D-ARCH-167; was 7)*, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
+**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. *(2026-11-20, ADR-0004 amendment 2 item 8: and the aggregate's type and id, by which the relay holds back the later events of an aggregate whose enqueue failed.)* Rows are purged 30 days after publish *(corrected 2026-11-19, D-ARCH-167; was 7)*, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
 
 ### 6.2 Idempotency keys (REQ-API-009..011, DR-A20)
 
@@ -4644,7 +4694,7 @@ This section records the architect's decisions on the open items raised in §10.
 | OI-02 — owner of the SECURITY DEFINER functions | **Ratified with one change:** the §4.5 functions are owned by a dedicated `NOLOGIN` role **`platform_definer`** (no table ownership, no DDL), which holds only the narrow policies drafted in §4.4 as `TO platform_migrator` (SELECT on the tables the functions read; DELETE with the expiry predicate on token tables). `platform_migrator` keeps no runtime policies. | A definer function runs with its owner's privileges; a defect in one must not run as the schema owner. ADR-0005 amendment 6 records this. Grant: `platform_app` EXECUTE on the functions only. |
 | OI-05 — `entry_hash` uniqueness | **Ratified:** `UNIQUE (entry_hash, occurred_at)` per partition plus `stream_seq bigint` (dense per stream); the verifier checks global uniqueness and gap-free `stream_seq`. | PostgreSQL cannot enforce a global unique on a partitioned table without the partition key; the chain itself is the global guarantee (ADR-0007 amendment 6). |
 | OI-07 — checkpoint size | **Ratified:** the nightly `CHAIN_CHECKPOINT` value holds the SHA-256 digest of the ordered `(stream_id, head_hash, stream_seq)` list plus the count; the full list lives in `audit_checkpoint_heads(checkpoint_entry_id, stream_id, head_hash, stream_seq)`; the external anchor signs the digest. | Keeps the entry small above 10 000 streams without losing verifiability. |
-| OI-08 — `audit_entries` exempt from standard columns | **Ratified:** append-only tables (`audit_entries*`, `audit_pii_vault`, `audit_checkpoint_heads`, `outbox_events`, `processed_events`) are exempt from `updated_at/updated_by/version`; `id`, `created_at`-equivalents remain. | A row that can never be updated has no version. product-manager to add the exemption to NFR-DATA-003 (D-ARCH-006 list). |
+| OI-08 — `audit_entries` exempt from standard columns | **Ratified:** append-only tables (`audit_entries*`, `audit_pii_vault`, `audit_checkpoint_heads`, `outbox_events`, `processed_events`) are exempt from `updated_at/updated_by/version`; `id`, `created_at`-equivalents remain. *Corrected 2026-11-20 (D-ARCH-186): `outbox_events` and `processed_events` carry the full standard columns, as §3.5 lists them and as `job_executions` does. A table that the runtime role writes is under the standard-columns guard (§7.6, C15). The exemption stands for the audit tables.* | A row that can never be updated has no version. product-manager to add the exemption to NFR-DATA-003 (D-ARCH-006 list). |
 | OI-15 — vault deletions by `platform_erasure` | **Ratified:** a separate `platform_erasure` role (used only by the M4/M5 erasure job task) holds DELETE on `audit_pii_vault` and on erasure-scoped document rows; `platform_app` never holds DELETE there. | Least privilege; ADR-0007 §erasure updated by reference. |
 | Token purges via `purge_expired_tokens()` | **Ratified** (owned by `platform_definer`, scheduled by `housekeeping`). | Token tables are USER_OWNED; the API never needs a DELETE grant on them. |
 | OI-19 — `quote_claim_state(id, guest_token_hash)` | **Ratified**, including the retained `claimed_from_token_hash` column. | Prevents probing claim state of arbitrary quote IDs (threat-model T-79 family). |
@@ -4696,6 +4746,8 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A32 | The two dispatch gates of D-SD-002 (R-ARCH-34 and PR293-SEC-03 before TASK-051; PR65-SEC-02 (b) before TASK-089), PR65-SEC-04 (a) and (b), the outbox horizon (`rulings/wave-1-r-arch-34-operator-rulings.md`; ADR-0005 amendment 14; D-ARCH-162..167) | **§4.7, §3.10, §4.3, §1.1 P12:** on a GUEST_CAPABLE table a reference is a pair of composite keys, one per owner column, with no single-column key (T2-G; T2-O for `quotes.requote_of_quote_id`); the claim is one statement; every unique key of a TENANT or GUEST_CAPABLE table holds an owner column, and a uniqueness rule is one index per owner column; a refused reference has one answer. **§4.6 C16:** arm (a) knows guest-bound keys, arm (b) and P9-CK are written down, (b) covers GUEST_CAPABLE tables and exclusion constraints (TASK-051). **§3.2, §1.5, §4.4, §9.1, §9.3:** new GLOBAL table `operator_staff_grants`, written by the provisioning lane as the migrator; lifecycle-guard rule 5 (an operator membership needs a grant) and rule 6 (`INVITED` not reachable by UPDATE), both in a later migration that replaces the function; the PARTNER backstop is deferred to M3; no users transition guard. **§3.5, §6.1, §10.1, §10.5:** the outbox purge horizon is 30 days, as ADR-0004 decides (the 7 days here were never decided). |
 | A33 | TASK-039 code review R1-m1, R1-m7 and R1-n8 (D-TASK039-03); the §8.3 wording routed by D-ORCH-139 (D-ARCH-171, D-ARCH-172) | **§3.5 (new entry), §1.5, §4.4, §10.1, §10.5:** `job_executions`, the idempotency ledger of job effects: SYSTEM, insert-only, unique on `(queue, job_key)`, purged 30 days after completion by the housekeeping job of TASK-043. **§8.3:** rule 10 call sites with their stated limits, the lone carriage return (rule L) and lexer parity are written down as TASK-293 shipped them; rule 14 is to refuse `CREATE CAST` and `CREATE AGGREGATE` (TASK-034). |
 | A34 | TASK-047 dispatch gate (D-SD-003 item 6, D-SD-004 item 8, D-PM-072; ADR-0013 amendment 4; D-ARCH-180) | **§4.5 `job_context`:** the function resolves ownership, not liveness. It filters `deleted_at` on neither the row nor its organisation and returns a fourth column `org_deleted` (true for a soft-deleted or missing organisation, NULL without an organisation). A job of a soft-deleted organisation runs in that organisation's own tenant scope; no refusal reason is added and no job runs in a wider scope. The body selects into variables and ends in one query (run on PGlite with stub tables). Candidate functions that settle, cancel, expire or backfill do not filter on the organisation's `deleted_at`. |
+| A35 | TASK-043 code review round 1 (M1, m4, m7; D-TASK043-04, -06 and -07; ADR-0004 amendment 2; ADR-0013 amendment 5; D-ARCH-183..187) | **§3.5, §6.1 `outbox_events`:** the sentence that said per-aggregate order "holds" is corrected. Order holds when `created_at` is the insert time (`clock_timestamp()`, set by the writer), the publishing transaction holds the row lock of the aggregate, one relay tick runs at a time under a transaction-level advisory lock, and only a holder of that lock writes an unpublished row. §6.1 shows the writer statement and the tick as built and lists the advisory-lock keys. The row checks on `aggregate_type`, `correlation_id` (the ADR-0016 §15 grammar) and `attempts`, and `ix_outbox_events__aggregate`, are written down. **§3.5, §4.4 `processed_events`:** `SELECT, INSERT, DELETE` and no `UPDATE`; `job_executions` gains `DELETE` with the TASK-043 migration. **OI-08:** both outbox tables carry the full standard columns. |
+| A36 | Conditions of the verification D-QG-002 (QG-043-C1 (c), QG-043-C3; ADR-0004 amendment 3; D-ARCH-188, D-ARCH-190) | **§6.1 advisory-lock keys:** the sentence "every advisory lock is a transaction-level one" is narrowed to the runtime role, and the table gains the two session-level locks of the provisioning lanes (the bootstrap lane and Prisma Migrate) and the computed key values. **§6.1 order, fourth condition (and its copy in §3.5):** an unpublished row is locked only by a holder of the relay lock or by the consumer of the row's own event. The `token_enc` overwrite after sending therefore carries no `published_at` predicate; it is by id, with a row-count check. An outbox replay takes the relay lock. No foreign key references `outbox_events`. |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:

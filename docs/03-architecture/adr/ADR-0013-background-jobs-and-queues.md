@@ -7,11 +7,11 @@
 
 ## Decision
 
-1. **Queues** (names are constants in `packages/shared/queues.ts`): `booking` (saga steps), `payments` (webhook processing, capture, refund, authorisation sweeper), `documents` (PDF generation, storage), `pickups` (schedule/cancel with carrier), `tracking-poll` (adaptive polling), `notifications` (render + send), `audit-maintenance` (partition pre-creation daily, chain verify hourly/nightly, nightly checkpoint), `outbox-relay` (500 ms scheduler + 30 s fallback), `housekeeping` (expired tokens, idempotency keys > 24 h, published outbox > 30 d, drafts > 30 d, MFA challenges). Each queue has a ~~`<queue>:dead`~~ `<queue>-dead` dead-letter queue (BullMQ `removeOnFail: false` + a `failed` listener moving exhausted jobs with redacted data, reason and attempt count). *Amended 2026-11-19 by amendment 3: the name is `<queue>-dead` (item 7); failed jobs and dead-letter records are bounded, so `removeOnFail: false` no longer holds (items 8–10); as built by TASK-035 the queue constants live in `packages/shared/src/queues/` (`@platform/shared/queues`) and the consumer writes the record before BullMQ marks the job failed, in place of a `failed` listener.*
+1. **Queues** (names are constants in `packages/shared/queues.ts`): `booking` (saga steps), `payments` (webhook processing, capture, refund, authorisation sweeper), `documents` (PDF generation, storage), `pickups` (schedule/cancel with carrier), `tracking-poll` (adaptive polling), `notifications` (render + send), `audit-maintenance` (partition pre-creation daily, chain verify hourly/nightly, nightly checkpoint), `outbox-relay` (500 ms scheduler + 30 s fallback), `housekeeping` (expired tokens, idempotency keys > 24 h, published outbox > 30 d, drafts > 30 d, MFA challenges). Each queue has a ~~`<queue>:dead`~~ `<queue>-dead` dead-letter queue (BullMQ `removeOnFail: false` + a `failed` listener moving exhausted jobs with redacted data, reason and attempt count). *Amended 2026-11-19 by amendment 3: the name is `<queue>-dead` (item 7); failed jobs and dead-letter records are bounded, so `removeOnFail: false` no longer holds (items 8–10); as built by TASK-035 the queue constants live in `packages/shared/src/queues/` (`@platform/shared/queues`) and the consumer writes the record before BullMQ marks the job failed, in place of a `failed` listener.* *Amended 2026-11-20 by amendment 5 item 24: `outbox-relay` is the queue of the `outbox_event` jobs; the relay itself is no job, so "(500 ms scheduler + 30 s fallback)" is withdrawn.*
 2. **Job options**: deterministic `jobId` from the business key (e.g. ~~`booking:<saga_id>:<step>`, `tracking:<shipment_id>`, `outbox:<event_id>`~~ `saga.<saga_id>.<step>`, `tracking_poll.<schedule_id>.<occurrence>`, `outbox_event.<event_id>`), `attempts: 5`, `backoff: { type: 'exponential', delay: 2000 }` + custom jitter strategy, `removeOnComplete: { age: 86400, count: 10000 }`. Non-retryable errors (`NonRetryableError`: validation, missing tenant context `MISSING_TENANT_CONTEXT`, permission) skip retries and go straight to the DLQ (DR-A25). *Amended 2026-11-19 by amendment 3: a job id is `<kind>.<id>` or `<kind>.<id>.<step>` (item 7), a recurring key carries its occurrence (item 11), and `removeOnFail` is bounded (item 8).*
 3. **Payload contract**: `{ v: 1, org_id, actor_id, correlation_id, idempotency_key, trace_context, data }`; processors open `withTenantTx` with the payload's `org_id` (REQ-RLS-008); system-wide schedulers iterate organisations explicitly. *Superseded 2026-11-12 by amendment 1: payload v2 carries `kind` + `id` only and the processor resolves `org_id` from PostgreSQL (`platform.job_context`).*
 4. **Idempotent processors**: `job_executions(job_key UNIQUE, status, result, completed_at)` written in the processor's transaction; a duplicate delivery of a completed job returns without side effects (REQ-PLAT-014). Outbox consumers additionally use `processed_events` (ADR-0004). *Amended 2026-11-20 (TASK-039 code review R1-m1 and R1-n8; D-ARCH-171; data-model §3.5): the key is unique per queue, `(queue, job_key)`, because BullMQ scopes job ids per queue and one payload kind can be a job of two queues. A row is deleted 30 days after completion, so a job id is one-shot on its queue for that time.*
-5. **Schedulers**: BullMQ **Job Schedulers** (`upsertJobScheduler`) registered idempotently at worker start, so N workers run each schedule once per interval (REQ-PLAT-015). Schedules (config): outbox relay 500 ms (lock-guarded loop) / 30 s fallback; audit partitions daily 02:00 UTC; chain verify hourly incremental + nightly full 03:00; checkpoint nightly 03:30; payment sweeper every 5 min; tracking poll planner every minute (enqueues due shipments per DR-B19 intervals with ±10 % jitter and failure backoff); housekeeping hourly.
+5. **Schedulers**: BullMQ **Job Schedulers** (`upsertJobScheduler`) registered idempotently at worker start, so N workers run each schedule once per interval (REQ-PLAT-015). Schedules (config): outbox relay 500 ms (lock-guarded loop) / 30 s fallback; audit partitions daily 02:00 UTC; chain verify hourly incremental + nightly full 03:00; checkpoint nightly 03:30; payment sweeper every 5 min; tracking poll planner every minute (enqueues due shipments per DR-B19 intervals with ±10 % jitter and failure backoff); housekeeping hourly. *Amended 2026-11-20 by amendment 5 item 24: the outbox relay is not a schedule; "outbox relay 500 ms (lock-guarded loop) / 30 s fallback" is withdrawn.*
 6. **Concurrency and isolation**: worker concurrency per queue from config (defaults: booking 5, payments 5, documents 4, pickups 5, tracking-poll 10, notifications 10, maintenance 1); carrier calls remain bounded by the per-account bulkhead (ADR-0010).
 7. **Graceful shutdown**: SIGTERM → `worker.close()` waits up to 30 s for active jobs, then exits 0; interrupted jobs are re-delivered (safe by idempotency) (REQ-PLAT-022, NFR-AVAIL-002). API: `server.close()` + drain ≤ 30 s.
 8. **Observability**: `/metrics` on the worker exposes per-queue `waiting`, `active`, `completed`, `failed`, `delayed`, `dead` gauges, job duration histograms, relay lag; trace context propagated in payloads (NFR-OBS-002/003). Readiness reports Redis connectivity and scheduler liveness. *Amended 2026-11-19 by amendment 3 item 12: the metric names.*
@@ -21,7 +21,7 @@
 
 - **pg-boss (Postgres-backed queue).** Attractive for transactional enqueue but the stack fixes BullMQ + Redis; the outbox gives the transactional guarantee instead.
 - **Cron in the API process.** Rejected: schedulers belong in the worker; API stays stateless.
-- **BullMQ Pro (groups, rate limiting per group).** Commercial licence — not in the allow-list; per-aggregate serialisation uses a Redis lock in the consumer instead.
+- **BullMQ Pro (groups, rate limiting per group).** Commercial licence — not in the allow-list; per-aggregate serialisation uses a Redis lock in the consumer instead. *Amended 2026-11-20 (ADR-0004 amendment 2 item 15; QG-043-C1 (b)): that lock is not built. A lock with retry gives mutual exclusion, not order. Handlers read the current state of the aggregate and do not depend on the order of events; a per-aggregate design is owed with the first handler that needs order (risks.md R-ARCH-37). The licence reason stands.*
 
 ## Consequences
 
@@ -117,7 +117,7 @@ The bounds are three constants exported from `@platform/shared/queues` (ages in 
 
     | Alarm | Expression | For | Severity | Runbook |
     |---|---|---|---|---|
-    | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`; ticket for the other queues | RB-07 |
+    | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`; ticket for the other queues (*amended 2026-11-20, amendment 5 item 26: `outbox-relay` pages too*) | RB-07 |
     | `QueueDeadLetterDepthHigh` | `max by (queue) (platform_queue_dead_letter_jobs) >= 1600` (80 % of the count bound) | 5 min | page | RB-07 |
     | `ValkeyMemoryHigh` | `max(platform_valkey_memory_used_bytes) / (max(platform_valkey_memory_max_bytes) > 0) >= 0.70` | 10 min | ticket | RB-06 |
     | `ValkeyMemoryCritical` | the same ratio `>= 0.85` | 5 min | page | RB-06 |
@@ -188,6 +188,39 @@ Items continue at 17.
     - **The reasons.** The pin of the non-retryable reasons is unchanged: no reason was added.
     - **Item 20.** A row without an organisation on a queue that requires a tenant is refused with `MISSING_TENANT_CONTEXT` before the processor is called, and the same row on `outbox-relay` runs.
     - The function sketch of data-model §4.5 was run on PGlite with stub tables (15 cases, no roles and no row-level security); nothing else was run for this amendment.
+
+## Amendment 5 (2026-11-20, TASK-043 code review round 1): the outbox relay is a loop, not a job; `outbox-relay` is the queue of the dispatcher (ADR-0004 amendment 2; D-TASK043-06 and -07; D-ARCH-183, D-ARCH-184)
+
+Items continue at 24.
+
+24. **`outbox-relay` (§1, §5, §6).**
+    - **The queue** carries one kind, `outbox_event`. Its processor is the dispatcher of ADR-0004 amendment 2 item 12, and its concurrency is 5, as TASK-035 built it. §6 did not list it.
+    - **The relay** is an in-process loop in every worker, kept to one tick at a time by a PostgreSQL advisory lock (ADR-0004 amendment 2 items 8 to 11). It is not a BullMQ job. It has no Job Scheduler and no 30 s fallback, and the list of schedules in §5 no longer contains it.
+    - **REQ-PLAT-015** is not touched: every schedule that exists is still registered once. Its note names "the outbox relay fallback" as a user of scheduled jobs; product-manager drops those words at the next edit of the requirement.
+25. **Relay metrics and alarms (joins the table of item 12 and the alarms of item 14).**
+
+    | Metric | Type | Value | Owner |
+    |---|---|---|---|
+    | `platform_outbox_relay_latency_seconds` | histogram | from the event's insert to its accepted enqueue | exists (TASK-043) |
+    | `platform_outbox_relay_published_total`, `platform_outbox_relay_failed_total` | counter | rows marked published; enqueue attempts that failed | exists (TASK-043) |
+    | `platform_outbox_relay_oldest_pending_age_seconds` | gauge | ADR-0004 amendment 2 item 11 | TASK-043 |
+    | `platform_outbox_relay_last_tick_timestamp_seconds` | gauge | ADR-0004 amendment 2 item 11 | TASK-043 |
+    | `platform_outbox_unhandled_total` | counter | events whose type has no handler | the task that builds the dispatcher (proposed: TASK-047) |
+
+    | Alarm (TASK-214) | Expression | For | Severity | Runbook |
+    |---|---|---|---|---|
+    | `OutboxRelayLag` | `max(platform_outbox_relay_oldest_pending_age_seconds) > 30` | 5 min | page | RB-06 |
+    | `OutboxRelayStalled` | `time() - max(platform_outbox_relay_last_tick_timestamp_seconds) > 60` (*item 26 adds an `absent()` arm*) | 2 min | page | RB-06 |
+
+    - `OutboxRelayLag` is the "Outbox relay lag" row of platform.md §8.5, now with its metric. Both page, because the booking saga starts from an outbox event.
+    - `OutboxRelayStalled` takes the place of the 30 s fallback. A fallback job would restart a dead loop without telling anyone, and it depends on the Valkey that a stalled relay may be waiting for.
+    - The worker's readiness reports the relay as degraded when the first gauge is above 60 s (ADR-0017 §5). TASK-214 adds the component and extends its lane A test of the alarm rules to these two.
+26. **Additions after the verification D-QG-002 (2026-11-20; observations of that entry; D-ARCH-188, D-ARCH-189).**
+    - **`OutboxRelayStalled`** is `time() - max(platform_outbox_relay_last_tick_timestamp_seconds) > 60 or absent(platform_outbox_relay_last_tick_timestamp_seconds)`, for 2 min. With every worker down no series exists and the first arm returns nothing; the second arm covers that case.
+    - **`QueueDeadLetterNew` pages for `outbox-relay`** as it does for `booking` and `payments` (amends item 14). Every saga and payment event passes that queue, and a dead-lettered event job leaves rows without their follow-up jobs (ADR-0004 amendment 3 item 20). The deployment alarm `dlq-growth` of platform.md §5.5 follows the same three queues.
+    - **The lag gauge** is set at the claim, before the enqueues (ADR-0004 amendment 3 item 22). A value written only at the end of a long tick would let the maximum over the workers read 0 and reset the 5 minutes of `OutboxRelayLag`.
+    - **The readiness component** for relay lag is the worker's alone; the api runs no relay.
+    - **`OutboxRelayLag` during a replay.** RB-06 makes published rows unpublished again, so the alarm fires for the length of the replay. The runbook says so and takes the relay lock for that statement (ADR-0004 amendment 3 item 22).
 
 ## Reversibility
 

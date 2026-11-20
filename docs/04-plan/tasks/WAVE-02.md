@@ -119,7 +119,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-278 **DC** (M1 Must) Create notification jobs only from outbox events, idempotently |
 | REQs | REQ-NOTIF-014 |
 | NFRs | NFR-RES-004 |
-| Spikes / security / decisions | D-ARCH-180 |
+| Spikes / security / decisions | D-ARCH-180, D-ARCH-183, D-ARCH-184, D-QG-002, R-ARCH-37, SEC-P3-08, D-SD-006 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-074, TASK-043, TASK-047 |
@@ -136,6 +136,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-278 scenarios
 - JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (notification_log, the notification row table of data-model 4.2; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- HANDLER RULES (ADR-0004 amendment 2 items 12 and 15; R-ARCH-37; D-ARCH-184): a handler registers by type, claims processed_events (consumer, event_id) in the transaction of its effect, does database work only and names its follow-up job by a row it wrote; it reads the current state of the aggregate and never derives state from the order of events; test: two events of one aggregate delivered in reverse end in the same state; the token_enc overwrite after sending carries published_at IS NOT NULL
+- DISPATCH GATE: TOKEN_ENC OVERWRITE OUTCOME (D-QG-002 QG-043-C3, principal-architect with security-analyst; placeholder until ruled): the overwrite after sending can match no row while the event is still unpublished (the enqueue runs before the mark commits); before this task is dispatched the ruling is folded here: either the overwrite checks its row count and is retried, or security-analyst accepts the 24 h backstop for that case in writing; one test either way
+- TOKEN_ENC HOUSEKEEPING OWNER (ADR-0004 amendment 1, SEC-P3-08; D-ARCH-183; D-QG-002 QG-043-C6; owner assigned by D-SD-006): this task builds the 24 h housekeeping that removes payload.token_enc and token_enc_key_id from outbox events older than 24 h; it takes pg_advisory_xact_lock(478216878200) in the transaction of its statement (ADR-0004 amendment 2 item 14); it is a scheduled job under the D-SECPR039-01 conditions (age predicate in its own SQL, batches, idempotentProcessor keyed by the occurrence id, a closed SCHEDULE_NAMES entry of at most 47 characters); tests: a row 23 h old keeps its token, a row 25 h old loses it and nothing else of the payload changes, and the statement waits for a held relay lock
 - AT-US-278-01 … AT-US-278-07: all 7 scenarios of US-278, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -275,7 +278,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-126 **DC** (M0 Must) Rate-shopping fan-out with deadlines and partial results |
 | REQs | REQ-CARR-008 |
 | NFRs | NFR-PERF-002, NFR-PERF-003, NFR-RES-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-SD-006 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-079, TASK-080 |
@@ -289,6 +292,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-126 scenarios (hung carrier -> named partial at 4 s; overall 5 s; AbortSignal cancels within 1 s)
 - D-ARCH-106: no tenant transaction is open while carriers are called; the caller persists each result in its own short tenant transaction as it arrives
+- PR #77 code review n9: the DR-B34 eligibility compares package dimensions orientation-free, with the same rule as the Mock limitViolation (best as a shared helper in packages/carriers/src/capabilities.ts), so a 100 x 1200 x 800 box that the Mock would quote is not excluded
 - AT-US-126-01 … AT-US-126-08: all 8 scenarios of US-126, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -302,7 +306,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-197 **DC** (M0 Must) Shipment state machine core<br>US-198 **DC** (M0 Must) Transition history and same-transaction audit |
 | REQs | REQ-BOOK-018, REQ-BOOK-019 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-030, D-ARCH-180 |
+| Spikes / security / decisions | D-030, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-029, TASK-032, TASK-043 |
@@ -317,6 +321,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-197 and US-198 scenarios (transition table DR-B01)
 - JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (shipments; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-197-01 … AT-US-197-06: all 6 scenarios of US-197, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-198-01 … AT-US-198-05: all 5 scenarios of US-198, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -398,7 +403,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-154 **DC** (M0 Must) Quote entity with 24 h expiry<br>US-173 **DC** (M0 Must) Shipment direction, content type and package type |
 | REQs | REQ-QUOTE-001, REQ-BOOK-027, REQ-BOOK-028 |
 | NFRs | NFR-DATA-002 |
-| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004, D-ARCH-180 |
+| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-083, TASK-051, TASK-029, TASK-070 |
@@ -415,6 +420,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - QUOTE TABLES AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10; rulings/wave-1-r-arch-34-operator-rulings.md section 2.8): ux_quotes__org_id_id and ux_quotes__guest_token_hash_id; quote_packages and quote_options reference quotes through the owner-bound pair with no single-column key; ux_quote_packages__org_quote_seq (partial on org_id IS NOT NULL) and ux_quote_packages__guest_quote_seq replace ux_quote_packages__quote_seq and ix_quote_packages__org_quote; requote_of_quote_id has the composite key through org_id, ck_quotes__requote_org_only and the entry fk_quotes__requote_of_quote_id in TENANT_REFERENCE_EXCEPTIONS; every read and write of a child carries the owner predicate next to quote_id; C16 is the gate
 - CANONICAL LISTS (ADR-0010 amendment 12 item 2; D-ARCH-168; data-model 1.7): a canonical list that packages/carriers already holds is moved to packages/shared and re-exported, never written a second time
 - JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (quotes; also the soft-deleted quote: the row resolves, and the processor reads it in the tenant transaction, finds it deleted and completes without effect; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-154-01 … AT-US-154-09: all 9 scenarios of US-154, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-173-01 … AT-US-173-07: all 7 scenarios of US-173, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -563,7 +569,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging<br>US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
 | REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-OBS-003, NFR-PERF-004, NFR-RES-005 |
-| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004, D-ARCH-180 |
+| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37, PR079-SEC-03, D-SECPR079-01, D-SD-006 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-084, TASK-085, TASK-088, TASK-079, TASK-047, TASK-040, TASK-043 |
@@ -583,6 +589,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (saga_executions; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - CANDIDATE FUNCTION saga_due_candidates (when this task builds it; otherwise TASK-094): the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
+- CALL RECORD CHANNEL (PR #77 code review m1; PR079-SEC-03; D-SECPR079-01; with principal-architect before dispatch): callRecords() of the Mock is diagnostic and test evidence on the raw adapter only (the guarded registry facade has none) and a per-process ring ordered by completion; principal-architect decides the channel the saga uses to cite carrier calls (for example an injected onCall(record) sink port, like the logger) before this task and before DHL, FedEx and UPS copy the pattern; the saga matches records by the ctx.correlationId it created; if the channel changes the Mock adapter, this task asks the orchestrator for the pkg-carriers-mock lock and also validates maxCallRecords as a positive safe integer
 - AT-US-202-01 … AT-US-202-07: all 7 scenarios of US-202, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)

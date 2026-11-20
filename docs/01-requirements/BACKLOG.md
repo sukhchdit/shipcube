@@ -1,6 +1,8 @@
 # Backlog — Epics outside this run (M2–M5 and LATER)
 
-Version 1.2 · 2026-11-20 · owner product-manager. Every item below is **MoSCoW: Won't (this run)** per D-001. They are listed so that seams required by the brief are visible to principal-architect and so later `/sdlc-change Implement milestone Mx` runs start from a known list. No detailed stories exist for these epics yet, except those in "Backlog stories written ahead of their milestone" at the end of this file.
+Version 1.3 · 2026-11-20 · owner product-manager. Every item below is **MoSCoW: Won't (this run)** per D-001. They are listed so that seams required by the brief are visible to principal-architect and so later `/sdlc-change Implement milestone Mx` runs start from a known list. No detailed stories exist for these epics yet, except those in "Backlog stories written ahead of their milestone" at the end of this file.
+
+v1.3 (D-PM-079): new subsection "Obligations Run 1 hands to M3 planning" under M3 with one entry: outbound webhooks state their ordering contract, because domain events are handled without a guaranteed order (ADR-0004 amendment 2 item 15, R-ARCH-37). The EPIC-B-305 row points to it. No epic added or removed.
 
 v1.2 (D-PM-075, D-PM-076): new subsection "Obligations Run 1 hands to M2 planning" under M2 with two entries: what the first organisation-closure story must state about pending work (ADR-0013 amendment 4, D-ARCH-180), and the volumetric-weight rule for the first task that prices from billable weight (TASK-076 code review R1-n10). The EPIC-B-203 and EPIC-B-205 rows point to it. No epic added or removed.
 
@@ -42,9 +44,17 @@ Exit demo: a partner connects its own sandbox carrier account, books through the
 | EPIC-B-302 Bring-your-own carrier accounts | Guided forms or OAuth per carrier, "Test connection", sandbox/production, write-only credentials, envelope encryption per tenant; programme-rules ADR | §4.3, §7 | CarrierContext carries account ownership (REQ-CARR) |
 | EPIC-B-303 API keys & test/live modes | `pk_test_`/`pk_live_` keys shown once, hashed, scoped, revocable, last-used; mode selected by prefix | §4.2, §4.8 | Actor type API_KEY in audit; test/live mode seam (REQ-API) |
 | EPIC-B-304 Public API hardening & developer portal | Rate limits per key, deprecation/sunset, Swagger + portal page, quick-starts, Postman collection, changelog | §4.8, §7 | OpenAPI contract-first pipeline (REQ-API) |
-| EPIC-B-305 Outbound webhooks | HMAC-signed, timestamped, retried, dead-lettered, replayable; delivery logs | §4.8 | Outbox events (REQ-PLAT) |
+| EPIC-B-305 Outbound webhooks | HMAC-signed, timestamped, retried, dead-lettered, replayable; delivery logs. Carries the ordering obligation below | §4.8 | Outbox events (REQ-PLAT) |
 | EPIC-B-306 Usage metering | Requests, labels, tracked shipments per key/org for future subscription billing | §2.2, §4.8 | Metering counters seam (REQ-API) |
 | EPIC-B-307 Partner pricing & sub-accounts | Partner margin rules over own costs; end customers within the partner tenant | §7 | Rule dimension "carrier account" (REQ-PRICE) |
+
+### Obligations Run 1 hands to M3 planning
+
+Same form and standing as the M2 subsection above: rules a Run 1 decision left for M3, not stories, not counted.
+
+| Epic and story | Obligation | Why it is owed | Source |
+|---|---|---|---|
+| EPIC-B-305, the first story that delivers webhooks to a partner | The story states the ordering contract of the webhooks of one shipment: either every payload carries what a receiver needs to order them itself (the event time and a per-shipment sequence), with "delivery order is not guaranteed" written in the developer documentation, or deliveries of one shipment are serialised. It is not accepted into a wave before principal-architect has delivered the design the chosen option needs. | In Run 1 domain events are published in order per aggregate only up to the enqueue; handlers may run at the same time or in reverse, and that is enough because every Run 1 handler reads current state (REQ-PLAT-017 note, A-115). A partner's system is a consumer the Platform does not control: it may well derive state from the order in which webhooks arrive, and a "delivered" webhook that lands before "out for delivery" would be a visible defect of the exit demo's "signed tracking webhooks". The per-aggregate sequence and the per-aggregate serialisation are the two designs ADR-0004 amendment 2 item 15 leaves open (R-ARCH-37). | D-ARCH-185; D-QG-002 QG-043-C5; D-PM-079 |
 
 ## M4 — Operations and finance depth (brief §12)
 Exit demo: a carrier invoice is imported, mismatches are flagged, one discrepancy is re-charged to the customer and the ledger balances.

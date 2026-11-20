@@ -1,5 +1,5 @@
 @media (hover: none) {
   .button:hover {
-    background: blue;
+    background: var(--color-bg-subtle);
   }
 }

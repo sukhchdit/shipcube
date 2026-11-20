@@ -92,7 +92,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-123 (M0 Must) Mock scenario directives and production exclusion |
 | REQs | REQ-CARR-005, REQ-CARR-006 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SEC-P3-21 |
+| Spikes / security / decisions | SEC-P3-21, D-SECPR079-01, PR079-SEC-01, PR079-SEC-02, PR079-SEC-03, PR079-SEC-05, D-SD-006 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-079, TASK-014 |
@@ -106,6 +106,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-123 scenarios
+- PR079-SEC-01 (LOW, CWE-693; D-SECPR079-01): tools/lint/carrier-wire-boundary.test.ts replaces the one-level barrel scan with the transitive walk of the record, so a wire re-export (value or type) from adapters/mock/ is refused; owned file, security round; DUE before the first adapters/<carrier>/wire* module merges (TASK-135 carries the merge prerequisite)
+- PR079-SEC-02 (LOW, CWE-400; code review m3 of PR #77): the Mock latency wait is capped at ctx.deadlineAt through an injected nowMs seam and ends with TIMEOUT, and it can be cancelled; directives are honoured only for sandbox contexts, and the MOCK: customer-reference source is read only in local and test; test: a deadline 60 s in the past does not sleep
+- PR #77 code review m2 (tracking anchor): Mock tracking progresses relative to an injected Clock or a per-number anchor instead of the fixed 2026-01-05 past anchor, so no event predates the shipment; the README states the behaviour; the tracking-ingestion owner (TASK-172) is told so that no sanity check rejects every Mock event
+- PR079-SEC-05 (INFO; D-SECPR079-01): the Mock refuses ctx.environment equal to production, and a test pins the single composition-root reference to the Mock factory
+- PR079-SEC-03 / code review m1, Mock half (unless TASK-092 did it): maxCallRecords is validated as a positive safe integer, falling back to the default, so NaN or Infinity cannot make the ring unbounded
 - AT-US-123-01 … AT-US-123-11: all 11 scenarios of US-123, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -147,7 +152,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-021 (M0 Must) Password reset |
 | REQs | REQ-AUTH-011, REQ-AUTH-012 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-06, D-050 |
+| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-059, TASK-086 |
@@ -161,6 +166,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-021 API scenarios
 - SEC-TC-47 (reset part): a successful reset sets email_verified_at
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-021-01 … AT-US-021-07: all 7 scenarios of US-021, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

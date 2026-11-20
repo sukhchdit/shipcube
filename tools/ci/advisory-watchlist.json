@@ -31,14 +31,6 @@
       "decision": "D-SECAUDIT-01",
       "granted": "2026-11-18",
       "expires": "2027-02-12"
-    },
-    {
-      "id": "GHSA-7589-6fvf-x4pw",
-      "package": "effect",
-      "reason": "Fixed in effect 3.22.1, but no in-range bump: @prisma/config 7.10.1 (the latest stable) pins effect at exactly 3.20.0, and @hookform/resolvers' optional ^3.10.3 peer dedupes onto it. devOptional only: no runtime image installs it, and no code of ours imports effect or @hookform/resolvers. The ReDoS needs a Schema.TemplateLiteral with two or more Schema.String spans over attacker input; @prisma/config decodes only our own prisma.config.ts with Struct/String schemas and never builds one. Short horizon on purpose: by the expiry, bump Prisma once a stable @prisma/config allows effect >= 3.22.1, or add a scoped override to a patched 3.22.x, then remove this entry.",
-      "decision": "D-SECAUDIT-02",
-      "granted": "2026-11-20",
-      "expires": "2026-12-18"
     }
   ]
 }
