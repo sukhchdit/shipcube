@@ -356,7 +356,7 @@ describe('[US-011] outbox relay on PostgreSQL 18 and Valkey 8', () => {
     expect(await relay.runOnce()).toMatchObject({ claimed: 0 });
   });
 
-  it('[AT-US-011-04] a crash between enqueue and mark redelivers; the duplicate is discarded (one job per event id)', async () => {
+  it('[AT-US-011-04] a crash between enqueue and mark re-enqueues the event under the same job id; no second job results', async () => {
     const [id] = await publishAll([randomUUID()]);
     const queues = workerQueues();
     const crashing: SystemTxRunner = {
