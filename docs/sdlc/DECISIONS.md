@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-086.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-087.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -7484,3 +7484,61 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **quality-gatekeeper:** QG-040-C7 (c) answered.
   - **security-analyst (self):** the threat-model row for T-71 gains C-1 (before G3, with the T-79 and R-05 text).
 - **Reversibility:** High (TASK-085 and the payment-method routes are not built).
+
+### D-SD-010 · 2026-11-20 · senior-developer · Plan fold for QG-040-C8 of D-QG-004: the card lines of D-ARCH-200..204 as replaced by D-ARCH-205 and D-ARCH-206, the order of TASK-096 and the If-Match operations mounted before it (retrofit, TASK-096 stays in batch 3.1), the CALL CLASS scan, the TASK-167 dispatch gate, and the TASK-040 part 040-A supersede branch (plan regenerated: 297 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Input:** D-QG-004 condition QG-040-C8; D-ARCH-200 to D-ARCH-206 (card lines); D-SECPR040-02 and D-SECPR040-03 (supersede branch `feat/TASK-040-idempotency-keys-v2` at `2abd665f`); code review supersede round `c83e059e`; `openapi.yaml` (21 operations take `If-Match`); `task-map.csv` and the wave files.
+- **Decision, per card:**
+  - **TASK-040:** LEASE RULE, PURGE LEDGER CLAIM, CONTRACT DESCRIPTIONS, TWO PULL REQUESTS ALLOWED (with the dispatch sentence: the first pull request goes as soon as part 040-A is on main, it does not wait for part 041-A), ENVELOPE, STORED CLIENT SECRETS, AS BUILT IN PART 040-A (D-ARCH-206: the `{origin, body}` seal and the claim-lost entry are already in part 040-A) and PART 040-A SUPERSEDE BRANCH. Three existing clauses are amended in place: the PR040-SEC-04 clause points to LEASE RULE, P-3 reads "the only statement on `idempotency_keys`", and the TWO PARTS start condition points to the narrower rule of D-ARCH-204. PART 040-B FILES AND LOCKS is split per pull request. The DISPATCH GATES line follows D-QG-004: dispatch gates closed, merge conditions QG-040-C3 (a), P-1 and the P-3 reading.
+  - **TASK-096:** VERSION CHECK BEFORE CALL replaces the placeholder. Files gain `execute.ts`, `define-route.ts` and `tests/generated/route-metadata.ts`. Locks gain `api-tx-execute` and `api-routing`; no other task of batch 3.1 holds them (gen.mjs passes). New line RETROFIT.
+  - **TASK-062 and TASK-092:** IF-MATCH UNTIL TASK-096.
+  - **TASK-085:** SIMULATED GATEWAY (D-ARCH-205 line 1). INTENT IN TWO STEPS of D-ARCH-202 is withdrawn and not folded. The line also records that QG-040-C7 is answered and that the concurrences routed by D-ARCH-205 (security-analyst (c), product-manager (d)) are on record before dispatch.
+  - **TASK-092:** CHECKOUT CALL, MOCK (D-ARCH-205 line 2). Its call-table rows are added by TASK-096, which settles the conflict QG-040-C8 named.
+  - **TASK-170:** CHECKOUT CALL, STRIPE. In the D-ARCH-106 line the key becomes `auth:<order_id>:<order_version>:<attempt>`, load reads the order version, and the client-secret sentence names the encrypted stored response (ADR-0014 amendment 15).
+  - **TASK-167:** CHECKOUT CALL, STRIPE and DISPATCH GATE: STRIPE REPEATED 500 (the D-ARCH-202 open item; the architect rules it before TASK-167 is dispatched).
+  - **TASK-249:** PAYMENT METHOD CALLS (D-ARCH-206).
+  - **TASK-214:** IDEMPOTENCY SIGNALS replaces the IDEMPOTENCY CLAIM LOST ALERT line of D-SD-009 and keeps its runbook sentence.
+  - **CALL CLASS** (D-ARCH-202 line 4) with a per-card tail on TASK-049 (registerUser, read), TASK-052 (loginUser, read), TASK-174 (confirmPayment, reachable), TASK-239 (suggestShipmentAddress, read), TASK-245 (listServicePoints, read), TASK-249 (setup inert, create reachable, update and delete no call), TASK-250 (the integrity check, read) and TASK-272 (refreshShipmentTracking, read in its call form).
+- **Sequencing (D-ARCH-202 asks for it; QG-040-C8 second item): retrofit, TASK-096 stays in batch 3.1.**
+  - The scan of the 21 `If-Match` operations against the cards and `req_ids` finds two mounted before batch 3.1: `updateMe` (TASK-062, batch 1.7) and `checkoutOrder` (TASK-092, batch 2.5). Every other one is mounted in Wave 5 or later.
+  - The `call` operations mounted before it are `registerUser` (TASK-049), `loginUser` (TASK-052), `checkoutOrder` and `confirmPayment` (TASK-092).
+  - The RETROFIT line names all of them. A task of that list that is not on main when TASK-096 merges declares its own source and row, which is the owner rule of ADR-0003 rule (i). No dependency edge is added.
+- **Why not move TASK-096 earlier:**
+  - It edits `execute.ts`, held by part 040-B through `api-tx-execute`, and `define-route.ts`, held by `api-routing`. Both locks are contended in Waves 1 and 2 by part 040-B and TASK-041.
+  - Moving it would lengthen the path to TASK-049, TASK-062 and TASK-092.
+  - No tag is cut before Wave 3 ends, so no release lacks the check.
+- **CALL CLASS scan method:** the wave files were searched for call-phase lines (D-ARCH-106, "call phase", "no transaction open"), and the payment operations were matched against the classes of ADR-0003 rule (j). Excluded:
+  - TASK-083 and TASK-091: `createQuote` starts its fan-out in `afterCommit`, not in `call`.
+  - TASK-187: it states a rule about `call`; it declares none.
+  - TASK-085, TASK-113 and TASK-044: platform pieces, not routes.
+  - `getPickupAvailability`: computed locally.
+  - `cancelShipment`: no `call` (ADR-0003 amendment item 6).
+- **Alternatives:**
+  - Dependency edges TASK-062 → TASK-096 and TASK-092 → TASK-096. Not taken: card lines cover both orders without blocking a back-fill.
+  - Moving TASK-096 into Wave 1 or 2. Rejected for the reasons above.
+- **Validation:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. The per-column diff of `task-map.csv` changes only the `refs` column of 16 rows; IDs, waves, batches, titles and branches are unchanged.
+- **Not changed:** `docs/04-plan/briefs/TASK-040.md` stays the part 040-A brief; part 040-B gets its own brief at dispatch. PLAN.md: no wave or count changed.
+- **Reversibility:** High (plan text).
+
+### D-PM-086 · 2026-11-20 · product-manager · QG-040-C7 (d) of D-QG-004: US-199, AT-US-202-01 and REQ-PAY-014 hold under ADR-0012 amendments 6 and 7 (D-ARCH-205, D-ARCH-206) — confirmed, with three notes added and one status literal of AT-US-202-01 corrected to the contract (201)
+- **Input:** D-ARCH-205 and D-ARCH-206 (`686dfc20`), which route the confirmation to product-manager; D-QG-004 QG-040-C7, due before TASK-085 is dispatched; D-SECPR040-04 (security concurrence with conditions C-1 to C-9); US-199, US-202, US-203; REQ-PAY-001, -002, -014, REQ-BOOK-020, DR-B03; `openapi.yaml` `checkoutOrder`.
+- **Confirmed:**
+  - **US-199: no change.** The interface keeps one `authorise`. "Token selects a deterministic outcome" (`mock_ok` gives AUTHORISED) and "Repeating a call with the same key returns the same result" (one authorisation, both calls return it) read as written. The new suite assertion for adapters that are not simulated belongs to "the same gateway contract suite" of the last scenario.
+  - **AT-US-202-01: no change for the ruling.** With `mock_ok` the Mock gateway answers AUTHORISED inside the checkout request; the request writes the payment as AUTHORISED, moves the shipments to PAID and publishes the event from which the worker saga starts. Every step of the scenario holds: the state sequence, one `createShipment` by the worker, CAPTURED, the persisted step outcomes.
+  - **REQ-PAY-014: the shall-statement and "Removal detaches at the gateway" stay.** The detach happens, after the commit, as a retried worker step.
+- **Product acceptance of the two rulings:**
+  - **The Mock gateway may authorise in the request; a real gateway never does.** Accepted. What the product needs from the rule, no hold on a customer's card without a payment the Platform knows about (D-PM-083), concerns a real gateway, and it is kept there. The Mock holds nothing and is refused in production.
+  - **A removal takes effect for the user with the request, and the gateway detach follows.** Accepted, with the user-facing meaning written into the REQ-PAY-014 note: from the commit the method is not listed, is refused at checkout and does not count towards the limit of 10. The last point is mine and goes beyond the architect's and the security analyst's text (C-3 covers the first two): a user who removes a card to make room for another must not be told that ten are saved while a detach is pending.
+- **Corrected, independently of the ruling: the response literal of AT-US-202-01.** The step said "the response is 202 with the order number". The contract answers `checkoutOrder` with 201 ("Payment created"), US-038 already says "booked … and got 201", and D-ARCH-205 names the 201 text among the four places of the contract that do not change. The step now reads 201. I found it while checking the scenario against the ruling. It is a wording amendment in the D-063 form: the title, the other steps, the ID and the count (7) are unchanged.
+- **Notes added (no shall-statement changed):**
+  - REQ-PAY-002: the Mock is a simulator inside the process and may answer AUTHORISED to the checkout request; a gateway that reaches a provider creates its payment unconfirmed.
+  - REQ-PAY-014: the removal sentence above.
+  - REQ-BOOK-020: the authorisation of step 1 is obtained at checkout (the request with the Mock; the hosted confirmation or the webhook with a real gateway); the worker saga starts from `payment.authorised`, runs the steps after it and owns the void. The shall-statement lists "authorise payment" first in a saga run "as a queued worker job"; a tester reading it alone would look for a worker call that authorises, and ADR-0014 has had none since P3.
+- **Alternatives:**
+  - **Confirm without notes.** Rejected for REQ-BOOK-020 and REQ-PAY-014: both read correctly only with the ruling beside them, and a test is written from the requirement.
+  - **Reword the REQ-BOOK-020 shall-statement** ("the steps after the authorisation run as a queued worker job"). Not done: nobody asked for it, the design dates from P3 and passed G2 with this text, and the note removes the ambiguity. Open to a later edit if a reviewer trips on it.
+  - **Change the contract to 202** to match the story. Rejected: 201 with the created payment is the contract that passed G2, a second story already uses it, and the booking's progress has its own status resource (REQ-BOOK-025).
+  - **Leave the 202 for the next edit of EPIC-10,** as the orchestrator prefers for story files. Not done: TASK-092 implements the contract exactly and writes this test with its ID; the literal would fail it or tempt a 202.
+- **For senior-developer:** the TASK-249 card line PAYMENT METHOD CALLS gains "a method marked removed does not count towards the limit of 10 saved methods; test: with 10 methods of which one is removed and not yet detached, an eleventh can be added". Nothing else: the TASK-085 and TASK-092 lines of D-ARCH-205 stand.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.19 (notes of REQ-PAY-002, REQ-PAY-014, REQ-BOOK-020), `docs/01-requirements/stories/EPIC-10-payments-booking-saga.md` (US-202 notes; the status literal of the first scenario), `docs/01-requirements/PRD.md` 1.20 (§11), this file (the next-entry pointer in D-PM-068). The story file is a lane-B tooling input; the orchestrator times its commit, before TASK-092 is dispatched at the latest.
+- **Validation:** the gateway contract suite of TASK-085 (US-199 scenarios, the simulated capability, the planted negative of C-2); AT-US-202-01 in TASK-092 with status 201; the TASK-249 tests of D-ARCH-206, C-3 and the limit test above. `checkoutOrder` was read in `openapi.yaml` (201, lines 12301 to 12353). Nothing was run.
+- **Reversibility:** High (notes and one literal; none of the three tasks is built).
