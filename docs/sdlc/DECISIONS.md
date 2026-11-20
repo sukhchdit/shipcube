@@ -5686,3 +5686,232 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **TASK-051.** Deferred: it shares `grants.manifest` and the table classes with TASK-043.
   - **TASK-042.** The next frontend filler, after TASK-038.
 - **Reversibility:** High (plan sources, generated outputs, STATUS, traceability and briefs; no code).
+
+### D-ORCH-141 · 2026-11-20 · sdlc-orchestrator (session A) · Batch merged; next batch dispatched
+- **Merged:** #74 effect waiver (`91ab4132`, D-SECAUDIT-02), #73 TASK-075 (`c6c98e67`), #75 TASK-076 (`2fd534ca`), #76 TASK-039 (`80cfb77d`). Each went in only after a MERGE-READY ci-gate on a merge commit of the then-current main and a clean P1 overlap check. #75 and #76 merged origin/main and re-ran lane B, because #73 raised the required cases (SEC-TC-76..78; catalog minimum 113). TASK-039 needed security round 3 (D-SECPR039-03), because its C15 fix touched `/prisma/`.
+- **Process note:** after a close/reopen, GitHub can run on a stale merge ref (PR #73 runs 44686534559 and 44687360543). Rule: credit only a run whose checkout's parents are exactly (current main, PR head); otherwise close/reopen again.
+- **Landed:** D-PM-073..078 requirement docs (`31ef0d7c`), the held story patch (`72539b17`, after no evidence was pending), the plan fold D-SD-005 (`f9cc7ca1`, adds TASK-295 for the effect waiver).
+- **Dispatched (MAX_PARALLEL_DEVELOPERS 4; TASK-041 holds slot 1):** TASK-043 outbox (opus, critical path), TASK-079 Mock carrier (sonnet), TASK-038 design tokens (sonnet). TASK-040 is on standby: it shares append-only schema and grants files with TASK-043.
+- **Waiting on the user:** the `.env.example` commit on TASK-041. Main is already merged into that branch at `3bdacb08`.
+- **Still held:** the api-designer README/OpenAPI patch (D-API-004, minus the REQ-SEC-012 hunk). It changes `openapi.yaml` and `types.gen.ts`, so it goes in its own small PR.
+- **Reversibility:** High.
+
+### D-SECPR079-01 · 2026-11-20 · security-analyst · TASK-079 security round 1 (pre-push, `f9cc7ca1..7815e1c8`) = PASS_WITH_FOLLOW-UPS at code head `7815e1c8` (record `docs/05-quality/security/PR-pending-TASK-079-security-review.md` on main; rename at PR time per D-ORCH-136/138)
+- **Trigger:** the one owned path is `tools/lint/carrier-wire-boundary.test.ts` (`/tools/lint/`). The AT-US-121-05 barrel scan now lets exactly `./adapters/mock/index.js` through (D-TASK079-01). `security_paths=false`, so no hosted `security-integration` job runs.
+- **Decision:**
+  - **D-TASK079-01 is accepted.** The exception does not weaken the control's purpose today:
+    - the Mock has no wire format;
+    - a transitive walk from the barrel reaches 25 modules, and none is a wire module or another carrier's adapter;
+    - the deep-import lint pattern and the `.`-only exports map are unchanged and pinned.
+  - **The condition is PR079-SEC-01.** The control's guarantee has narrowed to "the barrel enters `adapters/` only through the Mock entry". The scan does not look inside that entry, so a `wire` re-export from `adapters/mock/` (value or type) passes it. The only other guard is an unowned value-key pin.
+  - **Probe:** of 9 cases, the owned test misses M3/M4, which are new with this PR, and M5/M6/M8, which pass the base test too. The proposed transitive walk refuses all of them and passes the real head and base trees.
+- **Findings:**
+  - **PR079-SEC-01 LOW** (CWE-693). Replace the one-level scan with the walk (code in the record). Owner: this PR's fix cycle, else TASK-097 (owned file, security round required). Due before the first `adapters/<carrier>/wire*` module merges (TASK-135).
+  - **PR079-SEC-02 LOW** (CWE-400; code review m3). The latency sleep ignores `ctx.deadlineAt` and cannot be cancelled. A deadline 60 s in the past still slept the full directive. Production cannot reach it (strict boolean flag, default off, `productionGuard`). Once TASK-097 wires `X-Mock-Scenario` or the `MOCK:` customer reference, a caller can hold each Mock call for up to 30 s.
+    - Fix: cap the wait at the deadline through an injected `nowMs` seam and end with `TIMEOUT`. TASK-097 honours directives only for sandbox contexts, and reads the `MOCK:` source only in local/test. TASK-083/TASK-132 enforce `deadlineAt` and bulkhead accounting independently of the adapter.
+    - Due: before TASK-097 merges.
+  - **PR079-SEC-03 INFO** (code review m1). `maxCallRecords` set to `NaN`, `Infinity` or `'abc'` makes the ring unbounded (3,000 of 3,000 calls kept). The ring is process-wide and ordered by completion, so consumers must match records by `correlationId`. Owner: TASK-092 and principal-architect.
+  - **PR079-SEC-04 INFO.** A throwing logger in `finally` replaces the call's outcome with a non-`CarrierError`. For the real adapters that copy the wrapper, that turns a booked shipment into EXCEPTION. Owner: card lines on TASK-135/139/140, and TASK-132.
+  - **PR079-SEC-05 INFO.** The Mock serves production-environment contexts. Production exclusion is configuration plus the composition root (nothing in this PR wires the factory). Owner: TASK-097 (refuse `ctx.environment === 'production'`; pin the factory's single composition-root reference).
+- **Checked with no finding:**
+  - AT-US-008-03: one `carrier.call` line per operation that enters the adapter, the 8 allow-listed keys, 0 of 11 PII sentinels in lines, records or warnings.
+  - Zero network: wider traps (DNS, UDP, TLS, `child_process` as well as sockets and `fetch`), 0 attempts, no import-time side effect.
+  - The egress table is empty, and an empty table derives no rule.
+  - PR075-SEC-14 / D-SECPR075-03: 80,040 hostile and fuzzed labels pass `createLabelDocument` and the sniffers, with exact PDF/ZPL structure. Lead cases behave as ruled. The guarded `createShipment` drops no label.
+  - Hostile tracking text never reaches a label, log or event.
+  - PR076-SEC-06 not triggered (the line moves on). ReDoS: all added regexes are anchored and linear. Secrets: none in the added lines.
+- **Simulation:** main's real checker on the merge-ref form (main tip `7c7ed3e3` plus the record renamed to `PR-9999-…`, merged with `7815e1c8`, `--pr 9999`): 6/6 scenarios as expected. Pass with the renamed record (base = merge base, and base = tip). Missing with no record, with a FAIL verdict, with a `Head` row that names a main commit, and with the pending name only.
+- **Still owed:** lane B on `7815e1c8` (code review C1); lane A on the pushed head; the rename of the record and the merge-ref check. A new round is needed only if an owned path changes after `7815e1c8`.
+- **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected: no wire module exists before TASK-135, so a due date before that merge is enough.
+- **Reversibility:** High. This is a review record only.
+
+### D-SECPR038-01 · 2026-11-20 · security-analyst · TASK-038 security round 1 (pre-push, `f9cc7ca1..b7482fb8`) = PASS_WITH_FOLLOW-UPS at code head `b7482fb8` (record `docs/05-quality/security/PR-pending-TASK-038-security-review.md` on main; rename at PR time per D-ORCH-136/138)
+- **Trigger:** main's checker counts 16 owned paths: root `package.json` (the `tokens:build` script), `stylelint.config.mjs`, `tools/stylelint-rules/token-lint.mjs`, `tools/lint/negative-fixtures.test.ts` and 12 CSS fixtures (8 new, 4 edited). `security_paths=false`, so no hosted `security-integration` job runs. `LINT_CONTROLS=true`, so lane A's base-ref no-weakening step runs.
+- **Decision:**
+  - **The gate edits weaken no existing lint control.**
+    - Effective-config diff over 19 paths, head against base: only `platform/token-lint` is added. It is off only for `packages/ui/src/theme/tokens.generated.css`, every near miss keeps it on, and the three `report*Disables` flags are unchanged. Both mutation controls were visible.
+    - No disable comment or ignore entry exists for the new rule.
+    - Exact-mode replica: clean. Base-ref replica: 0 expected findings missing; 4 extras, all with a rule id, which no-weakening mode allows.
+    - Repository CSS lints clean.
+  - **D-TASK038-06 is accepted** as a build-time seam. Port conditions (i)-(vi) in record §4 bind whichever task first loads `BRAND_PRIMARY_*` or tenant theme values at runtime:
+    - (i) a closed Joi schema plus a `typeof` check;
+    - (ii) opaque colours only;
+    - (iii) a same-origin stylesheet, no `<style>` and no `'unsafe-inline'`;
+    - (iv) a server-side contrast gate whose logs and errors never echo the raw value;
+    - (v) tenant binding from the authenticated context, with an RBAC permission and an audit record on write;
+    - (vi) a start-up assertion over `tenantOverridable`.
+
+    No task in the plan names this work yet; principal-architect assigns it.
+- **Findings:**
+  - **PR038-SEC-01 LOW** (CWE-829, A08:2021; twin R1-m3 (2)). The owned rule imports its analysis and vocabulary from unowned `tools/ui/**`, and that code runs inside the Stylelint gate process. Neither CODEOWNERS nor `LINT_CONTROL_PATHS`/`PROOF_BASE_DIRS` names `tools/ui/`.
+    - Probe M1: an unowned exit handler in `tokens-core.mjs` turns `stylelint "**/*.css"` exit 2 into 0 over 4 findings from all three rules, and the fixture harness stays green.
+    - Probe M2: dropping `oklch()` is not noticed by any owned case.
+    - Mitigation: PR4-SEC-13 typegen already runs unowned code earlier in `npm run lint`.
+    - Fix: (a) add `/tools/ui/` to CODEOWNERS, and `tools/ui/` to `LINT_CONTROL_PATHS` and `PROOF_BASE_DIRS`; or (b) move the analysis under `tools/stylelint-rules/`. In both cases, add owned fixtures for `oklch()`, `rgba()`, 8-digit hex, a named colour in `border` and an `em` length in `gap`.
+    - Owner: senior-developer and devops-engineer. Due: in this PR if a fix cycle happens; otherwise before the next PR that changes `tools/ui/**`, and at the latest before TASK-046 merges. The fix needs a security round (owned paths).
+  - **PR038-SEC-02 INFO** (twin R1-m3 (1)). The "off" override is exact today, but no test pins it. Fix: in-memory `color: #ff0000` probes at repository paths in `lint-fixtures.mjs`, asserted in the always-run half. Owner: with SEC-01.
+  - **PR038-SEC-03 LOW** (CWE-1287, A03:2021). `buildTenantOverrideCss` checks the value by `RegExp#test` coercion and then calls `value.toLowerCase()`.
+    - A JSON array passes the check and throws a TypeError.
+    - A JS object with forged `toString`/`toLowerCase` injects `} html { display: none`.
+    - No runtime caller exists yet.
+    - Fix: `typeof value !== 'string' ||` before the regex, and a reason without the raw value. Owner: this PR's fix cycle (unowned file, no new round); otherwise port condition (i).
+  - **PR038-SEC-04 INFO** (A05:2021). `theme.css` documents a `<style>` delivery, which the planned hash-based CSP (`style-src 'self'`) refuses. Fix: deliver a same-origin stylesheet (for example under `/brand/`). Owner: port condition (iii); the comment fix rides any fix cycle.
+  - **PR038-SEC-05 INFO** (CWE-117/770). Rejection reasons echo the raw value without a bound: a 1 MiB value gave a 1,048,610-character reason. Owner: port condition (iv).
+  - **PR038-SEC-06 INFO** (CWE-1333). The token-lint quoted-string regex backtracks super-linearly on an unterminated quote plus a run of backslashes inside `url(...)`: about x2.2 per 2 backslashes, 85 ms at 30. It fails closed and only repository authors can reach it. Fix: `/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/gu`. Owner: with twin R1-m2.
+- **Checked with no finding:**
+  - No dependency: the lockfile and every workspace manifest are unchanged, and `tailwindcss` and `jest-environment-jsdom` were already declared.
+  - The generated CSS has no `url(`, `@import`, `@font-face` or scheme, uses system font stacks only, and works with `style-src 'self'`.
+  - Builder allow-list and grammar: the per-code-point fuzz accepted only `0-9A-Fa-f`, and every overridable token is named by at least one contrast pair.
+  - Secrets: the over-approximating pinned-rule scan of 2,605 added lines found 5 `generic-api-key` regex candidates, all below the entropy threshold and digit-free; the record itself has 0.
+  - Main (tip `8281055c` when this was written) shares no path with the PR, and `merge-tree` is clean.
+- **Simulation:** main's real checker on the merge-ref form (main tip `8281055c` plus the record renamed to `PR-9999-…`, merged with `b7482fb8`, `--pr 9999`): 6/6 scenarios as expected. Pass with the renamed record, both with base = merge base and with base = tip. Missing with no record, with the pending name only, with a FAIL verdict, and with a `Head` row that names a main commit.
+- **Still owed:** lane A on the pushed head; lane B (code review C1); the rename and the merge-ref check. A new round is needed only if an owned path changes after `b7482fb8`, which includes folding SEC-01 (a) or SEC-02 into this PR.
+- **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected for three reasons: PR4-SEC-13 already gives an equivalent lever earlier in the same `npm run lint`; the head suite's exact mode catches weakening of the 7 pinned shapes; and the fix touches CODEOWNERS and `tools/ci/`, which is better made as its own owned change before TASK-046.
+- **Reversibility:** High. This is a review record only.
+
+### D-ARCH-183 · 2026-11-20 · principal-architect · TASK-043 code review m7, m3 and n7 (D-TASK043-06): the outbox relay is an in-process loop in every worker under a PostgreSQL advisory lock, with the enqueue inside the claim transaction under stated bounds, no BullMQ fallback and no parked state — accepted, with the bounds, the loop and two gauges changed (ADR-0004 amendment 2 items 8 to 11; ADR-0013 amendment 5)
+- **Trigger:** code review round 1 of TASK-043 on branch head `5193fea4` (`docs/05-quality/reviews/PR-pending-TASK-043-code-review.md`, commit `ccb7e865`). m7: D-TASK043-06 contradicts ADR-0004 item 3 (Accepted), which names a Redis lock, a 500 ms scheduler and a 30 s repeatable fallback. m3: is an attempts cap with a parked state wanted. n7: the margin of the tick bounds is thin. Due before the fix cycle lands. D-ARCH-183 to D-ARCH-187 answer the five questions of the orchestrator's dispatch.
+- **Decision:**
+  1. **The lock is `pg_try_advisory_xact_lock`, and the relay is a loop in every worker.** Accepted as built. ADR-0004 item 3 is amended; the code is not changed for this.
+  2. **The enqueue stays inside the claim transaction.** That is what item 3 always described. It is now written down as the one exception to T-83, with bounds that change the head: with `W` = the smaller of the transaction timeout and `idle_in_transaction_session_timeout`, no new row is started after `W / 2`, and one enqueue may take `min(2,000 ms, W / 4)`. At the defaults that is 2,500 ms and 1,250 ms, and 1,250 ms remain for the two mark statements.
+  3. **No relay schedule and no 30 s fallback job.** Two gauges take the fallback's place: `platform_outbox_relay_oldest_pending_age_seconds` and `platform_outbox_relay_last_tick_timestamp_seconds`. Their alarms, `OutboxRelayLag` and `OutboxRelayStalled`, are TASK-214's.
+  4. **No attempts cap and no parked state** (m3 (a)). A row that cannot be enqueued stays pending. After a tick that failed and published nothing the loop backs off, doubling up to 5 s, and logs once per failure streak (m3 (b) and (c)).
+- **Why:**
+  - The lock exists for order: two relays that each claim a batch can enqueue two events of one aggregate in reverse. A transaction-level lock in PostgreSQL ends with the transaction that holds the claimed rows. A Valkey lock has an expiry, and a relay paused for longer than the expiry would go on enqueueing beside its successor.
+  - Takeover is bounded by the server: at once when the process dies, and after `idle_in_transaction_session_timeout` (15 s) when it freezes.
+  - The fallback job would restart a dead loop without telling anyone, and it depends on the Valkey that a stalled relay may be waiting for. Every worker runs a loop, so the others cover one dead loop; the last-tick gauge shows the case where none runs.
+  - Parking drops one event and reorders its aggregate. A refusal that hits every row (a bad deploy) would park the whole stream. A refused payload cannot come from a row the writer wrote (D-ARCH-187), so a parked state would serve only a defect, and for a defect "pending with an alarm" is the safer failure.
+  - The bounds of the head leave 500 ms at the default and nothing at a transaction timeout of 4,000 ms or below. A transaction timeout above the idle timeout would also let the server end the session in the middle of a slow batch, and that tick would lose its marks.
+- **Alternatives rejected:**
+  - The Valkey lock of item 3 (above).
+  - Keeping the 30 s fallback as a Job Scheduler (above).
+  - An attempts cap with a parked state (above).
+  - Committing the claim before the enqueue, to keep the network call out of the transaction: it needs a "claimed" state on the row and a job that takes back the rows of a dead relay.
+  - A fixed 500 ms reserve for the mark statements (`budget = W - enqueue - 500`): it keeps today's numbers at the default, but no fixed reserve fits a small `W`. The quarter rule holds for every value.
+- **Change list for the TASK-043 fix cycle (head `5193fea4`):**
+  - F5 `apps/worker/src/start-worker.ts`, `createProductionOutboxRelay`: `W = min(runner.transactionOptions.timeout, config.DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS)`; `budgetMs = max(1, floor(W / 2))`; `enqueueTimeoutMs = max(1, min(ENQUEUE_TIMEOUT_MS, floor(W / 4)))`. The test of code review m6 pins 2,500 and 1,250 at the defaults and one case in which the idle timeout is the smaller value.
+  - F6 `apps/worker/src/platform/outbox/relay.ts`, the loop: after a tick that threw, or that returned `failed > 0` and `published === 0`, the wait doubles from `pollIntervalMs` up to 5,000 ms; any other tick resets it. The enqueue-failure WARN is logged once per streak and `worker.outbox_relay_recovered` once at its end. Unit test: a run of failing ticks logs one WARN and its wait reaches 5,000 ms.
+  - F7 `relay-metrics.ts`: the two gauges as ADR-0004 amendment 2 item 11 defines them, with unit rows (a tick with the lock and rows, one with the lock and no rows, one without the lock, one that threw).
+  - F8 `relay.ts`: the comment on `RELAY_LOCK_KEY` (code review n1). The key is the registered value of data-model §6.1; it is not "outbox" in ASCII. The value does not change.
+  - F9 nothing is added for m3 (a): no attempts cap, no parked state.
+- **Card lines for the next fold:**
+  - TASK-214: "OUTBOX ALARMS (ADR-0013 amendment 5 item 25; D-ARCH-183): the alert rules OutboxRelayLag and OutboxRelayStalled with the expressions, durations, severity and runbook of that table; the lane A test of the alarm rules pins both; the worker readiness reports the relay as degraded when platform_outbox_relay_oldest_pending_age_seconds is above 60 s".
+  - The task that builds the 24 h `token_enc` housekeeping (no card names it yet): "it takes pg_advisory_xact_lock(478216878200) in the transaction of its statement (ADR-0004 amendment 2 item 14)".
+- **Routed:**
+  - orchestrator: record D-TASK043-01 to -08 in this log (m7), and ask quality-gatekeeper to verify ADR-0004 amendment 2 and ADR-0013 amendment 5 (CLAUDE.md §5), as was done for ADR-0016 amendment 12.
+  - product-manager: the note of REQ-PLAT-015 names "the outbox relay fallback" as a user of scheduled jobs. Those words go at the next edit; the shall statement stands.
+  - security-analyst: the T-83 exception of item 10 is in scope of the TASK-043 security round.
+- **Not run:** takeover between two sessions. The lock statement and the tick statements ran on PGlite (PostgreSQL 17.5, one connection): the lock is taken, and it is gone after commit.
+- **Applied in:** ADR-0004 amendment 2 items 8 to 11 with dated notes at item 3 and in the Consequences; ADR-0013 amendment 5 with dated notes at §1 and §5; data-model §6.1 (the tick as built, the advisory-lock keys); ADR-0017 §5 and platform.md §8.5 (the metric and the two alarm rows).
+- **Reversibility:** High. The lock and the loop are one file, and no producer or consumer depends on them.
+
+### D-ARCH-184 · 2026-11-20 · principal-architect · TASK-043 code review m7 and n8 (D-TASK043-07): every event goes to the one queue `outbox-relay` and the consumer of that queue dispatches by type — accepted; the `eventRouting` map of ADR-0004 item 5 is superseded (ADR-0004 amendment 2 item 12)
+- **Trigger:** the same review. D-TASK043-07 contradicts ADR-0004 item 5 (Accepted), which has a static `eventRouting` map `type → queue[]` in `packages/shared` and a counter `outbox_unrouted_total`.
+- **Decision:**
+  1. The relay enqueues one `outbox_event` job per event on `outbox-relay` and never reads the type. There is no `eventRouting` map.
+  2. The processor of `outbox-relay` is a dispatcher. It resolves the job context, reads the event row inside the tenant transaction and calls the handlers registered for the type. The registry is worker code.
+  3. A handler is one named `processed_events` consumer and claims in the transaction of its effect. It does database work only; slow or external work is a job on the module's own queue, named by a row the handler wrote.
+  4. A type without a handler completes without effect and counts in `platform_outbox_unhandled_total`.
+  5. No event type enters the catalogue before `outbox-relay` has its processor (n8). A worker test enforces it.
+- **Why:**
+  - The queue catalogue as built already says so: `outbox_event` is a kind of `outbox-relay` alone (ADR-0013 amendments 1 and 4).
+  - A tick stays one enqueue per row. A fan-out inside the claim transaction would need per-target accept state on the row to keep "published only after accept" true.
+  - A map in `packages/shared` ties the shared package to every module's queues. The registry sits beside the code that handles the event.
+  - Without item 5 the jobs of the first event type would wait in Valkey without a bound, and the consumer that arrives later would act on stale events (verification e-mails for tokens that have expired).
+- **Alternatives rejected:**
+  - The `eventRouting` map of item 5 (above).
+  - A no-effect processor for `outbox-relay` shipped by TASK-043, so that nothing can pile up: it changes the worker's runtime in a fix cycle, and events published before their handler exists would be consumed and lost without a rule that says so. The test is the smaller change.
+- **Change list for the TASK-043 fix cycle:**
+  - F10 a worker unit test beside `apps/worker/src/processors.ts`, title starting `[ADR-0004 am. 2 item 12]`: when `EVENT_CATALOGUE` of `@platform/shared/events` has at least one type, `PROCESSORS['outbox-relay']` is registered. No other code changes; the comment in `packages/shared/src/events/index.ts` may cite the item.
+- **Card lines for the next fold:**
+  - TASK-047 (proposed host, because it already runs an `outbox_event` job for AT-US-078-04; senior-developer decides the host and the size): "DISPATCHER (ADR-0004 amendment 2 item 12; D-ARCH-184): this task registers the processor of outbox-relay; it resolves the job context, reads the event row inside the tenant transaction and calls the handlers registered for the type, each a named processed_events consumer that claims in the transaction of its effect; the registry starts empty; a type without a handler completes without effect and counts in platform_outbox_unhandled_total; tests: a second delivery of one event runs no handler twice; an unhandled type completes and counts".
+  - TASK-078 and every later handler task: "HANDLER RULES (ADR-0004 amendment 2 items 12 and 15; R-ARCH-37): a handler registers by type, claims processed_events (consumer, event_id) in the transaction of its effect, does database work only and names its follow-up job by a row it wrote; it reads the current state of the aggregate and never derives state from the order of events; test: two events of one aggregate delivered in reverse end in the same state; the token_enc overwrite after sending carries published_at IS NOT NULL".
+  - TASK-049 first, and every task that adds `packages/shared/src/events/<module>.ts`: "EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12): the event file merges only after outbox-relay has its processor; the TASK-043 worker test fails otherwise". TASK-049 and TASK-047 are both in batch 1.4, so this is an order inside the batch.
+- **Owed by me:** the per-aggregate serialisation of the dispatcher, when a handler first needs order (R-ARCH-37). Nothing is owed before that.
+- **Applied in:** ADR-0004 amendment 2 item 12 and a dated note at item 5; ADR-0013 amendment 5 item 24.
+- **Reversibility:** High before the first handler exists; Medium after, because handlers are written against the dispatcher.
+
+### D-ARCH-185 · 2026-11-20 · principal-architect · TASK-043 code review M1: the order key of the outbox is the insert time, and per-aggregate order holds when the publisher holds the row lock of the aggregate — the reviewer's fix is confirmed with its precondition written down; the data-model sentence that said order "holds" is corrected (ADR-0004 amendment 2 items 13 to 15; R-ARCH-37)
+- **Trigger:** the same review, M1 (MAJOR). The relay orders by `(created_at, id)` and `created_at` defaults to the transaction start, so two transactions on one aggregate that commit in lock order can be relayed in reverse. The reviewer's fix: the writer sets `created_at` to `clock_timestamp()` and publishes after the aggregate write, with a two-transaction lane B test. The orchestrator asked whether that is sufficient, given that the insert time still differs from commit order when the publish precedes the row lock, and whether a per-aggregate sequence or a claim in commit order is needed.
+- **Decision:**
+  1. **The fix is sufficient under one precondition, and that precondition is now the contract.** The writer sets `created_at` and `updated_at` to one `clock_timestamp()` value. Events of one aggregate are then enqueued in the order of the business changes when the publishing transaction holds the row lock of the aggregate at the moment it publishes: after its `UPDATE` of the row, after the `INSERT` of a new aggregate, or after `SELECT … FOR UPDATE` when it only adds child rows.
+  2. **Without the lock there is no order to keep.** A handler that publishes before its write, or never locks the row, is concurrent with the other writer in every sense; the relay may enqueue either way. The rule binds the caller and the writer cannot check it. R-ARCH-37 records this.
+  3. **Two further conditions.** One relay tick at a time (D-ARCH-183). And only a transaction that holds the relay lock writes an unpublished row: a foreign row lock would make `SKIP LOCKED` pass over the row and enqueue a later event of its aggregate first.
+  4. **The guarantee ends at the enqueue.** BullMQ does not keep order through processing (5 jobs at a time, retries after a delay). A handler reads the current state of the aggregate and never derives state from the order of events. The consumer lock that ADR-0004 item 3 sketched is not built.
+  5. **Neither a per-aggregate sequence nor a claim in commit order is adopted.**
+- **Why the precondition is enough:** the periods in which two transactions hold one row lock do not overlap, and each insert time lies inside its own period, so the insert times are ordered as the commits are. The earlier transaction has committed before the later event is inserted, so no tick sees the later event without the earlier one. Inside a tick a failed row holds back the later rows of its aggregate, and in the next tick it is still first.
+- **Alternatives rejected:**
+  - **A sequence number per aggregate.** The relay needs one order over all aggregates and cannot sort by it; it helps only a consumer that buffers and reorders, and it needs the same row lock.
+  - **A claim in commit order** (`track_commit_timestamp`). It would also order a publish that precedes the write. It needs a server setting in every environment, and its sort cannot use an index, so every tick sorts the whole backlog.
+  - **A per-aggregate advisory lock in the writer.** It makes the precondition true for every publisher, at the price of a second lock in every business transaction, taken in an order the writer does not control: write-then-publish and publish-then-write would deadlock against each other. It is the first fallback if R-ARCH-37 shows up.
+  - **A buffered publish flushed at the end of the transaction.** It removes the precondition for every transaction that locks the aggregate at any point, but it belongs to the commit path of the runner, which is the audit writer's. Producers would not change, so it stays open.
+  - **Changing the column default to `clock_timestamp()`.** The writer is the only inserter, and a default that differs from the standard-column convention would need its own catalog exception.
+- **Change list for the TASK-043 fix cycle:**
+  - F1 `apps/api/src/platform/outbox/writer.ts`: the `INSERT` names `created_at` and `updated_at` and sets both to `ctx.at`; the derived table reads `pg_catalog.clock_timestamp() AS at` beside the actor (data-model §6.1 shows the statement). A unit test pins the statement text: both columns, one clock read.
+  - F2 the JSDoc of `publish`: the contract of decision items 1 and 2, and "`created_at` is the insert time on the database clock".
+  - F3 `apps/worker/src/platform/outbox/relay.int.test.ts` (lane B), title starting `[AT-US-011-03]`: one test with two arms over the same interleaving. T1 begins. T2 begins, locks a row with `SELECT … FOR UPDATE` (any row both may lock; a published `outbox_events` row will do), inserts E2 and waits. T1 asks for the same lock, and the test waits until `pg_stat_activity` shows a backend waiting on a lock (superuser client, no sleep). T2 commits; T1 gets the lock, inserts E1 and commits; one tick runs. Writer arm (`outbox.publish`): the job ids are E2, then E1. Control arm (a raw insert that leaves `created_at` to the column default): E1, then E2.
+  - F4 wording only: the header of `relay.ts` (one relay is for order), `relay-metrics.ts` ("from the event's insert", not "its transaction's start"), and the migration header and the `platform.prisma` comment (`created_at` is the insert time set by the writer; the default is not used). No DDL changes.
+- **Card line for the next fold:** every task that adds an event type (TASK-049 first): "PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT … FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it".
+- **Routed:** qa-lead: `gherkin-test-map.md` gains the two-transaction test under AT-US-011-03 (same ID, no new scenario). code-reviewer: the publish-after-write check joins the review of every publisher task.
+- **What was run:** on PGlite (PostgreSQL 17.5, one connection) a defaulted `created_at` is the transaction start (0 ms after it, after a 200 ms sleep inside the transaction), and the writer form gives `created_at = updated_at` at the insert time (206 ms and 207 ms). The row-lock wait, visibility between two sessions and `SKIP LOCKED` were not run: PGlite has one connection, and Docker belongs to the lane B queue. Decision item 1 rests on PostgreSQL's documented lock and visibility semantics until F3 runs on PostgreSQL 18. If F3 disagrees, the task comes back to me.
+- **Applied in:** ADR-0004 amendment 2 items 13 to 15 and 18, with dated notes at items 1 and 3 and at amendment 1; data-model §3.5 (the corrected paragraph and the column notes), §6.1 (the writer statement and the four conditions), §12 A35; risks.md 1.23 (R-ARCH-37).
+- **Reversibility:** High. The order key is one statement; the alternatives leave producers unchanged.
+
+### D-ARCH-186 · 2026-11-20 · principal-architect · D-TASK043-04 noted: `processed_events` is granted `SELECT, INSERT, DELETE` and no `UPDATE`, narrower than data-model §4.4 said; the §4.4 rows and OI-08 are corrected (ADR-0004 amendment 2 item 17)
+- **Trigger:** the same review, m7 and the ruling row on D-TASK043-04. data-model §4.4 listed `processed_events` on the SYSTEM hard-delete row with `SELECT, INSERT, UPDATE, DELETE`.
+- **Decision:** accepted. The table is insert-only: a consumer claims with `INSERT … ON CONFLICT DO NOTHING` and never changes the row, and `DELETE` is the purge's. §4.4 gets a row of its own for the table. The `job_executions` row records that the TASK-043 migration grants `DELETE` with the purge, as D-ARCH-171 planned.
+- **Also corrected:** OI-08 in data-model §12 listed `outbox_events` and `processed_events` as exempt from `updated_at`, `updated_by` and `version`. Both carry the full standard columns, as §3.5 lists them and as `job_executions` does: a table the runtime role writes is under the standard-columns guard (§7.6, C15). The exemption stands for the audit tables.
+- **Change list for the TASK-043 fix cycle:** none. The grant, the manifest line and the 42501 pin are as ruled.
+- **Alternatives rejected:** keeping `UPDATE` "for later use": no design updates a claim, and a grant nobody uses is against least privilege.
+- **Applied in:** data-model §3.5 (`processed_events`), §4.4 (two rows), §12 (OI-08, A35); ADR-0004 amendment 2 item 17.
+- **Reversibility:** High (a grant).
+
+### D-ARCH-187 · 2026-11-20 · principal-architect · TASK-043 code review m4: one correlation grammar — the check on `outbox_events.correlation_id` stays, the writer does not normalise, a scheduled job is already inside the grammar, and `withTenantTx` is narrowed to it on TASK-047 (ADR-0004 amendment 2 item 16)
+- **Trigger:** the same review, m4. The row check is `^[A-Za-z0-9-]{8,64}$`, `withTenantTx` accepts `^[A-Za-z0-9._:-]{1,128}$`, and the review says a scheduled occurrence has the correlation id `repeat:<schedule>:<millis>`, so the first scheduled handler that publishes would fail with SQLSTATE 23514.
+- **What the code says:** the premise about scheduled jobs does not hold. `repeat:<schedule>:<millis>` is the BullMQ job id. The correlation id of a scheduled job is `<schedule>-<occurrence millis>` (`packages/shared/src/queues/scheduled-job.ts`; D-SECPR039-01 condition (iii); at most 64 characters), which is inside the grammar. So are the contexts of the relay tick (`outbox-relay-<millis>`) and of the purge. The request context takes a client value only when it matches the grammar and otherwise mints a UUID. No production caller produces a value outside it.
+- **Decision:**
+  1. **The grammar is ADR-0016 §15 wherever a correlation id is stored or carried:** the request context, `audit_entries`, `outbox_events`, payload v2 and the logs. The check on `outbox_events` stays as built.
+  2. **The writer does not normalise.** Replacing a value would break D-062 (the id never changes between the row and the job) and hide a defect of the caller.
+  3. **Scheduled-job contexts do not change.**
+  4. **The gap is at the entry.** `withTenantTx` is narrowed to `CORRELATION_ID_PATTERN`, so a context outside the grammar is refused as `INVALID_TENANT_CONTEXT` before any statement. Owner: TASK-047, which builds the worker's twin of the runner. Until then such a context fails closed at the check and its transaction rolls back.
+- **Why the check must stay:** the relay copies the value into the job, and the producer validates the payload with the same pattern. A row outside the grammar would be refused on every tick and would hold back its aggregate for good. The check is what makes "a refused payload cannot come from a row the writer wrote" true (D-ARCH-183).
+- **Alternatives rejected:**
+  - Normalising in the `INSERT` (above).
+  - Widening the row check to the `withTenantTx` pattern: payload v2 and `audit_entries` would still refuse the value.
+  - An early refusal inside the writer's SQL: a third copy of the pattern, for a value that the runner should refuse once for every writer.
+  - Narrowing `withTenantTx` in this fix cycle: it adds a core file of the tenant-transaction runner to a diff that does not touch it, for a failure no production caller can reach.
+- **Change list for the TASK-043 fix cycle:**
+  - F11 the JSDoc of `publish`: the row check, and that a transaction whose correlation id is outside ADR-0016 §15 cannot publish (23514, the transaction rolls back).
+  - F12 tests. Lane B: a direct insert with `repeat:outbox-purge:1763550000000` and one with a 7-character id are refused with 23514 on `ck_outbox_events__correlation_id`. Unit: the context ids of the relay tick and of the purge match `CORRELATION_ID_PATTERN`.
+- **Card line for the next fold:** TASK-047: "CORRELATION GRAMMAR (ADR-0004 amendment 2 item 16; D-ARCH-187): contextValues of the tenant-transaction runner validates the correlation id with CORRELATION_ID_PATTERN of @platform/shared in place of the wider local pattern, in the api runner and in the worker twin; a context outside the grammar is INVALID_TENANT_CONTEXT before any statement; the unit literals shorter than 8 characters (req-1 and the like) are lengthened".
+- **What was run:** on PGlite the check answers 23514 with constraint `ck_outbox_events__correlation_id` for `repeat:outbox-purge:1763550000000` and for `req-1`, and accepts `outbox-purge-1763550000000` and `outbox-relay-1763550000000`. A scan of the single-quoted `correlationId` literals of the branch found values outside the grammar in unit tests only (`req-1`, `c-1`, `ctx-1` and negative cases).
+- **Applied in:** ADR-0004 amendment 2 item 16; data-model §3.5 (the `correlation_id` row) and §6.1 (the check in the DDL).
+- **Reversibility:** High.
+
+### D-SECPR295-01 · 2026-11-20 · security-analyst · TASK-295 security round 1 (pre-push, `8281055c..5edc54f5`) = PASS_WITH_FOLLOW-UPS at code head `5edc54f5` (record `docs/05-quality/security/PR-pending-TASK-295-security-review.md` on main; rename at PR time per D-ORCH-136/138)
+- **Trigger:** 4 owned paths: root `package.json` (`overrides: { "@prisma/config": { "effect": "3.22.4" } }`), `package-lock.json` (one tuple), `tools/ci/advisory-watchlist.json` (the D-SECAUDIT-02 waiver removed) and `tools/ci/check-audit.test.ts` (its two rows removed). `security_paths=true`, so the hosted `security-integration` job runs.
+- **Decision:** the change is accepted.
+  - The lockfile changes in exactly 3 leaves (`version`, `resolved`, `integrity` of `node_modules/effect`, 3.20.0 to 3.22.4). Integrity, tarball hash, both registry signatures and the SLSA provenance subject agree; built from `Effect-TS/effect` `refs/heads/v3`; MIT; no scripts; 28.6 days old.
+  - GHSA-7589-6fvf-x4pw no longer matches (3.22.4 is above the patched 3.22.1). npm, OSV and GitHub list no other advisory for 3.22.4. The advisory template is cubic on 3.20.0 (614 ms at n = 2,000) and linear on 3.22.4 (0 ms at n = 1,000,000).
+  - The override reaches only `effect` under `@prisma/config`; both `@hookform/resolvers` optional peers (`^3.10.3`) dedupe onto the same tuple. Prisma's real `loadConfigFromFile` gives identical results and identical error messages on 3.22.4 and 3.20.0.
+  - `check-audit` passes on the head (head and tested-base copies); the head register on the base lockfile fails with `audit/high` (control). No test assertion was weakened beyond the two waiver rows.
+- **Findings:**
+  - **PR295-SEC-01 LOW** (CWE-1395; code review m2 (b)). The override has no removal trigger and binds every future `@prisma/config`, so a Prisma bump can silently force effect back to 3.22.4. Fix: a `tools/ci` unit test that pins the premise (`@prisma/config` declares effect `3.20.0`), the single effect tuple at the overridden version, and the set of root override keys (code and a 5-mutant replay in the record). Owner devops-engineer via senior-developer; due before the next PR that changes the `@prisma/config` or `prisma` tuple, at the latest G3. ADR-0002 item 7 note: principal-architect (code review m2 (a)).
+  - **PR295-SEC-02 INFO** (code review n2). `npm ci`'s lockfile check (reproduced with npm 11.19.1's Arborist) accepts a lockfile that contradicts the override. check-audit is the backstop while the advisory exists; the SEC-01 test binds the lock to the override.
+  - **PR295-SEC-03 INFO.** The IMAGE_SCAN_ALLOW_LIST comment in `tools/docker/scan-image-secrets.mjs` names effect 3.20.0. A calibrated Gitleaks emulation finds the same six allow-listed paths in 3.22.4 and nothing else; lane B `images.stack` confirms.
+- **Closures on merge:** EFFECT-SEC-01 is closed by the fix. D-SECAUDIT-02 is discharged (route 2 taken, route 1 correctly not taken, waiver, pin and row removed in the same PR). EFFECT-SEC-02 and EFFECT-SEC-03 still stand. STATUS condition EFFECT-WAIVER can close on merge, with SEC-01 named in the closure note.
+- **Simulation:** main's real checker (main tip `4e1163aa` plus the record as `PR-9999-…`, `--pr 9999`): 7/7 as expected. The merge-ref form against `5edc54f5` passes. After the branch update that code review m1 requires, it fails: main's PR #78 changed root `package.json`, an owned path this PR also changes.
+- **Still owed:** the m1 branch update and then a merge-only security round on that merge commit (union of root `package.json`, lockfile delta still the three effect leaves); lane B (D-TASK295-03); lane A on the pushed head (real osv-scanner, `check-dep-age`, `security-integration`); the rename and the merge-ref check.
+- **Alternatives considered:** PASS_WITH_CONDITIONS with the SEC-01 test as a merge condition. Rejected: the forced downgrade can only happen at a later Prisma bump, and check-audit already fails closed for any advised version.
+- **Reversibility:** High. This is a review record only.
+
+### D-TASK043-01..08 · 2026-11-20 · backend-developer · TASK-043 transactional outbox (branch `feat/TASK-043-transactional-outbox-writer-at-least`; code review round 1 m7; rulings D-ARCH-183..187)
+- **01** `outbox_events` is declared in a new table-class manifest, module `outbox` (`tools/db/table-classes/outbox.json`), and `processed_events` in `worker.json`, not in `platform.json` as the brief suggested. That matches the `SYSTEM_MODEL_OWNERS` map of `eslint.config.mjs` (`outbox` → `apps/*/src/platform/outbox/**`; `worker` → processed_events) and avoids a merge conflict with TASK-040 on `platform.json`. Accepted by code review round 1.
+- **02** The relay and the purge live in `apps/worker/src/platform/outbox/**`, not `processors/outbox-relay/**` as the card said. Only that path is owned by both the `outbox` and the `worker` modules, so its raw SQL may name `outbox_events`, `processed_events` and `job_executions`. Accepted.
+- **03** The writer is one raw tagged `INSERT … SELECT` on the business `TenantDb`, not `systemDelegates(tx).outboxEvent.create`. `org_id`, `actor_id`, `created_by`/`updated_by` and `correlation_id` come from the transaction (`platform.app_org_id()`, `platform.app_actor_id()`, `app.correlation_id`), so a caller cannot forge them. After D-ARCH-185 it also sets `created_at` and `updated_at` to one `clock_timestamp()` value. Accepted.
+- **04** `processed_events` is granted `SELECT, INSERT, DELETE` and no `UPDATE` (insert-only; least privilege). Ruled by D-ARCH-186; data-model §4.4 corrected.
+- **05** The purge claims each batch in `job_executions` with a raw `INSERT … ON CONFLICT DO NOTHING` (`rawJobExecutionLedger`), because the worker SYSTEM accessor stays unbound until TASK-047. Each 5,000-row batch runs in its own transaction, keyed `<occurrence id>.<table>.<n>`. Retirement of the raw ledger is a TASK-047 item.
+- **06** The enqueue happens inside the SYSTEM claim transaction, as ADR-0004 item 3 always described, under bounds. Single relay instance comes from a PostgreSQL advisory lock, not a Valkey lock. The relay is an in-process poll loop in every worker, with no BullMQ 30 s fallback. Ruled by D-ARCH-183 (ADR-0004 amendment 2 items 8 to 11): bounds W/2 and min(2 s, W/4) with W = min(transaction timeout, idle-in-transaction timeout), backoff to 5 s, two liveness gauges.
+- **07** Every event goes to the one queue `outbox-relay` (the only queue with kind `outbox_event`); the consumer of that queue dispatches by type. There is no `eventRouting` map. Ruled by D-ARCH-184 (ADR-0004 amendment 2 item 12).
+- **08** A stored `traceparent` that fails the W3C check is dropped by the writer and by the relay; the producer drops only an invalid `tracestate` and still refuses an invalid `traceparent`. Accepted.
+- **Reversibility:** High (01, 02: manifest and path moves; 03 to 08: one file each).
