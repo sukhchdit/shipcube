@@ -64,7 +64,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-039 (M0 Must) ETags and optimistic concurrency |
 | REQs | REQ-API-012, REQ-API-013 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-193, D-QG-003, D-SD-007 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
@@ -78,6 +78,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-039 scenarios
+- ORDER AROUND THE IDEMPOTENCY CLAIM (ADR-0014 amendment 7; ADR-0016 item 7 as amended; D-ARCH-193): step 7b checks only that If-Match is present and well formed (428, 400) and never reads a row; the comparison with the row version is the conditional write inside the handler transaction; tests: a PATCH that committed, retried with the same Idempotency-Key and its original If-Match, answers the stored 200 with Idempotent-Replayed true and not 412; a new execution with a stale If-Match answers 412 and the same key replays that 412; part 040-B of TASK-040 is on main before this task is dispatched
+- DISPATCH GATE: VERSION CHECK BEFORE CALL (D-QG-003 QG-040-C2, principal-architect; placeholder until ruled): on a route with a call phase (checkoutOrder, cancelShipment) a request that was stale when it arrived must not reach the external effect, or a written reason says why it may; the ruling is folded here before this task is dispatched, with one test either way
 - AT-US-039-01 … AT-US-039-07: all 7 scenarios of US-039, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

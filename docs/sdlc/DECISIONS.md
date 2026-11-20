@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-084.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-085.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -6627,3 +6627,200 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **senior-developer:** PR043-SEC-02 tripwire (R3-m2) in fix cycle 3 if one runs, otherwise on TASK-049; PR043-SEC-08 with R3-m1 on TASK-049; the `tests/`-folder rule and the template-literal spelling on the R2-C5 card line.
   - **principal-architect:** nothing new.
 - **Reversibility:** High (a review record).
+
+### D-SECPR040-01 · 2026-11-20 · security-analyst · TASK-040 part 040-A (idempotency keys with encrypted stored responses; branch `feat/TASK-040-idempotency-keys`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS bound to the final head `3dc1e225` (fix cycle 2); QG-040-C4 answered: D-TASK040-04 stands with a derivation change, D-ARCH-193 confirmed, D-ARCH-192 concurred with conditions, no entry for a SENSITIVE VIEW/DOWNLOAD replay (record `docs/05-quality/security/PR-pending-TASK-040-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-040-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+- **Scope.** `4e1163aa..d0a82a24` was reviewed in full. The merge `40fce4b2` of main `af4a1b48` is a pure union: its tree equals `git merge-tree --write-tree af4a1b48 d0a82a24`. The fix-cycle-2 delta `40fce4b2..3dc1e225` (10 files) was also reviewed. The coordinator asked for the round to bind to the final head, so it does, and no separate delta round is owed.
+- **The record is a merge condition.** The PR changes 37 owned paths (main's checker, `--base af4a1b48`). The classifier selects the hosted `security-integration` job (34 paths). A simulation on a shared clone gives `pass` at `3dc1e225`. The controls give `missing`: one for a Head row on `d0a82a24`, one for a FAIL verdict.
+- **Method.** Static review plus single-process Node 24 probes on `git archive` extracts of `d0a82a24` and `3dc1e225`:
+  - P1, cipher and scope matrix: 29 of 29 on both heads;
+  - P2, the real lease function;
+  - P3, the real store over the branch's in-memory delegate with the real `TenantDb` guard: 14 of 14;
+  - P4, the D-ARCH-195 form through the real problem handler and Express 5: 10 of 11, the one miss a probe artefact (Express's application-wide weak ETag).
+
+  No npm, Jest or Docker, and nothing ran in the evidence worktree or the branch worktree. Lane B is the evidence for every `*.int.test.ts`.
+- **Held.**
+  - **The cipher.**
+    - AES-256-GCM with a random 96-bit nonce and a 128-bit tag.
+    - The AAD binds the table, the column, `hex(scope_hash)` and the key id.
+    - Another scope, a relabelled or unknown key id, a bit flip or a missing tag is refused.
+    - Dual read works by key id.
+  - **Scope isolation.** Organisation and actor, actor-only, guest and keyed client network are separate. An empty or unparsable IP gets no scope (D-TASK040-11).
+  - **M1.** The fail-closed VIEW/DOWNLOAD entry is written before the completion, and a failed entry releases the key.
+  - **The D-ARCH-195 form.** The stored document is replayed byte for byte through the problem handler's rendered path. The replay carries `application/problem+json` and `no-store` or `private, no-store`, with no `Retry-After` and no handler `ETag`. The `RenderedProblemError` brand cannot be forged.
+  - **Logs.** No log line carries the key, the scope hash or a body.
+  - **`Retry-After`** is kept on the exact code set `{IDEMPOTENCY_IN_PROGRESS}` only.
+  - **The migration.** CHECKs, grants and table class agree; the standard-columns guard makes every UPDATE bump `version`.
+- **QG-040-C4, first bullet: D-TASK040-04 stands, with one change.**
+  - **The keyed network HMAC is required:** `idem_key`, the method and the path are in clear, and IPv4 can be enumerated.
+  - **The change.** The configured material must not also be the AES key. Derive both keys by HKDF-SHA256 with the info labels `platform-idempotency-body-v1` and `platform-idempotency-scope-network-v1`, the `_PREVIOUS` key likewise (PR040-SEC-01). It costs one line and no compatibility, because no row exists before part 040-B.
+  - **The rotation effect is accepted.** Only `recordConsent` is network-scoped; a retry across a rotation records the consent twice, which is harmless (EC-A47); pinned by PR040-SEC-07 (a). NAT and trust-proxy sharing are accepted for the same reason.
+  - **Owed by principal-architect before part 040-B merges:**
+    - the ADR-0018 register row reads "key-derivation input of two HKDF keys…", with the blast radius "replay bodies including PER and payment client secrets, at most 25 h; pseudonyms of anonymous client networks";
+    - data-model §10.4 says that `scope_hash` is an unkeyed SHA-256 whose network input is keyed;
+    - the rotation note says that during a rolling deploy an old task answers 500 for a replay of a row written under the new key. This is register-wide, because `guards.ts` allows no read-ahead `_PREVIOUS`.
+- **QG-040-C4, third bullet.**
+  - **D-ARCH-193 confirmed.** A replay runs after the retry's own authentication, MFA gate, authorisation and limits. It returns the stored result of an execution that passed the check, to the same scope only, and starts no action, so skipping the proof check on a replay is not a bypass. Accepted residual: a replay within 24 h returns the data as it was, even after a resource-level (RLS) loss of access.
+  - **Card conditions for TASK-187, checked in its security round:**
+    - **T187-1.** Consumption is one conditional `UPDATE … RETURNING` bound to the actor, the session and the operation, in its own committed transaction, after the claim and before `load`.
+    - **T187-2.** A refusal releases the claim and is never stored. `storedProblemOf` stores every thrown 4xx except a 429, so the 401 `REAUTH_REQUIRED` needs an explicit exclusion in `execute.ts`.
+    - **T187-3.** The proof never enters the fingerprint, a stored body, an audit value or a log line.
+    - **T187-4.** A replay, a 409 or a 422 neither reads nor consumes a proof. The `ReauthProofConditional` text is corrected (with QG-040-C3 (a)).
+    - **T187-5.** After a lease takeover the retry needs a fresh proof.
+    - **T187-6.** Every new execution of the `org.member.manage` and `payment_method.manage` operations is checked, whatever its idempotency mode.
+  - **A SENSITIVE VIEW/DOWNLOAD replay needs no entry of its own.** The only such operation is `emailShipmentDocuments`: 202, no body, no second e-mail, the same re-authorised actor, and the one disclosure already has its entry (M1). Pinned by PR040-SEC-07 (b). A future operation that returns sensitive content needs a decision first.
+- **QG-040-C4, second bullet (before part 040-B is dispatched): D-ARCH-192 concurred,** with five conditions:
+  - **P-1: CODEOWNERS, required.** `/apps/worker/src/platform/idempotency/` gets a CODEOWNERS line before part 040-B merges. It joins PR64-SEC-09 (devops-engineer). The folder holds a SYSTEM-scope DELETE on a table with personal data, and a wrong predicate deletes live keys, so a retry runs `call` twice.
+  - **P-2: `tools/ci/security-paths.mjs`, not required.** No hosted security suite exercises the purge; its PostgreSQL 18 test runs in lane B. This stays with PR46-SEC-08.
+  - **P-3: mechanical confinement in the purge's unit test:**
+    - over a recording client, the only statement is the D-ARCH-192 DELETE, with at most 200 batches;
+    - the source text contains neither `response_body` nor `responseBody`;
+    - no import from `apps/api` (boundaries, with a negative fixture).
+  - **P-4.** The purge logs counts only and runs only on its schedule.
+  - **P-5.** It deletes by `expires_at` only, IN_PROGRESS rows included.
+- **QG-040-C4, fourth bullet:** the T-79, R-05, AC-14 and SEC-TC-04 text is mine before G3. Record §3.9.
+- **Other rulings.**
+  - **D-ARCH-195 form accepted.** A stored problem may hold free-text `detail` (PR63-SEC-01), extra `errors[]` fields, `instance` and the first correlation id, all encrypted and kept at most 25 h. F2-2 to F2-4 are met; F2-1 waits for PR040-SEC-02.
+  - **D-PM-081: concurrence,** except for a claim lost after `call` (PR040-SEC-05, routed back to product-manager).
+  - **Retention until part 040-B: no exposure,** because no row can exist. Without the purge at 040-B it would be MEDIUM; D-ARCH-192 is the control.
+- **New findings.** LOW, all due before part 040-B merges:
+  - **PR040-SEC-01 (CWE-320).** The configured material is the AES key and also the HKDF input of the network key.
+  - **PR040-SEC-02 (CWE-345).** The stored status and headers, the `Content-Type` problem marker included, are not authenticated. A database writer can make a replay `text/html` (Express keeps it over `res.json`; the API sends neither `nosniff` nor a CSP), redirect its `Location`, or flip a 2xx status. Fix: seal `{v, status, headers, body}` always, plus a `Content-Type` value allow-list.
+  - **PR040-SEC-03 (CWE-922).** `checkoutOrder`, `confirmPayment` and `createPaymentMethodSetup` store a gateway `client_secret`, against T-79, R-05, AC-14 and SEC-TC-04 "no stored secrets". Recommended: accept and record it (principal-architect), with SEC-TC-04 reading "no secret in clear".
+  - **PR040-SEC-04 (CWE-667, = code review R2-n1, extended).** The lease formula misses the third transaction of the read-only path and the renewal around `call`. Headroom is 3 s at the defaults and negative from `DB_TX_STATEMENT_TIMEOUT_MS` = 9 s. Fix: `max(D + oneTx, 3 × oneTx + 1 s) + 5 s`, with a table test.
+  - **PR040-SEC-05 (CWE-778, = R2-n2).** A claim lost after `call` answers 409 with no FAILED entry and only the info line of a client conflict. Fix: a FAILED entry and a WARN `api.idempotency_claim_lost` when `call` ran.
+
+  INFO:
+  - **PR040-SEC-06.** `idem_key` is stored in clear and nothing reads it (optional: hash it or drop it later).
+  - **PR040-SEC-07.** Contract pins for the public, VIEW/DOWNLOAD and `client_secret` operation sets.
+  - **PR040-SEC-08.** "A 5xx releases the key" requires provider idempotency keys on booking, pickup and payment calls (ADR-0011, ADR-0012, TASK-075).
+  - **PR040-SEC-09.** A thrown 4xx whose document cannot be serialised throws before `settleClaim`, so the key is held for the lease. Fix: try/catch, then release.
+- **Conditions.**
+  - **Before part 040-A merges:**
+    - lane B PASS on the final head (`store.int.test.ts`, `idempotency-keys.int.test.ts`, the C15 literal);
+    - the hosted `security-integration` job;
+    - the rename and the merge-ref check;
+    - a new round only if an owned path changes after `3dc1e225` (a merge-only round for a main merge).
+  - **Before part 040-B merges:** PR040-SEC-01, -02, -04 and -05 fixed or answered; -03 decided; -07 and -09 done; P-1 to P-5; the purge with or before the wiring; the register and §10.4 text.
+- **Routed:**
+  - **senior-developer:** PR040-SEC-01, -02, -04, -05, -07 and -09 into part 040-B; P-3 and P-4; T187-1 to T187-6 onto the TASK-187 card.
+  - **principal-architect:** register row, §10.4, rotation note; the PR040-SEC-03 decision; PR040-SEC-06 (optional); PR040-SEC-08; the `ReauthProofConditional` wording.
+  - **product-manager:** PR040-SEC-05 and the scope of D-PM-081.
+  - **devops-engineer:** P-1 into PR64-SEC-09.
+  - **qa-lead:** SEC-TC-04 (anonymous half on `recordConsent`; "no secret in clear").
+  - **quality-gatekeeper:** QG-040-C4 bullets 1 to 3 answered; bullet 4 owed by me before G3.
+- **Alternatives considered:**
+  - **Keep the raw-material AES key and accept D-TASK040-04 as written.** Rejected. The change costs one line now and nothing later, and it brings the key in line with the register rule.
+  - **A separate register key for the network HMAC.** Not needed. HKDF labels separate the purposes, and a new key would add a configuration variable and a rotation of its own.
+  - **A replay entry for every SENSITIVE VIEW/DOWNLOAD replay.** Not needed for the one operation in the set; the contract pin forces the question for any new one.
+  - **Ruling PR040-SEC-02 a merge blocker of part 040-A.** Rejected. No row can exist before part 040-B, so the fix lands where the stored form first meets production.
+- **Reversibility:** High (a review record; every follow-up lands before any row exists).
+
+### D-SD-007 · 2026-11-20 · senior-developer · Plan fold for QG-040-C6 (D-QG-003; card lines of D-ARCH-191..195, D-PM-081/082), D-ARCH-188..190, D-ARCH-196..199 and D-SECPR043-01: TASK-040 delivered in parts with US-038 partial in `task-map.csv`, part 040-B gates 33 cards derived from the contract (TASK-062 in Wave 1 among them), TASK-047 takes the follow-up-job, lint, org-binding and admission lines, new late task TASK-296 `outboxpurgefn` (plan regenerated: 296 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..295 unchanged)
+- **Trigger:** the orchestrator's fold request after D-QG-003 (`5451a677`), D-ARCH-196..199 (`af4a1b48`) and D-ARCH-188..190 (`57eb12e1`); PR #79 (TASK-295) merged as `1ce81abd`.
+- **Decision (cards in `docs/04-plan/generator/plan-data.mjs`, outputs regenerated):**
+  1. **TASK-040 (before part 040-A merges).**
+     - Cards now carry, verbatim: TWO PARTS, STORED RESPONSES, the D-PM-081 audit line and the D-PM-082 SCENARIO OWNERSHIP line, which replaces "All US-038 scenarios". The 4xx-completion line no longer limits itself to a returned 4xx.
+     - **US-038 partial in `task-map.csv`.** The generator gains a card field `inPart: {story: part}`. The story still counts as completed by the task for validation, because part 040-B is a part of TASK-040 and not a new task ID (D-ARCH-191). `task-map.csv` lists it under `partial_stories` until that part merges, and the card shows "in part 040-B; partial until that part merges".
+       - Rejected: `us:[]` with `part`, because gen then reports a Must story with no completing task.
+       - Rejected: a new task ID, which the architect rejected.
+  2. **TASK-040, part 040-B (before it is dispatched).**
+     - SCOPE (verbatim) and PURGE (verbatim), plus the two tests D-QG-003 adds: the forged occurrence and the 200-batch bound.
+     - PROOFS, sharpened as D-QG-003 writes:
+       - (b) names the configuration key `IDEMPOTENCY_BODY_KEY`;
+       - (d) states its result: no 400 `IDEMPOTENCY_KEY_REQUIRED` on an allowed required case, and still 403 when denied;
+       - (e) is on the card;
+       - (f) is unconditional, with its result.
+     - FILES AND LOCKS of D-ARCH-191 line 4 sit as an acceptance line, not in `f`/`lk`. TASK-040 and TASK-041 are both in batch 1.2, so gen's batch-lock rule would refuse `api-platform-core`/`api-routing` on both. The orchestrator assigns them at the part 040-B dispatch, after part 041-A releases them.
+     - A DISPATCH GATES line lists the D-QG-003 conditions per part.
+  3. **PRECONDITION PART 040-B, derived from the contract.**
+     - Method: the 47 operations with `x-idempotency` `required`/`optional` in `openapi.yaml`, mapped to tasks through `x-requirements` × `task-map.csv` and then read card by card. I kept the task that builds or extends the handler and dropped the UI-only and REQ-sharing cards.
+     - The verbatim line, with the operation list, is on 32 cards:
+       - Wave 1–2: TASK-062 (`updateMe`, Wave 1 batch 1.7) and TASK-092.
+       - Waves 5–6: TASK-146, 149, 153, 154, 166, 170, 174.
+       - Waves 7–9: TASK-186, 203, 209, 219, 224, 227, 229, 231, 234, 236, 237, 243, 247, 248, 249, 255, 262, 263, 264, 268, 272, 273, 274.
+     - TASK-096 carries the precondition inside its own line, so 33 cards wait for part 040-B in all.
+     - **Not on the list:** TASK-177. It shares REQ-PAY-005 but its card builds no payment-method route.
+     - **New finding: TASK-062** (Wave 1, the locale persistence through `PATCH /me`) mounts an `optional` operation. D-ARCH-191 and D-QG-003 knew of no Wave 1 task that waits for part 040-B. Part 040-B is therefore on the path of batch 1.7 and of the M0 booking (TASK-092). This answers part of QG-040-C5 (b) for product-manager.
+  4. **Other D-ARCH-191 and D-ARCH-193/195 lines.**
+     - TASK-049: PART 040-A IS THE GATE.
+     - TASK-096: ORDER AROUND THE IDEMPOTENCY CLAIM, plus a DISPATCH GATE placeholder for QG-040-C2.
+     - TASK-187: RE-AUTHENTICATION CHECK PLACEMENT. It gains `execute.ts` and the lock `api-tx-execute`.
+     - **TASK-152 is the first frontend card that sends `Idempotency-Key`.** It is the guest gate that claims the quote and starts the booking, and it gets KEY LIFETIME IN THE CLIENT; later forms reuse its helper. TASK-062 sends `updateMe` from a switcher, not from a submission, and the header is optional there.
+  5. **TASK-047.**
+     - FOLLOW-UP JOBS (D-ARCH-189, verbatim) replaces the D-SD-006 placeholder.
+     - T-83 LINT (D-ARCH-188), OUTBOX ORG BINDING (D-ARCH-197) and SYSTEM ADMISSION KEY (D-ARCH-199), all verbatim, plus C4-1 (D-SECPR043-01).
+     - The BOUNDARIES RESOLVED-FILE POLICY of TASK-043 R2-m3 / PR043-SEC-02 (b) goes on the next holder of the lint lock. The line sits on TASK-047 and on TASK-040 part 040-B: whichever takes the lock first after part 041-A carries it, and the other drops it. TASK-041 part 041-B does not hold the `lint` lock, so it is not the holder.
+     - Files gain `eslint.config.mjs`, the ratchet test, `writer.ts` and `grants.manifest`; locks gain `lint` and `outbox`.
+     - **Note:** TASK-047 is now the largest card of batch 1.4. If its first PR runs long, the orchestrator may split it into parts in the TASK-041 form.
+  6. **TASK-078.**
+     - The HANDLER RULES clause "the token_enc overwrite carries published_at IS NOT NULL" is withdrawn (D-ARCH-190), and the apply/followUps sentence of D-ARCH-189 is added.
+     - TOKEN OVERWRITE (verbatim) replaces the QG-043-C3 placeholder.
+     - Security conditions T078-1 to T078-5 (D-SECPR043-01) are on the card.
+  7. **TASK-214.** The D-SD-006 observation text in OUTBOX ALARMS is replaced by the lines of D-ARCH-188 (the `absent()` arm, the QueueDeadLetterNew page set, readiness on the worker only) and D-ARCH-196 (the last tick that held the lock). C4-2 is met by D-ARCH-196.
+  8. **New late task TASK-296 `outboxpurgefn`** (batch 7.10; database-engineer, S, opus; depends on TASK-043 and TASK-047; lock `outbox`; due before G3). It carries PURGE BEHIND DEFINER FUNCTIONS (D-ARCH-198, verbatim). STATUS tracks R-ARCH-38 against it.
+- **Not foldable on a card:** the P7 runbook lines for RB-06 (D-ARCH-188, D-ARCH-196, D-ARCH-198 / PR043-SEC-06 (b)). No plan task writes the P7 runbooks, so they are kept verbatim as STATUS tracked condition RB-06-LINES (devops-engineer / technical-writer, G4).
+- **For qa-lead (not senior-developer's):** the `gherkin-test-map.md` rows.
+  - AT-US-011-03: names F3.
+  - AT-US-011-04: names both halves, the TASK-043 relay half and the TASK-047 consumer half.
+  - AT-US-038-01 and AT-US-038-06: name the part 040-B tests (proofs (a) and (f)).
+- **STATUS:** TASK-295 is merged (PR #79, `1ce81abd`). EFFECT-WAIVER is closed, with PR295-SEC-01 named as the open follow-up on TASK-015 part 015-C. **traceability v1.14:** the Design cells of REQ-API-009..011 name ADR-0014 amendments 5 to 9 and ADR-0013 amendment 6.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` shows 0 changes of branch, title, wave or batch; 40 rows changed (refs, plus the stories columns of TASK-040); one new row, TASK-296.
+- **Reversibility:** High (plan sources, the generator field, STATUS, traceability; no product code).
+
+### D-PM-084 · 2026-11-20 · product-manager · TASK-040 security review PR040-SEC-05 (= code review R2-n2): a request that loses its idempotency claim after its external call has run is audited `FAILED` and raises a WARN operational event, although it is answered 409 `IDEMPOTENCY_IN_PROGRESS`; the exception of D-PM-081 is narrowed to refusals made before the handler or any external call has run
+- **Input:** D-SECPR040-01 (`23e6a244`), finding PR040-SEC-05 (LOW, CWE-778) and the objection in §3.4 of the security record; code review round 2, R2-n2. Due before TASK-040 part 040-B merges. D-PM-081 routed exactly this kind of objection back to me.
+- **The case.** The renewal of the claim before the handler transaction finds the key taken over by a retry. The request's `call` phase has already run: a carrier or the payment gateway was called. The request is answered 409 `IDEMPOTENCY_IN_PROGRESS`. At head `3dc1e225` it writes no `FAILED` entry and one info line, the same line a client's ordinary duplicate produces.
+- **Decision:** security-analyst's position is adopted in full.
+
+  | Claim lost | Audit entry | Operational signal |
+  |---|---|---|
+  | after the external call has run (the renewal before the handler) | the route's **`FAILED`** entry, written as for any other failure of the route, with the code `IDEMPOTENCY_IN_PROGRESS` | **WARN** `api.idempotency_claim_lost` with the phase and the correlation ID, never the key or a body |
+  | before any external call, when only reads have run (the renewal before `call`) | none (D-PM-081 holds) | the conflict line, as today |
+  | inside the handler transaction (the completion finds the claim gone; the transaction rolls back) | unchanged: this was never within the exception, which read "before the handler runs" | unchanged |
+
+- **REQ-AUDIT-010 (Must), the exception's qualifier:** "before the handler runs" becomes "before the handler or any external call has run". With that, the lost claim after `call` falls under the main clause again (a 409 of an authorised mutating request), and no new clause is needed. The note, DR-A10, the REQ-API-011 note and A-116 follow.
+- **Why:**
+  - **It is an attempt with an effect.** The rule of D-PM-081 is that a `FAILED` entry records an attempt at the business action, and that a protocol refusal is not one. Here the caller's action was attempted and something happened outside the database that the rollback cannot undo. The same reasoning made D-PM-083 require a 412 before any external call.
+  - **This is the one record of a possible double call.** The retry that took the key over runs `call` again. Where the provider call carries its own idempotency key the two calls converge on one booking or one authorisation; where a carrier has no idempotent create, the first call can leave an orphan (the guardrails "duplicate labels" and "captured payments without a booked shipment", PRD §9 R-02). Without the entry and the event, neither an auditor nor operations can find the request that caused it.
+  - **No flooding.** A client cannot produce this case at will: it needs a pause longer than the lease, which PR040-SEC-04 sizes. The reasons that keep the three protocol refusals out of the trail do not apply.
+  - **Why the code of the entry is the 409's.** It is what the caller was answered, and no other `FAILED` entry carries `IDEMPOTENCY_IN_PROGRESS`, because the ordinary conflict is not audited. So the code alone identifies the case in the trail.
+- **Alternatives:**
+  - **Extend D-PM-081 to this case** (the review's second option: "record that this case is covered"). Rejected: it would leave an external effect with no record, for the sake of a rule about requests that did nothing.
+  - **The WARN event without the entry.** Rejected: logs are not the audit trail, and they are not kept as long.
+  - **A distinct problem code for the response or the entry** (for example a claim-lost code). Not now: the client must do the same thing as for any 409 in progress, wait and retry, and the catalogue and the contract would change for an event the entry already identifies.
+  - **An entry for a claim lost before `call` as well.** Rejected: only reads ran; the retry that took over is the attempt and writes its own entry.
+- **For senior-developer, part 040-B (security routed PR040-SEC-05 there; no apostrophes in the line):** card `idem`: "CLAIM LOST AFTER CALL (D-PM-084; PR040-SEC-05; REQ-AUDIT-010 as amended): when the renewal before the handler transaction finds the claim taken over and the call phase has run, the request answers 409 IDEMPOTENCY_IN_PROGRESS, writes the FAILED entry of the route through recordFailure and logs WARN api.idempotency_claim_lost with the phase and the correlation id, never the key or a body; a claim lost at the renewal before call writes no entry; tests: the m4 test of a key taken over during call expects exactly one FAILED entry and one WARN line, and a key taken over before call expects none". TASK-214: an alert on any `api.idempotency_claim_lost` after `call`, with a runbook line that says to compare the provider's record with the shipment or payment of the correlation ID (recommended; operations cannot reconcile what does not page or ticket).
+- **Also corrected here, after D-SD-007:** D-PM-083 named TASK-092 as the first task on the M0 path that waits for part 040-B. D-SD-007 derived 33 cards from the contract and found TASK-062 in Wave 1 (`PATCH /me`, an optional operation). PRD §7 and A-117 now name it. The conclusion of D-PM-083 is unchanged and stronger: a Wave 1 task waits for the part.
+- **Not changed:** the US-038 and US-088 notes say that the refusals "that precede the handler" are not audited, which stays true of the three refusals they list; they gain the boundary sentence at their next edit, and REQ-AUDIT-010 is the text that decides until then. No scenario, title, step or ID changed; counts 434 / 91 / 293 / DC 134; NFR.md, traceability.md, BACKLOG.md and every story file are untouched.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.18 (REQ-AUDIT-010 shall-statement and note, DR-A10, REQ-API-011 note), `docs/01-requirements/ASSUMPTIONS.md` (A-116, A-117), `docs/01-requirements/PRD.md` 1.19 (§7, §11), this file (the next-entry pointer in D-PM-068).
+- **Validation:** the two tests on the card line above, in part 040-B; the table test of PR040-SEC-04, which bounds how often the case can occur; after launch, the count of `api.idempotency_claim_lost` (expected 0; one occurrence is a reconciliation case). Nothing was run for this entry (documents only, no shell).
+- **Reversibility:** High (one call and one log line in a path that no deployment runs before part 040-B).
+
+### D-SD-008 · 2026-11-20 · senior-developer · Plan fold for D-SECPR040-01 (TASK-040 security round 1), TASK-040 code review R3-m1 and D-SECPR043-02 (PR043-SEC-08, R3-m2): the part 040-B security and purge conditions, proof (g), T187-1..6 on TASK-187, two merge prerequisites on TASK-049, the widened lint-twin line and two CODEOWNERS additions on TASK-015 part 015-C (plan regenerated: 296 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Trigger:** the orchestrator's addendum to the D-SD-007 fold. D-SECPR040-01 (`23e6a244`), code review round 3 of TASK-040 (`1f70221a`) and D-SECPR043-02 (`86ec0678`).
+- **Decision (cards):**
+  1. **TASK-040, part 040-B.** Three new lines:
+     - PART 040-B SECURITY CONDITIONS:
+       - PR040-SEC-01: HKDF-derived body and network keys with separate info labels.
+       - PR040-SEC-02: seal `{v, status, headers, body}`; the replayed `Content-Type` is JSON or problem+json only.
+       - PR040-SEC-04: the lease formula with a table test.
+       - PR040-SEC-05: FAILED entry plus WARN when `call` ran, pending product-manager.
+       - PR040-SEC-07: three contract pins — public = {recordConsent}; VIEW/DOWNLOAD = {emailShipmentDocuments}; `client_secret` = {checkoutOrder, confirmPayment, createPaymentMethodSetup}.
+       - PR040-SEC-09: release the key after a rendering failure.
+     - PART 040-B PURGE CONDITIONS, P-3 to P-5, naming P-1 as devops-engineer's item.
+     - PART 040-B PROOF (g): code review R3-m1, one `problemTypeBase` source in `defaultSlots` plus the composition test.
+  2. **The lint twin of R2-C5.** The BOUNDARIES RESOLVED-FILE POLICY line on TASK-047 and TASK-040 part 040-B now also names the `tests/`-folder rule, the `@platform/<pkg>/testing` specifier and the template-literal `import()` spelling.
+  3. **TASK-049.** Two merge prerequisites, each lapsing if an earlier commit closes it:
+     - PR043-SEC-08 widened by R3-m1: the closed-schema walk reads `whens`, `ordered`, custom rules, inverted patterns and default functions; the pattern probe set runs at catalogue load; `base64` only under `*_enc` keys.
+     - The PR043-SEC-02 tripwire of R3-m2.
+  4. **TASK-187.** T187-1 to T187-6, including the explicit exclusion of 401 `REAUTH_REQUIRED` from `storedProblemOf`.
+  5. **TASK-015 part 015-C (devops-engineer, PR64-SEC-09).** The CODEOWNERS ADDITIONS line gains:
+     - (4) `/apps/worker/src/platform/outbox/` and `/packages/shared/src/events/`;
+     - (5) `/apps/worker/src/platform/idempotency/` (P-1), before part 040-B merges.
+- **Not mine, routed onward:**
+  - qa-lead: SEC-TC-04 wording (the anonymous half on `recordConsent`; "no secret in clear").
+  - principal-architect: the PR040-SEC-03 decision, the ADR-0018 register row, data-model §10.4, the rotation note, and the `ReauthProofConditional` wording with QG-040-C3.
+  - product-manager: PR040-SEC-05 and the scope of D-PM-081.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 4 rows of `task-map.csv` changed (refs of TASK-015, 040, 049 and 187); no branch, title, wave or batch changed.
+- **Reversibility:** High.

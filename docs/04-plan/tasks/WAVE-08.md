@@ -39,7 +39,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-014 (M0 Should) Feature-flag evaluation and audited changes |
 | REQs | REQ-PLAT-020, REQ-PLAT-021 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-029, TASK-039 |
@@ -53,6 +53,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-014 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createFeatureFlag, updateFeatureFlag (optional) (D-SD-007)
 - AT-US-014-01 … AT-US-014-06: all 6 scenarios of US-014, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -267,7 +268,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-060 (M1 Should) Privacy notice and consent rule endpoint<br>US-114 (M1 Should) Cookie consent banner |
 | REQs | REQ-COMP-007, REQ-UI-023 |
 | NFRs | NFR-PRIV-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-127, TASK-189 |
@@ -281,6 +282,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-060 and US-114 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: recordConsent (optional) (D-SD-007)
 - AT-US-060-01 … AT-US-060-06: all 6 scenarios of US-060, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-114-01 … AT-US-114-09: all 9 scenarios of US-114, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -376,7 +378,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-164 (M1 Should) Save a quote and reopen it<br>US-259 (M1 Should) Saved quotes list |
 | REQs | REQ-QUOTE-014, REQ-ACCT-005 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-146, TASK-183 |
@@ -390,6 +392,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-164 and US-259 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: saveQuote, deleteSavedQuote (optional) (D-SD-007)
 - AT-US-164-01 … AT-US-164-10: all 10 scenarios of US-164, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-259-01 … AT-US-259-07: all 7 scenarios of US-259, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -433,7 +436,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-145 (M1 Should) Customer discounts and coupons<br>US-194 (M1 Should) Coupon entry on the review step |
 | REQs | REQ-PRICE-010, REQ-PRICE-011, REQ-BOOK-015 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-192, TASK-164 |
@@ -448,6 +451,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-145 and US-194 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: applyOrderCoupon, removeOrderCoupon (optional) (D-SD-007)
 - AT-US-145-01 … AT-US-145-07: all 7 scenarios of US-145, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-194-01 … AT-US-194-05: all 5 scenarios of US-194, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -464,7 +468,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-165 (M1 Should) Share a quote by link |
 | REQs | REQ-QUOTE-015 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-32, SEC-P3-10, D-ARCH-162, D-ARCH-163, D-SD-003 |
+| Spikes / security / decisions | SEC-P3-32, SEC-P3-10, D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-234 |
@@ -480,6 +484,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-165 scenarios
 - SEC-TC-53 (amended): two mints -> two tokens, first 404; CREATE + UPDATE audit; 11th mint/hour -> 429; three byte-identical 404 bodies
 - quote_shares AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10): the owner-bound pair; ux_quote_shares__org_quote_active and ux_quote_shares__guest_quote_active replace ux_quote_shares__quote_active; ux_quote_shares__share_token_hash is an entry of TENANT_UNIQUE_EXCEPTIONS with its reason; the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23503
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: revokeQuoteShare (optional) (D-SD-007)
 - AT-US-165-01 … AT-US-165-12: all 12 scenarios of US-165, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -629,7 +634,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-193 (M1 Should) Add and remove shipments in the open order |
 | REQs | REQ-BOOK-014 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-153 |
@@ -642,6 +647,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-193 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: addOrderShipment, removeOrderShipment (optional) (D-SD-007)
 - AT-US-193-01 … AT-US-193-06: all 6 scenarios of US-193, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -738,7 +744,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-196 (M1 Should) Self-service shipment cancellation |
 | REQs | REQ-BOOK-029 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-017 |
+| Spikes / security / decisions | D-017, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-244, TASK-203 |
@@ -751,6 +757,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-196 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: cancelShipment (required) (D-SD-007)
 - AT-US-196-01 … AT-US-196-11: all 11 scenarios of US-196, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -765,7 +772,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-238 (M1 Should) Reschedule an active pickup |
 | REQs | REQ-PICK-009 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-203 |
@@ -778,6 +785,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-238 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: reschedulePickup (required) (D-SD-007)
 - AT-US-238-01 … AT-US-238-05: all 5 scenarios of US-238, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -791,7 +799,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-217 (M1 Should) Saved payment methods |
 | REQs | REQ-PAY-014 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-COND-01, SEC-COND-06 |
+| Spikes / security / decisions | SEC-COND-01, SEC-COND-06, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-174, TASK-187 |
@@ -805,6 +813,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-217 scenarios
 - SEC-TC-37 (amended, saved-card part): auth_time > 12 h -> require_cvc_recollection=true; after createReauthProof retried checkout has cvc_recollection_required=false
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createPaymentMethod, createPaymentMethodSetup, updatePaymentMethod, deletePaymentMethod (optional) (D-SD-007)
 - AT-US-217-01 … AT-US-217-16: all 16 scenarios of US-217, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -950,7 +959,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-228 (M1 Should) Email documents to the account address |
 | REQs | REQ-DOC-010 |
 | NFRs | — |
-| Spikes / security / decisions | D-051 |
+| Spikes / security / decisions | D-051, D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-179, TASK-162 |
@@ -963,6 +972,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-228 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: emailShipmentDocuments (optional) (D-SD-007)
 - AT-US-228-01 … AT-US-228-09: all 9 scenarios of US-228, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1143,7 +1153,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-260 (M1 Should) Repeat a past shipment |
 | REQs | REQ-ACCT-006 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-185, TASK-149 |
@@ -1156,6 +1166,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-260 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: repeatShipment (optional) (D-SD-007)
 - AT-US-260-01 … AT-US-260-08: all 8 scenarios of US-260, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1170,7 +1181,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-266 (M1 Should) Notification preferences with consent records<br>US-288 (M1 Should) Suppress tracking emails by preference at send time |
 | REQs | REQ-ACCT-012, REQ-NOTIF-011 |
 | NFRs | NFR-PRIV-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-259 |
@@ -1184,6 +1195,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-266 and US-288 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: replaceNotificationPreferences (optional) (D-SD-007)
 - AT-US-266-01 … AT-US-266-08: all 8 scenarios of US-266, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-288-01 … AT-US-288-09: all 9 scenarios of US-288, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -1200,7 +1212,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-262 (M1 Should) Address book create, edit, delete and search<br>US-263 (M1 Should) Default sender address |
 | REQs | REQ-ACCT-008, REQ-ACCT-009 |
 | NFRs | NFR-PERF-006 |
-| Spikes / security / decisions | D-PLAN-006 |
+| Spikes / security / decisions | D-PLAN-006, D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-100, TASK-159 |
@@ -1214,6 +1226,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-262 and US-263 scenarios; US-175 address-book selection scenario now runs
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createAddressBookEntry, replaceAddressBookEntry, deleteAddressBookEntry (optional) (D-SD-007)
 - AT-US-262-01 … AT-US-262-12: all 12 scenarios of US-262, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-263-01 … AT-US-263-08: all 8 scenarios of US-263, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -1308,7 +1321,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-272 (M1 Should) Locale, display currency and unit preferences |
 | REQs | REQ-ACCT-018 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-062, TASK-230 |
@@ -1321,6 +1334,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-272 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: updateMe (optional) (D-SD-007)
 - AT-US-272-01 … AT-US-272-08: all 8 scenarios of US-272, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

@@ -107,7 +107,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-253 (M1 Could) Manual tracking refresh limited to once per 5 minutes |
 | REQs | REQ-TRACK-015 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-204 |
@@ -121,6 +121,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-253 scenarios
 - D-ARCH-106: the manual refresh is load (shipment under RLS, last refresh time), call (carrier track, no transaction open) and handler (events and audit), or an outbox event with 202; the once-per-5-minutes limit is checked in load and re-checked in the handler
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: refreshShipmentTracking (optional) (D-SD-007)
 - AT-US-253-01 … AT-US-253-06: all 6 scenarios of US-253, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -134,7 +135,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-264 (M1 Could) Address book CSV import parsed in the browser |
 | REQs | REQ-ACCT-010 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-264 |
@@ -147,6 +148,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-264 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: importAddressBookEntries (optional) (D-SD-007)
 - AT-US-264-01 … AT-US-264-11: all 11 scenarios of US-264, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -160,7 +162,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-270 (M1 Could) Privacy data export<br>US-271 (M1 Could) Privacy account deletion request |
 | REQs | REQ-ACCT-016, REQ-ACCT-017 |
 | NFRs | NFR-PRIV-005 |
-| Spikes / security / decisions | SEC-COND-01, D-027 |
+| Spikes / security / decisions | SEC-COND-01, D-027, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-187, TASK-039 |
@@ -174,6 +176,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-270 and US-271 scenarios (SEC-TC-37 privacy-export part)
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: requestPrivacyExport, requestAccountDeletion (optional) (D-SD-007)
 - AT-US-270-01 … AT-US-270-10: all 10 scenarios of US-270, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-271-01 … AT-US-271-08: all 8 scenarios of US-271, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
