@@ -4,7 +4,9 @@
  * statically, through `export ... from`, `import()` or `require`. The `db-test-seam` boundaries policy in eslint.config.mjs
  * is the lint-time arm of the same rule; this scan is the tripwire that needs no lint configuration. PR043-SEC-02 adds
  * the outbox test factory and the catalogue-parameterised writer module (only the outbox barrel imports it); its
- * resolved-file boundaries twin waits for the next lint-lock holder (code review R2-C5).
+ * resolved-file boundaries twin waits for the next lint-lock holder (code review R2-C5). Code review R3-m2 and the
+ * reopened PR043-SEC-02 (D-SECPR043-02) widen it to every test layer: no non-test source under apps/*\/src or
+ * packages/*\/src imports into a `test`, `tests` or `__tests__` folder, or any `@platform/<pkg>/testing` subpath.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, posix, relative, sep } from 'node:path';
@@ -57,25 +59,84 @@ function sourceFiles(dir: string): string[] {
 }
 
 /** Every non-test source under apps/*\/src, repository-relative POSIX paths. */
-function productionSources(): string[] {
-  const appsDir = join(repoRoot, 'apps');
-  return readdirSync(appsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const src = join(appsDir, entry.name, 'src');
-      try {
-        return sourceFiles(src);
-      } catch {
-        return [];
-      }
+function productionSources(roots: readonly string[] = ['apps']): string[] {
+  return roots
+    .flatMap((root) => {
+      const rootDir = join(repoRoot, root);
+      return readdirSync(rootDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .flatMap((entry) => {
+          try {
+            return sourceFiles(join(rootDir, entry.name, 'src'));
+          } catch {
+            return [];
+          }
+        });
     })
     .map((path) => relative(repoRoot, path).split(sep).join('/'))
     .filter((path) => !TEST_FILE.test(path));
 }
 
+/** A path with a `test`, `tests` or `__tests__` folder segment (the test layers prune-dist removes from images). */
+const TEST_FOLDER = /(?:^|\/)(?:test|tests|__tests__)\//;
+/** The test subpath of any workspace package (`@platform/<pkg>/testing`, with or without a further segment). */
+const TESTING_SUBPATH = /^@platform\/[^/]+\/testing(?:\/.*)?$/;
+
+/**
+ * Specifiers in `source` (of the repository-relative POSIX `file`) that reach a test layer (code review R3-m2, the
+ * reopened PR043-SEC-02, D-SECPR043-02): a relative specifier that resolves into a `test`, `tests` or `__tests__`
+ * folder, and any `@platform/<pkg>/testing` specifier.
+ */
+function testLayerImports(file: string, source: string): string[] {
+  return [...source.matchAll(SPECIFIERS)]
+    .map((match) => match[2] ?? '')
+    .filter((specifier) => {
+      if (TESTING_SUBPATH.test(specifier)) return true;
+      if (!specifier.startsWith('.')) return false;
+      return TEST_FOLDER.test(`${posix.normalize(posix.join(posix.dirname(file), specifier))}`);
+    });
+}
+
 const read = (path: string): string => readFileSync(join(repoRoot, ...path.split('/')), 'utf8');
 
 describe('test seams', () => {
+  it('[R3-m2] [PR043-SEC-02] finds a test-layer import in every form and spelling (positive control)', () => {
+    const file = 'apps/api/src/modules/orders/service/orders.service.ts';
+    const planted = [
+      "import { timeOperation } from '../../../platform/routing/tests/timing.js';",
+      "export { createTestOutbox } from '../../../platform/outbox/tests/test-outbox';",
+      "const fixture = await import('./test/fixture.ts');",
+      "const legacy = require('../__tests__/helper.js');",
+      "import { createTestOutbox } from '@platform/api/testing';",
+      "import { createTestEnv } from '@platform/config/testing';",
+      "import '@platform/shared/testing/clock.js';",
+    ].join('\n');
+    expect(testLayerImports(file, planted)).toHaveLength(7);
+    // The `timing.ts` case of the record: a routing file two levels down.
+    expect(
+      testLayerImports(
+        'apps/api/src/modules/orders/routes/orders.routes.ts',
+        "import { x } from '../../platform/routing/tests/timing.js';",
+      ),
+    ).toEqual(['../../platform/routing/tests/timing.js']);
+    // Not a test layer: a folder merely named like one, a resolved path that leaves it again, an unrelated subpath.
+    const clean = [
+      "import { a } from './testing/index.js';",
+      "import { b } from './contest/x.js';",
+      "import { c } from './tests/../real.js';",
+      "import { d } from '@platform/api/runtime';",
+      "import { e } from '@platform/api/testingx';",
+      "import { f } from 'tests-helper';",
+    ].join('\n');
+    expect(testLayerImports(file, clean)).toEqual([]);
+  });
+
+  it('[R3-m2] [PR043-SEC-02] no non-test source under apps/*/src or packages/*/src imports a test layer', () => {
+    const sources = productionSources(['apps', 'packages']);
+    expect(sources.some((path) => path.startsWith('packages/'))).toBe(true);
+    expect(sources.filter((path) => testLayerImports(path, read(path)).length > 0)).toEqual([]);
+  });
+
   it('finds a seam import in every import form (positive control)', () => {
     const planted = [
       "import { withQueryCounter } from './platform/db/query-counter.js';",
