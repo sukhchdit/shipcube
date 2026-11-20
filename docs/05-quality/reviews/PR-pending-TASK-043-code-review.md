@@ -85,3 +85,114 @@ Host rule of the dispatch: no install, Jest or Docker in the evidence worktree (
 - The relay reads identifiers only (pinned: no `payload`, `org_id` or `actor_id` in the claim SQL). It marks after accept, the guard columns are correct (`updated_by` = SYSTEM, `version + 1`), `last_error` is an error class name only, metrics are counted after commit, and the enqueue is honestly bounded.
 - The purge is predicate-bound in its own SQL, batched, capped and resumable through the ledger, with a redelivery test.
 - The AUTH-refusal test comes with a live mutant that prints the password, the tracestate-drop rows are present, and the grant pins and the C15 literal were extended beside the manifests.
+
+---
+
+# Round 2 (verdict bound to head `da996002`)
+
+| Field | Value |
+|---|---|
+| Head | `da996002`. Path: `5193fea4`, then `94393c9e` (docs: DECISIONS.md restored), `c60959bd` (fix), `da996002` (F3 `lock_timeout` 10 s, F7 lag gauge at the claim, DECISIONS.md re-synced). I reviewed `c60959bd` in full (R2.1 to R2.4) and the `da996002` delta in R2.6. The evidence worktree is detached at `da996002`; lane B is queued |
+| Reviewer | code-reviewer, 2026-11-20 |
+| Bindings added | ADR-0004 amendment 2 (items 8-18) and amendment 3 (items 19-22, `57eb12e1` on main); D-ARCH-183..190; D-QG-002 (QG-043-C1..C7); the TASK-043 card FIX CYCLE LINES F1-F12 (D-SD-006); the D-ARCH-188 change list (F13, F3 lock_timeout, F7 gauge at the claim); D-TASK043-01..10 as given in the `c60959bd` commit body |
+
+```
+VERDICT: APPROVED_WITH_NITS at da996002 (merge conditions R2-C2, R2-C4, R2-C5 in R2.6)
+SUMMARY: M1 is fixed properly: one clock_timestamp() read, the publish-under-lock contract, and a lane B interleaving
+         with a control arm that proves the old default inverts. Every round-1 MAJOR and MINOR is closed or closed by
+         ruling. The two D-ARCH-188 card lines found at c60959bd (R2-m1 lag gauge at the claim, R2-m2 lock_timeout
+         10 s) and the DECISIONS.md merge conflict (R2-n1) are fixed at da996002. Open: R2-m3, the test seam is
+         importable by production code (routed to the lint-lock holder), and NITs.
+```
+
+## R2.1 What I verified myself
+
+Same host rule. I worked in a `git archive c60959bd` extract, with `node_modules` junctioned to the evidence worktree (HEAD `c60959bd`, so the `@platform/*` links resolve to the same sources) and `prisma/generated` copied in. I removed the extract afterwards: worktree `git status` clean, `node_modules` count 748.
+
+| Check | Result |
+|---|---|
+| ESLint `--max-warnings 0`, every changed `.ts` outside fixtures (`efa6d1e0..c60959bd`) | Clean |
+| Prettier on every changed file | Clean |
+| `tsc -b` shared, config, api, worker, prisma, tools | Clean |
+| Targeted unit tests (writer, relay, relay-queues, purge, producer, events, start-worker, jobs, system-db, grants-manifest, queues, worker `processors.test.ts`), `--maxWorkers=2` | 14 suites, 154 tests pass |
+| `negative-fixtures -t 'TASK-043\|ok-handler-outbox'` | 5/5 pass |
+| `lint-migrations` | No findings |
+| Coverage of changed sources | writer, purge, events 100 %; relay 100 % lines / 95.5 % branches; relay-metrics 100 % / 87.5 %; `start-worker.ts` 99.1 % (only the pre-existing `createProductionQueues`, lines 119-120, is unexecuted by units) |
+| Lint probe (m5) | I put three probe files in the extract, each importing the seam: `apps/worker/src/zz-probe.ts` and an `apps/worker/src/processors/` file through `@platform/api/testing/outbox`, and `apps/api/src/modules/orders/zz-probe.ts` through `../../platform/outbox/tests/test-outbox.js`. All three are lint-clean (R2-m3) |
+| Open handle (n2) | `relay-queues.test.ts` paired with one other suite: "worker failed to exit gracefully" in 3 of 3 runs. Still open |
+| Merge with current main | `git merge-tree --write-tree origin/main c60959bd` conflicts in `docs/sdlc/DECISIONS.md` only (R2-n1). Every other path merges clean |
+| Not re-run | All `*.int.test.ts`, including the new api `writer.int.test.ts`, the interleaving, the two-relay rows and the 23514 rows. Lane B on the final head is the evidence |
+
+## R2.2 Round-1 closure
+
+| R1 ID | Status | Evidence |
+|---|---|---|
+| M1 | Closed (lane B pending) | `writer.ts`: `created_at, updated_at` = one `pg_catalog.clock_timestamp()` read (`ctx.at`). The unit pin checks both columns, a single clock read and no `now()`. The JSDoc states the publish-after-lock contract. The lane B `interleave()` gates T1/T2 through `pg_stat_activity` with no sleep: the writer arm enqueues E2 then E1, and the control arm (column default) enqueues E1 then E2. The control arm shows the test can detect the inversion |
+| M2 | Closed in substance; see R2-n1 | No line of base `efa6d1e0` is removed. The branch file equals main at `3b93b342` |
+| m1 | Closed (lane B pending) | `apps/api/src/platform/outbox/writer.int.test.ts`: `createApp` with a `transaction: 'tenant'` fixture route, `X-Correlation-Id: Client-Corr-0103` in, the row's `correlation_id` asserted. The worker test asserts row == job with the same literal. A route that fails after the publish leaves no event. The relay.int header is now true. The api helper is a byte copy apart from its header (`REPO_ROOT` depth checked) |
+| m2 | Closed | 01 and 02 write a `job_executions` row in the same transaction. 01 asserts both rows exist and checks `type`, `aggregate_*`, `payload`, `created_at` set and `created_at = updated_at`. 02 asserts neither row exists |
+| m3 | Closed by ruling (am. 2 item 11, am. 3 item 19: nothing is parked) | Backoff doubles from the poll interval to 5 s, with one WARN per streak and `recovered` at the end (unit: waits 1000, 2000, 4000, 5000, 5000, then 500). The per-row WARN is gone. Two gauges were added. Residual R2-n2 |
+| m4 | Closed; I retract its scheduled-job premise | A scheduled occurrence's correlation id is `<schedule>-<millis>` (`scheduled-job.ts:121`), which is inside ADR-0016 §15. My r1 premise (`repeat:<schedule>:<ms>`) was a misreading. F11 JSDoc, F12 lane B 23514 rows, and unit rows for the relay and purge contexts |
+| m5 | Partly closed | `createOutbox` is off both barrels; the barrel key set is pinned. `mergeEvents` refuses `.unknown(true)` and non-object schemas (tested). The seam is importable from production code: R2-m3 |
+| m6 | Closed | `WORKER_PROCESS.createOutboxPurge` unit row (statement sequence, SYSTEM scope). `relayBounds` rows: 2,500/1,250 at the defaults, an idle-smaller case, a cap case, and the floor case. The composition exposes the bounds |
+| m7 | Closed | D-TASK043-01..10 are in the commit body for the orchestrator. ADR-0004 amendments 2 and 3 cover items 3 and 5 (D-ARCH-183, -184) and §4.4 (D-ARCH-186) |
+| n1 | Closed | The lock-key comment now names the registered value |
+| n2 | Open | Every queue is now disconnected, but the leak persists (R2.1). It is pre-existing in class (`open-queue.test.ts`) |
+| n3 | Deferred, accepted | D-TASK043-10: the lint lock blocks a shared constant |
+| n4 | Closed | Hooks installed. Side effect: R2-n4 |
+| n5 | Closed (lane B pending) | Two concurrent `runOnce` publish 3 in total, each exactly once. QG-043-C7 (a)/F13: a tick held inside an enqueue makes the second relay return `locked: false`, after which order is kept and attempts are 1 |
+| n6 | Closed | The retirement is recorded in D-TASK043-05 (TASK-047) |
+| n7 | Closed | F5: budget W/2, enqueue min(2 s, W/4), so at least W/4 is left for the marks; W includes the idle-in-transaction timeout |
+| n8 | Closed | F10 `processors.test.ts` fails once a type is catalogued while `PROCESSORS['outbox-relay']` is missing |
+
+## R2.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `apps/worker/src/platform/outbox/relay.ts:206, 249`; `relay-metrics.ts` `tickEnded` | The card's F7 line ("set the lag gauge at the claim, so a long tick cannot read 0"; D-QG-002 observation; D-ARCH-188 change list; ADR-0004 am. 3 item 22) is not met. The claimed age is kept in a local and published to the gauge only by `tickEnded`, after the commit. While a tick runs, for up to 3W/4, the lock holder still shows the previous tick's value. That value is often 0, while the other workers show 0 too, so the `max` over workers misses the lag exactly when a tick is slow. After a tick that claimed rows and then threw (a failed commit, a mark that timed out), the lag gauge stays stale. These card lines landed on main (`182520b4`, `57eb12e1`) after the branch's base. | Set the lag gauge right after the claim, before the first enqueue, for example with `metrics.lag(age)`. Keep `last_tick_timestamp` at the end of a tick that did not throw. Add a unit row: with the enqueue held open, `render()` already shows the claimed age. Required before merge (card). |
+| R2-m2 | MINOR | `apps/worker/src/platform/outbox/relay.int.test.ts:68` | The D-ARCH-188 change list adds to F3: "its runner has a `lock_timeout` of at least 10 s". The lane B runner uses `DB_TX_LOCK_TIMEOUT_MS: 2_000`. In `interleave()`, T1 waits from the moment it blocks until `untilLockWaiter()` sees it and T2 commits. On a loaded lane B host that can exceed 2 s and fail with 55P03, a flake in the one test that proves M1. | Set `DB_TX_LOCK_TIMEOUT_MS: 10_000` in `configFor`; `DB_TX_STATEMENT_TIMEOUT_MS` (10,000) already allows it. Required before merge (card). |
+| R2-m3 | MINOR (routed; security flag) | `apps/api/package.json` `./testing/outbox`; `tests/test-outbox.ts` | The seam is off the barrels but stays importable by production code. My probe files in the worker's `src/` and in an api module both lint clean. A module can still publish an uncatalogued type with an unreviewed schema through `createTestOutbox`. The existing `@platform/api/testing` export (timing) has the same gap. | The next holder of the lint lock adds a rule: a non-test file may not import `@platform/api/testing*` or any `**/tests/**` path, with a negative fixture per form. `eslint.config.mjs` is TASK-041's lock, so this is not a TASK-043 merge condition; record it as a card line (TASK-047 already holds the T-83 lint lines). |
+| R2-n1 | NIT | `docs/sdlc/DECISIONS.md` | The branch copies main at `3b93b342`. Main has since appended D-SD-006 and D-ARCH-188..190, so merging main conflicts at the end of the file. | At merge-main, take `origin/main`'s file whole. Cleaner: restore the base (`efa6d1e0`) version so the PR carries no DECISIONS delta at all. |
+| R2-n2 | NIT | `relay.ts:226-231`, `isFailedTick` | A `JobProducerError` in a tick that also published other rows is not logged anywhere; only `failed_total` rises. Item 16 says a writer-written row cannot cause one, so this is accepted. | Optional: a DEBUG line with the error class. |
+| R2-n3 | NIT | `apps/worker/src/processors.test.ts:13-17` | The object-shaped assertion is hard to read. | `expect(types.length === 0 \|\| registered).toBe(true)`, with a message naming the types. |
+| R2-n4 | NIT (process, for the orchestrator) | shared `.git/config` | `npm run hooks:install` set `core.hooksPath=tools/hooks` for the shared repository. That covers every worktree and every agent. Each commit now runs `npm exec` Prettier, ESLint and commitlint on the staged files, so a commit without the Node 24 PATH prefix, or in a checkout without `node_modules`, fails. | The orchestrator decides whether to keep it or `git config --unset core.hooksPath`. I left it unchanged. |
+
+## R2.4 Rulings on the new decisions
+
+- **D-TASK043-09** (a test-only export as the seam): accepted, with R2-m3.
+- **D-TASK043-10** (no shared digest constant): accepted.
+- **F1 to F13:** met as listed in R2.2. The exceptions are F7 "at the claim" (R2-m1) and the F3 `lock_timeout` (R2-m2).
+
+## R2.5 Merge conditions
+
+1. **R2-C1:** fix R2-m1 and R2-m2, plus their unit and lane B rows.
+2. **R2-C2:** lane B PASS on the final head. This covers the api `writer.int.test.ts`, AT-US-011-01..06, the interleaving (both arms), the two-relay and held-lock rows, the 23514 rows, the purge, C15 and job-executions. The `migrated-postgres.ts` helper boots in both apps.
+3. **R2-C3:** merge main, with DECISIONS.md taken from `origin/main` (R2-n1). The PR diff then carries no DECISIONS change. The orchestrator appends D-TASK043-01..10.
+4. **R2-C4:** a security record on the head (owned paths unchanged, plus `apps/api/package.json`). It includes R2-m3 and the D-ARCH-190 confirmation that is due before TASK-078.
+5. **R2-C5:** R2-m3 recorded as a card line for the next lint-lock holder.
+
+## R2.6 Delta `c60959bd..da996002` (the bound head)
+
+Checks on a `git archive da996002` extract, set up as in R2.1 and removed afterwards (worktree clean, 748 entries in `node_modules`):
+
+- ESLint and Prettier on `apps/worker/src/platform/outbox/`: clean.
+- `tsc -b apps/worker`: clean.
+- relay, purge and start-worker unit suites: 43 tests pass.
+- `git merge-tree --write-tree origin/main da996002`: clean, with no conflicted path.
+- DECISIONS.md is byte-identical to `origin/main`.
+
+| ID | Status | Evidence |
+|---|---|---|
+| R2-m1 | Closed | `metrics.pendingAge(...)` runs right after the claim, before the first enqueue, and `pendingAge(0)` runs when the lock is not taken. `tickEnded` now sets only the timestamp. New unit row: with the enqueue held open, the gauges read `[33, 0]`, and `[33, 9000]` after the tick ends. A tick that throws after its claim keeps the claimed lag (12) and the timestamp stops |
+| R2-m2 | Closed (lane B pending) | `orderRuntime` uses `lock_timeout` 10 s, statement timeout 20 s and idle timeout 30 s. T1 asserts `current_setting('lock_timeout') = '10s'` inside the interleaving. The runtime is closed in `afterAll` |
+| R2-n1 | Closed | The merge with main is clean. The PR diff against main carries no DECISIONS.md change once main is merged |
+| R2-m3 | Open, routed (R2-C5) | Unchanged |
+| n2, R2-n2, R2-n3, R2-n4 | Open NITs | Unchanged |
+
+Merge conditions at `da996002`, replacing R2.5:
+
+- **R2-C2:** lane B PASS on `da996002`.
+- **R2-C3:** reduced to "merge main if it moves again; take `origin/main`'s DECISIONS.md".
+- **R2-C4:** a security record on `da996002`.
+- **R2-C5:** R2-m3 recorded as a card line for the next lint-lock holder.
+- **R2-C1:** met.

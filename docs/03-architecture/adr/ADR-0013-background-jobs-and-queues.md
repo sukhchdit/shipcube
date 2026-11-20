@@ -21,7 +21,7 @@
 
 - **pg-boss (Postgres-backed queue).** Attractive for transactional enqueue but the stack fixes BullMQ + Redis; the outbox gives the transactional guarantee instead.
 - **Cron in the API process.** Rejected: schedulers belong in the worker; API stays stateless.
-- **BullMQ Pro (groups, rate limiting per group).** Commercial licence — not in the allow-list; per-aggregate serialisation uses a Redis lock in the consumer instead.
+- **BullMQ Pro (groups, rate limiting per group).** Commercial licence — not in the allow-list; per-aggregate serialisation uses a Redis lock in the consumer instead. *Amended 2026-11-20 (ADR-0004 amendment 2 item 15; QG-043-C1 (b)): that lock is not built. A lock with retry gives mutual exclusion, not order. Handlers read the current state of the aggregate and do not depend on the order of events; a per-aggregate design is owed with the first handler that needs order (risks.md R-ARCH-37). The licence reason stands.*
 
 ## Consequences
 
@@ -117,7 +117,7 @@ The bounds are three constants exported from `@platform/shared/queues` (ages in 
 
     | Alarm | Expression | For | Severity | Runbook |
     |---|---|---|---|---|
-    | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`; ticket for the other queues | RB-07 |
+    | `QueueDeadLetterNew` | `sum by (queue) (increase(platform_queue_dead_lettered_total[15m])) > 0` | none | page for `booking` and `payments`; ticket for the other queues (*amended 2026-11-20, amendment 5 item 26: `outbox-relay` pages too*) | RB-07 |
     | `QueueDeadLetterDepthHigh` | `max by (queue) (platform_queue_dead_letter_jobs) >= 1600` (80 % of the count bound) | 5 min | page | RB-07 |
     | `ValkeyMemoryHigh` | `max(platform_valkey_memory_used_bytes) / (max(platform_valkey_memory_max_bytes) > 0) >= 0.70` | 10 min | ticket | RB-06 |
     | `ValkeyMemoryCritical` | the same ratio `>= 0.85` | 5 min | page | RB-06 |
@@ -210,11 +210,17 @@ Items continue at 24.
     | Alarm (TASK-214) | Expression | For | Severity | Runbook |
     |---|---|---|---|---|
     | `OutboxRelayLag` | `max(platform_outbox_relay_oldest_pending_age_seconds) > 30` | 5 min | page | RB-06 |
-    | `OutboxRelayStalled` | `time() - max(platform_outbox_relay_last_tick_timestamp_seconds) > 60` | 2 min | page | RB-06 |
+    | `OutboxRelayStalled` | `time() - max(platform_outbox_relay_last_tick_timestamp_seconds) > 60` (*item 26 adds an `absent()` arm*) | 2 min | page | RB-06 |
 
     - `OutboxRelayLag` is the "Outbox relay lag" row of platform.md §8.5, now with its metric. Both page, because the booking saga starts from an outbox event.
     - `OutboxRelayStalled` takes the place of the 30 s fallback. A fallback job would restart a dead loop without telling anyone, and it depends on the Valkey that a stalled relay may be waiting for.
     - The worker's readiness reports the relay as degraded when the first gauge is above 60 s (ADR-0017 §5). TASK-214 adds the component and extends its lane A test of the alarm rules to these two.
+26. **Additions after the verification D-QG-002 (2026-11-20; observations of that entry; D-ARCH-188, D-ARCH-189).**
+    - **`OutboxRelayStalled`** is `time() - max(platform_outbox_relay_last_tick_timestamp_seconds) > 60 or absent(platform_outbox_relay_last_tick_timestamp_seconds)`, for 2 min. With every worker down no series exists and the first arm returns nothing; the second arm covers that case.
+    - **`QueueDeadLetterNew` pages for `outbox-relay`** as it does for `booking` and `payments` (amends item 14). Every saga and payment event passes that queue, and a dead-lettered event job leaves rows without their follow-up jobs (ADR-0004 amendment 3 item 20). The deployment alarm `dlq-growth` of platform.md §5.5 follows the same three queues.
+    - **The lag gauge** is set at the claim, before the enqueues (ADR-0004 amendment 3 item 22). A value written only at the end of a long tick would let the maximum over the workers read 0 and reset the 5 minutes of `OutboxRelayLag`.
+    - **The readiness component** for relay lag is the worker's alone; the api runs no relay.
+    - **`OutboxRelayLag` during a replay.** RB-06 makes published rows unpublished again, so the alarm fires for the length of the replay. The runbook says so and takes the relay lock for that statement (ADR-0004 amendment 3 item 22).
 
 ## Reversibility
 
