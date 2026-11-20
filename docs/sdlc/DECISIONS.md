@@ -5904,3 +5904,14 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Still owed:** the m1 branch update and then a merge-only security round on that merge commit (union of root `package.json`, lockfile delta still the three effect leaves); lane B (D-TASK295-03); lane A on the pushed head (real osv-scanner, `check-dep-age`, `security-integration`); the rename and the merge-ref check.
 - **Alternatives considered:** PASS_WITH_CONDITIONS with the SEC-01 test as a merge condition. Rejected: the forced downgrade can only happen at a later Prisma bump, and check-audit already fails closed for any advised version.
 - **Reversibility:** High. This is a review record only.
+
+### D-SECPR295-02 · 2026-11-20 · security-analyst · TASK-295 / PR #79 merge-only security round on `a1b0ba76` = PASS_WITH_FOLLOW-UPS (round 2 appended to `docs/05-quality/security/PR-pending-TASK-295-security-review.md`; the rename to `PR-0079-…` is still owed)
+- **Trigger:** the branch update `a1b0ba76` (main `4e1163aa` merged into the branch, DECISIONS resolved as a union) brought in main's root `package.json` change. `package.json` is an owned path, so round 1 at `5edc54f5` no longer binds.
+- **Decision:** re-bound to `a1b0ba76`, no new finding.
+  - Root `package.json` is the union of main's `tokens:build` script and the override.
+  - Against `origin/main`, the lockfile change is still exactly the 3 `node_modules/effect` leaves. The blob is identical to `5edc54f5`, and its SHA-256 equals the lane B summary's.
+  - The merge tree equals the clean three-way merge on every path except the DECISIONS union, which removes 0 lines.
+  - The watchlist and test blobs are unchanged.
+- **Simulation:** main's real checker passes the merge-ref form against `a1b0ba76`. It also passes the next DECISIONS-union update (that update changes only docs paths). It fails the four controls.
+- **Notes:** `a1b0ba76` again conflicts with main `89d0b769` in DECISIONS.md (D-ARCH-183..187, D-SECPR295-01 and this entry), so one more union update is needed. That update does not void this round. Lane B ran only `unit`, because the image suites are still planned. PR295-SEC-03 therefore rests on the round-1 emulation, and the D-TASK295-03 migrate/shadow question goes to the orchestrator.
+- **Reversibility:** High. This is a review record only.

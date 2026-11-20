@@ -160,3 +160,51 @@ Main's real `check-security-owned-paths.mjs` on a shared clone of the repository
 | Field | Value |
 |---|---|
 | Verdict | PASS_WITH_FOLLOW-UPS. No Critical, High or Medium finding for this change. LOW PR295-SEC-01 and INFO PR295-SEC-02/-03, routed. EFFECT-SEC-01 closes and D-SECAUDIT-02 is discharged when this PR merges; EFFECT-SEC-02/-03 stand. Binding: head `5edc54f5` only; the branch update of section 5 needs a merge-only round |
+
+## Round 2 (merge-only): PR #79 head after the branch update
+
+This round re-binds the record to the updated head. It follows section 5: the update merged `origin/main` into the branch, which brought in main's root `package.json` change, an owned path. It adds no new finding.
+
+| Field | Value |
+|---|---|
+| Head | a1b0ba76c17639513f4e076c6a79d6809b932869 |
+| Commits after `5edc54f5` | `253f7f4a`, the lane B evidence for `20261120T1205Z_5edc54f`, which adds only four files under `docs/05-quality/tests/runs/20261120T1205Z_5edc54f/`. Then `a1b0ba76`, `merge origin/main into task-295 (union of decisions log)`, with parents `253f7f4a` and main `4e1163aa` |
+| Reviewer / date | security-analyst, 2026-11-20, merge-only round. Read from the main checkout with `git show`, `git diff` and `git merge-tree`. Single-process Node scripts ran on blobs only; I did not touch the evidence worktree |
+
+### R2.1 Checks
+
+| Check | How | Result |
+|---|---|---|
+| Merge resolution | `git merge-tree --write-tree 253f7f4a 4e1163aa`, then `git diff --name-status <that tree> a1b0ba76` | The only difference is `M docs/sdlc/DECISIONS.md`, the expected union. Every other path, including all four owned paths, is exactly the clean three-way merge. The resolution hand-edited nothing else |
+| DECISIONS union | `git diff 4e1163aa a1b0ba76 -- docs/sdlc/DECISIONS.md` | 0 removed lines; the only additions are D-TASK295-01..03. All 14 lines the branch added on `8281055c` are present in the merged file |
+| Root `package.json` | `git diff 4e1163aa a1b0ba76` and `git diff 5edc54f5 a1b0ba76`; deep JSON diff against main | Against main: only the `overrides` member `"@prisma/config": { "effect": "3.22.4" }`. Against the round-1 head: only main's `tokens:build` script line. So it is the union of both, and the deep diff against `origin/main` shows exactly 1 leaf, `/overrides/@prisma/config` |
+| Lockfile | Blob identity; deep JSON diff of `a1b0ba76` against `origin/main` (`89d0b769`), with a positive control | The `package-lock.json` blob at `a1b0ba76` is `87332c13`, identical to `5edc54f5`. Main's blob `a4c0ba2e` is still the base blob, because PR #78 changed no lockfile. The deep diff shows exactly the 3 leaves `version`, `resolved` and `integrity` of `node_modules/effect` (3.20.0 to 3.22.4), 1,636 entries on each side and one effect tuple. The control shows its 2 planted changes. The lockfile SHA-256 equals the lane B summary's `lockfile_sha256` (`ca709fad…`) |
+| Other owned paths | Blob identity | `tools/ci/advisory-watchlist.json` (`1905629c`) and `tools/ci/check-audit.test.ts` (`d2bda840`) are identical to `5edc54f5`. Main had not changed either one since `8281055c` |
+| Owned-path set | main's `check-security-owned-paths.mjs --base 4e1163aa --head a1b0ba76` and `security-paths.mjs` | The same 4 owned paths as round 1. `security_paths=true`, so the hosted `security-integration` job runs |
+| Carry-over | Round 1, section 2 | The lockfile, register and test blobs are byte-identical to round 1. The round-1 registry, advisory, ReDoS, config-load, audit-gate and OSV results therefore apply unchanged. The replay of the PR295-SEC-01 test logic on the merged pair passes all three assertions |
+| Lane B evidence (read only) | `253f7f4a` `summary.json` / `summary.md` | Verdict PASS on `5edc54f5`, profile `pr`, clean build, `env_overrides` empty. The only suite run is `unit` (8,053 tests passed, 2 skipped). Path rule `images-and-deps` fired, but `compose-up`, `image-assertions` and `trivy` are still `planned` in the manifest, so the `images.stack` check named under PR295-SEC-03 did not run. The calibrated emulation in round 1 remains the evidence for SEC-03. The run reported no integration or Testcontainers suite, so the lane B part of D-TASK295-03 (Prisma `migrate`/shadow) is for the orchestrator and code review to judge. On the security side, the round-1 probe already ran Prisma's real `loadConfigFromFile` on effect 3.22.4 |
+
+### R2.2 Findings and state of main
+
+- **No new finding.** PR295-SEC-01 (LOW) and PR295-SEC-02/-03 (INFO) stay open with the round-1 routes. SEC-01 is not folded into this PR (coordinator decision): it is due before the next PR that changes the `prisma` or `@prisma/config` tuple, and by G3 at the latest.
+- **The merge with main conflicts again.** Main's tip is now `89d0b769`, after `d7925b70` (D-ARCH-183..187) and the round-1 record commit, which appends D-SECPR295-01. `git merge-tree a1b0ba76 origin/main` reports a content conflict in `docs/sdlc/DECISIONS.md`. The existing `refs/pull/79/merge` (`66e895fa`) was built against `4e1163aa`. This round's own D-SECPR295-02 sits in the same region. Before merging, the branch needs one more DECISIONS-union update.
+- **That next update does not void this round.** It brings in only `docs/03-architecture/**`, `docs/sdlc/DECISIONS.md` and this record, none of which is an owned path (simulation R2.3, scenario S2). A new security round is needed only if an owned path changes after `a1b0ba76`.
+
+### R2.3 Record simulation
+
+I ran main's real `check-security-owned-paths.mjs` in a shared clone, on scenario commits built with git plumbing. Base: main `89d0b769` plus this record with round 2 appended, named `PR-9999-…`, plus D-SECPR295-02. Flags: `--pr 9999`. Every DECISIONS conflict was resolved as a union.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1: the merge-ref form, (main + record with round 2) merged with `a1b0ba76`, `--base 4e1163aa --head a1b0ba76` | pass | exit 0 |
+| S2: the next branch update (the branch merged with that main, DECISIONS as a union), `--base` = that main, `--head` = the update | pass | exit 0 |
+| C1: round-1-only record, `--head a1b0ba76` | fail | exit 1: "names 5edc54f, but package.json changed after it" |
+| C2: round 2 with a FAIL verdict | fail | exit 1, verdict FAIL refused |
+| C3: a commit on `a1b0ba76` that edits root `package.json` | fail | exit 1: "names a1b0ba7, but package.json changed after it" |
+| C4: no record | fail | exit 1 |
+
+6 of 6 as expected. The record now has two Head rows, one per round, and its last Verdict row is this round's.
+
+| Field | Value |
+|---|---|
+| Verdict | PASS_WITH_FOLLOW-UPS. Merge-only round on `a1b0ba76`: root `package.json` is the union of main's `tokens:build` script and the override; the lockfile change against main is still exactly the 3 effect leaves; the merge resolution changed nothing else that is owned. No new finding. PR295-SEC-01 (LOW) and SEC-02/-03 (INFO) stay open as routed in round 1 |
