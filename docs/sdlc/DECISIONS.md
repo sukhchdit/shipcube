@@ -6627,3 +6627,91 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - **senior-developer:** PR043-SEC-02 tripwire (R3-m2) in fix cycle 3 if one runs, otherwise on TASK-049; PR043-SEC-08 with R3-m1 on TASK-049; the `tests/`-folder rule and the template-literal spelling on the R2-C5 card line.
   - **principal-architect:** nothing new.
 - **Reversibility:** High (a review record).
+
+### D-SECPR040-01 · 2026-11-20 · security-analyst · TASK-040 part 040-A (idempotency keys with encrypted stored responses; branch `feat/TASK-040-idempotency-keys`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS bound to the final head `3dc1e225` (fix cycle 2); QG-040-C4 answered: D-TASK040-04 stands with a derivation change, D-ARCH-193 confirmed, D-ARCH-192 concurred with conditions, no entry for a SENSITIVE VIEW/DOWNLOAD replay (record `docs/05-quality/security/PR-pending-TASK-040-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-040-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+- **Scope.** `4e1163aa..d0a82a24` was reviewed in full. The merge `40fce4b2` of main `af4a1b48` is a pure union: its tree equals `git merge-tree --write-tree af4a1b48 d0a82a24`. The fix-cycle-2 delta `40fce4b2..3dc1e225` (10 files) was also reviewed. The coordinator asked for the round to bind to the final head, so it does, and no separate delta round is owed.
+- **The record is a merge condition.** The PR changes 37 owned paths (main's checker, `--base af4a1b48`). The classifier selects the hosted `security-integration` job (34 paths). A simulation on a shared clone gives `pass` at `3dc1e225`. The controls give `missing`: one for a Head row on `d0a82a24`, one for a FAIL verdict.
+- **Method.** Static review plus single-process Node 24 probes on `git archive` extracts of `d0a82a24` and `3dc1e225`:
+  - P1, cipher and scope matrix: 29 of 29 on both heads;
+  - P2, the real lease function;
+  - P3, the real store over the branch's in-memory delegate with the real `TenantDb` guard: 14 of 14;
+  - P4, the D-ARCH-195 form through the real problem handler and Express 5: 10 of 11, the one miss a probe artefact (Express's application-wide weak ETag).
+
+  No npm, Jest or Docker, and nothing ran in the evidence worktree or the branch worktree. Lane B is the evidence for every `*.int.test.ts`.
+- **Held.**
+  - **The cipher.**
+    - AES-256-GCM with a random 96-bit nonce and a 128-bit tag.
+    - The AAD binds the table, the column, `hex(scope_hash)` and the key id.
+    - Another scope, a relabelled or unknown key id, a bit flip or a missing tag is refused.
+    - Dual read works by key id.
+  - **Scope isolation.** Organisation and actor, actor-only, guest and keyed client network are separate. An empty or unparsable IP gets no scope (D-TASK040-11).
+  - **M1.** The fail-closed VIEW/DOWNLOAD entry is written before the completion, and a failed entry releases the key.
+  - **The D-ARCH-195 form.** The stored document is replayed byte for byte through the problem handler's rendered path. The replay carries `application/problem+json` and `no-store` or `private, no-store`, with no `Retry-After` and no handler `ETag`. The `RenderedProblemError` brand cannot be forged.
+  - **Logs.** No log line carries the key, the scope hash or a body.
+  - **`Retry-After`** is kept on the exact code set `{IDEMPOTENCY_IN_PROGRESS}` only.
+  - **The migration.** CHECKs, grants and table class agree; the standard-columns guard makes every UPDATE bump `version`.
+- **QG-040-C4, first bullet: D-TASK040-04 stands, with one change.**
+  - **The keyed network HMAC is required:** `idem_key`, the method and the path are in clear, and IPv4 can be enumerated.
+  - **The change.** The configured material must not also be the AES key. Derive both keys by HKDF-SHA256 with the info labels `platform-idempotency-body-v1` and `platform-idempotency-scope-network-v1`, the `_PREVIOUS` key likewise (PR040-SEC-01). It costs one line and no compatibility, because no row exists before part 040-B.
+  - **The rotation effect is accepted.** Only `recordConsent` is network-scoped; a retry across a rotation records the consent twice, which is harmless (EC-A47); pinned by PR040-SEC-07 (a). NAT and trust-proxy sharing are accepted for the same reason.
+  - **Owed by principal-architect before part 040-B merges:**
+    - the ADR-0018 register row reads "key-derivation input of two HKDF keys…", with the blast radius "replay bodies including PER and payment client secrets, at most 25 h; pseudonyms of anonymous client networks";
+    - data-model §10.4 says that `scope_hash` is an unkeyed SHA-256 whose network input is keyed;
+    - the rotation note says that during a rolling deploy an old task answers 500 for a replay of a row written under the new key. This is register-wide, because `guards.ts` allows no read-ahead `_PREVIOUS`.
+- **QG-040-C4, third bullet.**
+  - **D-ARCH-193 confirmed.** A replay runs after the retry's own authentication, MFA gate, authorisation and limits. It returns the stored result of an execution that passed the check, to the same scope only, and starts no action, so skipping the proof check on a replay is not a bypass. Accepted residual: a replay within 24 h returns the data as it was, even after a resource-level (RLS) loss of access.
+  - **Card conditions for TASK-187, checked in its security round:**
+    - **T187-1.** Consumption is one conditional `UPDATE … RETURNING` bound to the actor, the session and the operation, in its own committed transaction, after the claim and before `load`.
+    - **T187-2.** A refusal releases the claim and is never stored. `storedProblemOf` stores every thrown 4xx except a 429, so the 401 `REAUTH_REQUIRED` needs an explicit exclusion in `execute.ts`.
+    - **T187-3.** The proof never enters the fingerprint, a stored body, an audit value or a log line.
+    - **T187-4.** A replay, a 409 or a 422 neither reads nor consumes a proof. The `ReauthProofConditional` text is corrected (with QG-040-C3 (a)).
+    - **T187-5.** After a lease takeover the retry needs a fresh proof.
+    - **T187-6.** Every new execution of the `org.member.manage` and `payment_method.manage` operations is checked, whatever its idempotency mode.
+  - **A SENSITIVE VIEW/DOWNLOAD replay needs no entry of its own.** The only such operation is `emailShipmentDocuments`: 202, no body, no second e-mail, the same re-authorised actor, and the one disclosure already has its entry (M1). Pinned by PR040-SEC-07 (b). A future operation that returns sensitive content needs a decision first.
+- **QG-040-C4, second bullet (before part 040-B is dispatched): D-ARCH-192 concurred,** with five conditions:
+  - **P-1: CODEOWNERS, required.** `/apps/worker/src/platform/idempotency/` gets a CODEOWNERS line before part 040-B merges. It joins PR64-SEC-09 (devops-engineer). The folder holds a SYSTEM-scope DELETE on a table with personal data, and a wrong predicate deletes live keys, so a retry runs `call` twice.
+  - **P-2: `tools/ci/security-paths.mjs`, not required.** No hosted security suite exercises the purge; its PostgreSQL 18 test runs in lane B. This stays with PR46-SEC-08.
+  - **P-3: mechanical confinement in the purge's unit test:**
+    - over a recording client, the only statement is the D-ARCH-192 DELETE, with at most 200 batches;
+    - the source text contains neither `response_body` nor `responseBody`;
+    - no import from `apps/api` (boundaries, with a negative fixture).
+  - **P-4.** The purge logs counts only and runs only on its schedule.
+  - **P-5.** It deletes by `expires_at` only, IN_PROGRESS rows included.
+- **QG-040-C4, fourth bullet:** the T-79, R-05, AC-14 and SEC-TC-04 text is mine before G3. Record §3.9.
+- **Other rulings.**
+  - **D-ARCH-195 form accepted.** A stored problem may hold free-text `detail` (PR63-SEC-01), extra `errors[]` fields, `instance` and the first correlation id, all encrypted and kept at most 25 h. F2-2 to F2-4 are met; F2-1 waits for PR040-SEC-02.
+  - **D-PM-081: concurrence,** except for a claim lost after `call` (PR040-SEC-05, routed back to product-manager).
+  - **Retention until part 040-B: no exposure,** because no row can exist. Without the purge at 040-B it would be MEDIUM; D-ARCH-192 is the control.
+- **New findings.** LOW, all due before part 040-B merges:
+  - **PR040-SEC-01 (CWE-320).** The configured material is the AES key and also the HKDF input of the network key.
+  - **PR040-SEC-02 (CWE-345).** The stored status and headers, the `Content-Type` problem marker included, are not authenticated. A database writer can make a replay `text/html` (Express keeps it over `res.json`; the API sends neither `nosniff` nor a CSP), redirect its `Location`, or flip a 2xx status. Fix: seal `{v, status, headers, body}` always, plus a `Content-Type` value allow-list.
+  - **PR040-SEC-03 (CWE-922).** `checkoutOrder`, `confirmPayment` and `createPaymentMethodSetup` store a gateway `client_secret`, against T-79, R-05, AC-14 and SEC-TC-04 "no stored secrets". Recommended: accept and record it (principal-architect), with SEC-TC-04 reading "no secret in clear".
+  - **PR040-SEC-04 (CWE-667, = code review R2-n1, extended).** The lease formula misses the third transaction of the read-only path and the renewal around `call`. Headroom is 3 s at the defaults and negative from `DB_TX_STATEMENT_TIMEOUT_MS` = 9 s. Fix: `max(D + oneTx, 3 × oneTx + 1 s) + 5 s`, with a table test.
+  - **PR040-SEC-05 (CWE-778, = R2-n2).** A claim lost after `call` answers 409 with no FAILED entry and only the info line of a client conflict. Fix: a FAILED entry and a WARN `api.idempotency_claim_lost` when `call` ran.
+
+  INFO:
+  - **PR040-SEC-06.** `idem_key` is stored in clear and nothing reads it (optional: hash it or drop it later).
+  - **PR040-SEC-07.** Contract pins for the public, VIEW/DOWNLOAD and `client_secret` operation sets.
+  - **PR040-SEC-08.** "A 5xx releases the key" requires provider idempotency keys on booking, pickup and payment calls (ADR-0011, ADR-0012, TASK-075).
+  - **PR040-SEC-09.** A thrown 4xx whose document cannot be serialised throws before `settleClaim`, so the key is held for the lease. Fix: try/catch, then release.
+- **Conditions.**
+  - **Before part 040-A merges:**
+    - lane B PASS on the final head (`store.int.test.ts`, `idempotency-keys.int.test.ts`, the C15 literal);
+    - the hosted `security-integration` job;
+    - the rename and the merge-ref check;
+    - a new round only if an owned path changes after `3dc1e225` (a merge-only round for a main merge).
+  - **Before part 040-B merges:** PR040-SEC-01, -02, -04 and -05 fixed or answered; -03 decided; -07 and -09 done; P-1 to P-5; the purge with or before the wiring; the register and §10.4 text.
+- **Routed:**
+  - **senior-developer:** PR040-SEC-01, -02, -04, -05, -07 and -09 into part 040-B; P-3 and P-4; T187-1 to T187-6 onto the TASK-187 card.
+  - **principal-architect:** register row, §10.4, rotation note; the PR040-SEC-03 decision; PR040-SEC-06 (optional); PR040-SEC-08; the `ReauthProofConditional` wording.
+  - **product-manager:** PR040-SEC-05 and the scope of D-PM-081.
+  - **devops-engineer:** P-1 into PR64-SEC-09.
+  - **qa-lead:** SEC-TC-04 (anonymous half on `recordConsent`; "no secret in clear").
+  - **quality-gatekeeper:** QG-040-C4 bullets 1 to 3 answered; bullet 4 owed by me before G3.
+- **Alternatives considered:**
+  - **Keep the raw-material AES key and accept D-TASK040-04 as written.** Rejected. The change costs one line now and nothing later, and it brings the key in line with the register rule.
+  - **A separate register key for the network HMAC.** Not needed. HKDF labels separate the purposes, and a new key would add a configuration variable and a rotation of its own.
+  - **A replay entry for every SENSITIVE VIEW/DOWNLOAD replay.** Not needed for the one operation in the set; the contract pin forces the question for any new one.
+  - **Ruling PR040-SEC-02 a merge blocker of part 040-A.** Rejected. No row can exist before part 040-B, so the fix lands where the stored form first meets production.
+- **Reversibility:** High (a review record; every follow-up lands before any row exists).
