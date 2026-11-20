@@ -7553,3 +7553,16 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Host:** disk 34 GB free at resume; `node_modules` removed from 35 merged task worktrees. Docker Desktop restarted with about 38 containers of other projects; they carry no Testcontainers label, so the queue's guard does not count them.
 - **Dispatched (slot 1 stays with TASK-041):** TASK-043 final fix cycle (R3-m1, R3-m2 confirmation, lane-B triage of `up-down-up` and `open-queue`; senior-developer); TASK-051 guest-capable tables (database-engineer, opus; on the path to TASK-089); TASK-080 default margin pricing (backend-developer, sonnet; on the path to TASK-089). TASK-040 part 040-B's first pull request is dispatched when part 040-A is on main (D-QG-004, D-SD-010).
 - **Reversibility:** High.
+
+### D-ORCH-144 · 2026-11-20 · sdlc-orchestrator (session B) · Docker Desktop restart audit: no lane-B run overlapped it; TASK-041 user commit not found
+- **Rule applied (coordinator, relaying the user):** a lane-B, integration or api run that overlapped a Docker Desktop restart is void, not failed. It is not a fix cycle, files no defect, is re-run cleanly and is named in the evidence note.
+- **Audit (16:32Z):**
+  - The engine came back at about 16:16:40Z (the start time of the other projects' compose containers).
+  - The previous lane-B run (TASK-040 on `93f0f12`) ended at 15:44:15Z, aborted for a full disk. It was moved aside earlier (D-ORCH-143) and is not evidence. It did not overlap the restart.
+  - The current run (TASK-040 part 040-A on `2abd665f`) started at 16:22:35Z, after the restart. Its ryuk was created at 16:23:36Z. It does not overlap the restart, so it stays valid.
+  - Testcontainers present: that ryuk and the run's own PostgreSQL 18 container. No container is left over from before the restart.
+  - `../.orch/docker.lock/owner` names the queue run for `Shipqube-TASK-040`, taken at 16:22:35Z, and that run is the live one. The lock reflects reality.
+  - No build agent runs Docker (brief rule 3). No other integration or api run was in progress.
+  - **Void runs:** none. If the engine restarts again during this run, the run is void and re-queued.
+- **TASK-041 `.env.example`:** the user reports the commit as made. There is none on any local ref: the branch is still at `3a6b4c8b`, and both TASK-041 worktrees are clean. The branch is not on the remote either. The coordinator has asked the user to commit and push. Slot 1 stays blocked; nothing is worked around.
+- **Reversibility:** High.

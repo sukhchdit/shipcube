@@ -102,7 +102,7 @@
 ## User-only inputs (agents are denied `.env*`; never worked around)
 | Branch | Lines | Since | Blocks |
 |---|---|---|---|
-| `feat/TASK-041-valkey-backed-rate-limiting-per` | the 18 rate-limit placeholder lines + `TRUST_PROXY_HOPS=0` (D-ORCH-140) | 2026-11-20 | TASK-041 part 041-A merge → 041-B, TASK-048, TASK-049, TASK-052 |
+| `feat/TASK-041-valkey-backed-rate-limiting-per` | the 18 rate-limit placeholder lines + `TRUST_PROXY_HOPS=0` (D-ORCH-140) | 2026-11-20 (user reported it done; at 16:32Z no such commit on any local ref and the branch is not on the remote, D-ORCH-144; coordinator asked the user to commit and push) | TASK-041 part 041-A merge → 041-B, TASK-048, TASK-049, TASK-052 |
 | `feat/TASK-043-transactional-outbox-writer-at-least` (after it is pushed) | `# Outbox relay poll interval in ms (ADR-0004; default 500)` / `OUTBOX_RELAY_POLL_INTERVAL_MS=500` / `# Outbox relay batch size per SKIP LOCKED claim (default 100)` / `OUTBOX_RELAY_BATCH_SIZE=100` (D-ORCH-143) | 2026-11-20 | TASK-043 lane B PASS → merge → TASK-047, TASK-049 |
 
 ## Escalations in progress
