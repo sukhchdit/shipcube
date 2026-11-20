@@ -224,3 +224,88 @@ I ran nothing in `../Shipqube-TASK-040`, which is busy with lane B.
 - The lease is derived from the runner's own `transactionOptions` instead of a constant, and renewals are version-conditional. A lost claim is answered before `call` can run twice.
 - The D-PM-081 tests serialise every log line and assert that neither the key nor the body appears.
 - `storedProblemOf` reuses `classifyThrown`, so stored and rendered failures cannot disagree on the status.
+
+
+---
+
+# Round 3: head `3dc1e225` (2026-11-20)
+
+- **Commits reviewed:**
+  - `40fce4b2`, a merge of `origin/main` at `af4a1b48`;
+  - `099fa1ad`, code and tests (D-ARCH-195 F1 to F6);
+  - `3dc1e225`, an empty commit that carries the decision texts, including the new D-TASK040-13.
+- **Scope:** the M2 re-check list of R2.2, the proof that the merge of main is a pure union, and whether R2-n1 and R2-n2 block.
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: The D-ARCH-195 core is right. A thrown 4xx (not 429) is rendered once by the problem handler's own
+  renderProblem, with the first correlation_id and URL. It is stored and sent through the problem handler unchanged,
+  and the replay sends the same bytes with its own X-Correlation-Id. The merge of main is a pure union.
+  One explicit re-check item fails: a handler that RETURNS its own application/problem+json 4xx is replayed as a
+  sticky 500 (R3-M1, reproduced). The type base is honoured when given, but the composition does not hand the problem
+  handler's value to the tx slot (R3-m1, reproduced: the same thrown 409 gets two different `type` URLs). That is
+  harmless until part 040-B, which must close it.
+FINDINGS: 1 MAJOR (R3-M1), 1 MINOR (R3-m1), 0 new NIT. R2-n1 to R2-n4 stay NITs and do not block.
+```
+
+## R3.1 What I verified myself
+
+I ran nothing in `../Shipqube-TASK-040`, which is in lane B.
+
+**Set-up.** I worked in a `git archive 3dc1e225` extract taken from the main checkout. Its `node_modules` was a junction to the idle `Shipqube-TASK-295` worktree, whose lock is byte-identical to the head's (md5 `7e5ffed3…`, the TASK-295 override that came in with the merge). I added `@platform/*` junctions inside the extract, generated the Prisma client there and pointed each `tsBuildInfoFile` into the extract. Afterwards I removed everything. The TASK-295 worktree is still at 748 entries with a clean `git status`.
+
+| Check | Result |
+|---|---|
+| Merge of main | `git merge-tree --write-tree d0a82a24 af4a1b48` gives tree `f7a0ca46`. `git diff f7a0ca46 40fce4b2` is **empty**, so the merge commit is exactly the clean merge, with no hand resolution. `099fa1ad` touches only the 10 files of the fix. `3dc1e225` is empty. Against main there is no `package.json`, lock or `tools/ci` delta: those changes arrived with `#79`. `merge-tree 3dc1e225 origin/main` is clean; main has moved only by review records. |
+| Jest `unit` + `api` (`--maxWorkers=2`): idempotency, `errors/`, `pipeline-guards`, `db/system-db`, `contract/x-idempotency`, `grants-manifest`, `tx/`, `audit/capture`, `check-audit`, `route-metadata` | **22 suites, 407 of 407 passed** |
+| Coverage | `execute.ts`, `rendered-problem.ts` and every `platform/idempotency` file: 100 % of lines. `problem-handler.ts` 96.7 %. Its uncovered lines 140-148 are the unchanged PR9-SEC-07 fallback, not lines of this diff. |
+| `tsc -b` over the touched projects | clean |
+| ESLint `--max-warnings 0` on every changed `.ts` file | clean |
+| Prettier `--check --ignore-unknown` | clean |
+| **Probe** (a throw-away API test under `createApp` with `problemTypeBase: 'https://docs.example.test/p/'` and a store; removed) | (1) A handler **returns** `409` with `Content-Type: application/problem+json` and the body `{type:'about:blank', title:'Version conflict', status:409, current_version:3}`. First answer: **409** with that body. Retry with the same key: **500 INTERNAL_ERROR**, plus ERROR event `api.idempotency_replay_unreadable {reason: 'stored problem malformed'}`. That repeats for 24 h. (2) A thrown `AppError('CONFLICT')` on the same app: **without a key** `type` is `https://docs.example.test/p/CONFLICT`; **with a key** `type` is `https://docs.platform.invalid/problems/CONFLICT`. |
+
+**Not re-run:** the PostgreSQL 18 suites (`store.int.test.ts` now covers a stored rendered document), because they need lane B.
+
+## R3.2 The M2 re-check list
+
+| Item | Result |
+|---|---|
+| (a) Byte-identical, `correlation_id` included | **Met.** `storedProblemOf` stores the `Problem` object, and `RenderedProblemError.body = JSON.stringify(problem)` is what the first response sends. A replay sends `JSON.stringify(JSON.parse(stored))`, the same text for a JSON-only document. Pinned in the API test (`replay.text === first.text`, the replay's `correlation_id` equals the first response's `X-Correlation-Id`, its own header differs) for thrown 409, 422 and 400, and for a 4xx thrown in `load` and one in `call` (`call` ran once). The order is FAILED entry, completion, response. |
+| (b) Same `typeBase` as the problem handler, shown by a test | **Partly met.** `renderProblem` is now the single rendering, and `storedProblemOf` honours a `typeBase` (`problem.test.ts:28`). But the value reaches the tx slot through a second, separate option (`ExecuteOptions.problemTypeBase`) that `createApp`'s `defaultSlots` does not set from `AppDependencies.problemTypeBase`. No test shows the two being equal in a composition, and my probe shows they diverge. Today production configures no type base, and no idempotent route can mount before 040-B, so nothing is exposed yet. See R3-m1. |
+| (c) `Retry-After` never stored | **Met.** `STORED_HEADERS` is `ETag`, `Location` and `Content-Type`. A 429 and every retryable DbError (all 503) are released, not stored, and keep their original error, so their `Retry-After` survives. A `RenderedProblemError` is sent without `Retry-After`; among 4xx only `IDEMPOTENCY_IN_PROGRESS` carries one, and the protocol answers it before any phase, never as a stored outcome. |
+| (d) A handler that RETURNS its own `application/problem+json` 4xx is replayed as returned | **Not met (R3-M1).** `replayedProblemOf` treats any stored `Content-Type: application/problem+json` as a document the slot rendered. If the body has no catalogue `code` whose status matches, the row is declared unreadable and every retry answers 500. ADR-0014 am. 6 says the response is stored "as the first request received it: the status, the allow-listed headers (`ETag`, `Location`, `Content-Type`) and the body". Its malformed-row cases in `problem.test.ts:51` are all bodies the slot would never write. None is a returned document. |
+
+## R3.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-M1 | MAJOR | `apps/api/src/platform/idempotency/problem.ts` `replayedProblemOf`; `store.ts` `STORED_HEADERS` (`content-type`) | A returned 4xx whose handler set `Content-Type: application/problem+json` (RFC 9457 extension members, such as a current version on a 409 or 412, which TASK-096 is likely to want) is completed normally. Its replay is then refused as "stored problem malformed": **500 for 24 h** to a client that got a correct 409, plus an ERROR event that sends operations looking for a key-rotation mistake. The marker cannot tell "rendered by the slot" from "returned by the handler". Reproduced (R3.1). This is the fourth item of the M2 re-check, so M2 does not close. | Make the slot-rendered origin explicit and impossible for a handler to forge. For example: (i) store an internal marker in `response_headers` under a name outside the response allow-list (so `replayedHeadersOf` never emits it); or (ii) put the origin in the AAD-covered body envelope. Replay through `RenderedProblemError` only for those rows. Every other `problem+json` row replays as an ordinary result through `send` (stored `Content-Type`, the same `JSON.stringify` bytes). Keep "malformed" only for slot-marked rows. Tests: a returned `application/problem+json` 409 with extension members, and one with a catalogue `code`, each replayed as returned (`text` equal, `Idempotent-Replayed: true`, handler once). |
+| R3-m1 | MINOR | `apps/api/src/platform/tx/execute.ts` `ExecuteOptions.problemTypeBase`; `apps/api/src/app.ts:171` (locked, not edited) | One setting is wired twice: the problem handler gets `deps.problemTypeBase`, and the tx slot gets nothing unless a composition passes `problemTypeBase` separately. With a configured base, the same thrown 409 carries `type …/p/CONFLICT` without a key and `…/problems/CONFLICT` with one (reproduced). That breaks the D-ARCH-195 premise that the stored document is "the one the problem handler would render". Not exposed before 040-B: no type base is configured in production, and no idempotent route mounts. | In part 040-B, `defaultSlots` in `app.ts` derives `problemTypeBase` for the tx slot from the same `deps.problemTypeBase` that `problemHandler` gets (one source). Add a composition test: `createApp({ problemTypeBase: X, … })` gives the same `type` for a thrown 4xx with and without a key. Add it to the 040-B proof list of ADR-0014 am. 9. |
+
+**R2-n1 (the lease counts two transactions; the read-only path has three, and the admission wait is left out) and R2-n2 (a claim lost after `call` gets no FAILED entry):** not addressed in this cycle. **They do not block.**
+- R2-n1 has no exposure with the default budgets: the 30 s floor and the 20 s call deadline dominate. It matters only with a raised `DB_TX_*` budget.
+- R2-n2 needs the sizing invariant to break first.
+- Both stay NITs for the developer, and R2-n2 also for the security record. R2-n3 and R2-n4 are unchanged.
+
+## R3.4 Rulings on the decisions
+
+| Decision | Ruling |
+|---|---|
+| D-TASK040-03 (replaced) | Accepted for thrown 4xx (am. 6). The "as sent" half for returned `problem+json` 4xx is open (R3-M1). |
+| D-TASK040-13 (shared `renderProblem`; `RenderedProblemError` sent as is; WeakSet brand) | Accepted. A forged look-alike falls through to `renderProblem`, where it classifies as `unexpected` (500). |
+| D-TASK040-01, -02, -05, -06, -08, -10, -11, -12 | As ruled in rounds 1 and 2 and by ADR-0014 am. 5 to 9. |
+
+## R3.5 Merge conditions (replace R2.5)
+
+1. R3-M1 fixed and tested. A round-4 delta review of that fix only.
+2. R3-m1 added to part 040-B's proofs (ADR-0014 am. 9), or fixed now if the `app.ts` lock is free.
+3. Lane B on PostgreSQL 18 green on the final head: `store.int.test.ts`, `idempotency-keys.int.test.ts`, the C15 literal. Diff coverage clean.
+4. The second of TASK-040 and TASK-043 to merge takes the four literal unions and settles R2-n4.
+5. A security-analyst record on the final head: D-TASK040-04, R2-n2, and the `RenderedProblemError` brand.
+
+## R3.6 Good
+
+- One rendering function for the problem handler and the tx slot. The tx slot no longer duplicates the classification, so a stored document cannot drift from the handler's rules.
+- The stored and the sent document are the same object, rendered once, and the API test compares response **text**, not parsed JSON.
+- A 4xx thrown in `load` and one thrown in `call` are covered, with `call` counted once.
+- The merge of main has no hand resolution (an empty diff against the clean merge-tree).
