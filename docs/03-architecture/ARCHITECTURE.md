@@ -143,9 +143,10 @@ Each module folder: `routes.ts` (`defineRoute` declarations), `controller.ts`, `
 ```mermaid
 flowchart TB
   boot["Worker bootstrap<br/>config, Pino, OTel, Redis, Prisma"] --> sched["Job schedulers (upsertJobScheduler)"]
+  boot --> rloop["Outbox relay loop (no job)<br/>advisory lock, SKIP LOCKED batch → queue outbox-relay"]
   boot --> procs
   subgraph procs["Processors (one per queue)"]
-    relay["outbox-relay<br/>SKIP LOCKED batch → BullMQ"]
+    relay["outbox-relay<br/>dispatcher: event type → handlers,<br/>then their follow-up jobs"]
     booking["booking<br/>saga steps 2–3"]
     pay["payments<br/>webhook processing, capture, refund, sweeper"]
     docs["documents<br/>pdfkit render, store, hash"]
@@ -158,9 +159,12 @@ flowchart TB
   procs --> svc["Module services (shared code) via withTenantTx(job ctx)"]
   svc --> gw["CarrierGateway per account<br/>bulkhead → breaker → timeout → retry"]
   svc --> pg[(PostgreSQL)]
+  rloop --> pg
   procs --> dlq[(DLQ per queue)]
   boot --> health["/health/*, /metrics"]
 ```
+
+*Amended 2026-11-20 (ADR-0004 amendments 2 and 3; ADR-0013 amendment 5; QG-043-C1 (b)): the drawing showed `outbox-relay` as the processor that runs "SKIP LOCKED batch → BullMQ". The relay is an in-process loop in every worker, not a job. The processor of the queue `outbox-relay` is the dispatcher: it calls the handlers registered for the event's type and then enqueues their follow-up jobs.*
 
 ### 5.3 `apps/web`
 
