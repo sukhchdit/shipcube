@@ -752,3 +752,110 @@ Then correct the module doc at `labels.ts:7-10`.
 - **TASK-101/135/139/140:** every real-carrier PDF/ZPL fixture passes the sniffers (D-TASK075-21 residual and the module doc), and a contract case for R3-m1.
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** Round 3 at `82aa275`: PR075-SEC-10 (MEDIUM) closed (11/11 operations: a contract error after adapter entry leaves as `CarrierError` `CARRIER_UNKNOWN_ERROR`, a pre-entry refusal as `CarrierContractError`); PR075-SEC-11, -12, -13 (INFO) closed; code review R2-m1, R2-n2, R2-n3, R2-n4 closed; every round-1/2 closure re-probed and holding. New: PR075-SEC-14 LOW (the 1024-byte PDF window accepts HTML-, PNG- and ZPL-led payloads as PDF, a regression of the round-1 guarantee, and a blank byte moves foreign magic past the ZPL check; validated fix), PR075-SEC-15 INFO (worst-case caret loop 708 ms per 20 MB; TASK-113 response-size cap). Code review R3-m1 and R3-n1 concurred. Open and routed: -02 (b) TASK-113, -02 (c) orchestrator, -04 (b) TASK-132, -09 TASK-113/128. 0 Critical, 0 High, 0 Medium open. Conditions: C1 lane B and hosted `security-integration` at `82aa275`, C2 rename and merge-ref confirmation, C3 delta round on any later change to the guard, errors, labels, egress or context |
+
+## Round 4 (delta, pre-push, final fix cycle): `82aa275..28044845`
+
+| Field | Value |
+|---|---|
+| Head | 2804484569dfe86972240bd959381cfed662f3bb |
+| Range | One commit on `82aa275`, touching three files under `packages/carriers/src/`: `labels.ts` (the header sniffers), `canonical/types.ts` (the `LabelDocument` JSDoc for R3-m1) and `hardening-misc.test.ts` (the round-3 shapes plus a property) |
+| Owned paths changed | Still one: `tools/lint/carrier-wire-boundary.test.ts`, unchanged since `c2eaa47` |
+| Tip to push | `28044845` plus evidence-only commits (lane B run files only) |
+| Lane B evidence | About to start on `28044845` (coordinator); `dde830b` passed every suite. I read no run files |
+| Code review twin | Round 4 on main, `ffe6b78`: APPROVED_WITH_NITS. Its R4-n1 (a blank lead longer than 1,024 bytes moves the ZPL foreign-signature test onto blanks) is the edge stated in R4.1; I concur that its impact is negligible |
+| Plan fold read | D-SD-004 (`3f91abf`) routes PR075-SEC-02 (c) to the CODEOWNERS additions, which are due with 015-C or earlier and before TASK-135. It also gives TASK-101/135/139/140 the label-fixture and R3-m1 contract lines |
+| Developer decisions | D-TASK075-25 (in the hand-off, not read). PR075-SEC-15 is left to TASK-113, as routed in round 3 |
+| Reviewer / date | security-analyst, 2026-11-20, round 4 (C3 of round 3). Same host rule and method: nothing was run in the PR worktree. The kit ran on a `git archive` extract of `28044845`, with `82aa275` as the control, plus one new edge probe (`r4-edges.mjs`). Line numbers come from single-file reads at `28044845` |
+
+### R4.1 PR075-SEC-14: closed
+
+**What changed.** `labels.ts` now:
+- allows only NUL, TAB, LF, FF, CR, space and the UTF-8 BOM bytes before a header (`LEADING`, `:41`; `firstSignificant`, `:44-48`, bounded by the 1024-byte window);
+- in `isZpl` (`:56-61`), tests the PDF, PNG, GIF, JPEG, BMP and `<` signatures after that lead, then looks for `^XA` in every letter case with native `Buffer#includes`;
+- in `isPdf` (`:67-70`), requires `%PDF-` at the first significant byte, starting before byte 1024 and matched against the full buffer.
+
+This is the round-3 candidate, plus the code review's R3-n1 straddle rule.
+
+**The 14 round-3 shapes** (`r3-labels.mjs`):
+
+| Shape | Labelled | `82aa275` | `28044845` |
+|---|---|---|---|
+| `%PDF-` at 0; BOM then `%PDF-`; CR/LF then `%PDF-` | PDF_4X6 | accepted (3) | accepted (3) |
+| HTML, then `%PDF-` at 60 | PDF_4X6 | **accepted** | refused |
+| PNG header, then `%PDF-` at 40 | PDF_4X6 | **accepted** | refused |
+| ZPL, then `%PDF-` (an adapter mislabel) | PDF_A4 | **accepted** | refused |
+| `%PDF-` after 1,100 blanks | PDF_4X6 | refused | refused |
+| `^XA` at 0; a 4,800-byte `~DG` preamble then `^XA` | ZPL | accepted (2) | accepted (2) |
+| LF, then a PDF holding `^xa` | ZPL | **accepted** | refused |
+| BOM, then PNG bytes holding `^xa` | ZPL | **accepted** | refused |
+| A space, then `<html>…^XA` | ZPL | **accepted** | refused |
+| EPL whose field data holds `^XA` | ZPL | accepted | accepted (stated residual, D-TASK075-21) |
+
+That is 13 of 14 as wanted (control: 7 of 14). The fourteenth is the stated EPL residual.
+
+**Edge probe** (`r4-edges.mjs`, 13 rows), all as wanted:
+- **PDF window.** A header after 1,019 or 1,020 blanks is accepted (R3-n1: it straddles byte 1024); after 1,024 blanks it is refused.
+- **PDF lead bytes.** NUL/TAB/FF leads are accepted. An NBSP (0xA0) lead, a UTF-16 BOM lead and `%PDF` without the dash are refused.
+- **Sub-array views.** `isPdf` reads the view's own first byte. `isZpl` searches only the view, because `Buffer.from(buffer, byteOffset, byteLength)` respects it: a `^XA` outside the view is not seen, one inside is found.
+- **ZPL leads.** A TAB/CR/LF/BOM lead before `^XA` is accepted; a BOM then `%PDF` is refused.
+- **One accepted edge: a lead longer than 1,024 blank bytes.** It is followed by PNG bytes holding `^xa`, and is accepted as ZPL, because the foreign-signature test then sees blanks. This is negligible: a carrier response does not carry a 1 KiB blank prefix, and the result is a wrong document type, not a new exposure. I record it as a stated edge, not a finding; it is the code review's R4-n1.
+
+**Guard path.** An HTML-led "PDF" is dropped from `createShipment` with a `carrier.label.dropped` line and the `ref` kept. From `recoverLabel` it is refused as `CarrierError(CARRIER_UNKNOWN_ERROR)` with a `carrier.label.refused` line.
+
+**Docs and tests.**
+- The module doc (`labels.ts:7-12`) now matches the behaviour and names both residuals.
+- `hardening-misc.test.ts:212-226` adds the property "after any blank/BOM lead, a PNG, GIF, JPEG, BMP or markup header is neither ZPL nor PDF", which is the verification test asked for in round 3.
+
+**Code review R3-m1.** Addressed in the `LabelDocument` JSDoc (`canonical/types.ts:124-129`): in `createShipment`, adapters return `{ format, content }` and let the guard check it. The TASK-101 contract case stays routed.
+
+### R4.2 Regression of the earlier closures
+
+The full round-2/3 kit at `28044845` gives the same rows as at `82aa275`:
+- PR075-SEC-10: 11/11 operations (`r3-class.mjs`), and before/after classes differ (`r2-sec10.mjs`);
+- PR075-SEC-01: the 6 accepted context rows all see a frozen sandbox copy;
+- egress: the misfiled, the exact-under-prefix and the cross-carrier tables are refused, and the valid tables give 0 issues;
+- SEC-04 (a): no sentinel or URL path in the real `createLogger` line or in `util.inspect`;
+- SEC-07: 21 lines;
+- R1-M1/S4: 3 in, 3 out, no description in a warn line;
+- SEC-08: the registry message.
+
+**PR075-SEC-15 (INFO)** stays open and routed to TASK-113. The worst case (20 MB of `^`, no `^XA`) is now 315-420 ms with the native search, against 671-708 ms for the round-3 loop. The bound is the ADR-0016 §13 response-size cap.
+
+### R4.3 Secrets, record binding and simulation
+
+**Secrets.** The over-approximating Gitleaks scan of the commit's 87 added lines (pinned v8.30.1 config; the PAT and AWS-id controls fired) found 0 hits.
+
+**Binding.** The four `Head` rows of this file name `c2eaa47`, `dde830b`, `82aa275` and `28044845`, all in the PR's range. The last `Verdict` row is this round's.
+
+**Simulation.** I used main's real checker in a `--shared` sparse clone. The record (four rounds) is committed on main's tip as `PR-9999-TASK-075-security-review.md` and merged with the head; `--base` is the event base (the merge base `2ec81df`), `--pr 9999`:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| T1 The merge ref: the record on main (tip `ffe6b78` when this round was written), merged with `28044845` | pass | pass |
+| T2 An evidence-only commit after `28044845` | pass | pass |
+| T3 Control: no `PR-9999-*` record (main's tip carries only the placeholder name) | fail | fail (`missing`) |
+| T4 Control: a later `FAIL` verdict row | fail | fail |
+| T5 Control: the owned lint test changed after `28044845` | fail | fail |
+| T6 Control: `eslint.config.mjs` changed after `28044845` | fail | fail |
+| T7 Control: the record only under the placeholder name | fail | fail |
+| T8 `packages/carriers/src/guard.ts` changed after `28044845` | pass | pass: the checker does not demand a new round; C3 does |
+| T9 Control: all four `Head` rows name a main commit | fail | fail |
+
+9 of 9 as expected.
+
+### R4.4 Merge conditions and routes
+
+**Conditions.**
+- **C1.** Lane B at `28044845`: `unit`, including `hardening-misc` with the new property, `guard-hardening` and `tracking-and-logging`, and the coverage gate. The hosted `security-integration` job must be green.
+- **C2.** Rename the record, then confirm the merge ref contains it (D-ORCH-136/138).
+- **C3 (carried).** Any later change to `packages/carriers/src/{guard,errors,labels,egress,context}.ts` before the merge needs a security delta round. The coordinator reports this was the last fix cycle, so none is expected.
+
+**Routes (open items after this PR).**
+- **TASK-113:** PR075-SEC-15 (the response-size cap value), PR075-SEC-02 (b) (the most specific entry decides the tier; three SEC-TC-66 rows) and -09.
+- **TASK-132:** -04 (b) (convert non-`CarrierError` failures with `safeCause`, using the ruling-2 wording).
+- **TASK-128:** -09.
+- **Orchestrator:** -02 (c) (CODEOWNERS lines for `packages/carriers/src/egress.ts` and `packages/carriers/src/adapters/*/egress.ts`; D-SD-004: with 015-C, at the latest before TASK-135).
+- **Public tracking task:** the -12 sentinel test.
+- **TASK-101/135/139/140:** every real-carrier PDF/ZPL fixture passes the sniffers; an R3-m1 contract case.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 4 at `28044845` (final fix cycle): PR075-SEC-14 (LOW) closed. The 14 round-3 label shapes give 13 of 14 as wanted (control 7 of 14); the fourteenth is the stated EPL residual (D-TASK075-21). 13 of 13 edge rows as wanted (the >1 KiB blank lead is the stated edge, code review R4-n1), including R3-n1's straddling header, NBSP and UTF-16 leads, and sub-array views. Code review R3-m1 addressed in the JSDoc. All earlier closures re-probed and holding (PR075-SEC-10 11/11). No new finding. Open and routed: PR075-SEC-15 INFO and -02 (b) TASK-113, -02 (c) orchestrator, -04 (b) TASK-132, -09 TASK-113/128, -12 sentinel test to the public tracking task. 0 Critical, 0 High, 0 Medium open. Conditions: C1 lane B and hosted `security-integration` at `28044845`, C2 rename and merge-ref confirmation |

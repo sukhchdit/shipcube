@@ -5184,3 +5184,29 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - api-designer: the §7 / §13 acknowledgement.
   - devops-engineer: the CODEOWNERS PR, if it runs before 015-C.
 - **Reversibility:** High (plan data only).
+
+### D-SECPR075-04 · 2026-11-20 · security-analyst · TASK-075 security round 4 (delta `82aa275..28044845`, pre-push, the final fix cycle; the C3 round of D-SECPR075-03) = PASS_WITH_FOLLOW-UPS at code head `28044845` (round appended to `docs/05-quality/security/PR-pending-TASK-075-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical, High or Medium is open, and there is no new finding.
+  - **Scope.** `28044845` is one commit on `82aa275`: `labels.ts`, the `LabelDocument` JSDoc and `hardening-misc.test.ts`. The owned path is unchanged.
+  - **Method.** Static review plus single-process Node probes on a `git archive` extract of `28044845`, with `82aa275` as the control. Nothing was run in the PR worktree.
+- **Closed: PR075-SEC-14 (LOW).** Only NUL/TAB/LF/FF/CR/space/UTF-8 BOM bytes may precede a header. `isPdf` needs `%PDF-` at the first significant byte, starting before byte 1024. `isZpl` refuses PDF/PNG/GIF/JPEG/BMP/`<` after the lead, then finds `^XA` with native `Buffer#includes`.
+  - **The 14 round-3 shapes:** 13 of 14 as wanted (control: 7 of 14). The fourteenth is the stated EPL residual (D-TASK075-21).
+  - **Edges:** 13 of 13 as wanted (R3-n1's straddling header, NBSP and UTF-16 leads, sub-array views).
+  - **Stated edge:** a blank lead longer than 1,024 bytes hides a foreign signature from the ZPL test. Negligible; it is also code review R4-n1.
+  - **Guard path:** an HTML-led "PDF" is dropped from `createShipment` with the `ref` kept, and refused from `recoverLabel`.
+  - **Property test:** added.
+  - **Code review R3-m1:** addressed in the JSDoc.
+- **Regression.** Every earlier closure was re-probed and holds; PR075-SEC-10 is 11/11.
+- **Binding.** The four `Head` rows name `c2eaa47`, `dde830b`, `82aa275` and `28044845`. Simulation with main's real checker: 9 of 9 as expected.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at `28044845`.
+  - **C2.** Rename the record and confirm the merge ref.
+  - **C3 (carried).** A delta round on any later change to the guard, errors, labels, egress or context before the merge. None is expected: this was the last fix cycle.
+- **Open and routed:**
+  - **TASK-113:** PR075-SEC-15 (INFO; the ADR-0016 §13 response-size cap value; the worst case is now 315-420 ms per 20 MB), -02 (b), -09.
+  - **TASK-132:** -04 (b).
+  - **TASK-128:** -09.
+  - **Orchestrator:** -02 (c), CODEOWNERS per D-SD-004.
+  - **Public tracking task:** the -12 sentinel test.
+  - **TASK-101/135/139/140:** the label fixtures and the R3-m1 contract case (D-SD-004).
+- **Reversibility:** High (a review record).
