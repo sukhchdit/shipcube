@@ -6027,3 +6027,48 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Trigger kept (A-112, R-16):** one event after launch that affects more than one user of an address reopens the two narrower designs of amendment 13 item 4.
 - **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.15 (REQ-SEC-005 note), `docs/01-requirements/ASSUMPTIONS.md` (A-112), `docs/01-requirements/PRD.md` 1.16 (§9 R-16, §11). DR-A22, NFR-SEC-005 and the US-040 notes are unchanged: they state the values, which did not change.
 - **Reversibility:** High.
+
+### D-SD-006 · 2026-11-20 · senior-developer · Plan fold for QG-043-C6 (D-QG-002; card lines of D-ARCH-183..187) with the US-011 split of D-PM-079, and the review routings of PR #77 (TASK-079), PR #78 (TASK-038) and PR #79 (TASK-295): the dispatcher is hosted on TASK-047 (now M), TASK-078 owns the 24 h `token_enc` housekeeping (plan regenerated: 295 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Trigger:** the orchestrator's fold request after D-QG-002 (`abd17e2d`) and the merges of PR #77 and #78. D-PM-079 is folded in the same commit because it moves the completion of US-011 onto the dispatcher host this entry chooses. It was still uncommitted in the shared checkout; its card items 1 and 2 are taken as written.
+- **Decision (cards in `docs/04-plan/generator/plan-data.mjs`, outputs regenerated):**
+  1. **TASK-043 (before it merges).**
+     - The planned path of D-TASK043-02 is `apps/worker/src/platform/outbox/**`; `processors/outbox-relay/**` is now the dispatcher, which belongs to TASK-047.
+     - The schema item names `processed_events` and the `job_executions` DELETE grant.
+     - One FIX CYCLE LINES entry carries F1 to F12 of D-ARCH-183, -184, -185 and -187 with their values and tests, plus the D-QG-002 observation that the lag gauge is set at the claim.
+     - The `[QG-043-C7 (a)]` two-session relay-lock test is on the card, with the AT-US-011-04 map note of C7 (c).
+     - D-PM-079 item 1: `us` [] and `part` US-011, and the SCENARIO OWNERSHIP line replaces "All US-011 scenarios".
+  2. **The dispatcher host is TASK-047**, as D-ARCH-184 proposed.
+     - It already runs an `outbox_event` job for AT-US-078-04 and owns the consumer, the job context and the worker runner twin. Every handler goes through the dispatcher, so it needs the context resolution first.
+     - It is in Wave 1, so US-011 (M0 Must DC) completes inside its band without a wave exception (D-PM-079).
+     - Its size goes from S to M. It gains the files `apps/worker/src/processors.ts` and `processors/outbox-relay/**`, plus `apps/api/src/platform/db/with-tenant-tx.ts` with the worker twin, so it gains the shared-file lock `api-tenant-db`. No other batch 1.4 card holds that lock; gen checks it.
+     - New lines: DISPATCHER (verbatim); DISPATCH GATE: FOLLOW-UP JOB RULE, a placeholder for QG-043-C2 that principal-architect must rule before dispatch, with the test of C2; CORRELATION GRAMMAR (verbatim); MERGE ORDER IN BATCH 1.4 (TASK-047 before TASK-049); `[AT-US-011-04]` consumer half, which completes US-011 (D-PM-079 item 2).
+     - Rejected: a new late dispatcher task. It would split the consumer from the context it must resolve, add a task to the full batch 1.4, and need its own US-011 completion.
+     - Rejected: TASK-078 as the host. It is Wave 2, it would carry US-011 to the edge of its band, and the dispatch of TASK-078 waits on QG-043-C3.
+  3. **Publishers.**
+     - TASK-049 carries EVENT TYPE SEQUENCING, as a merge prerequisite inside batch 1.4 (TASK-047 on main first), and the PUBLISH RULE.
+     - The same two rules go on every card whose plan adds an event file or publishes: TASK-059 (verify), TASK-084 (statemachine), TASK-087 (quote), TASK-092 (saga), TASK-099 (reset) and TASK-227 (invite).
+     - They are merge-order lines, not dependency edges, so dispatch is not delayed (D-SD-001).
+  4. **TASK-078.**
+     - HANDLER RULES (verbatim).
+     - DISPATCH GATE: TOKEN_ENC OVERWRITE OUTCOME, a placeholder for QG-043-C3 (principal-architect with security-analyst).
+     - **TOKEN_ENC HOUSEKEEPING OWNER.** TASK-078 builds the 24 h removal of `payload.token_enc`, taking `pg_advisory_xact_lock(478216878200)` in the transaction of its statement (D-ARCH-183), as a scheduled job under the D-SECPR039-01 conditions, with tests at 23 h and 25 h and against a held relay lock.
+     - Why TASK-078: it owns the overwrite after sending and the C3 alternative "accept the 24 h backstop", so the backstop and the rule it backs land in one PR and one security round.
+     - Window accepted: between the TASK-049 merge (first producer of `token_enc`) and the TASK-078 merge (Wave 2), unconsumed `token_enc` rows are bounded only by the 30-day outbox purge. This holds only on local and CI databases, because no deployed environment exists in Run 1, and TASK-078 merges before `v0.1.0-m0`.
+     - Rejected: TASK-049 as the owner. It is on the critical path, and a schedule there would edit the queue definitions that TASK-047 holds in the same batch.
+     - Rejected: TASK-043. Its fix cycle is limited to the D-QG-002 list.
+  5. **TASK-214:** OUTBOX ALARMS (verbatim), plus the D-QG-002 observations: an `absent()` arm (or a worker-down alarm) for OutboxRelayStalled, and the QueueDeadLetterNew page set.
+  6. **PR #77 routings.**
+     - TASK-097: PR079-SEC-01 (the transitive wire-boundary walk; owned file; due before TASK-135), PR079-SEC-02 (the latency wait capped at `deadlineAt`, sandbox-only directives), code review m2 (a tracking anchor on an injected clock; TASK-172 told), PR079-SEC-05 (refuse production contexts, pin the composition root), and the Mock half of m1 / PR079-SEC-03 (validate `maxCallRecords`) unless TASK-092 does it.
+     - TASK-135: a merge prerequisite on PR079-SEC-01.
+     - TASK-092: the CALL RECORD CHANNEL line (m1 / SEC-03 with principal-architect before dispatch). If the channel changes the Mock adapter, TASK-092 asks for the lock `pkg-carriers-mock`.
+     - TASK-132, 135, 139 and 140: PR079-SEC-04 (a throwing logger must not replace the outcome).
+     - TASK-083: code review n9 (orientation-free dimension eligibility).
+  7. **PR #78 routings, on TASK-046.**
+     - A merge prerequisite for PR038-SEC-01: (a) CODEOWNERS plus `LINT_CONTROL_PATHS` and `PROOF_BASE_DIRS`, with a devops pairing for those owned files, or (b) a move under `tools/stylelint-rules/`. Either way with the owned fixtures, with PR038-SEC-02 and with a security round.
+     - The SPACING SCALE line (R1-m1), enforced only after ux-designer amends tokens.md §2 and §5.
+     - Not carded, because no task builds runtime tenant themes in Run 1: the D-TASK038-06 port conditions (i) to (vi). They stay with principal-architect, as D-SECPR038-01 says.
+  8. **PR #79.** PR295-SEC-01, the root-overrides pin test, goes on TASK-015 part 015-C (devops-engineer), due before the next PR that changes the `prisma` or `@prisma/config` tuple, at the latest G3. TASK-295 is shown as PR #79 open. EFFECT-WAIVER closes when PR #79 merges; it is not closed here, because the PR was still open at commit time.
+  9. **Merges recorded.** STATUS rows for TASK-079 (PR #77, `8281055c`) and TASK-038 (PR #78, `4e1163aa`), and the TASK-043 fix-cycle row with its D-QG-002 merge conditions. traceability v1.12: REQ-CARR-004 and REQ-UI-001 are Implemented, and REQ-PLAT-011 notes the Mock hop. It sits above D-PM-079's v1.11, which product-manager commits.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. A per-row diff of `task-map.csv` against the pre-fold file shows 0 changes of branch, title, wave or batch; 19 rows changed (refs; complexity and stories of TASK-047; stories of TASK-043); no new task.
+- **Commit hygiene:** the shared checkout held product-manager's uncommitted D-PM-079/080 edits in DECISIONS.md, traceability.md and `docs/01-requirements/**`. This commit stages index blobs built from HEAD plus my own edits only, so those edits stay in the working tree for product-manager to commit.
+- **Reversibility:** High (plan sources, generated outputs, STATUS, traceability; no code).
