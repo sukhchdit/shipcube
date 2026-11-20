@@ -1098,7 +1098,8 @@ Burn rate is (error ratio) / (1 − SLO). In CloudWatch each window is a metric-
 | Queue backlog / oldest job age (booking) | Age > 60 s for 5 min | RB-07 |
 | `QueueDeadLetterNew`: new dead letters on a queue (*amended 2026-11-19, ADR-0013 amendment 3 item 14, D-ARCH-160; was "DLQ depth growth"*) | `platform_queue_dead_lettered_total` increased in 15 min; page for `booking` and `payments`, ticket for the other queues | RB-07 |
 | `QueueDeadLetterDepthHigh`: dead-letter records near their count bound (*added 2026-11-19, same amendment*) | `platform_queue_dead_letter_jobs` ≥ 1,600 (80 % of 2,000) for 5 min; page | RB-07 |
-| Outbox relay lag | > 30 s for 5 min | RB-06 |
+| `OutboxRelayLag`: outbox relay lag (*named 2026-11-20, ADR-0013 amendment 5 item 25, D-ARCH-183*) | `platform_outbox_relay_oldest_pending_age_seconds` > 30 s for 5 min; page | RB-06 |
+| `OutboxRelayStalled`: no relay tick completes (*added 2026-11-20, same amendment; it takes the place of the relay's 30 s fallback job*) | `platform_outbox_relay_last_tick_timestamp_seconds` older than 60 s for 2 min; page | RB-06 |
 | Carrier breaker open | Any carrier open > 5 min | RB-08 |
 | Payment webhook signature failures | > 5 in 5 min | RB-09 |
 | Audit chain broken (`audit.chain_broken`) | Any | RB-11 |
