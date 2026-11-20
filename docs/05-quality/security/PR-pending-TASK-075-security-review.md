@@ -455,3 +455,161 @@ I also concur with R1-m1, R1-n2, R1-n3, R1-n5 (closed by the PR075-SEC-01 fix), 
 - **PR075-SEC-09:** TASK-128 and TASK-113.
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** 0 Critical, 0 High, 0 Medium. New: PR075-SEC-01 LOW (the guard checks one read of the context and passes the live object on), PR075-SEC-02 LOW (one-directional, unvalidated tier separation on shared origins), PR075-SEC-03 LOW (ZPL unchecked, returned labels not re-checked), PR075-SEC-04 LOW (raw carrier text to logs through `cause` and pass-through), PR075-SEC-05..09 INFO. Fixes for 01, 02 (a), 03 and 04 (a) validated on a scratch copy and preferred in this PR's fix cycle with code review R1-M1. Conditions: C1 lane B and hosted `security-integration` at the pushed head, C2 rename and merge-ref confirmation, C3 security delta round on the fix head |
+
+## Round 2 (delta, pre-push): `c2eaa47..dde830b`
+
+| Field | Value |
+|---|---|
+| Head | dde830bee361f4f91a7a0bff7c2d322d44bda5d7 |
+| Range | `7de6ec8` merges main `2ec81df` into `c2eaa47`. The merge is clean: its tree equals `git merge-tree --write-tree c2eaa47 2ec81df` (`a97d882`). Main's non-docs changes since `5145d52` are in `tools/db`, `tools/quality` and `prisma/tests`, none of them a path of this PR. `dde830b` (the fix commit) changes 19 files, all under `packages/carriers/src/` |
+| Owned paths changed | Still one: `tools/lint/carrier-wire-boundary.test.ts`, unchanged since `c2eaa47` |
+| Tip to push | `dde830b` plus evidence-only commits (lane B run files under `docs/05-quality/tests/runs/` only); section R2.5 |
+| Lane A evidence | None: the branch is not pushed. The classifier still selects `security-integration` (through `packages/config/**`) |
+| Lane B evidence | Queued on `dde830b` (coordinator). I read no run files |
+| Code review twin | Round 2 on main, `6b843c0`: APPROVED_WITH_NITS. R2-m1 (label false negatives destroy the only copy for DHL/FedEx), R2-n1..n4. I concur with all five (section R2.3) |
+| Decisions read | D-SD-003 (`77ac6d2`) routes PR075-SEC-02 (b) and -09 to TASK-113, -09 to TASK-128, and -04 (b) with ruling 2 to TASK-132. D-ARCH-168 (`71a2d36`) records the code review's C2 (`getRates` returns `RateResponse`) |
+| Reviewer / date | security-analyst, 2026-11-20, round 2. Same host rule and method as round 1: no npm, Jest, type-check, build or Docker, and nothing run in the PR worktree. The scratchpad had been wiped since round 1, so I rebuilt the probes from this record and re-ran them on `git archive` extracts of `dde830b`, with `c2eaa47` as the control. Line numbers come from single-file reads at `dde830b` |
+
+### R2.1 Round-1 findings
+
+| ID | What `dde830b` does | Probe at `dde830b` (control `c2eaa47`) | Status |
+|---|---|---|---|
+| PR075-SEC-01 (LOW) | `snapshotContext` (`guard.ts:100-129`) reads every field once into a `createCarrierContext` copy and passes the copy to the adapter (`:144-147`) | 9 rows. A getter on `environment`, getters on `account.environment` plus `environment`, a getter on `account.carrierCode`, a mutation after the call starts and a Proxy each see `sandbox`, `/v1/test/rates` and a frozen context, before and after the `await`. The bad `deadlineAt`/`locale`/`mockScenario` row is refused. The 3 controls are unchanged. At the control, 5 rows saw `production` | **Closed**; also closes code review R1-n5 |
+| PR075-SEC-02 (a) (LOW) | `crossTierIssues` (`egress.ts:91-103`), run once the shapes are valid (`:132`) | The PR's `FAKE_EGRESS` (shared exact token path) and the ADR rows for UPS, FedEx and DHL, plus the Mock: 0 issues. The four misfiled tables (DHL `/mydhlapi/` and `/`, the FedEx and UPS production hosts in `sandbox`): 1 issue each | **Closed** for prefixes. The exact-path form is code review R2-n4 (concurred); the cross-carrier form is PR075-SEC-11 (INFO) |
+| PR075-SEC-02 (b), (c) | Not in this PR: (b) is TASK-113's per D-SD-003; (c) is the orchestrator's | | Open, routed |
+| PR075-SEC-03 (a) (LOW) | `isZpl` (`labels.ts:37-44`): no foreign magic, and `^XA` within the first 1 KiB | 11 of 12 shapes as wanted. PNG, GIF, PDF, HTML, JPEG and EPL are refused; `^XA`, a CR/LF lead, the `CT~~CD` prefix, lower case and a 200-byte `~DG` preamble are accepted. A valid ZPL with a 4,800-byte `~DG` graphic before `^XA` is **refused** | **Closed** for the raster/markup class. The 1 KiB window came from my round-1 candidate and is code review R2-m1 (concurred, R2.3) |
+| PR075-SEC-03 (b) (LOW) | `checkedLabels` (`guard.ts:150-166`) | `createShipment` keeps the valid PDF and drops raster-as-PDF, `PNG`, a URL object and a CRLF format. It writes 4 `carrier.label.dropped` lines with format codes only (`(unprintable)` for the CRLF one), keeps `ref`, freezes the result and never throws a contract error. `recoverLabel` refuses a `GIF` for a `PDF_4X6` request and an unrequested format | **Closed**; residuals PR075-SEC-10 (MEDIUM, R2.2), PR075-SEC-13 (INFO), code review R2-n1/R2-n2 |
+| PR075-SEC-04 (a) (LOW) | `safeCause` (`errors.ts:31`), applied in the `CarrierError` constructor | Through the real `createLogger` from the extract: neither a random sentinel nor the DHL URL path in a cause appears in the log line or in `util.inspect`, and the cause is `{"name":"Error","code":"ERR_BAD_REQUEST"}`. Control: a plain `Error` with the sentinel is logged. A cause code holding CRLF is dropped. A cause with a throwing `name` getter makes the constructor throw (code review R2-n3, concurred) | **Closed** |
+| PR075-SEC-04 (b) | Not in this PR. A plain `Error` with carrier text still leaves the guard unchanged; TASK-132 converts it (card, D-SD-003) | | Open, routed |
+| PR075-SEC-05 (INFO) | Runtime field checks in the constructor (`errors.ts:68-79`) | `NOT_A_CODE`, `toString` and `__proto__` become `CARRIER_UNKNOWN_ERROR` with the canonical message. A CRLF `carrier`, the operation `x y` and a numeric `carrierErrorCode` are dropped from `toJSON()` | **Closed**; also R1-n2 |
+| PR075-SEC-06 (INFO) | Closed schema and a three-field copy (`egress.ts:81-82`, `:127`, `:137-138`) | Refused: an unknown rule key, an unknown table key and an own `__proto__` rule key from `JSON.parse`. A defined rule has exactly `origin`, `pathPrefixes` and `tier`. The environments `live` and `constructor` are named issues (R1-n10), and so is an encoded separator (R1-n1) | **Closed** |
+| PR075-SEC-07 (INFO) | `unmappedReporter` caps the lines at 20 per call plus one summary | 5,000 distinct unmapped codes give 21 lines; the last one is `{ unmappedCount: 5000, logged: 20 }` | **Closed** |
+| PR075-SEC-08 (INFO) | `registry.get` echoes the code only in the carrier-code shape | A CRLF + JSON code gives `no adapter is registered for (invalid code)` | **Closed** |
+| PR075-SEC-09 (INFO) | Not in this PR | | Open, routed by D-SD-003 to TASK-113 and TASK-128 |
+
+**Code review S4 / R1-M1 (tracking events and `description`).**
+- `normaliseTrackingEvents` now keeps every event. Three events in give three out: `PICKED_UP`/`false`, then `IN_TRANSIT`/`true` twice.
+- A description holding a random sentinel never reaches a warn line. That includes an unmapped code that itself embeds the description after a CRLF, which is logged as `(unprintable)`. The warn lines carry `ZZ99` and `(unprintable)` only.
+- The new `TrackingEvent.description` is documented as personal data. Its name, however, collides with the public schema's field: PR075-SEC-12 (INFO).
+
+**Code review R1-n3.** The `CARRIER_OTHER` raw label drops U+202E, U+200B and a trailing lone surrogate, and stays well-formed. Closed.
+
+### R2.2 New: PR075-SEC-10 (MEDIUM): a contract error from inside the adapter has the same class as a refusal before it
+
+| | |
+|---|---|
+| CWE / OWASP 2021 | CWE-755 (improper handling of exceptional conditions) / A04 |
+| Where (`dde830b`) | `guard.ts:144-147` (`run` returns the adapter's promise as it is); `errors.ts:6-9` (header: the gateway "treats a `CarrierContractError` thrown before the adapter is reached as local and non-ambiguous"); TASK-132 card (D-SD-003, ruling 2) |
+
+**What happens.** The gateway (TASK-132) sees only what leaves the guard. Since `dde830b`, the guard throws `CarrierContractError` for its own refusals before the adapter (bad context), and for the `recoverLabel` re-check after it. Every `CarrierContractError` thrown inside the adapter also leaves the guard unchanged. The most likely source is `createLabelDocument` on carrier bytes: `types.ts` tells adapters to "build through `createLabelDocument`", so a `createShipment` that has already been accepted by the carrier throws it when the payload fails the label check. The class alone therefore cannot say whether the adapter was entered, and neither the gateway nor the card's ruling-2 rule can be applied from the error.
+
+This differs from code review R2-n1. R2-n1 covers a `TypeError` after the call, which TASK-132 already treats as an unknown, ambiguous failure. A `CarrierContractError` after the call is instead the class the gateway is told to treat as **local**.
+
+**Probe** (`r2-sec10.mjs`). An adapter whose `createShipment` counts one carrier call, then builds its label with `createLabelDocument('PDF_4X6', <PNG bytes>)`:
+
+| Build | Refused before the adapter (bad context) | Thrown after the carrier accepted | Same class |
+|---|---|---|---|
+| `c2eaa47` | `CarrierContractError` | `CarrierContractError` | yes |
+| `dde830b` | `CarrierContractError` | `CarrierContractError` | **yes** |
+| Candidate (below) | `CarrierContractError` | `CarrierError` `CARRIER_UNKNOWN_ERROR` | no |
+
+A valid ZPL label whose `~DG` preamble is longer than 1 KiB (R2-m1) does the same when an adapter checks it itself, so a correct carrier answer can trigger it.
+
+**Exploitability and impact.** A gateway that follows the documented rule classifies a carrier-accepted shipment as a local, non-ambiguous failure, meaning "nothing happened at the carrier". The saga may then:
+- release or refund the booking while an orphan carrier shipment exists, billed to the Platform's account; or
+- create it again, giving a second shipment and a duplicate label. DHL Express has neither idempotent create nor void (ADR-0010 am. 11 items 2 and 9).
+
+Both outcomes are CLAUDE.md §1 guardrails held at 0. The likelihood is Low: an adapter must throw a contract error after the carrier answered, and the gateway must apply the class rule as written. **Impact High × likelihood Low = MEDIUM.**
+
+**Remediation (code level, `guard.ts`, this PR).** The guard is the only component that knows whether the adapter was entered, so it must encode that in the class. Validated on a scratch copy of `dde830b` (`apply-fix2.mjs`): the before and after rows now differ (table above), and the round-2 label, context and egress probes are otherwise unchanged.
+```ts
+const run = async <R>(operation: CarrierOperation, ctx: unknown, call: ((ctx: CarrierContext) => Promise<R>) | undefined): Promise<R> => {
+  if (!supported(operation) || call === undefined) throw new CarrierError('CAPABILITY_NOT_SUPPORTED', { carrier: code, operation });
+  const copy = snapshotContext(ctx, code, operation); // a CarrierContractError here: the adapter was not entered
+  try {
+    return await call(copy);
+  } catch (error) {
+    // Once the adapter is entered nothing is local: a contract error from inside it is a carrier-call failure.
+    if (error instanceof CarrierContractError) throw new CarrierError('CARRIER_UNKNOWN_ERROR', { carrier: code, operation, cause: error });
+    throw error;
+  }
+};
+```
+Two consequences:
+- The `recoverLabel` re-check then surfaces as `CarrierError(CARRIER_UNKNOWN_ERROR)`. That is idempotent and retryable, so retrying is safe. To keep the refused format visible, log a `carrier.label.refused` line with the format code before throwing. `guard-hardening.test.ts:212-231` changes its expected class accordingly.
+- Reword `errors.ts:6-9` (and the TASK-132 card text at the next fold): "a `CarrierContractError` that leaves the guard means the adapter was not entered; it is local and non-ambiguous. Anything else after a `createShipment` call is ambiguous."
+
+**Verification test (`guard-hardening.test.ts`).** An adapter that records one carrier call, then throws `createLabelDocument`'s error from `createShipment`: the guard rejects with `CarrierError` `CARRIER_UNKNOWN_ERROR`, never `CarrierContractError`. A context refusal for the same adapter rejects with `CarrierContractError` and zero adapter calls. Property: for every operation, `CarrierContractError` leaves the guard only when the adapter recorded zero calls.
+
+**Due.** Preferred before the push (about 8 lines plus one test). At the latest before TASK-132 merges (the gateway that applies the class rule), and before TASK-135/139/140.
+
+### R2.3 Code review round 2 and the ZPL window
+
+- **R2-m1 (label false negatives destroy the only copy for DHL/FedEx): concurred.** I add two things:
+  - The 1 KiB `^XA` window was my round-1 candidate; I proposed it before I had checked `~DG` preambles. My probe confirms the false negative at 4,800 bytes (the twin's is 3.2 KB).
+  - A validated fix: search the whole payload for `^XA` with native `indexOf` (four case variants over 20 MB: 7 ms on this host), or with a `Uint8Array.prototype.indexOf(0x5e, from)` loop. On the scratch copy, 12 of 12 shapes behave as wanted. Re-check against the carrier ZPL in the TASK-101 fixtures before merging, because for DHL and FedEx a false negative is unrecoverable.
+- **R2-n1 (TypeError after the call): concurred.** With the PR075-SEC-10 fix, a `TypeError` keeps reaching TASK-132 as an unknown, ambiguous failure, which is the safe class.
+- **R2-n2 (optional logger): concurred.** PR075-SEC-13 adds the non-array case.
+- **R2-n3 (`safeCause` with a throwing getter): concurred**, and reproduced.
+- **R2-n4 (sandbox exact path under a production prefix): concurred.** Its rule ("refuse unless the identical exact path is in production too") keeps the shared token path valid.
+
+### R2.4 New INFO items
+
+**PR075-SEC-11 (INFO, CWE-183): the cross-tier check is per table.**
+- **What.** A carrier's sandbox list that names another carrier's production host (for example `https://apis.fedex.com` `/` in a new adapter's table) passes `egressIssues` and `deriveCarrierEgressRules`, and becomes a sandbox-tier rule.
+- **Fix.** In `deriveCarrierEgressRules` (`egress.ts:183`), check each enabled table's sandbox list against the production lists of every table:
+  ```ts
+  const tableIssues = egressIssues({ sandbox: table.sandbox, production: Object.values(egress).flatMap((other) => (Array.isArray(other?.production) ? other.production : [])) });
+  ```
+  Validated on the scratch copy: the cross-carrier row is refused, and the 5 valid tables keep 0 issues.
+
+**PR075-SEC-12 (INFO, CWE-359): the canonical `TrackingEvent.description` shares its name with the public field (`canonical/types.ts:210`).**
+- **What.** The canonical field holds the carrier's free text (personal data, data-model `carrier_description`, never public under DR-B31). `openapi.yaml` `PublicTrackingEvent.description` is the *localised canonical* description, a `string` under `additionalProperties: false`. A public-tracking mapper that copies `event.description` into `description` passes the schema and leaks a signatory's name or street.
+- **Fix (this PR, before any consumer exists).** Rename the canonical field `carrierDescription`, matching `carrier_description` and the authenticated `TrackingEvent` schema.
+- **For the public tracking task.** A test that a sentinel carrier description is absent from the `getPublicTracking` and `lookupPublicTracking` bodies.
+
+**PR075-SEC-13 (INFO, CWE-778): a non-list `labels` is dropped without a line.**
+- **What.** A `createShipment` answer whose `labels` is not an array (for example a carrier `LabelURL` string, the `URL_ONLY` case of ADR-0010 am. 11 item 6) gives `labels: []` and writes no warn line even when a logger is given (`guard.ts:151`; probe: 0 lines). R2-n2 covers a missing logger.
+- **Fix.** Log `{ carrier, operation, format: '(not a list)' }` once for a non-array `labels`.
+
+### R2.5 Secrets, record binding and simulation
+
+**Secrets.** The over-approximating Gitleaks scan (pinned v8.30.1 config, keyword prefilter and regexes only; 222 rules, 220 compiled; the PAT and AWS-id controls fired) found:
+- **Fix commit (981 added lines).** 2 raw `generic-api-key` hits in `guard-hardening.test.ts`: Proxy-trap lines that compare the key with the field name `environment`. Both are false positives, and both drop out with an entropy-and-digit filter.
+- **Merge `c2eaa47..7de6ec8` (first parent).** It brings main's lines since `5145d52` into lane A's range: 40 raw hits, 3 after the filter. All 3 are in `docs/05-quality/tests/runs/20261119T1550Z_c618d8a/unit.junit.xml`, which landed with PR #72 (`f723fef`) after lane A scanned it there.
+- I quote no flagged value here.
+
+**Binding.** The two `Head` rows of this file name `c2eaa47` (round 1) and `dde830b` (round 2); both are in the PR's range. The last `Verdict` row is this round's.
+
+**Simulation.** I used main's real checker in a `--shared` sparse clone, with scenario commits built by plumbing. The record (both rounds) is committed on main's tip as `PR-9999-TASK-075-security-review.md` (`71a2d36` when this round was written) and merged with the head as GitHub's merge ref would be; `--base` is the event base (the merge base `2ec81df`), `--pr 9999`:
+
+| Scenario | Expected | Result |
+|---|---|---|
+| T1 The merge ref: the record on main, merged with `dde830b` | pass | pass |
+| T2 An evidence-only commit after `dde830b` (a run file under `docs/05-quality/tests/runs/`) | pass | pass |
+| T3 Control: no `PR-9999-*` record (main's tip carries only the placeholder name) | fail | fail (`missing`) |
+| T4 Control: a later `FAIL` verdict row | fail | fail |
+| T5 Control: the owned lint test changed after `dde830b` | fail | fail |
+| T6 Control: `eslint.config.mjs` changed after `dde830b` | fail | fail |
+| T7 Control: the record only under the placeholder name | fail | fail |
+| T8 `packages/carriers/src/guard.ts` changed after `dde830b` (as the PR075-SEC-10 fix would) | pass | pass: the checker does not demand a new round; C3 does |
+| T9 Control: both `Head` rows name a main commit | fail | fail |
+
+9 of 9 as expected.
+
+### R2.6 Merge conditions and routes
+
+**Conditions.**
+- **C1.** Lane B at `dde830b` (queued): `unit`, including `guard-hardening`, `hardening-misc` and `tracking-and-logging` with the real `createLogger`, and the coverage gate. The hosted `security-integration` job must be green.
+- **C2.** Rename the record, then confirm the merge ref contains it (D-ORCH-136/138).
+- **C3.** A security delta round 3 on any later change to `packages/carriers/src/{guard,errors,labels,egress,context}.ts`, including the PR075-SEC-10 and R2-m1 fixes. The checker does not demand it (T8), so this is procedural.
+
+**Routes.**
+- **This PR, preferred before the push:** PR075-SEC-10 (MEDIUM; at the latest before TASK-132 and TASK-135/139/140 merge), -11, -12 and -13, together with the code review's R2-m1 and R2-n1..n4.
+- **TASK-113:** PR075-SEC-02 (b) and -09.
+- **TASK-132:** PR075-SEC-04 (b), plus the ruling-2 wording from R2.2.
+- **TASK-128:** PR075-SEC-09.
+- **Orchestrator:** PR075-SEC-02 (c).
+- **The public tracking task:** the PR075-SEC-12 sentinel test.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 at `dde830b`: PR075-SEC-01, -02 (a), -03 (a) and (b), -04 (a) (LOW) closed; -05 to -08 (INFO) closed; code review R1-M1/S4 (no event dropped, no description in logs), R1-n1, R1-n2, R1-n3, R1-n5 and R1-n10 confirmed; code review R2-m1 and R2-n1..n4 concurred. New: PR075-SEC-10 MEDIUM (a contract error thrown inside the adapter after the carrier accepted leaves the guard as `CarrierContractError`, the class the gateway treats as local and non-ambiguous; validated guard fix, preferred before the push, at the latest before TASK-132), PR075-SEC-11..13 INFO. Open and routed: -02 (b) TASK-113, -02 (c) orchestrator, -04 (b) TASK-132, -09 TASK-113/128. 0 Critical, 0 High. Conditions: C1 lane B and hosted `security-integration` at `dde830b`, C2 rename and merge-ref confirmation, C3 delta round on any later change to the guard, errors, labels, egress or context |

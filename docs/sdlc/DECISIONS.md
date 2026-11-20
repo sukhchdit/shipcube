@@ -4864,3 +4864,40 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Applied in:** data-model §8.3 (pointer at rule 10, amendment before §8.4), A33.
 - **Not verified:** nothing was run; the text follows the linter's own documentation comments and the PR #72 records.
 - **Reversibility:** High.
+
+### D-SECPR075-02 · 2026-11-20 · security-analyst · TASK-075 security round 2 (delta `c2eaa47..dde830b`: main merge `7de6ec8` plus fix commit `dde830b`, pre-push) = PASS_WITH_FOLLOW-UPS at code head `dde830b` (round appended to `docs/05-quality/security/PR-pending-TASK-075-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical or High is open.
+  - **Method.** Static review plus single-process Node probes on `git archive` extracts of `dde830b`, with `c2eaa47` as the control. Same host rule as round 1, and nothing was run in the PR worktree.
+  - **The merge.** `7de6ec8` is a clean union: its tree equals `git merge-tree c2eaa47 2ec81df`.
+  - **The fix commit** touches only `packages/carriers/src/**`. The one owned path (`tools/lint/carrier-wire-boundary.test.ts`) is unchanged.
+- **Closed (probes at `dde830b`):**
+  - **PR075-SEC-01:** in 9 rows (getter, Proxy, mutation after the call starts, `account.carrierCode` getter, hand-built fields) the adapter sees a frozen sandbox copy or the call is refused.
+  - **-02 (a):** the 5 valid tables give 0 issues, the 4 misfiled ones 1 each.
+  - **-03 (a):** raster, PDF, markup and EPL bytes are refused as ZPL.
+  - **-03 (b):** `createShipment` drops 4 bad labels with format-code warn lines and keeps `ref`; `recoverLabel` refuses.
+  - **-04 (a):** through the real `createLogger`, the cause is `{ name, code }`, and no sentinel or URL path reaches the log line or `util.inspect`.
+  - **-05 to -08.**
+  - **Code review R1-M1/S4:** no tracking event is dropped and no description reaches a warn line. Also R1-n1, n2, n3, n5 and n10.
+- **New:**
+  - **PR075-SEC-10 (MEDIUM, CWE-755).** A `CarrierContractError` thrown inside the adapter after the carrier accepted the shipment leaves the guard with the same class as the guard's own refusal before the adapter. The likely source is `createLabelDocument` on carrier bytes, the documented label pattern. The probe at `dde830b` and at `c2eaa47` gives "same class: yes".
+    - **Why it matters.** The gateway (TASK-132 card, `errors.ts` header) is told to treat that class as local and non-ambiguous. The saga could then release a shipment that exists at the carrier or create it again: an orphan or a duplicate label. DHL has no idempotent create and no void.
+    - **Fix (this PR).** `run` wraps `call(copy)` and turns any `CarrierContractError` from inside the adapter into `CarrierError(CARRIER_UNKNOWN_ERROR)` with `safeCause`. Validated on a scratch copy. Reword `errors.ts:6-9`.
+    - **Due:** preferred before the push; at the latest before TASK-132 and TASK-135/139/140 merge.
+  - **PR075-SEC-11 (INFO).** The cross-tier egress check is per table, so another carrier's production host in a sandbox list passes. Fix: check against every table's production list in `deriveCarrierEgressRules` (validated).
+  - **PR075-SEC-12 (INFO, CWE-359).** The canonical `TrackingEvent.description` (carrier free text, personal data) has the same name as `PublicTrackingEvent.description` (the localised canonical text, `additionalProperties: false`). Fix: rename it `carrierDescription`. The public tracking task adds a sentinel test.
+  - **PR075-SEC-13 (INFO).** A non-array `labels` is dropped without a warn line.
+- **Concurred with the code review round 2 (`6b843c0`):**
+  - **R2-m1.** The 1 KiB `^XA` window was my round-1 candidate; a 4,800-byte `~DG` preamble is refused. Fix: search the whole payload natively (20 MB in 7 ms); validated 12 of 12. Check against the TASK-101 ZPL fixtures.
+  - **R2-n1 to R2-n4.**
+- **Binding.** The two `Head` rows name `c2eaa47` and `dde830b`, and the last `Verdict` row is round 2's. Simulation with main's real checker: 9 of 9 as expected.
+  - Pass: the merge ref with the record on main; an evidence-only tip; a later `guard.ts` change.
+  - Fail: no record; a later FAIL verdict; an owned lint test or `eslint.config.mjs` change; the placeholder name; `Head` rows naming main commits.
+- **Conditions:**
+  - **C1.** Lane B and the hosted `security-integration` job at `dde830b`.
+  - **C2.** Rename the record and confirm the merge ref.
+  - **C3.** A security delta round 3 on any later change to `packages/carriers/src/{guard,errors,labels,egress,context}.ts`, including the PR075-SEC-10 and R2-m1 fixes. The checker would not demand it.
+- **Routed:**
+  - **This PR:** PR075-SEC-10 to -13, with R2-m1 and R2-n1 to R2-n4.
+  - **Unchanged from round 1:** -02 (b) TASK-113; -02 (c) orchestrator; -04 (b) TASK-132 (plus the ruling-2 wording: a `CarrierContractError` leaving the guard means the adapter was not entered); -09 TASK-113 and TASK-128.
+  - **Public tracking task:** the PR075-SEC-12 sentinel test.
+- **Reversibility:** High (a review record; the fixes are local to `packages/carriers`).
