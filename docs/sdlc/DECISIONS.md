@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-081.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-083.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -6158,3 +6158,79 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 
 ### D-TASK295-03 · 2026-11-20 · devops-engineer · TASK-295: a lockfile change means full lane B; run it before merge
 - The Prisma CLI is the only consumer of `@prisma/config`; the migration, shadow and Testcontainers suites run it, so lane B (Docker) must prove that `prisma migrate`, `generate` and the migration linter still load the config on effect 3.22.4. Not run here (no Docker by instruction).
+
+### D-PM-081 · 2026-11-20 · product-manager · TASK-040 code review m3 (D-TASK040-07): refusals of the idempotency-key protocol that precede the handler write no audit entry and are logged only — 409 `IDEMPOTENCY_IN_PROGRESS`, 422 `IDEMPOTENCY_KEY_REUSED` and an unreadable stored response; a failed claim on a new request is a 5xx and writes `FAILED`; REQ-AUDIT-010 amended
+- **Input:** `docs/05-quality/reviews/PR-pending-TASK-040-code-review.md` (`a5eab85b`), finding m3 and merge condition 2: 409 and 422 conflicts and 5xx failures of the claim phase write no `FAILED` entry, REQ-AUDIT-010 asks for one for authorised mutating requests that end in 409, 422 or 5xx, and "the exception belongs to product-manager, not the developer". Read: REQ-AUDIT-010, DR-A10, REQ-API-009 to -011, DR-A20, EC-A27/A28, US-038, US-088.
+- **Decision, case by case:**
+
+  | Case | Audit entry | Other evidence required |
+  |---|---|---|
+  | 409 `IDEMPOTENCY_IN_PROGRESS` (same key, first request still running) | none | log line with the code and the correlation ID |
+  | 422 `IDEMPOTENCY_KEY_REUSED` (same key, different fingerprint) | none | the same |
+  | 500 on a retry whose stored response cannot be read back (damaged row, or a key that is no longer configured) | none | an ERROR-level operational event, class only, without the key value or the body (the review's n4, which this ruling makes required) |
+  | 5xx because the claim itself fails on a new request (key store error or time-out) | **`FAILED`**, the same entry any other 5xx of the route writes: the descriptor's action and entity, the problem code, no entity ID when none was resolved | the usual error log |
+  | 409 or 422 produced by the handler, first time | `FAILED`, unchanged | – |
+  | Replay of a stored 2xx or 4xx | none, unchanged (REQ-API-010) | – |
+
+- **The rule behind it.** A `FAILED` entry records an attempt at the business action. A request refused by the key protocol is not an attempt. It is either a duplicate of a request that is running or already answered, which has or will have its own entry, or a key reused with another body, which the platform declines to consider. It stands with 400, 412, 428 and 429, the other refusals that precede the action and are not audited. The statuses 409 and 422 are those of the IETF draft, not a sign of a business conflict.
+- **REQ-AUDIT-010 (Must), shall-statement:** the clause "shall not write audit entries for requests rejected by schema validation (400)" gains "or refused by the idempotency-key protocol before the handler runs (409 `IDEMPOTENCY_IN_PROGRESS`, 422 `IDEMPOTENCY_KEY_REUSED`, and a retry whose stored response cannot be read back)". The note carries the rule, the reasons and the case that is not excepted. DR-A10, the notes of REQ-API-010 and REQ-API-011, EC-A28 and the notes of US-038 and US-088 follow. AT-US-088-04 is not reworded; the US-088 notes state its reading.
+- **Why:**
+  - **The trail would misreport.** One booking whose client polls during a slow first request would appear as several failed bookings and one success. "The trail never lies" (US-088) is served by one entry per attempt.
+  - **Flooding.** A client that polls with `Retry-After: 1`, or loops on a reused key, could write to its organisation's audit chain at its request limit (600 a minute). Every entry takes the head of that chain, which the request still in progress needs for its own entry. This is the reason REQ-AUDIT-010 already excludes 400 (GAP-A-09).
+  - **Nothing an auditor needs is lost.** A key is scoped to the caller's own organisation, actor, method and path, so a refused reuse is a client defect and says nothing about access to another party's data.
+  - **Why the claim failure is not excepted.** There the caller did attempt the action, and the platform failed. Whether an entry exists must not depend on which internal phase raised the 5xx. A client cannot produce this case at will, so the flooding reason does not apply.
+  - **Why the unreadable response gets no entry but a loud event.** The action succeeded and is audited; the retry is a repeat under REQ-API-010. The failure is operational (a key rotated out too early) and must reach operations, and the client can repeat it for 24 h, so an entry per retry would be the flooding case again.
+- **Alternatives:**
+  - **`recordFailure` for all of them** (the review's second option, the literal reading). Rejected for the first two reasons above.
+  - **Except the whole claim phase, the failed claim included** ("no business action attempted"). Rejected: for a first request with a failing key store the action was attempted in every sense the caller and an auditor can see.
+  - **One aggregated entry per key and window**, as the denial budget does for permission denials. Not now: it needs a counter store and a new details shape for a refusal that carries no security meaning. A-116 names what would reopen it.
+  - **Leave REQ-AUDIT-010 as written and record the exception in the story notes only.** Rejected: the shall-statement would still require the entries, and the generated audit suite is built from it.
+- **For the TASK-040 fix cycle (part 040-A):** (a) tests that the audit entry count is unchanged after a 409 in progress and after a 422 key reused, and that a log line with the code and the correlation ID exists; (b) the ERROR event for an unreadable stored response, with a test that it carries neither the key nor the body; (c) `recordFailure` when the claim fails on a new request, with a test of exactly one `FAILED` entry; (d) the developer decision D-TASK040-07 cites this entry.
+- **Routed:** qa-lead: the generated audit suite (AT-US-088-04) expects no `FAILED` entry for the two codes on any route. security-analyst: the review lists m3 among its flags; this is the product ruling, and an objection in the TASK-040 security round comes back to me. senior-developer: a counter of these refusals by code on the TASK-214 card (recommended, not a condition).
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.16 (REQ-AUDIT-010, DR-A10, REQ-API-010 note, REQ-API-011 note, EC-A28), `docs/01-requirements/stories/EPIC-04-audit-trail-viewer.md` (US-088 notes), `docs/01-requirements/stories/EPIC-16-api-conventions-security.md` (US-038 notes), `docs/01-requirements/ASSUMPTIONS.md` (new A-116), `docs/01-requirements/PRD.md` 1.17 (§11).
+- **Validation:** the four tests above; A-116 telemetry after launch. Nothing was run for this entry (documents only, no shell).
+- **Reversibility:** High (wording and three small tests; adding the entries later is one call in the claim path).
+
+### D-PM-082 · 2026-11-20 · product-manager · US-038 delivery split: TASK-040 is delivered in two parts — part 040-A proves the mechanism in a test composition, part 040-B (production wiring, the production-composition proof of AT-US-038-01, the purge) completes the story; AT-US-038-07 stands as written (TASK-040 code review §2, m1, m2, M2)
+- **Input:** the same review, §2 (conditions 1 and 2), m1, m2 and M2, relayed by the orchestrator: the production wiring needs `app.ts`, `start-api.ts` and `matrix-app.ts`, which TASK-041 holds, and the purge is deferred (D-TASK040-02, D-TASK040-10); principal-architect is defining part 040-B. Read: US-038, US-202, US-203, the TASK-040 card and brief, `task-map.csv`.
+- **Decision:**
+  - **US-038 (M0 Must, DC, 9 scenarios) is not completed by part 040-A.** It is partial until part 040-B merges.
+  - **Scenario ownership.**
+
+    | Scenario | Part 040-A (the pull request under review): the real pipeline slots, fixture routes, a test composition | Part 040-B: the production composition |
+    |---|---|---|
+    | AT-US-038-01 Replay returns the stored response with no new effect | same status and body, `Idempotent-Replayed: true`, one handler run, no second audit entry | completes it: under the production composition, on a route that writes a row and publishes an event, the replay leaves one row, one audit entry and one outbox event |
+    | AT-US-038-02 Key required | yes, on a route in the required mode; the contract test pins which operations are required | – |
+    | AT-US-038-03 Invalid key format | yes | – |
+    | AT-US-038-04 Same key, different body | yes (no audit entry, D-PM-081) | – |
+    | AT-US-038-05 Concurrent duplicate | yes (no audit entry, D-PM-081) | – |
+    | AT-US-038-06 Server errors and rate limits are not stored | the 5xx half; the 429 half if the TASK-041 limiter was on main | the 429 half against the real limiter if part 040-A used a stand-in |
+    | AT-US-038-07 4xx responses are replayed | yes, for a returned and for a raised 4xx (below) | – |
+    | AT-US-038-08 Keys are scoped to the caller | yes | – |
+    | AT-US-038-09 Expiry | yes (an expired key is processed as new) | the purge, which REQ-API-009 needs and no scenario names |
+
+  - **What part 040-B must contain for the story to complete:** the key store in the production composition, with a test that an idempotent route mounts and replays there; the AT-US-038-01 proof above; the purge of expired keys with a test that an expired key which is never sent again is gone after the purge runs. The purge ships with or before the wiring.
+  - **The booking-route forms are not moved here.** AT-US-038-01 and -02 use the booking as their example. The same behaviour on the booking route is already AT-US-202-03 and AT-US-203-01 to -03, owned by TASK-092 and TASK-094. US-038 is accepted on the mechanism through the real pipeline plus the production composition; the booking tasks carry their own IDs.
+  - **AT-US-038-07 stands as written.** REQ-API-010 replays "2xx and other 4xx". A 4xx that a service raises is a 4xx. Product-manager does not offer the rewording that option (b) of M2 would need: a retry after a refused booking must get the refusal again, not a second run of the action and of its external calls. This is the product position; the fix or an amendment of ADR-0014 is principal-architect's and the developer's.
+  - **The 24 h bound.** REQ-API-009 says the response is stored "for 24 h". Its note now says that this is also the upper bound, because a stored response may hold personal data. Product position on the cadence: hourly, as ADR-0014 amendment 1 already says, so that a response is gone at most one hour after it expires; principal-architect confirms the place and the cadence with part 040-B (review m2).
+  - **Release effect.** Both parts are Wave 1 and part 040-B precedes the first module task with an unsafe route (TASK-049), so US-038 is complete at `v0.1.0-m0` and PRD §7 is unchanged.
+  - **Unchanged:** every scenario title, step and ID and the count (9); priority, milestone and DC tag; counts 434 / 91 / 293 / DC 134.
+- **Why:**
+  - **The gap is real.** With the first part alone no production composition has a key store, so the story's purpose, a retry that never creates a second order or charge, holds in no running system. "Completes" on the first merge would let a DC Must story read as Implemented on a test composition.
+  - **Nothing runs unprotected in between.** The API refuses to mount a route whose contract makes the key required or optional when no store is wired, and no module route is on main (A-117). The split costs sequence, not safety.
+  - **Why the last clause of AT-US-038-01 waits.** "No second … outbox event" can only be shown where an event is published, and the outbox writer (TASK-043) is not a dependency of the first part.
+  - **Why the purge is tied to the wiring and not to a scenario.** No row can exist before the wiring. Appending a tenth scenario now would break the map of an open pull request for a behaviour a card test can pin.
+- **Alternatives:**
+  - **Leave "completes US-038" on the first part and track part 040-B as a follow-up.** Rejected (first reason above; D-061, D-062, D-PM-068, D-PM-078).
+  - **Make TASK-092 the owner of AT-US-038-01 and -02 on the booking route** (the D-PM-078 rule). Rejected: unlike the rule-helper tests of TASK-041, these tests go through the real pipeline and answer over HTTP, and the booking-route behaviour already has its own scenarios and owners.
+  - **Append a purge scenario (AT-US-038-10).** Not now (see Why). Open to qa-lead at the next map regeneration; the card test is the proof until then.
+  - **Route the wiring through `RuntimeServices` so that one pull request completes the story.** Rejected by the reviewer as a layering hack; I agree it buys a label, not a product.
+- **Applied in:** `docs/01-requirements/stories/EPIC-16-api-conventions-security.md` (US-038 notes), `docs/01-requirements/REQUIREMENTS.md` 1.16 (REQ-API-009 note, REQ-API-010 note), `docs/sdlc/traceability.md` 1.13 (REQ-API-009, -010, -011 rows), `docs/01-requirements/ASSUMPTIONS.md` (new A-117), `docs/01-requirements/PRD.md` 1.17 (§11).
+- **Not applied here, for senior-developer's plan fold once principal-architect has defined part 040-B (no apostrophes in the lines):**
+  1. Card `idem` (TASK-040). If part 040-B is a part of the same task (the TASK-041 precedent), the card keeps US-038 and gains: "TWO PARTS (D-PM-082; code review section 2, m1 and m2): part 040-A is the first pull request and proves the mechanism in a test composition; part 040-B wires the key store into the production composition, proves AT-US-038-01 there and purges expired keys; US-038 is partial on the STATUS board until part 040-B merges". If part 040-B gets a task ID of its own, `idem` becomes `us:[]` with `part:['US-038']` and the new card completes US-038; it must sit in Waves 0 to 2 (US-038 is M0 Must DC).
+  2. The line "All US-038 scenarios" and the line "AT-US-038-01 … AT-US-038-09" become: "SCENARIO OWNERSHIP (D-PM-082): part 040-A proves AT-US-038-02 to -09 through the real pipeline slots on fixture routes and, of AT-US-038-01, the same status and body, the replay header, one handler run and no second audit entry; part 040-B completes AT-US-038-01 under the production composition on a route that writes a row and publishes an event (after the replay: one row, one audit entry, one outbox event), proves the 429 half of AT-US-038-06 against the real limiter if part 040-A used a stand-in, and purges expired keys (test: an expired key that is never sent again is gone after the purge runs)".
+  3. Part 040-A, audit lines of D-PM-081: "IDEMPOTENCY REFUSALS ARE NOT AUDITED (D-PM-081; REQ-AUDIT-010 as amended): 409 IDEMPOTENCY_IN_PROGRESS and 422 IDEMPOTENCY_KEY_REUSED write no audit entry and are logged with code and correlation id, never the key value; a stored response that cannot be read back answers 500, writes no entry and raises one ERROR-level event without key or body; a claim that fails on a new request writes the FAILED entry of any other 5xx; tests for each".
+  4. Part 040-B is a merge prerequisite of every module task that mounts an unsafe route, TASK-049 first (review section 2 condition 1).
+- **Routed:** qa-lead: the AT-US-038-01 row of `gherkin-test-map.md` names the part 040-B test beside the part 040-A one. principal-architect: the purge place and cadence (m2), the M2 fix or amendment, and the m7 ordering (replay before the `If-Match` and re-authentication-proof checks), which decides whether a retried request with a consumed proof is replayed as api/README §5 promises.
+- **Validation:** the part 040-A suite on lane B; the composition test and the purge test of part 040-B; at P6 acceptance product-manager checks both before accepting US-038 (A-117). Nothing was run for this entry.
+- **Reversibility:** High until part 040-A merges (notes, three traceability cells, card lines).
