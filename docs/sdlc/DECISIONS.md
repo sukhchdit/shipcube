@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-085.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-087.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -6824,3 +6824,721 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - product-manager: PR040-SEC-05 and the scope of D-PM-081.
 - **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 4 rows of `task-map.csv` changed (refs of TASK-015, 040, 049 and 187); no branch, title, wave or batch changed.
 - **Reversibility:** High.
+
+### D-PM-085 · 2026-11-20 · product-manager · AT-US-293-15 retitled "Redis unavailable: anonymous fan-out is refused" at qa-lead's request; the D-PM-084 boundary sentence added to the US-038 and US-088 notes
+- **Input:** qa-lead, relayed by the orchestrator: the title of the 15th scenario of US-293 still read "Redis unavailable falls back to per-instance counting" although D-PM-074 replaced its steps with the carrier admission refusal. D-PM-074 kept the title because it is a key of `gherkin-test-map.md` and recommended this retitle to qa-lead "at the next map regeneration". D-PM-084 left the boundary sentence of the two story notes for "their next edit".
+- **Decision:**
+  - **US-293, 15th scenario:** the Scenario line reads "Redis unavailable: anonymous fan-out is refused". The steps are those of D-PM-074, unchanged. The ID (AT-US-293-15), the position, the scenario count (15) and the owner (TASK-190) are unchanged. The US-293 notes record the old title and the reason it was kept until now.
+  - **US-038 and US-088 notes:** one sentence each. The idempotency exception covers a refusal made before the handler or any external call has run; a request that loses its claim after its external call has run is answered 409 `IDEMPOTENCY_IN_PROGRESS` and writes a `FAILED` entry (D-PM-084).
+- **Why now:** a title that says the opposite of its steps misleads whoever writes the TASK-190 test from the map. The map is qa-lead's, and qa-lead regenerates it with this change, so the drift test stays green. The row of `gherkin-test-map.md` (line 792) still shows the old title until that regeneration.
+- **Rule kept:** a scenario title changes only together with a map regeneration by qa-lead (D-PM-069, D-PM-074). This is such a case; it is not a precedent for retitling without one.
+- **Applied in:** `docs/01-requirements/stories/EPIC-06-carrier-integration.md` (US-293 notes, the Scenario line), `docs/01-requirements/stories/EPIC-16-api-conventions-security.md` (US-038 notes), `docs/01-requirements/stories/EPIC-04-audit-trail-viewer.md` (US-088 notes), this file (the next-entry pointer in D-PM-068). No requirement, assumption, PRD or traceability text changes: wording of a title and of two notes, already decided by D-PM-074 and D-PM-084. The three story files are lane-B tooling inputs; the orchestrator times the commit with qa-lead's map regeneration.
+- **Validation:** the gherkin drift test after the regeneration. Nothing was run for this entry.
+- **Reversibility:** High.
+
+### D-SD-009 · 2026-11-20 · senior-developer · Plan fold for D-PM-084 (a claim lost after the external call is audited) and the qa-lead report: CLAIM LOST AFTER CALL and the m4 test change on TASK-040 part 040-B, the idempotency rows of the generated audit suite on TASK-033, an optional alert on TASK-214, and a new late tooling task TASK-297 for named tests in the gherkin map (plan regenerated: 297 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..296 unchanged)
+- **Trigger:** the orchestrator's relay of the qa-lead report and D-PM-084 (`afb2b73c`).
+- **Decision (cards):**
+  1. **TASK-040, part 040-B.**
+     - CLAIM LOST AFTER CALL, verbatim.
+     - A TEST CHANGE line: the 040-A case `[m4] a key taken over during call answers 409 … with no audit entry` (`idempotency.api.test.ts`, line 555 at the 040-A head) is changed to expect exactly one FAILED entry with the code `IDEMPOTENCY_IN_PROGRESS` and one WARN `api.idempotency_claim_lost`; a takeover before `call` expects none. If part 040-A merges with the old expectation, part 040-B changes it in the same PR as the behaviour.
+     - The PR040-SEC-05 clause of the security-conditions line now points at D-PM-084 instead of "pending".
+  2. **TASK-033 (auditgen).** The idempotency rows of the generated audit suite, with the boundaries as D-PM-084 narrows D-PM-081:
+     - No FAILED entry, only a log line with the code and the correlation ID, for:
+       - 409 `IDEMPOTENCY_IN_PROGRESS` refused before the handler or any external call;
+       - 422 `IDEMPOTENCY_KEY_REUSED`;
+       - an unreadable replay, which also raises an ERROR event without key or body.
+     - Exactly one FAILED entry for:
+       - a 409 or 422 that the handler produced;
+       - the 5xx of a failed claim on a new request;
+       - a claim lost after `call` (409 plus WARN).
+  3. **TASK-214.** IDEMPOTENCY CLAIM LOST ALERT (ticket) with the reconciliation runbook line, as D-PM-084 recommends.
+  4. **New late task TASK-297 `gherkinnotes`** (batch 1.11; test-engineer, S, sonnet; depends on TASK-277; lock `quality-trace`).
+     - `gherkin-suite-assignments.json` gains an optional `notes` object keyed by AT-ID.
+     - `gen-gherkin-map` validates the IDs and renders a trailing "Named tests" section. `parseGherkinMap` is unchanged and still reads only the `| AT-` rows, and a test pins the map rows and the trace output.
+     - The map is regenerated.
+     - Seed notes for AT-US-011-03, AT-US-011-04 (both halves), AT-US-038-01 and AT-US-038-06; qa-lead supplies the exact titles at dispatch.
+     - It lands only when no PR evidence is pending.
+     - Rejected: a line on TASK-294. Its `quality-tools` lock and its runner scope are unrelated, and it is due only before G3, while the notes are needed for the TASK-043 and TASK-040 merges.
+- **Verified:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. 3 rows changed (refs of TASK-033, 040 and 214); new row TASK-297 (`feat/TASK-297-named-tests-gherkin-test-map`, batch 1.11); no branch, title, wave or batch changed.
+- **Reversibility:** High.
+
+### D-ARCH-200 · 2026-11-20 · principal-architect · QG-040-C1 (d) of D-QG-003, TASK-040 code review R2-n1 and R2-n2 (= PR040-SEC-04, PR040-SEC-05): the texts follow part 040-A as built — the lease is a floor with a sizing rule and two renewals, a lost claim answers 409, an anonymous caller without a client address has no scope, the store uses the application clock; the lease counts the renewal after `call` and three transactions; a claim lost after `call` writes `FAILED`
+- **Input:** D-QG-003 condition QG-040-C1 (d), due before part 040-A merges; code review rounds 2 and 3 (`e52e77d6`, `1f70221a`), R2-n1 and R2-n2; D-SECPR040-01 (`23e6a244`) PR040-SEC-04 and -05; D-PM-084; D-TASK040-06 and -11; `execute.ts`, `store.ts` and `scope.ts` at `3dc1e225`; `packages/config/src/schema.ts` (the defaults).
+- **Decision (ADR-0014 amendments 10 and 11; data-model §3.5 and §6.2):**
+  - **Folded as built.** The lease is at least 30 s and is sized per request. It is renewed before `call` when a `load` ran and before the handler transaction when a `load` or a `call` ran, each time in a transaction of its own that is conditional on the row version. A renewal that finds the row taken over answers 409 `IDEMPOTENCY_IN_PROGRESS` and ends the request. An anonymous caller without a client address has no scope: `optional` runs without idempotency, `required` answers 503 with its `FAILED` entry (D-TASK040-11 accepted). The lease and the expiry are written and compared with the application clock (D-TASK040-06 accepted); data-model §6.2 steps 1 and 2 showed `now()` of the database. The heading of the table in §3.5 names expired rows and released claims.
+  - **R2-n1 = PR040-SEC-04, ruled: the sizing rule.** The lease is not shorter than the longest stretch between two writes of `lease_until`, or between the last write and the end of the request, plus 5 s. A transaction counts with T = admission wait + `maxWait` + `timeout`. `lease = max(30 s, max(D + T, 3 × T + 1 s) + 5 s)`, D being the call deadline. At the defaults that is 32.25 s. Part 040-A computes `max(30 s, max(D, 2 × (maxWait + timeout) + 1 s) + 5 s)`.
+  - **R2-n2 = PR040-SEC-05, ruled with security-analyst and product-manager (D-PM-084).** A claim lost at the renewal before the handler transaction, after `call` ran: the route's `FAILED` entry with the code `IDEMPOTENCY_IN_PROGRESS`, then the 409, and WARN `api.idempotency_claim_lost` with the phase and the correlation id. A claim lost at the renewal before `call`: no entry, the info line of a client conflict.
+  - **Where it is built.** Both rulings are code of part 040-B (the security record routes them there). Part 040-A merges as it is: no row exists in any environment before part 040-B.
+- **Why:**
+  - **The two missing stretches are real.** After `call` returns, the renewal still has to be admitted, to get a connection and to run; a competing retry may take the row over from the moment the lease ends. On a VIEW or DOWNLOAD route three transactions follow the last write: the handler, the fail-closed entry, the completion. The security record measured 3 s of headroom at the defaults and a negative one from a statement timeout of 9 s.
+  - **Why renewal and not a longer lease alone.** The lease is also the time a crashed request blocks its retry. Renewals keep it near the longest single stretch.
+  - **Why an entry after `call` and none before.** After `call` the request attempted the action and something happened outside the database. Before `call` only reads ran, and the request that took the key over is the attempt. A client cannot produce either case at will, so the flooding reason of D-PM-081 does not apply. My first reading was the WARN line without an entry, because the request that took over records the outcome; both owners ruled otherwise and their reason holds: it is the one record of a possible second call.
+- **Alternatives:**
+  - **Renew before the fail-closed entry as well** (the security record's second form). Not needed with three transactions counted; it would add a sixth transaction to the read-only path.
+  - **A distinct WARN for a claim lost before `call`.** Not adopted: D-PM-084 keeps the conflict line there. It can be added without a decision if operations ask for it.
+  - **A longer fixed lease (60 s) and no formula.** Rejected: wrong again as soon as a `DB_TX_*` budget is raised, and twice the recovery time at the defaults.
+- **Card lines for senior-developer (no apostrophes):**
+  1. Card `idem`, part 040-B, refining the PR040-SEC-04 line of D-SD-008: "LEASE RULE (ADR-0014 amendment 10; D-ARCH-200; PR040-SEC-04; code review R2-n1): one transaction counts as admission wait plus maxWait plus timeout (T); lease = max(30 s, max(call deadline + T, 3 x T + FAILED entry wait) + 5 s); table test over statement timeouts of 5, 8, 9, 12 and 120 s asserting lease minus stretch >= 5 s for the call path, the failure path and the read-only path; 30 s is the floor".
+  2. The CLAIM LOST AFTER CALL line of D-PM-084 stands as written.
+  3. Card of TASK-214: "IDEMPOTENCY SIGNALS (D-ARCH-200, D-ARCH-202; D-PM-084): counters for api.idempotency_claim_lost and api.call_without_commit; an alert on any claim lost after call, with the runbook line of D-PM-084".
+- **Applied in:** ADR-0014 amendments 10 and 11 with dated notes in amendments 5 and 7; data-model §3.5 (heading, `lease_until`, the second amendment block), §6.2 steps 1 and 2, A39; api/README §5 ("Scope", "Conflicts").
+- **Validation:** the formula was computed from the defaults of `schema.ts` (admission wait 250 ms, `maxWait` 2 s, statement timeout 5 s, call deadline 20 s). Nothing was run.
+- **Reversibility:** High (text; the code is one function and one branch in part 040-B).
+
+### D-ARCH-201 · 2026-11-20 · principal-architect · QG-040-C1 (a) and (c) of D-QG-003: each batch of `idempotency-purge` takes the ledger claim, as `outbox-purge` does; the definer function is rejected because the API store must keep `DELETE`, not because the table has no RLS; the security conditions P-1 to P-5 join the purge
+- **Input:** D-QG-003 QG-040-C1 (a) and (c), due before part 040-B is dispatched; D-SECPR039-01 condition (ii); D-ARCH-192 and D-ARCH-198; D-SECPR040-01 §3.8 (P-1 to P-5); the purge of the TASK-043 branch.
+- **Decision (ADR-0014 amendment 12; ADR-0013 item 27; data-model §6.2 step 5):**
+  - **(a) The ledger claim holds.** Each batch runs through `idempotentProcessor`, keyed by the occurrence id and the batch number, in the transaction of the batch. Both halves of condition (ii) bind the schedule.
+  - **The sentence "the worker file holds the purge statement and nothing else" is corrected:** the `DELETE` is its only statement on `idempotency_keys`; the ledger claim names `job_executions`.
+  - **(c) The reason for rejecting the definer function is replaced.** The API store deletes rows in normal operation (a released claim, an expired key before its next claim), so the runtime role keeps `DELETE` whatever the purge uses, and a definer purge would remove no privilege.
+  - **P-1 to P-5 are adopted.** P-3 is read as "the only statement on `idempotency_keys`".
+- **What was wrong in my text.** D-ARCH-192 said both "built like `outbox-purge`" and "the purge statement and nothing else", and it restated only the first half of condition (ii). It rejected the definer function with "the table has no RLS"; D-ARCH-198, written the same day, uses definer functions on three tables without RLS precisely to remove a privilege. The conclusion of D-ARCH-192 stands; its reason did not.
+- **Why the ledger although the `DELETE` is idempotent by its predicate:** a security condition that binds "every later schedule" is worth more as one form than as a list of exceptions, and the cost is one `job_executions` row per batch.
+- **Alternatives:**
+  - **Ask security-analyst to waive the second half for naturally idempotent deletes.** Not asked: it saves a few rows and costs a case-by-case judgement on every later purge.
+  - **Move the store's own deletes behind definer functions too, so that the runtime role loses `DELETE`.** Rejected: three functions on the allow-list to guard a row whose deletion costs the replay of one retry, and which the store deletes by design.
+- **Card line for senior-developer (no apostrophes):** card `idem`, part 040-B, beside the PURGE line of D-ARCH-192 and the PURGE CONDITIONS of D-SD-008: "PURGE LEDGER CLAIM (ADR-0014 amendment 12; D-ARCH-201; D-SECPR039-01 condition (ii)): each batch runs through idempotentProcessor keyed by the occurrence id and the batch number in the batch transaction, as outbox-purge does; a redelivered occurrence skips the batches it committed; the P-3 test reads: over a recording client the only statement on idempotency_keys is the DELETE, the only other statement of a batch is the ledger claim on job_executions, and an occurrence runs at most 200 batches".
+- **Routed:** security-analyst confirms the reading of P-3 in the round of part 040-B.
+- **Applied in:** ADR-0014 amendment 12 with two struck clauses in amendment 8; ADR-0013 item 27; data-model §3.5, §6.2 step 5, A39.
+- **Reversibility:** High.
+
+### D-ARCH-202 · 2026-11-20 · principal-architect · QG-040-C2 and QG-040-C1 (b) of D-QG-003, D-PM-083, PR040-SEC-08: on a route with `If-Match` and a `call` phase the version is compared after `load` and before `call`; a `call` makes only an effect that is right whatever happens to the write that follows, so a lost race leaves nothing to reverse; the key of an effect covers its inputs; the `call` operations are pinned (ADR-0003 amendment of this date; R-ARCH-39)
+- **Input:** D-QG-003 QG-040-C2 (before TASK-096 or the first task that mounts an operation with `If-Match` and a `call`) and QG-040-C1 (b); D-PM-083, which makes "stale on arrival is answered 412 before any external call" a requirement and leaves with me what records and reverses an external effect when a request loses the race after its `call`; D-PM-084; D-SECPR040-01 PR040-SEC-04 and -08; ADR-0003 (phases, rule (h), the `cancelShipment` example), ADR-0005 item 18, ADR-0012, ADR-0014 (saga, cancellation saga), ARCHITECTURE.md checkout flow; the contract (21 operations take `If-Match`).
+- **Decision (ADR-0003 amendment of 2026-11-20; ADR-0014 amendment 13; ADR-0012 amendment 5; ADR-0005 item 18 note):**
+  1. **Rule (i), the first outcome of QG-040-C2.** A route that requires `If-Match` and declares `call` declares where `load` returns the id and the version. The tx slot compares after `load` and before `call`: stale → 412, no `call`. `defineRoute` refuses such a route without the declaration. The conditional write stays the deciding check. Owner TASK-096.
+  2. **Rule (j), the answer to "what records and reverses".** A `call` makes an external effect only if the effect is right whatever happens to the handler transaction: `read`; `inert` (an object that binds nobody until a step that needs the committed write confirms it); `reachable` (an action on a provider object that an earlier committed row names, with the state derived from the provider again). An effect that is right only if the state change commits is made after the commit, by a saga step. So a lost race leaves nothing that must be reversed.
+     - `checkoutOrder` creates its intent in `call` and never confirms it, with the Mock gateway as with Stripe. A hold is placed only on an intent that a committed payment row names.
+     - `cancelShipment` has no `call`. Its handler makes the transition under the version check and the cancellation saga calls the carrier (ADR-0014). The route example of ADR-0003 shows the fields, not this operation.
+  3. **Rule (k).** The key of an effect covers every input of the provider request. For the checkout: `auth:<order_id>:<order_version>:<attempt>`.
+  4. **Rule (l), the record.** WARN `api.call_without_commit` whenever a handler transaction does not commit after `call` returned. The route-metadata test pins every operation that declares `call` with its class. Each `inert` and `reachable` operation has a fault test.
+  5. **Rule (d) of ADR-0003 made precise (QG-040-C1 (b)).** The claim, the re-authentication check, `load`, `call`, `handler`, the completion; a refused proof leaves the window; the lease renewals.
+  6. **PR040-SEC-08 confirmed.** A 5xx releases the key, so `call` can run twice. Every effect of a `call` carries a derived key (the 2026-11-13 rule and rule (k)); every booking, pickup, capture, void and refund is a saga step with its key (ADR-0014 G2 and G3, ADR-0012 item 1); a carrier without idempotent create is covered by G2.
+  7. **Residual R-ARCH-39.** An intent that was created and never got its row stays at the gateway as an incomplete object. It holds no funds. Accepted.
+- **Why:**
+  - **The product rule and my rule agree.** D-PM-083 asks for the comparison before any external call; rule (i) is that. I do not rule the second outcome of QG-040-C2.
+  - **The comparison cannot remove the race**, because the row can change during `call`. A request that loses then has no committed row. Anything it did outside the database can only be recorded by a transaction that runs right after the database refused one. So the rule limits what it may do instead of promising a clean-up.
+  - **ADR-0014 already had this shape.** Its step 1 says "sync intent creation" and takes the authorisation from the webhook or the confirmation; its cancellation saga calls the carrier from the worker. What was missing was the sentence that forbids the shortcut, and the route example of ADR-0003, which showed a carrier cancellation in a `call`.
+  - **Why the version joins the key.** Stripe compares the parameters of a repeated key with the first request and refuses the request when they differ (its documentation of idempotent requests, read 2026-11-20). With `auth:<order_id>:<attempt>`, a checkout that lost its write and is sent again after the order changed would be refused by the gateway for 24 h.
+- **What was wrong in my text.** ADR-0014 amendment 7 moved the `If-Match` comparison into the handler and did not look at routes whose `call` runs first; the gatekeeper found it. The route example of ADR-0003 (D-ARCH-106) contradicted the cancellation saga of ADR-0014. Rule (h) derived the checkout key from the order and the attempt only.
+- **Alternatives:**
+  - **A write phase before `call`** (intent row, call, outcome row). The complete answer for a binding effect, and what a saga step does. In a request it means two write transactions, two candidate places for the audit entry and for the completion of the key, and a reconciliation job. Rule (j) keeps binding effects out of the request instead. On file in R-ARCH-39.
+  - **A compensation after the rollback**, run by the slot or recorded as an outbox event. Rejected: it runs exactly when the database has just failed the request, and a void races the retry that would adopt the authorisation.
+  - **A lint on the provider methods a `call` may name.** Not now: the pinned table and the fault tests are cheaper and the methods are not all built. On file in R-ARCH-39.
+  - **Audit the lost race.** Not mine and not needed: D-PM-083 keeps a 412 unaudited, and with rule (j) nothing binding happened.
+- **Sequencing found while ruling (for senior-developer).** Step 7b is a stub until TASK-096 (Wave 3), and operations with `If-Match` are mounted before it: `updateMe` (TASK-062, Wave 1) and `checkoutOrder` (TASK-092, Wave 2) at least. Until TASK-096 merges they enforce no `If-Match`. Either TASK-096 moves before them, or its card names the operations it retrofits. Rules (j) and (k) bind TASK-085, TASK-092 and TASK-170 now, whatever the order.
+- **Open, not ruled.** Stripe replays the saved answer of a key, 500 included, for at least 24 h. A derived key that never changes would then repeat a gateway 500. The attempt number is read in `load`, and nothing is written when `call` fails. TASK-167 (Stripe adapter) needs a rule for it; I owe it before TASK-167 is dispatched.
+- **Card lines for senior-developer (no apostrophes):**
+  1. Card of TASK-096, replacing the DISPATCH GATE placeholder for QG-040-C2: "VERSION CHECK BEFORE CALL (ADR-0003 amendment 2026-11-20 rules (i) and (l); ADR-0014 amendment 13; D-ARCH-202; D-PM-083; QG-040-C2): a route that requires If-Match and declares call declares where load returns the id and the version; the tx slot compares them with the expected value of step 7b after load and before call and answers 412 CONCURRENCY_CONFLICT with the current ETag; defineRoute refuses such a route without the declaration; the conditional write of the handler stays the deciding check; tests: a stale If-Match on an operation with a call phase answers 412 and the call was not made; a version that changes during call answers 412 from the conditional write, the call ran once and WARN api.call_without_commit is logged with the operation id and the correlation id and no value; the route-metadata test pins every operation that declares call with its class (read, inert, reachable) and fails on an unlisted one; this task declares the version source on every If-Match operation that is mounted when it merges; files gain apps/api/src/platform/tx/execute.ts, apps/api/src/platform/routing/define-route.ts and tests/generated/route-metadata.ts".
+  2. Card of TASK-085: "INTENT IN TWO STEPS (ADR-0012 amendment 5; ADR-0003 amendment 2026-11-20 rule (j); D-ARCH-202): the gateway interface and the Mock gateway separate creating an intent from confirming it; the create step places no hold and never returns AUTHORISED; the Mock outcome tokens take effect at the confirmation or through the synthetic webhook; test: after create alone the Mock holds no authorisation".
+  3. Cards of TASK-092 and TASK-170, replacing the key in the D-ARCH-106 line of TASK-170: "CHECKOUT CALL (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendment 5; D-ARCH-202; R-ARCH-39): the call phase of checkoutOrder creates the intent and never confirms it; its key is auth:<order_id>:<order_version>:<attempt>; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; checkoutOrder is class inert and confirmPayment class reachable in the call table of the route-metadata test".
+  4. Every later card whose route declares call: "CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step".
+- **Routed:** quality-gatekeeper (QG-040-C2 and QG-040-C1 (b) answered). product-manager (the question D-PM-083 left with me is answered by rule (j) and R-ARCH-39; no requirement text changes). security-analyst (rule (j), R-ARCH-39 and the fault tests in the payment rounds; PR040-SEC-08 confirmed).
+- **Applied in:** ADR-0003 (new amendment; a dated note at rule (h)); ADR-0014 amendment 13, a note under the table of amendment 7 and the key cell of saga step 1; ADR-0012 amendment 5; ADR-0005 item 18; ARCHITECTURE.md (checkout note); api/README §5 "Order"; risks.md 1.26 (R-ARCH-39).
+- **Validation:** the Stripe statement was read in its documentation on 2026-11-20. The 21 `If-Match` operations were listed from `openapi.yaml`. No code was run; no route with a `call` and a provider exists on main.
+- **Reversibility:** High today (the rules bind tasks that are not built). Medium once TASK-085 has shaped the gateway interface.
+
+### D-ARCH-203 · 2026-11-20 · principal-architect · QG-040-C3 of D-QG-003 (and T187-4): two contract descriptions follow ADR-0014 amendments 6 and 7 — the proof parameters say that a replay neither verifies nor consumes a proof; `Idempotent-Replayed` on a replayed 4xx is sent and stays undeclared on the shared 4xx responses, with the reason written down
+- **Input:** D-QG-003 QG-040-C3 (a) and (b), due before part 040-B merges; D-SECPR040-01 T187-4 and T187-6; `openapi.yaml` (`ReauthProof`, `ReauthProofConditional`, `IdempotentReplayed`, the shared responses); `tests/contract/x-idempotency.test.ts` at `3dc1e225`; api/README §16 and §18.
+- **Decision (ADR-0014 amendment 14), a change request to api-designer:**
+  - **(a)** `components.parameters.ReauthProofConditional.description`: the last sentence "A proof that is sent is always verified and consumed." becomes "A proof that is sent is verified and consumed whenever the request executes. A replay under an Idempotency-Key, and the 422 and 409 answers of that key, neither verify nor consume it (ADR-0014 amendment 7)." `components.parameters.ReauthProof.description` gains the second of these sentences.
+  - **Scope of the rule:** every operation that declares `x-reauth-scope` and takes a key, ten operations (four with the conditional parameter, six with the required one).
+  - **(b)** `Idempotent-Replayed` is not declared on any 4xx response. `components.headers.IdempotentReplayed.description` gains: "Also sent when a stored 4xx problem is replayed; the shared problem responses do not declare it (api/README section 5)."
+  - **Vehicle:** the pull request of part 040-B, with `npm run openapi:lint` and `npm run openapi:types`. api-designer acknowledges at the fold (the D-API-003 pattern).
+- **Why (b) is not declared:** the 4xx responses are shared components; `createQuote` references the same `BadRequest`, `Forbidden` and `UnprocessableContent` as the idempotent operations. The contract loader dereferences them, so a header declared there is declared on the one-time-secret operations, and SEC-TC-53 and ADR-0014 amendment 4 forbid that. Copies of seven shared responses for 47 operations would duplicate their example sets. The response-validation helper checks declared headers only, so nothing fails; the tests of part 040-A assert the header on a replayed 4xx directly.
+- **Alternatives:** per-operation copies of the shared responses (rejected, above); a vendor extension on the operation (rejected: no tool reads it).
+- **Card line for senior-developer (no apostrophes):** card `idem`, part 040-B: "CONTRACT DESCRIPTIONS (ADR-0014 amendment 14; D-ARCH-203; QG-040-C3; T187-4): in openapi.yaml the description of ReauthProofConditional ends: A proof that is sent is verified and consumed whenever the request executes. A replay under an Idempotency-Key, and the 422 and 409 answers of that key, neither verify nor consume it (ADR-0014 amendment 7). ReauthProof gains the second sentence. The header component IdempotentReplayed gains: Also sent when a stored 4xx problem is replayed; the shared problem responses do not declare it (api/README section 5). No response gains the header; the SEC-TC-53 contract test stays green; openapi:lint and openapi:types run in the same pull request; api-designer acknowledges".
+- **Applied in:** ADR-0014 amendment 14; api/README §5 ("Replay and re-auth proof", new row "Replay header on a 4xx"). `openapi.yaml` is not edited by this entry.
+- **Reversibility:** High (descriptions).
+
+### D-ARCH-204 · 2026-11-20 · principal-architect · TASK-040 security record D-SECPR040-01, items routed to me, and code review R3-m1: the configured key only derives (PR040-SEC-01); the stored response becomes one sealed envelope (PR040-SEC-02); payment client secrets in stored responses are accepted and recorded (PR040-SEC-03); `idem_key` stays in clear for now (PR040-SEC-06); part 040-B is extended and may be two pull requests
+- **Input:** D-SECPR040-01 (`23e6a244`) §3.1 items 4 and 6, PR040-SEC-01, -02, -03, -06, -07, -09 and its routing table; code review round 3 (`1f70221a`) R3-M1 and R3-m1; D-SD-008 (the security lines are already on the card); ADR-0018 register; `packages/config/src/guards.ts`; ADR-0014 amendment 1.
+- **Decision (ADR-0014 amendments 15 and 16; ADR-0018 amendment 9; data-model §3.5 and §10.4):**
+  - **PR040-SEC-01, accepted.** `IDEMPOTENCY_BODY_KEY` is a key-derivation input. Two keys are derived with HKDF-SHA256, an empty salt and the labels `platform-idempotency-body-v1` and `platform-idempotency-scope-network-v1`; the `_PREVIOUS` body key likewise. This closes the open point of D-ARCH-194. The register row has the two uses and the blast radius the record asked for.
+  - **Rotation note (register-wide).** `_PREVIOUS` must be an older version, so no task can read ahead. During a rolling deploy that rotates a key, an old task cannot read what a new task wrote; for this store it answers 500 on such a replay, for minutes. A `<NAME>_NEXT` form is not adopted in this run; the M5 rotation runbook decides it before the first production rotation.
+  - **PR040-SEC-02, accepted.** From part 040-B every completion seals `{v, status, headers, body}`. A replay reads the three from the envelope only; the clear `response_status` and `response_headers` must equal it; a completed row always has a body, with a check; a replayed `Content-Type` is `application/json` or `application/problem+json`. The origin marker of review R3-M1 moves into the envelope.
+  - **PR040-SEC-03, accepted and recorded.** The stored responses of `checkoutOrder`, `confirmPayment` and `createPaymentMethodSetup` hold the client secret of the gateway intent: encrypted, bound to the scope, at most 25 h. ADR-0014 amendment 1 keeps its rule for secrets the Platform issues once and cannot return again. A contract test pins the three operations.
+  - **PR040-SEC-06, not now.** `idem_key` stays in clear. It goes, or becomes a hash, with the contract step that drops the clear response columns. api/README §5 tells clients to keep personal data out of a key.
+  - **Part 040-B, extended.** It also holds the lease rule and the lost-claim entry (D-ARCH-200), the ledger claim (D-ARCH-201), the contract descriptions (D-ARCH-203), PR040-SEC-07 and -09, and proof (g) of review R3-m1.
+  - **Two pull requests are allowed.** The first holds what needs only part 040-A on main: the lease, the lost claim, the keys, the envelope with its migration, PR040-SEC-09 and the contract pins. It touches no file that TASK-041 holds and does not wait for part 041-A. The second holds the composition and the purge. The first merges before the second, and both before the first operation that takes a key is mounted.
+- **Why:**
+  - **Client secrets.** A retried checkout must get the secret of the same intent, and fetching it again would put a gateway call on the replay path. With the database and the key an attacker could confirm an intent of the last day with their own payment method, which costs the victim nothing.
+  - **The envelope and R3-M1 are one change of form.** A marker in a clear header would be the unauthenticated field PR040-SEC-02 objects to. If part 040-A closes R3-M1 with such a marker to keep its last fix cycle small, part 040-B moves it; no row exists in between.
+  - **Why two pull requests.** Part 041-A waits for a user commit. The security fixes do not depend on it, and TASK-062 (Wave 1) and TASK-092 wait for part 040-B.
+- **Alternatives:**
+  - **A redacted stored body and a fresh fetch of the client secret at replay.** Rejected by the security record and by me (a gateway call on the replay path).
+  - **A separate register key for the network HMAC.** Not needed: the labels separate the uses; a new key adds a variable and a rotation.
+  - **Adopt `<NAME>_NEXT` now.** Not now: no key is rotated in a deployed environment in this run, and it changes every key of the register.
+  - **Hash `idem_key` in part 040-B.** Not now: an operator can still match a key that a client reports, and the column can leave with the clear response columns in one contract step.
+- **Card lines for senior-developer (no apostrophes):**
+  1. Card `idem`, part 040-B: "TWO PULL REQUESTS ALLOWED (ADR-0014 amendment 16; D-ARCH-204): the first holds the lease rule, the lost-claim entry, the HKDF keys, the sealed envelope with its migration, PR040-SEC-09 and the three contract pins, needs only part 040-A on main and no file that TASK-041 holds (locks api-tx-execute and api-idempotency); the second holds the composition, the purge and the contract descriptions and needs part 041-A and TASK-043; the first merges before the second and both before the first operation that takes a key is mounted".
+  2. Card `idem`, part 040-B, beside the PR040-SEC-02 line of D-SD-008: "ENVELOPE (ADR-0014 amendment 15; D-ARCH-204): the origin marker of a problem document rendered by the tx slot (code review R3-M1) lives inside the sealed envelope, never in a clear column; a check (status = COMPLETED) = (response_body IS NOT NULL) is added by a migration of this part; the table has never held a row, database-engineer picks the linter kind of the migration".
+  3. Card `idem`, part 040-B: "STORED CLIENT SECRETS (ADR-0014 amendment 15; ADR-0012 amendment 5; D-ARCH-204; PR040-SEC-03 accepted): the stored responses of checkoutOrder, confirmPayment and createPaymentMethodSetup contain the gateway client secret, encrypted; the contract pin PR040-SEC-07 (c) names exactly these three; the SEC-TC-04 scan of the clear columns of idempotency_keys finds no client-secret shape".
+- **Routed:** security-analyst and qa-lead (T-79, R-05, AC-14 and SEC-TC-04 read "no secret in clear", as the record says). devops-engineer (P-1, already on TASK-015 part 015-C by D-SD-008). The M5 rotation runbook task (the `<NAME>_NEXT` question).
+- **Applied in:** ADR-0014 amendments 15 and 16 with dated notes in amendments 5, 6 and 9; ADR-0018 (the register row, amendment 9); ADR-0012 amendment 5; data-model §3.5, §10.4, A39; api/README §5 ("Scope", "Clients").
+- **Validation:** the guard on `_PREVIOUS` was read in `packages/config/src/guards.ts` (rule `key.previousVersion`). Nothing was run.
+- **Reversibility:** High before part 040-B (no row exists). After it, the envelope is a stored form with a version field.
+
+### D-SECPR040-02 · 2026-11-20 · security-analyst · TASK-040 part 040-A security round 2 (delta `3dc1e225..e96bd979`, fix cycle 3 and D-PM-084) = PASS_WITH_FOLLOW-UPS at code head `e96bd979`; ruling on the synthetic UUID literal that gitleaks-full reports in three unpushed branch commits: no baseline change, a supersede branch preferred, D-SEC-PR45-01 commit-bound entries accepted as the alternative (round appended to `docs/05-quality/security/PR-pending-TASK-040-security-review.md` on main)
+- **Decision (delta):** nothing Critical, High or Medium is open, and the delta adds no finding.
+- **Scope.**
+  - The merges `5bea60ad`, `2ae719aa` and `a8b69fed` are pure unions: each merge commit's tree equals `git merge-tree` of its parents, and main changed only documents.
+  - 13 code files were reviewed.
+  - The PR head `93f0f126` adds only a merge of main that touches documents, so the binding to `e96bd979` holds.
+  - Main's checker counts 39 owned paths. A shared-clone simulation passes at `e96bd979` and at `93f0f126`. The control, the round-1 record alone, gives `missing`.
+- **Verified.**
+  - **R3-M1 origin envelope `{origin, body}`, probe P5 6/6.** The origin is inside the GCM plaintext. On a slot-problem row, a clear `Content-Type` tamper is ignored, a status flip is refused, and a body without the envelope is refused. This closes the marker path of PR040-SEC-02.
+  - **What stays open of PR040-SEC-02.** The status and headers of a handler row are still unauthenticated, and a body nulled together with its key id turns any row into a body-less handler replay.
+  - **PR040-SEC-05 is closed.** A claim lost after `call` writes the FAILED entry and a WARN `api.idempotency_claim_lost {phase, correlation_id}`. A claim lost before `call` writes no entry. The tests assert no key in any log line.
+  - **C9 lists and test keys.** The C9 lists are tied to the migration. The test keys are `randomUUID()`. The final tree holds no key-shaped literal on a key-named identifier: the one remaining occurrence is main's EPIC-16 Gherkin line, which cannot match `generic-api-key`.
+- **Status of the round-1 findings.**
+  - **Closed by ruling:** PR040-SEC-03 (D-ARCH-204, SEC-TC-04 at `b9c0ddeb`), -06 (D-ARCH-204) and -08 (D-ARCH-202 item 6).
+  - **Open, due in part 040-B, first pull request (D-ARCH-200, D-ARCH-204):** -01, -02 (narrowed), -04, -07 and -09.
+- **Gitleaks ruling (the coordinator's question).**
+  - **Facts.**
+    - The branch has never been pushed (`git ls-remote`).
+    - All 65 PR landings on main are squashes, so these commits never reach main's ancestry.
+    - Lane A's PR range scan reads only the base ref's `.gitleaks.toml`, never the baseline, so the first `pull_request` event would report the same lines.
+  - **(1) `tools/quality/gitleaks-baseline.txt`, `BASELINE_COUNT` and the sec-static pin stay unchanged.** Nothing is committed for this. The baseline is for main's history (D-SEC-PR25-01). It would not fix lane A, and it would keep fingerprints of commits that never reach main in an exact, count-pinned list for good.
+  - **(2) Preferred: a supersede branch.** A new branch from `origin/main` with one squash commit of the final tree, checked with `git diff --quiet <final head> HEAD`, and pushed in place of the old one. The old branch stays as it is, unpushed, as the archive of the reviewed SHAs. No ref moves and nothing is force-pushed, so this is no history rewrite (the precedent is PR #18 and PR #19). It costs one lane B run on the new head and a supersede round on its head row, in the code review and in this record. Both rounds are tree-equality proofs.
+  - **(3) Accepted alternative: exact entries in `.gitleaks.toml`, one per finding, under D-SEC-PR45-01 conditions 1 to 7.**
+    - **Each entry:** AND, `regexTarget = "line"`, the full commit, `targetRules = ["generic-api-key"]`, an anchored path, and `^\n?<exact line>$` with the value class pinned. Fingerprints come from the lane B report (rule, commit, path, line only).
+    - **Delivery:** in their own PR to main, with a record and a real-image before/after on a Docker slot.
+    - **Why it is allowed here.** D-SEC-PR45-01 covers already-pushed commits. I extend it to commits that review records and evidence have already bound.
+    - **Coverage and lifetime.** The entries cover lanes A, B and C. They are retired once the commits are not ancestors of main and the branch is closed.
+  - **(4) The orchestrator chooses (2) or (3).**
+    - Under (2), the lane B run queued on `93f0f126` cannot be the PR's gitleaks evidence.
+    - Under (3), the config PR merges before the TASK-040 PR's lane A and its gitleaks-full step.
+- **Routed:**
+  - **orchestrator:** the choice in item (4), then the rename and the merge-ref check.
+  - **senior-developer:** if (2), the supersede branch and the tree-equality check.
+  - **devops-engineer:** if (3), the config PR and its real-image proof.
+  - **security-analyst (self):** if (2), the supersede round; if (3), the review of the config PR.
+- **Alternatives considered:**
+  - **Baseline only.** Rejected: it leaves lane A red, and it is the wrong list.
+  - **A `.gitleaks.toml` path or rule allowlist for the test files.** Rejected: it is the class PR10-SEC-08 and D-SEC-PR45-01 forbid.
+  - **Changing the old branch in place (a rebase that drops the literal).** Not needed: it moves a ref the reviews are bound to, and option (2) gives the same result without moving any ref.
+- **Reversibility:** High (a review record, and no configuration change).
+
+### D-QG-004 · 2026-11-20 · quality-gatekeeper · Re-verification of the QG-040 conditions of D-QG-003 against D-ARCH-200..204, and verification of the new Accepted text (ADR-0003 amendment of 2026-11-20, ADR-0014 amendments 10 to 16, ADR-0012 amendment 5, ADR-0018 amendment 9; CLAUDE.md §5) = PASS_WITH_CONDITIONS; QG-040-C1, -C2 and -C5 closed, no QG-040 condition left for the part 040-A merge, new conditions QG-040-C7 and QG-040-C8
+- **Trigger:** the coordinator's request after `1012fa6f`; the routing of D-ARCH-202 ("quality-gatekeeper: QG-040-C2 and QG-040-C1 (b) answered"). This is not a phase gate.
+- **Judged at:** `1012fa6f` (D-ARCH-200..204), read on main `8b8ec12c`. The three commits after it add round 4 of the code review and security round 2 (D-SECPR040-02) and change no architecture, requirement or plan file. Documents only. No test, lint or Docker run. Statements about the code were checked by reading the TASK-040 branch at `e96bd979` and `packages/config` on main. The contract was read with a script over `openapi.yaml`.
+- **Read:** the diff of `1012fa6f` in full (ADR-0003, -0005, -0012, -0013, -0014, -0018, api/README §5, data-model §3.5, §6.2, §10.4 and A39, ARCHITECTURE.md checkout note, risks.md R-ARCH-39); D-ARCH-200..204, D-PM-083 and D-PM-084, D-SECPR040-01 and -02, D-SD-007 to -009; code review rounds 2 to 4; REQ-API-013, DR-A08, REQ-AUDIT-010, REQ-PAY-002, -009 and -014, REQ-BOOK-020, A-117; US-199 and US-202; the contract operations `checkoutOrder` and `confirmPayment` with their `x-audit` and examples; ADR-0012 §1, §4 and amendment 4; api/README §8 and §10; the cards of TASK-040, TASK-096 and TASK-170, `task-map.csv`, STATUS and traceability 1.14.
+- **Decision:** PASS_WITH_CONDITIONS. The answers to QG-040-C1, -C2 and -C3 are sound, and the new Accepted text is a valid amendment. One contradiction with the contract is new (QG-040-C7), and the card lines of the five entries are not folded (QG-040-C8).
+- **Status of the D-QG-003 conditions:**
+
+  | Condition | Status | Evidence |
+  |---|---|---|
+  | QG-040-C1 (a) ledger claim | **Closed** | ADR-0014 amendment 12, ADR-0013 item 27, data-model §6.2 step 5: each batch runs through `idempotentProcessor`; the sentence of amendment 8 is struck and corrected |
+  | QG-040-C1 (b) ADR-0003 pointer | **Closed** | ADR-0003 amendment of 2026-11-20 item 1: claim, re-authentication check, `load`, `call`, `handler`, completion; a refused proof leaves the window |
+  | QG-040-C1 (c) definer reason | **Closed** | amendment 12: the API store keeps `DELETE`, so a definer purge removes no privilege; the old reason is struck in amendment 8 |
+  | QG-040-C1 (d) as-built texts | **Closed** | amendments 10 and 11; data-model §3.5 (heading, `lease_until`), §6.2 steps 1 and 2. The part 040-A formula quoted in amendment 10 is the one in `execute.ts` at `e96bd979` |
+  | QG-040-C2 `If-Match` before `call` | **Closed** for the ruling | ADR-0003 rule (i), ADR-0014 amendment 13, api/README §5 "Order". It is the first outcome, and it is what REQ-API-013 and DR-A08 require since D-PM-083. The test is written in D-ARCH-202 card line 1; the TASK-096 card still holds the placeholder (QG-040-C8) |
+  | QG-040-C3 (a) proof parameters | **Answered, open until the contract carries it** | amendment 14 fixes the two sentences and counts ten operations (four conditional, six required; my count agrees). `openapi.yaml` is unchanged; the edit rides the second pull request of part 040-B and needs the api-designer acknowledgement |
+  | QG-040-C3 (b) replay header on 4xx | **Closed** | amendment 14 and api/README §5 "Replay header on a 4xx": not declared, because the 4xx responses are components shared with the one-time-secret operations (SEC-TC-53). The reason holds |
+  | QG-040-C4 item 1 (D-TASK040-04) | **Closed** | D-SECPR040-01 (stands, with HKDF for both keys); ADR-0018 amendment 9 and the register row; data-model §10.4 |
+  | QG-040-C4 item 2 (D-ARCH-192) | **Closed** for the concurrence | D-SECPR040-01 conditions P-1 to P-5, adopted in amendment 12. Open inside part 040-B: P-1 (CODEOWNERS line, devops-engineer, TASK-015 part 015-C) and the reading of P-3 with the ledger claim (security-analyst, round of part 040-B) |
+  | QG-040-C4 item 3 (proof check, VIEW/DOWNLOAD replay) | **Closed** | D-SECPR040-01: D-ARCH-193 confirmed, T187-1 to -6 on the TASK-187 card (D-SD-008); no entry for the replay of `emailShipmentDocuments`, pinned by PR040-SEC-07 (b) |
+  | QG-040-C4 item 4 (threat model) | **Open, before G3** | `threat-model.md` T-79, R-05, AC-14 and SEC-TC-04 still read "no secrets stored"; `security-test-cases.md` was changed (`b9c0ddeb`) |
+  | QG-040-C5 (a) story files | **Closed** | `a3d0a02b` holds EPIC-01, EPIC-04 and EPIC-16; on main the US-038, US-088 and US-011 texts carry D-PM-079, -081 and -082. The story half of QG-043-C5 is closed with it |
+  | QG-040-C5 (b), (c) | **Closed** | D-PM-083: A-117 and D-PM-082 corrected; DR-A08 split into four steps; the stale-on-arrival rule in the REQ-API-013 note; what keeps US-038 inside M0 is stated |
+  | QG-040-C6 plan fold | **Closed** except one row | D-SD-007: the TASK-040 card and `task-map.csv` (US-038 partial), proofs (b), (d), (e), (f) worded as asked, 32 cards with PRECONDITION PART 040-B plus TASK-096 (counted on the wave files), TASK-152 named for the client rule, traceability 1.14. Open: the `gherkin-test-map.md` rows of AT-US-038-01 and -06 are unchanged (qa-lead) |
+
+- **Held, for the new Accepted text:**
+  1. **Supersession is explicit.** Dated notes stand at ADR-0003 rule (h), ADR-0005 item 18, ADR-0013 item 27, ADR-0014 amendments 5 to 9 and saga step 1, the ADR-0018 register row, ARCHITECTURE.md and data-model §3.5, §6.2 and §10.4. Struck text is kept. Each entry says what was wrong in the earlier text.
+  2. **The lease rule is right.** With D = 20 s and T = 0.25 + 2 + 5 s (the defaults of `schema.ts`): D + T = 27.25 s, 3 × T + 1 s = 22.75 s, lease 32.25 s. Part 040-A gives 30 s, 2.75 s above the stretch through `call`; at a statement timeout of 9 s the read-only path needs 34.75 s. I checked every stretch between two writes of `lease_until` against the formula, the first one (claim, `load`, renewal) included.
+  3. **Rule (i) and D-PM-083 agree** word for word on the outcome: stale on arrival, 412, no `call`; the conditional write decides the race.
+  4. **Rules (j) to (l) are coherent with ADR-0014.** The saga takes the authorisation from the confirmation or the webhook, and the cancellation saga calls the carrier after the commit, so `cancelShipment` has no `call`. The version in the gateway key removes the case the old key could not serve. R-ARCH-39 states the residual, its owner and what reopens it.
+  5. **Amendments 11 to 16.** `recordConsent` is the only idempotent operation with public access (counted). The envelope, the HKDF labels and the stored client secrets follow D-SECPR040-01, which is the security-analyst's position. The reading of "one-time secret" in amendment 1 is stated and pinned by a contract test.
+  6. **Rejected alternatives are reasoned** in each entry: a write phase before `call`, a compensation after the rollback, a longer fixed lease, a waiver of the ledger half, per-operation copies of the shared responses, a separate register key, `<NAME>_NEXT` now.
+- **Conditions:**
+  - **QG-040-C7 · principal-architect, as a change request to api-designer, with security-analyst and product-manager; before TASK-085 is dispatched** (D-ARCH-202 rates its own reversibility Medium once TASK-085 has shaped the gateway interface). ADR-0012 amendment 5 says that `checkoutOrder` "creates the intent and does not confirm it … with the Mock gateway as with Stripe" and never returns `AUTHORISED`. The contract says the opposite in four places, and amendment 5 of ADR-0014 says that the contract decides:
+    - the description of `checkoutOrder`: "On AUTHORISED the booking saga starts", and "One payment-state derivation function serves this route (Mock gateway, which authorises synchronously)";
+    - its 201 response: "AUTHORISED starts the saga; FAILED carries failure_code";
+    - its `x-audit.additional` entry, `UPDATE payment` "when a required CVC check did not pass on a synchronous (Mock) authorisation: the gateway authorisation is voided". The generated audit suite asserts each `additional` entry (api/README §10);
+    - api/README §8: "One derivation function serves `checkoutOrder` (Mock), `confirmPayment` and the Stripe and Mock webhooks".
+
+    D-ARCH-203 raises a change request for the proof parameters and the replay header only, and D-ARCH-202 says "no requirement text changes". Required:
+    - (a) the change request for these places, or a narrower rule (j) for the Mock gateway with its reason;
+    - (b) the step that confirms a Mock intent in the M0 saga. AT-US-202-01 posts the booking with `mock_ok` and expects `PAID` with no browser step; amendment 5 offers "`confirmPayment` or a worker step" and the TASK-085 line "the confirmation or the synthetic webhook". One of them has to be the rule;
+    - (c) security-analyst: SEC-COND-06 / SEC-P3-28 was resolved on "the synchronous Mock path", and SEC-TC-37 tests the Mock CVC outcomes; say where they run now;
+    - (d) product-manager: the reading of US-199 ("an authorisation … is requested with token `mock_ok`" gives `AUTHORISED`; "authorise is called twice with the same idempotency key") under an interface with two steps.
+  - **QG-040-C8 · senior-developer, plan fold.** No card carries a line of D-ARCH-200..204.
+    - Before part 040-B is dispatched: on the TASK-040 card LEASE RULE, PURGE LEDGER CLAIM, CONTRACT DESCRIPTIONS, TWO PULL REQUESTS ALLOWED, ENVELOPE and STORED CLIENT SECRETS; its DISPATCH GATES line follows this entry.
+    - Before TASK-096 is dispatched: VERSION CHECK BEFORE CALL replaces the placeholder. The order of TASK-096 (Wave 3) and the tasks that mount an `If-Match` operation before it (TASK-062, TASK-092) is decided, as D-ARCH-202 asks. The CHECKOUT CALL line gives TASK-092 a row in "the call table of the route-metadata test", which TASK-096 builds a wave later; one of the two lines has to change.
+    - Before TASK-085 is dispatched, and after QG-040-C7: INTENT IN TWO STEPS. Before TASK-092 and TASK-170: CHECKOUT CALL (the TASK-170 card still names the key `auth:<order_id>:<attempt>`).
+    - A dispatch gate on TASK-167 for the item D-ARCH-202 leaves open (Stripe replays the saved answer of a key, a 500 included; the architect owes the rule before that dispatch). It is on no card and not in STATUS.
+    - IDEMPOTENCY SIGNALS on TASK-214, and CALL CLASS on every card whose route declares `call`.
+- **Still open from D-QG-003:** QG-040-C3 (a), until `openapi.yaml` carries the two sentences and api-designer has acknowledged (part 040-B merge check). QG-040-C4: P-1 and the P-3 reading (part 040-B), and the threat-model rows (before G3). QG-040-C6: the two map rows (qa-lead).
+- **For the part 040-A merge check:** no QG-040 condition remains. D-QG-003 named QG-040-C1 (d), -C4 item 1, -C5 and the first item of -C6; all four are closed above. What remains is the review's and the security record's own list (code review R4.4, D-SECPR040-02): R4-m1 (the supersede branch or the commit-bound gitleaks entries), lane B on PostgreSQL 18 on the final head, the security record bound to that head with its rename and merge-ref check, and the four literal unions with TASK-043. None of them is mine to waive. Part 040-B is gated by QG-040-C3 (a), -C4 (P-1, P-3) and -C8 first item; TASK-096 by -C8 second item; TASK-085 by -C7.
+- **Observations, no action required for this verdict:**
+  - Part 040-A at `e96bd979` already seals the body as `{origin, body}` (code review R4, D-SECPR040-02). Amendment 15 and data-model §3.5 describe part 040-A as storing "the three parts separately" and move the marker in part 040-B. No row exists before part 040-B; align the sentence at its fold.
+  - Rule (j) leaves the class of some operations to their tasks. `deletePaymentMethod` and `createPaymentMethod` change a provider object that the customer sees; a detach is right only if the delete commits, which by the rule makes it a worker step. The pinned table of rule (l) will force the question; TASK-096 or the payment-method task should not answer it alone.
+  - The route example of ADR-0003 still shows `call: controller.cancelAtCarrier` in the code block. Item 6 of the amendment explains it, far below the block. A comment in the block would stop the next reader.
+  - The `<NAME>_NEXT` question of ADR-0018 amendment 9 is routed to "the M5 rotation runbook task", which is no task of this run. It belongs in BACKLOG.md or risks.md so that it is found at M5.
+  - AC-14 ("no secrets stored") is contradicted by code from the day `checkoutOrder` is mounted (TASK-092, Wave 2). G3 is the due point of QG-040-C4 item 4; earlier is better.
+  - EPIC-04, EPIC-06 and EPIC-16 are again modified and not committed in the shared checkout. `d59c3e4f` says why (D-PM-084 and D-PM-085, held until the map regeneration). On main the US-038 and US-088 notes lack the D-PM-084 sentence until then.
+- **For G3, beyond D-QG-003:** the lease table test of amendment 10 (5, 8, 9, 12 and 120 s) and the claim-lost entry; the envelope and its check; the three contract pins of PR040-SEC-07; the TASK-096 tests (a stale `If-Match` with a `call` phase: 412 and the call fake not invoked; a version that changes during `call`: 412, one call, WARN `api.call_without_commit`); the call table with every `call` operation and a fault test per `inert` and `reachable` row; the outcome of QG-040-C7 in the contract and in the Mock gateway; R-ARCH-39.
+- **No evidence note:** as for D-QG-001 to D-QG-003, this entry is the record.
+- **Reversibility:** High (a verification record; it changes no artefact).
+
+### D-ORCH-142 · 2026-11-20 · sdlc-orchestrator (session A) · Developer decisions of TASK-040 part 040-A and TASK-043, recorded from their commit bodies
+- **Why here:** the branches were kept free of DECISIONS.md edits to stop repeated merge conflicts; the developers put their decisions in commit bodies, appended below verbatim. Rulings that replaced or amended them are cited inside each entry.
+
+#### TASK-040 commit 95945b7e
+
+```text
+US-038, REQ-API-009..011, SEC-TC-04, SEC-TC-53. The commits on this branch add these parts:
+- The idempotency_keys table (SYSTEM, hard-delete), its table-class manifest idempotency.json,
+  the grants and the catalog pins.
+- Slot 7a: key parsing and the request fingerprint.
+- The store port over systemDelegates(tx). Response bodies are AES-256-GCM ciphertext.
+- Tx-slot changes: the claim, the replay, the 2xx completion in the handler transaction, the
+  returned-4xx completion after the FAILED entry, and the release.
+- Tests: unit, API, contract (x-idempotency) and integration on PostgreSQL 18 (integration
+  not yet run).
+
+Developer decisions (orchestrator appends them to DECISIONS.md on main):
+D-TASK040-01 The claim, replay, completion and release run in the tx slot. Slot 7a is a plain
+  RouteSlot constant in pipeline.ts (TASK-041 lock), so it cannot get the runner or the key. It
+  parses the key, fingerprints the validated input and records a branded request in res.locals.
+  The store reaches the tx slot as ExecuteOptions.idempotency, which flows through
+  defaultPipelineSlots with no edit. The claim commits in its own transaction before load.
+D-TASK040-02 Fail closed at mount. A required/optional route without a store throws
+  IdempotencyNotWiredError. An idempotent mode on a safe method or on a transaction none route
+  throws IdempotencyRouteError. Production wiring (idempotencyStoreFrom in start-api.ts, through
+  AppDependencies into app.ts defaultSlots) needs TASK-041 files and waits for that lock. No
+  route on main is idempotent yet.
+D-TASK040-03 Only returned results are stored: a 2xx in the handler transaction, and a 4xx
+  other than 429 in its own transaction after the FAILED entry. A thrown error, AppError 4xx
+  included, releases the key: its problem body carries the first correlation id, and nothing
+  committed.
+D-TASK040-04 Anonymous scope = HMAC-SHA256 of the client network (IPv4 /32, IPv6 /64). The key
+  is HKDF-SHA256 of the current IDEMPOTENCY_BODY_KEY (info
+  platform-idempotency-scope-network-v1). Rotation changes anonymous scopes. An actor with no
+  organisation is scoped by the actor alone. scope_hash = SHA-256 of
+  JCS([version, kind, owner, actorScope, actor, method, path, key]).
+D-TASK040-05 The single scope_hash column of data-model 6.2 is used. The ADR-0014 am. 1
+  guest_token_hash / client_ip_hash columns are not added.
+D-TASK040-06 The lease (30 s) and the expiry (24 h) use the application clock. Takeover and
+  completion are conditional on the row version. A request that lost its claim rolls its 2xx
+  back (IdempotencyClaimLostError).
+D-TASK040-07 409 IDEMPOTENCY_IN_PROGRESS and 422 IDEMPOTENCY_KEY_REUSED write no audit entry.
+D-TASK040-08 errors/classify.ts keeps Retry-After for an exact allow-list of client codes
+  (IDEMPOTENCY_IN_PROGRESS). TASK-041 adds RATE_LIMITED: union-merge the set.
+D-TASK040-09 Extra CHECKs: __method, __response_status, __completed, __body_key_id. Migration
+  20261120100000 sorts after TASK-043's 20261120000000.
+D-TASK040-10 No purge job here (data-model 6.2 step 5, housekeeping follow-up). New test project
+  tests/contract (root tsconfig reference, root-scripts pin). No new dependency.
+
+
+```
+
+#### TASK-040 commit d0a82a24
+
+```text
+Code review PR-pending-TASK-040 round 1:
+- M1: a read-only (VIEW/DOWNLOAD) idempotent route completes its key only after the fail-closed
+  entry is written. If the entry fails, the key is released and the error is rethrown, so the
+  retry runs the handler again.
+- M2: a thrown 4xx other than 429 is stored and replayed, like a returned one.
+- m4: the lease is sized to the longest phase and renewed before call and before the handler
+  transaction.
+- m5: tests for a failed release and for the two-round fall-through. The MemoryRunner.refuse
+  seam is gone.
+- m6: store.int.test.ts runs store.ts on PostgreSQL 18 (copy of the migrated-postgres helper).
+- n1: the TASK-040 registry block moved above the invitations comment.
+- n3: the scope path is the normalised template path built from the validated parameters.
+- n4: an unreadable stored row is logged at ERROR as api.idempotency_replay_unreadable.
+- n6: an anonymous caller without a client IP gets no scope.
+
+D-PM-081 (REQ-AUDIT-010 amended):
+- 409 IDEMPOTENCY_IN_PROGRESS (from the claim or from a renewal) and 422 IDEMPOTENCY_KEY_REUSED
+  write no audit entry. They log api.idempotency_conflict with the code and the correlation id.
+- A retry whose stored response cannot be read answers 500. The ERROR event carries the class
+  and a fixed reason, never the key, the body or the scope. No FAILED entry is written.
+- A claim that fails on a new request writes exactly one FAILED entry, as any 5xx does. The
+  same applies to the 503 of a required route without a scope.
+
+Decisions (append to DECISIONS.md; revised and new entries):
+D-TASK040-03 (revised) Store returned AND thrown 4xx other than 429; 5xx and 429 release.
+  - A thrown 4xx (AppError, or a DbError with a 4xx code, classified like the problem handler)
+    is stored as its problem source: status, Content-Type application/problem+json as the
+    marker, and the encrypted body {code, detail, errors}.
+  - A replay rethrows an equivalent AppError (ReplayedProblemError, plus Idempotent-Replayed:
+    true), which the problem handler renders.
+  - The replay matches the original byte for byte (type, title, status, detail, instance, code,
+    errors), except correlation_id. ADR-0016 ties that id to the response's X-Correlation-Id;
+    a replay is a new request.
+  - Storing the rendered document instead would contradict the replay's header and duplicate
+    the problem handler's configurable type base inside the tx slot.
+D-TASK040-06 (amended) Lease = max(30 s, longest stretch between renewals + 5 s skew margin).
+  - Longest stretch = max(call deadline, 2 x (maxWait + tx timeout) + FAILED wait); the tx
+    numbers come from the runner's transactionOptions.
+  - The lease is renewed before call and before the handler transaction (only when the route
+    has load or call), conditional on the version.
+  - A lost claim answers 409 IDEMPOTENCY_IN_PROGRESS before any further phase, so call never
+    runs twice.
+  - The application clock stays: the database clock would mean raw SQL statements throughout
+    the store, and the version-conditional writes keep correctness under skew.
+D-TASK040-08 (corrected) classify.ts keeps Retry-After for IDEMPOTENCY_IN_PROGRESS only. TASK-041
+  does not edit classify.ts; there is no union to make.
+D-TASK040-11 n6: with no client network, an anonymous caller has no scope. An optional route
+  runs without idempotency and a required route answers 503 SERVICE_UNAVAILABLE (with its
+  FAILED entry). Both log api.idempotency_scope_unavailable. One scope shared by every
+  anonymous caller would let a key replay another caller's response.
+D-TASK040-12 n3: scope path = matched template with validated params, percent-encoded.
+  Parameter case follows the Joi schema.
+Held for rulings (not implemented): m7 ordering (architect); purge owner and cadence, 040-B
+  wiring (architect).
+
+
+```
+
+#### TASK-040 commit 3dc1e225
+
+```text
+Architect rulings D-ARCH-191..195 (ADR-0014 amendments 5 to 9), change list F1 to F6:
+- F1/F2: a 4xx other than 429, returned or thrown, in load, call or the handler transaction,
+  is the response as sent. A thrown one is rendered ONCE in the tx slot with the first request's
+  correlation_id, by renderProblem (errors/rendered-problem.ts). renderProblem is the problem
+  handler's own classification and rendering, now shared by both. That exact document is
+  stored (Content-Type joins STORED_HEADERS), then sent through the problem handler as is
+  (RenderedProblemError). A replay sends the stored bytes again, correlation_id included, with
+  its own X-Correlation-Id header and Idempotent-Replayed: true. The order is FAILED entry,
+  then completion, then response. The {code, detail, errors} re-render path is removed.
+  ExecuteOptions.problemTypeBase keeps the document equal to the problem handler's when a type
+  base is configured; part 040-B passes the same value to both.
+- F3: API tests cover thrown 409, 422 and 400 (replayed byte for byte, handler once), a 4xx
+  thrown in load and one in call (replayed, call once), and a thrown 429 and 5xx (no row). Unit
+  tests cover problem.ts and rendered-problem.ts.
+- F4: M1 is kept (entry before completion on read-only routes; a failed entry releases).
+- F6: header comments of execute.ts and store.ts corrected; the purge is the 040-B worker
+  schedule (D-ARCH-192).
+- origin/main merged; DECISIONS.md is main's.
+
+Decisions (append to DECISIONS.md; these replace or annotate the earlier texts):
+D-TASK040-01 Claim, replay, completion and release run in the tx slot (ADR-0014 amendment 7).
+D-TASK040-02 Fail closed at mount without a store; production wiring is part 040-B (ADR-0014
+  amendment 9).
+D-TASK040-03 (replaced; cites D-ARCH-195, ADR-0014 amendment 6) Every 2xx and every 4xx other
+  than 429 produced after the claim is stored, returned or thrown, as sent. A thrown 4xx is
+  stored as its problem document rendered once (first correlation_id included) and replayed
+  byte for byte. A 5xx, a 429, a deadline or disconnect 503 and any unclassified failure
+  release the key.
+D-TASK040-05 Single scope_hash column per data-model 6.2 (ADR-0014 amendment 5).
+D-TASK040-06, -08, -11, -12 as in the fix cycle 1 commit (d0a82a24). The m4 lease renewal
+  matches the architect's preference; the 30 s value is unchanged.
+D-TASK040-10 No purge in 040-A (ADR-0014 amendment 8: the 040-B worker schedule); tests/contract
+  project; no new dependency.
+D-TASK040-13 The problem handler and the tx slot share renderProblem. A RenderedProblemError is
+  sent as is by the problem handler (status, problem+json, Cache-Control and error mark as for
+  any problem). A forged look-alike is not recognised (WeakSet brand) and is classified as
+  usual.
+
+
+```
+
+#### TASK-040 commit 20758572
+
+```text
+Lane B on 95945b7e and code review round 3 (R3-M1):
+- C9: ck_idempotency_keys__method and __status are registered in prisma/tests/catalog ENUM_CHECKS,
+  pinned from data-model 6.2. The TS sources of truth are IDEMPOTENT_METHODS (request.ts) and the
+  new IDEMPOTENCY_KEY_STATUSES (store.ts). enum-checks.test.ts compares them with the migration.
+- gitleaks (PR33-SEC-08): the UUID literal '7f1c0c1e-...' assigned to key-named identifiers is
+  gone. Tests now use randomUUID() at run time (api test KEY, scope.test, request.test and the
+  prisma integration claim). The old commits still hold it:
+  a633eb84 scope.test.ts:24, 9f08ecb5 idempotency.api.test.ts:33,
+  5e0dc1b0 prisma/tests/idempotency/idempotency-keys.int.test.ts:58.
+- Late ioredis log: the open-queue unit tests now force-disconnect every Queue their metrics
+  scrape touched. A queue that never passed the refused handshake could outlive its bounded
+  close and log after the file ended. Only BullMQ queue-profile connections set
+  enableOfflineQueue false.
+- R3-M1: the origin of a stored response is sealed inside the AES-GCM body envelope
+  {origin, body}, never derived from Content-Type. Only a slot-problem row replays through
+  RenderedProblemError ("malformed" applies only to those rows). A route's own problem+json
+  result replays as an ordinary result through send, with the same bytes and stored
+  Content-Type.
+
+Decisions (append to DECISIONS.md):
+D-TASK040-14 Stored body = sealed JSON envelope {origin: handler | slot-problem, body}. The origin is
+  authenticated by the GCM tag (AAD: table, column, scope hash, key id) and set only by this port,
+  so no column or header can forge a slot-rendered row (R3-M1 option (ii)). A body-less result
+  (204) stores no ciphertext and is a handler result.
+D-TASK040-15 C9 lists for idempotency_keys are pinned in prisma/tests (which may not import apps/api)
+  and tied to the code by apps/api/src/platform/idempotency/enum-checks.test.ts, the organisations
+  module pattern.
+D-TASK040-16 Test idempotency keys are generated with randomUUID(); no key-shaped literal in tests.
+Not changed now: R3-m1 single-source problemTypeBase (part 040-B).
+
+
+```
+
+#### TASK-040 commit e96bd979
+
+```text
+When a lease renewal finds the key taken over:
+- The answer is still 409 IDEMPOTENCY_IN_PROGRESS.
+- It logs WARN api.idempotency_claim_lost with the phase (before-call or before-handler) and the
+  correlation id, never the key or a body. This replaces the INFO api.idempotency_conflict line
+  of that path.
+- If call already ran (the renewal before the handler transaction of a route with call), exactly
+  one FAILED entry is written (D-PM-084).
+- A takeover before call (the renewal after load, or before the handler of a load-only route)
+  still writes none (D-PM-081).
+
+Tests (idempotency.api.test.ts):
+- Takeover during call: one FAILED 409 entry, one WARN line with phase before-handler, no key.
+- New row, takeover during load: call not run, no audit entry, one WARN line with phase
+  before-call.
+
+Decision (append to DECISIONS.md):
+D-TASK040-17 Lost-claim audit follows the external effect: FAILED iff call ran before the claim
+  was found lost (D-PM-084), else none (D-PM-081). WARN api.idempotency_claim_lost {phase,
+  correlation_id} in both cases.
+
+
+```
+
+#### TASK-043 commit c60959bd
+
+```text
+Code review round 1 and rulings D-ARCH-183..187 (ADR-0004 amendment 2):
+- F1/F2/F11 writer sets created_at = updated_at = one clock_timestamp(); JSDoc states the
+  publish-after-aggregate-lock contract and the correlation grammar (23514 outside it)
+- F3 lane B two-arm ordering test under the aggregate row lock (pg_stat_activity, no sleep)
+- F4 wording (relay header, metrics, migration header, schema comment); F8 lock-key comment
+- F5 relayBounds: W = min(tx timeout, idle-in-tx timeout), budget W/2, enqueue min(2 s, W/4)
+- F6 loop backs off from the poll interval to 5 s, one WARN per streak, recovery INFO
+- F7 gauges oldest_pending_age_seconds and last_tick_timestamp_seconds
+- F10 worker test: no event type before the outbox-relay processor exists
+- F12 lane B 23514 rows; unit rows for the relay and purge correlation ids
+- m1 api lane B test X-Correlation-Id -> row (Client-Corr-0103), own migration helper copy
+- m2 01/02 write a business row in the same transaction; more columns asserted
+- m5 createOutbox off the public barrels (test export @platform/api/testing/outbox);
+  mergeEvents refuses an open (.unknown(true)) or non-object payload schema
+- m6 unit rows for createProductionOutboxPurge and the bounds (2,500/1,250; idle smaller)
+- n2 relay-queues test disconnects every queue; n5 and QG-043-C7 lane B two-relay rows
+- M2/D-QG-002: docs/sdlc/DECISIONS.md equals origin/main; decisions below, for the log
+
+Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchestrator):
+- D-TASK043-01 outbox_events in table-class module outbox (outbox.json), processed_events in
+  worker.json, not platform.json: matches the SYSTEM_MODEL_OWNERS lint map; avoids a
+  conflict with TASK-040.
+- D-TASK043-02 relay and purge in apps/worker/src/platform/outbox/** (owned by both the
+  outbox and worker modules), not processors/outbox-relay/**.
+- D-TASK043-03 the writer is one raw tagged INSERT on the business TenantDb; org, actor,
+  correlation and (D-ARCH-185) created_at come from the transaction, never the caller.
+- D-TASK043-04 processed_events: SELECT, INSERT, DELETE, no UPDATE (ruled D-ARCH-186).
+- D-TASK043-05 the purge claims each 5,000-row batch with a raw job_executions INSERT ON
+  CONFLICT DO NOTHING until TASK-047 binds the worker SYSTEM accessor; retirement is a
+  TASK-047 item.
+- D-TASK043-06 enqueue inside the claim transaction under bounds, PostgreSQL advisory lock,
+  in-process loop in every worker, no BullMQ fallback (ruled D-ARCH-183).
+- D-TASK043-07 every event on the one queue outbox-relay; its processor dispatches by type;
+  no eventRouting map (ruled D-ARCH-184).
+- D-TASK043-08 an invalid stored traceparent is dropped by the writer and the relay; the
+  producer drops only an invalid tracestate.
+- D-TASK043-09 the catalogue-parameterised outbox factory is exported only as the test seam
+  @platform/api/testing/outbox (apps/api package.json export), not from the barrels (m5).
+- D-TASK043-10 no shared constant for the postgres:18 digest (code review n3, not done):
+  apps may not import the prisma/tests harness or each other's test layers without a lint
+  change (eslint.config.mjs is TASK-041's lock); the two helper copies carry the digest.
+
+
+```
+
+#### TASK-043 commit 07788996
+
+```text
+Security review round 1 (D-SECPR043-01) and ADR-0004 amendment 4 (D-ARCH-196, D-ARCH-197):
+- PR043-SEC-03: the outbox test factory is served from the existing ./testing subpath
+  (routing/tests/timing.ts re-exports createTestOutbox); the ./testing/outbox export is gone
+- PR043-SEC-01: isClosedObjectSchema walks describe(): declared keys at every depth, no
+  unknown/allowUnknown/patterns, one closed array item, string leaves bound to a grammar or
+  a valid list, only number/boolean/date otherwise; the ten open shapes are refused rows
+- PR043-SEC-02: tools/repo/test-seams.test.ts tripwire for test-outbox, @platform/api/testing
+  and any production import of the outbox writer module but the outbox barrel
+- PR043-SEC-04 / F7: only a tick that held the relay lock moves the last-tick gauge (HELP
+  text updated); unit row: 61 s of lockless ticks leave time() - gauge > 60
+- F14 (PR043-SEC-05): outbox_events gets SELECT, INSERT, DELETE and column-level UPDATE on
+  published_at, attempts, last_error, updated_at, updated_by, version; manifest, pins and the
+  lane B privilege listing follow; lane B row: UPDATE of org_id, actor_id, payload,
+  correlation_id as platform_app is 42501 while claim and both marks pass
+- F15: ck_outbox_events__actor CHECK (actor_id = created_by); lane B 23514 row
+- lane B unit fixes: writer.int.test uses fetchOnce/closeLoopbackServer (loopback ratchet)
+  and the lane idle timeout TEST_LANE_TX_IDLE_TIMEOUT_MS (D-ARCH-106 (6))
+
+Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchestrator):
+- D-TASK043-11 the closed-schema walk also refuses a top-level allowUnknown preference at
+  catalogue load (stronger than the validator-time refusal the record describes).
+- D-TASK043-12 the writer tripwire resolves relative specifiers against the importing file,
+  so a same-folder './writer.js' import is caught, not only deep 'platform/outbox/writer'.
+
+
+```
+
+### D-SECPR040-03 · 2026-11-20 · security-analyst · TASK-040 part 040-A supersede round = PASS_WITH_FOLLOW-UPS at `2abd665f` (branch `feat/TASK-040-idempotency-keys-v2`, one squash commit on main `f65d7955`); tree equality with the reviewed `e96bd979`, and a gitleaks emulation that finds nothing in the PR range (round 3 appended to `docs/05-quality/security/PR-pending-TASK-040-security-review.md` on main)
+- **Decision:** the round-2 verdict carries over to the supersede head unchanged. This carries out item (2) of D-SECPR040-02. No ref was moved and nothing was force-pushed. The old branch stays unpushed as the archive of the reviewed SHAs.
+- **Tree equality.**
+  - `tree(2abd665f)` equals `git merge-tree --write-tree e96bd979 f65d7955` (`a6b0bf97`).
+  - 0 code paths differ from `e96bd979` or from `93f0f126`.
+  - Ignoring `index` lines, the PR's net code diff equals `afb2b73c..e96bd979`; main changed no code path in between.
+  - The squash commit touches no document.
+  - Main's checker counts the same 39 owned paths (`--base f65d7955`), and the classifier selects the hosted job (36 paths).
+- **Gitleaks: the emulation, rebuilt after the scratch wipe.**
+  - **Method:** it follows v8.30.1 git mode. Each hunk is one fragment, and allowlists are applied with `regexTarget`, conditions, commits and stopwords. The repository's `.gitleaks.toml` is read from main.
+  - **Controls:** the literal fires; a `keyId` line is allow-listed.
+  - **Differential:** it reproduces exactly lane B's three findings on `4e1163aa..e96bd979`.
+  - **Result:** 0 findings on lane A's range `f65d7955..2abd665f` and on `origin/main..2abd665f` (3,720 added lines).
+  - **Unchanged:** the baseline and `.gitleaks.toml`.
+- **Record binding.** A simulation on a shared clone passes for `--base f65d7955 --head 2abd665f`; without this round it is `missing`.
+- **Owed:**
+  - lane B PASS on `2abd665f`, once Docker Desktop is back; earlier runs do not count for this head;
+  - the hosted `security-integration` job on the first `pull_request` event;
+  - the rename to `PR-<NNNN>-TASK-040-security-review.md` and the merge-ref check.
+- **Status unchanged:**
+  - PR040-SEC-01, -02 (narrowed), -04, -07 and -09 are due in the first pull request of part 040-B;
+  - PR040-SEC-03, -05, -06 and -08 are closed;
+  - P-1 to P-5 and T187-1 to T187-6 stand.
+- **Routed:**
+  - **orchestrator:** lane B, the push of the v2 branch, the rename.
+  - **security-analyst (self):** triage, if lane B's gitleaks-full reports anything on the v2 head.
+- **Reversibility:** High (a review record).
+
+### D-ARCH-205 · 2026-11-20 · principal-architect · QG-040-C7 of D-QG-004: ADR-0012 amendment 5 is narrowed — "the checkout call never confirms" binds a gateway that reaches a provider; the Mock gateway authorises inside the request, as the contract says in four places, and none of them changes; the M0 saga needs no confirming step (ADR-0012 amendment 6); the two-step interface line for TASK-085 is withdrawn
+- **Input:** D-QG-004 (`f65d7955`) condition QG-040-C7 (a) to (d), due before TASK-085 is dispatched; the contract: `checkoutOrder` (description, 201 text, `x-audit.additional`), `confirmPayment`; api/README §8; US-199, US-202 (AT-US-202-01); REQ-PAY-001, -002, -009; ADR-0012 §1, §4 and amendments 4 and 5; ADR-0014 saga step 1; D-ARCH-202; D-PM-083.
+- **What was wrong in my text.** ADR-0012 amendment 5 and ADR-0003 rule (j) said that `checkoutOrder` never confirms an intent "with the Mock gateway as with Stripe" and never returns `AUTHORISED`, and D-ARCH-202 gave TASK-085 an interface with two steps. I wrote the rule from the Stripe flow and from ADR-0014 ("sync intent creation") and did not read the operation in the contract. The contract has the Mock authorise synchronously, and M0 is built on it: there is no browser step and no webhook route before Wave 6.
+- **Decision (ADR-0012 amendment 6):**
+  - **(a) No change request for the four places.** The narrower rule: ADR-0003 rule (j) is about effects outside the process and binds an adapter that reaches a provider. The Mock gateway is a simulator inside the process, holds no funds and no card, and is refused in production. Its synchronous authorisation in the `call` of `checkoutOrder` is no external effect.
+  - **Control.** An adapter declares `capabilities().simulated`, `true` for the Mock gateway only. An adapter that is not simulated never returns `AUTHORISED` from `authorise` and creates its intent unconfirmed; the gateway contract suite of US-199 asserts it for every such adapter. The interface of ADR-0012 §1 keeps its one `authorise`.
+  - **(b) No step confirms a Mock intent in the M0 saga.** With `mock_ok` the Mock answers `AUTHORISED` in the `call`; the handler of `checkoutOrder` writes the payment as `AUTHORISED`, moves the shipments to `PAID` and publishes `payment.authorised` in its one transaction; the saga starts from that event (AT-US-202-01). `mock_3ds` answers `REQUIRES_ACTION`; `confirmPayment` retrieves the Mock object and derives the outcome, and from TASK-171 the synthetic webhook does the same. With Stripe the browser confirms. `confirmPayment` retrieves and derives; it never confirms. No server-side confirmation of a Stripe intent exists in this run; one that is added later is a worker step after `order.checkout_started`.
+  - **(c) SEC-P3-28 / SEC-COND-06 and SEC-TC-37 run where they ran:** the synchronous Mock path of `checkoutOrder` with its `x-audit.additional` entry, `confirmPayment`, and the webhook path.
+  - **(d) US-199 reads as written.** One `authorise`; `mock_ok` gives `AUTHORISED`; two calls with one key give one authorisation.
+  - **What stands of D-ARCH-202:** rules (i), (k) and (l), rule (j) for every adapter that reaches a provider, the key `auth:<order_id>:<order_version>:<attempt>`, R-ARCH-39.
+- **Why not the change request** (the Mock in two steps as well): it would change four places of the contract and the generated audit suite, the reading of US-199 and the place of SEC-TC-37, and it would add a confirming step to the M0 saga, all for a simulator that holds nothing. The property the rule protects, no hold without a row, is a property of a real gateway, and the suite assertion tests it there.
+- **What the narrowing costs.** The Mock no longer shows that a checkout survives a write that does not commit after a real authorisation. The Stripe fixtures show it (TASK-167, TASK-170). A gateway that authorises at creation is the first trigger of R-ARCH-39.
+- **Alternatives:**
+  - **The change request** (above). Rejected.
+  - **No capability, the Mock named in the rule.** Rejected: the next adapter would have no line to cross; a flag with one assertion in the shared suite is the cheaper control.
+  - **A run-time refusal of `AUTHORISED` from a non-simulated adapter in the checkout.** Not adopted: by then the hold exists; the suite catches it before a release.
+- **Card lines for senior-developer (no apostrophes). They replace lines 2 and 3 of D-ARCH-202, which are not folded yet:**
+  1. Card of TASK-085; INTENT IN TWO STEPS is withdrawn: "SIMULATED GATEWAY (ADR-0012 amendment 6; ADR-0003 amendment 2026-11-20 rule (j) as corrected; D-ARCH-205; QG-040-C7): the interface of ADR-0012 section 1 keeps one authorise; capabilities().simulated is true for the Mock gateway and false for every other adapter; the Mock answers mock_ok and the other outcome tokens synchronously, as US-199 says; the gateway contract suite gains one assertion that runs for every adapter with simulated false: authorise never returns AUTHORISED and creates its intent unconfirmed (first run on the Stripe fixtures of TASK-167); configuration keeps refusing the Mock gateway in production".
+  2. Card of TASK-092: "CHECKOUT CALL, MOCK (ADR-0012 amendment 6; ADR-0003 amendment 2026-11-20 rule (k); D-ARCH-205): the call phase of checkoutOrder asks the Mock gateway with the key auth:<order_id>:<order_version>:<attempt>; on AUTHORISED the handler writes the payment as AUTHORISED, moves the shipments to PAID and publishes payment.authorised in its one transaction, and no step confirms afterwards (AT-US-202-01); mock_3ds answers REQUIRES_ACTION and confirmPayment derives the outcome; fault test: the handler transaction fails after call, no payment row exists, the retry with the same Idempotency-Key gets the same Mock result and the saga starts once; the rows of checkoutOrder and confirmPayment in the call table are added by TASK-096".
+  3. Cards of TASK-170 and TASK-167: "CHECKOUT CALL, STRIPE (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendments 5 and 6; D-ARCH-202, D-ARCH-205; R-ARCH-39): with the Stripe adapter the call phase of checkoutOrder creates the PaymentIntent unconfirmed and never returns AUTHORISED; the browser confirms with the client secret of the committed response; the key is auth:<order_id>:<order_version>:<attempt> and replaces auth:<order_id>:<attempt> in the D-ARCH-106 line; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; TASK-167 runs the suite assertion of the SIMULATED GATEWAY line on the Stripe fixtures".
+- **Routed:**
+  - quality-gatekeeper: QG-040-C7 (a) and (b) answered here.
+  - security-analyst, for (c): concurrence that a simulated gateway may authorise in a `call`, and that SEC-COND-06 and SEC-TC-37 keep their place. It rests on the refusal of the Mock gateway in production (SEC-TC-24).
+  - product-manager, for (d): confirm that US-199 and AT-US-202-01 need no rewording. D-PM-083 ("a stale checkout would place a hold") is met for Stripe by the rule and has no object with the Mock.
+  - api-designer: nothing for these four places.
+- **Applied in:** ADR-0012 amendment 6 and a struck sentence in amendment 5; ADR-0003 (the corrected bullet of rule (j), the note at rule (h)); ADR-0014 amendment 17 and a note in amendment 13; ARCHITECTURE.md (checkout note); risks.md 1.27 (R-ARCH-39).
+- **Validation:** the four places were read in `openapi.yaml` and api/README §8; US-199 and US-202 in EPIC-10. Nothing was run.
+- **Reversibility:** High (TASK-085 is not dispatched).
+
+### D-ARCH-206 · 2026-11-20 · principal-architect · Observations of D-QG-004: the classes of the payment-method operations under ADR-0003 rule (j) — `deletePaymentMethod` has no `call`, its detach is a worker step after the commit (ADR-0012 amendment 7); the route example of ADR-0003 carries a comment; the key-rotation window is kept as R-ARCH-40; two sentences about part 040-A corrected to the code at `e96bd979`
+- **Input:** D-QG-004 observations 1 to 4; the contract descriptions of `createPaymentMethodSetup`, `createPaymentMethod`, `updatePaymentMethod` and `deletePaymentMethod`; REQ-PAY-014; `store.ts` and `execute.ts` at `e96bd979`.
+- **Decision:**
+  - **Classes (ADR-0012 amendment 7).** `createPaymentMethodSetup`: `inert`. `createPaymentMethod`: `reachable`; it acts only on the setup that the row committed by the setup operation names. `updatePaymentMethod`: no `call`. `deletePaymentMethod`: no `call`.
+  - **`deletePaymentMethod`.** The handler marks the method removed under the version check and publishes its event. A worker step detaches at the gateway with its own key and then deletes the row. The contract description "Detaches at the gateway, then removes" becomes "Removes the saved method; the gateway detach follows after the commit": a change request to api-designer, in the pull request of the task that builds the route.
+  - **A completed setup that never becomes a saved method** leaves a method attached at the gateway. The task that builds these routes detaches it in its housekeeping, with security-analyst.
+  - **ADR-0003 route example:** a comment inside the code block says that the phase lines are not the shape of `cancelShipment`.
+  - **`<NAME>_NEXT`:** kept as risks.md R-ARCH-40, due at M5 before the first production rotation, because no task of this run owns the rotation runbook.
+  - **As built at `e96bd979`:** part 040-A already seals `{origin, body}` and already writes the `FAILED` entry of a claim lost after `call` (with the WARN line in both phases). ADR-0014 amendments 10 and 15 and data-model §3.5 named part 040-B; corrected in place and in amendment 17.
+- **Why the detach is not a `call`.** The operation takes `If-Match`. If a concurrent change wins at the conditional write, for example the same card made the default in another tab, a detach that already ran leaves a card that the Platform lists and the gateway refuses. A detach is right only if the delete commits, so rule (j) puts it after the commit. The user sees the card gone at once, and the worker step is retried until the gateway agrees.
+- **Alternatives:**
+  - **Detach in `call` as class `reachable`,** relying on rule (i) for the stale case and on a retry for the race. Rejected: the losing delete would break a card that the winning request keeps.
+  - **Delete the row in the handler and carry the gateway token in the event.** Rejected: a token in an outbox payload; the mark keeps it in its row until the detach is done.
+- **Card line for senior-developer (no apostrophes), on the card that builds the saved-payment-method routes (REQ-PAY-014):** "PAYMENT METHOD CALLS (ADR-0012 amendment 7; ADR-0003 amendment 2026-11-20 rule (j); D-ARCH-206): createPaymentMethodSetup has a call of class inert; createPaymentMethod a call of class reachable that acts only on the setup its committed row names; updatePaymentMethod and deletePaymentMethod have no call; deletePaymentMethod marks the method removed under the version check and publishes its event, and a worker step detaches at the gateway with its own key and then deletes the row (an already detached method counts as done); the contract description of deletePaymentMethod becomes: Removes the saved method; the gateway detach follows after the commit (change request to api-designer, in this pull request); housekeeping detaches the method of a completed setup that never became a saved method (with security-analyst); tests: a delete that loses its conditional write leaves the method attached and usable; a delete whose detach fails is retried and the method is not listed meanwhile".
+- **Routed:** api-designer (the `deletePaymentMethod` description, with that task). security-analyst (the abandoned-setup housekeeping; the detach as a worker step). product-manager (REQ-PAY-014 says "Removal detaches at the gateway", which stays true; no rewording needed).
+- **Applied in:** ADR-0012 amendment 7; ADR-0003 (code block comment, classes in the corrected bullet); ADR-0014 amendment 17 with notes in amendments 10 and 15; ADR-0018 amendment 9 (pointer); data-model §3.5; risks.md 1.27 (R-ARCH-40).
+- **Reversibility:** High (the routes are not built).
+
+### D-SECPR040-04 · 2026-11-20 · security-analyst · QG-040-C7 (c) of D-QG-004, the security part of D-ARCH-205 and D-ARCH-206 (ADR-0012 amendments 6 and 7): concurrence on all three points, with conditions
+- **Input:** D-ARCH-205 and D-ARCH-206 (`686dfc20`); D-QG-004 QG-040-C7; threat model T-71, AC-31, SEC-TC-24, SEC-TC-37; SEC-P3-28 / SEC-COND-06 (P3 review §8); `packages/config/src/guards.ts`, where `PAYMENT_PROVIDER=mock` is forbidden in production; D-ARCH-202 rules (i) to (l).
+- **(1) A simulated gateway may authorise in a `call`: concur.**
+  - **Why rule (j) does not bind the Mock.** Rule (j) protects against an external hold with no row behind it. The Mock is an in-process simulator that holds no funds and no card, so a Mock `AUTHORISED` without a committed row has no effect outside the process. The retry with the same key gets the same simulated result (US-199).
+  - **What the concurrence rests on.**
+    - The Mock never runs in production: the config guard forbids `PAYMENT_PROVIDER=mock` there, and SEC-TC-24 / AC-31 cover the webhook route and the `mock_*` tokens.
+    - The suite assertion that a non-simulated adapter never returns `AUTHORISED` and creates its intent unconfirmed.
+  - **Where the SEC checks stay.** SEC-COND-06 / SEC-P3-28 and SEC-TC-37 stay where they ran: the synchronous Mock path of `checkoutOrder` with its `x-audit.additional` void entry, `confirmPayment`, and the webhook path. The one derivation function keeps serving all three.
+  - **Conditions (TASK-085 card):**
+    - **C-1.** `simulated` is a constant of the adapter class, never configuration or request input. The composition refuses any payment adapter whose `capabilities().simulated` is `true` when `APP_ENV=production`, so the refusal keys on the capability and not only on the provider name. SEC-TC-24 gains that case: an adapter declaring `simulated: true` in a production composition ends the start.
+    - **C-2.** The suite assertion runs for every adapter registered with `simulated: false`, and a planted adapter returning `AUTHORISED` from `authorise` makes the suite fail (a negative control).
+  - **Accepted residual.** The M0 demo no longer exercises "no hold without a row" on a real gateway. The Stripe fixtures of TASK-167 and TASK-170 carry that proof, as D-ARCH-205 says.
+- **(2) The `deletePaymentMethod` detach as a worker step after the commit: concur.**
+  - **Why.** A detach that runs before the conditional write can break a card that a concurrent winner keeps. After the commit it is right by construction.
+  - **Conditions (on the card that builds the routes):**
+    - **C-3. Removed means unusable at once.** From the handler's commit, a method marked removed is neither listed nor accepted by `checkoutOrder` or any other charge path; the charge path checks the status, not only the list. Test: a checkout naming a removed method is refused while its detach is still pending.
+    - **C-4. The event carries only the method id** (no gateway token, as D-ARCH-206 decides). The worker step re-reads the row under the organisation's job context and detaches only a row still marked removed. It uses a gateway key derived from the method id, treats "already detached" as done, and deletes the row only after the gateway answers.
+    - **C-5. Retries are bounded.** A detach that keeps failing goes to the dead-letter queue and is visible to operations (TASK-214 signal). The marked row, which holds the gateway reference but no card data, stays until the detach succeeds; no other cleanup deletes it first.
+    - **C-6. Logs and audit.** The worker logs the method id and the outcome class only, never the gateway token. The user's DELETE audit entry is written by the handler; the detach adds no user-attributed entry.
+- **(3) Housekeeping of abandoned setups by the task that builds the payment-method routes: concur.**
+  - **The case.** The orphan card is not reachable through the Platform, which charges only methods that its own rows name. But it stays attached to the gateway customer against the user's intent.
+  - **Conditions (on that card; security-analyst reviews its record):**
+    - **C-7. Act only on setups the Platform itself started.** The housekeeping works from the Platform's own setup rows, never from a list of the gateway customer's methods, because a list-and-detach could remove a method saved concurrently. A setup row qualifies when it is older than its TTL (24 h unless that task sets otherwise) and has no saved method.
+    - **C-8. The housekeeping and a late `createPaymentMethod` exclude each other.** Each setup row is claimed by one conditional update (`ACTIVE` to `ABANDONED`), and `createPaymentMethod` refuses a setup that is no longer active, so a setup is either saved or detached, never both. Test: the race in both orders.
+    - **C-9.** The gateway key is derived from the setup id. The step is idempotent and runs under the organisation's job context, with SYSTEM batches only where ADR-0013 allows them. It logs counts and classes only. Test: a completed setup that is never saved is detached after the TTL, and its method no longer exists at the gateway fake.
+- **Routed:**
+  - **senior-developer:** C-1 and C-2 on the TASK-085 card; C-3 to C-9 on the card that builds the saved-payment-method routes.
+  - **quality-gatekeeper:** QG-040-C7 (c) answered.
+  - **security-analyst (self):** the threat-model row for T-71 gains C-1 (before G3, with the T-79 and R-05 text).
+- **Reversibility:** High (TASK-085 and the payment-method routes are not built).
+
+### D-SD-010 · 2026-11-20 · senior-developer · Plan fold for QG-040-C8 of D-QG-004: the card lines of D-ARCH-200..204 as replaced by D-ARCH-205 and D-ARCH-206, the conditions of D-SECPR040-04 and the TASK-249 line of D-PM-086, the order of TASK-096 and the If-Match operations mounted before it (retrofit, TASK-096 stays in batch 3.1), the CALL CLASS scan, the TASK-167 dispatch gate, and the TASK-040 part 040-A supersede branch (plan regenerated: 297 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Input:** D-QG-004 condition QG-040-C8; D-ARCH-200 to D-ARCH-206 (card lines); D-SECPR040-04 (C-1 to C-9); D-PM-086 (the limit line for TASK-249); D-SECPR040-02 and D-SECPR040-03 (supersede branch `feat/TASK-040-idempotency-keys-v2` at `2abd665f`); code review supersede round `c83e059e`; `openapi.yaml` (21 operations take `If-Match`); `task-map.csv` and the wave files.
+- **Decision, per card:**
+  - **TASK-040:** LEASE RULE, PURGE LEDGER CLAIM, CONTRACT DESCRIPTIONS, TWO PULL REQUESTS ALLOWED (with the dispatch sentence: the first pull request goes as soon as part 040-A is on main, it does not wait for part 041-A), ENVELOPE, STORED CLIENT SECRETS, AS BUILT IN PART 040-A (D-ARCH-206: the `{origin, body}` seal and the claim-lost entry are already in part 040-A) and PART 040-A SUPERSEDE BRANCH. Three existing clauses are amended in place: the PR040-SEC-04 clause points to LEASE RULE, P-3 reads "the only statement on `idempotency_keys`", and the TWO PARTS start condition points to the narrower rule of D-ARCH-204. PART 040-B FILES AND LOCKS is split per pull request. The DISPATCH GATES line follows D-QG-004: dispatch gates closed, merge conditions QG-040-C3 (a), P-1 and the P-3 reading.
+  - **TASK-096:** VERSION CHECK BEFORE CALL replaces the placeholder. Files gain `execute.ts`, `define-route.ts` and `tests/generated/route-metadata.ts`. Locks gain `api-tx-execute` and `api-routing`; no other task of batch 3.1 holds them (gen.mjs passes). New line RETROFIT.
+  - **TASK-062 and TASK-092:** IF-MATCH UNTIL TASK-096.
+  - **TASK-085:** SIMULATED GATEWAY (D-ARCH-205 line 1). INTENT IN TWO STEPS of D-ARCH-202 is withdrawn and not folded. The line also records that QG-040-C7 is answered: security-analyst concurs in D-SECPR040-04 and product-manager in D-PM-086. New line SIMULATED GATEWAY SECURITY CONDITIONS (C-1, C-2).
+  - **TASK-092:** CHECKOUT CALL, MOCK (D-ARCH-205 line 2). Its call-table rows are added by TASK-096, which settles the conflict QG-040-C8 named. New line AT-US-202-01 STATUS LITERAL (D-PM-086): the test asserts 201, and the held story edit lands before dispatch.
+  - **TASK-170:** CHECKOUT CALL, STRIPE. In the D-ARCH-106 line the key becomes `auth:<order_id>:<order_version>:<attempt>`, load reads the order version, and the client-secret sentence names the encrypted stored response (ADR-0014 amendment 15).
+  - **TASK-167:** CHECKOUT CALL, STRIPE and DISPATCH GATE: STRIPE REPEATED 500 (the D-ARCH-202 open item; the architect rules it before TASK-167 is dispatched).
+  - **TASK-249:** PAYMENT METHOD CALLS (D-ARCH-206), with the LIMIT sentence of D-PM-086, and PAYMENT METHOD SECURITY CONDITIONS (D-SECPR040-04 C-3 to C-9).
+  - **TASK-214:** IDEMPOTENCY SIGNALS replaces the IDEMPOTENCY CLAIM LOST ALERT line of D-SD-009 and keeps its runbook sentence. New line PAYMENT METHOD DETACH DEAD LETTERS (C-5). TASK-249 is in Wave 8 and TASK-214 in Wave 7, so the line hands the alert rule to TASK-249 if it merges later.
+  - **CALL CLASS** (D-ARCH-202 line 4) with a per-card tail on TASK-049 (registerUser, read), TASK-052 (loginUser, read), TASK-174 (confirmPayment, reachable), TASK-239 (suggestShipmentAddress, read), TASK-245 (listServicePoints, read), TASK-249 (setup inert, create reachable, update and delete no call), TASK-250 (the integrity check, read) and TASK-272 (refreshShipmentTracking, read in its call form).
+- **Sequencing (D-ARCH-202 asks for it; QG-040-C8 second item): retrofit, TASK-096 stays in batch 3.1.**
+  - The scan of the 21 `If-Match` operations against the cards and `req_ids` finds two mounted before batch 3.1: `updateMe` (TASK-062, batch 1.7) and `checkoutOrder` (TASK-092, batch 2.5). Every other one is mounted in Wave 5 or later.
+  - The `call` operations mounted before it are `registerUser` (TASK-049), `loginUser` (TASK-052), `checkoutOrder` and `confirmPayment` (TASK-092).
+  - The RETROFIT line names all of them. A task of that list that is not on main when TASK-096 merges declares its own source and row, which is the owner rule of ADR-0003 rule (i). No dependency edge is added.
+- **Why not move TASK-096 earlier:**
+  - It edits `execute.ts`, held by part 040-B through `api-tx-execute`, and `define-route.ts`, held by `api-routing`. Both locks are contended in Waves 1 and 2 by part 040-B and TASK-041.
+  - Moving it would lengthen the path to TASK-049, TASK-062 and TASK-092.
+  - No tag is cut before Wave 3 ends, so no release lacks the check.
+- **CALL CLASS scan method:** the wave files were searched for call-phase lines (D-ARCH-106, "call phase", "no transaction open"), and the payment operations were matched against the classes of ADR-0003 rule (j). Excluded:
+  - TASK-083 and TASK-091: `createQuote` starts its fan-out in `afterCommit`, not in `call`.
+  - TASK-187: it states a rule about `call`; it declares none.
+  - TASK-085, TASK-113 and TASK-044: platform pieces, not routes.
+  - `getPickupAvailability`: computed locally.
+  - `cancelShipment`: no `call` (ADR-0003 amendment item 6).
+- **Alternatives:**
+  - Dependency edges TASK-062 → TASK-096 and TASK-092 → TASK-096. Not taken: card lines cover both orders without blocking a back-fill.
+  - Moving TASK-096 into Wave 1 or 2. Rejected for the reasons above.
+- **Validation:** `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. The per-column diff of `task-map.csv` changes only the `refs` column of 16 rows; IDs, waves, batches, titles and branches are unchanged.
+- **Not changed:** `docs/04-plan/briefs/TASK-040.md` stays the part 040-A brief; part 040-B gets its own brief at dispatch. PLAN.md: no wave or count changed.
+- **Reversibility:** High (plan text).
+
+### D-PM-086 · 2026-11-20 · product-manager · QG-040-C7 (d) of D-QG-004: US-199, AT-US-202-01 and REQ-PAY-014 hold under ADR-0012 amendments 6 and 7 (D-ARCH-205, D-ARCH-206) — confirmed, with three notes added and one status literal of AT-US-202-01 corrected to the contract (201)
+- **Input:** D-ARCH-205 and D-ARCH-206 (`686dfc20`), which route the confirmation to product-manager; D-QG-004 QG-040-C7, due before TASK-085 is dispatched; D-SECPR040-04 (security concurrence with conditions C-1 to C-9); US-199, US-202, US-203; REQ-PAY-001, -002, -014, REQ-BOOK-020, DR-B03; `openapi.yaml` `checkoutOrder`.
+- **Confirmed:**
+  - **US-199: no change.** The interface keeps one `authorise`. "Token selects a deterministic outcome" (`mock_ok` gives AUTHORISED) and "Repeating a call with the same key returns the same result" (one authorisation, both calls return it) read as written. The new suite assertion for adapters that are not simulated belongs to "the same gateway contract suite" of the last scenario.
+  - **AT-US-202-01: no change for the ruling.** With `mock_ok` the Mock gateway answers AUTHORISED inside the checkout request; the request writes the payment as AUTHORISED, moves the shipments to PAID and publishes the event from which the worker saga starts. Every step of the scenario holds: the state sequence, one `createShipment` by the worker, CAPTURED, the persisted step outcomes.
+  - **REQ-PAY-014: the shall-statement and "Removal detaches at the gateway" stay.** The detach happens, after the commit, as a retried worker step.
+- **Product acceptance of the two rulings:**
+  - **The Mock gateway may authorise in the request; a real gateway never does.** Accepted. What the product needs from the rule, no hold on a customer's card without a payment the Platform knows about (D-PM-083), concerns a real gateway, and it is kept there. The Mock holds nothing and is refused in production.
+  - **A removal takes effect for the user with the request, and the gateway detach follows.** Accepted, with the user-facing meaning written into the REQ-PAY-014 note: from the commit the method is not listed, is refused at checkout and does not count towards the limit of 10. The last point is mine and goes beyond the architect's and the security analyst's text (C-3 covers the first two): a user who removes a card to make room for another must not be told that ten are saved while a detach is pending.
+- **Corrected, independently of the ruling: the response literal of AT-US-202-01.** The step said "the response is 202 with the order number". The contract answers `checkoutOrder` with 201 ("Payment created"), US-038 already says "booked … and got 201", and D-ARCH-205 names the 201 text among the four places of the contract that do not change. The step now reads 201. I found it while checking the scenario against the ruling. It is a wording amendment in the D-063 form: the title, the other steps, the ID and the count (7) are unchanged.
+- **Notes added (no shall-statement changed):**
+  - REQ-PAY-002: the Mock is a simulator inside the process and may answer AUTHORISED to the checkout request; a gateway that reaches a provider creates its payment unconfirmed.
+  - REQ-PAY-014: the removal sentence above.
+  - REQ-BOOK-020: the authorisation of step 1 is obtained at checkout (the request with the Mock; the hosted confirmation or the webhook with a real gateway); the worker saga starts from `payment.authorised`, runs the steps after it and owns the void. The shall-statement lists "authorise payment" first in a saga run "as a queued worker job"; a tester reading it alone would look for a worker call that authorises, and ADR-0014 has had none since P3.
+- **Alternatives:**
+  - **Confirm without notes.** Rejected for REQ-BOOK-020 and REQ-PAY-014: both read correctly only with the ruling beside them, and a test is written from the requirement.
+  - **Reword the REQ-BOOK-020 shall-statement** ("the steps after the authorisation run as a queued worker job"). Not done: nobody asked for it, the design dates from P3 and passed G2 with this text, and the note removes the ambiguity. Open to a later edit if a reviewer trips on it.
+  - **Change the contract to 202** to match the story. Rejected: 201 with the created payment is the contract that passed G2, a second story already uses it, and the booking's progress has its own status resource (REQ-BOOK-025).
+  - **Leave the 202 for the next edit of EPIC-10,** as the orchestrator prefers for story files. Not done: TASK-092 implements the contract exactly and writes this test with its ID; the literal would fail it or tempt a 202.
+- **For senior-developer:** the TASK-249 card line PAYMENT METHOD CALLS gains "a method marked removed does not count towards the limit of 10 saved methods; test: with 10 methods of which one is removed and not yet detached, an eleventh can be added". Nothing else: the TASK-085 and TASK-092 lines of D-ARCH-205 stand.
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.19 (notes of REQ-PAY-002, REQ-PAY-014, REQ-BOOK-020), `docs/01-requirements/stories/EPIC-10-payments-booking-saga.md` (US-202 notes; the status literal of the first scenario), `docs/01-requirements/PRD.md` 1.20 (§11), this file (the next-entry pointer in D-PM-068). The story file is a lane-B tooling input; the orchestrator times its commit, before TASK-092 is dispatched at the latest.
+- **Validation:** the gateway contract suite of TASK-085 (US-199 scenarios, the simulated capability, the planted negative of C-2); AT-US-202-01 in TASK-092 with status 201; the TASK-249 tests of D-ARCH-206, C-3 and the limit test above. `checkoutOrder` was read in `openapi.yaml` (201, lines 12301 to 12353). Nothing was run.
+- **Reversibility:** High (notes and one literal; none of the three tasks is built).

@@ -107,7 +107,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-253 (M1 Could) Manual tracking refresh limited to once per 5 minutes |
 | REQs | REQ-TRACK-015 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-191 |
+| Spikes / security / decisions | D-ARCH-191, D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-204 |
@@ -122,6 +122,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-253 scenarios
 - D-ARCH-106: the manual refresh is load (shipment under RLS, last refresh time), call (carrier track, no transaction open) and handler (events and audit), or an outbox event with 202; the once-per-5-minutes limit is checked in load and re-checked in the handler
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: refreshShipmentTracking (optional) (D-SD-007)
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: refreshShipmentTracking is class read when it takes the load, call and handler form; the outbox form with 202 declares no call and has no row
 - AT-US-253-01 … AT-US-253-06: all 6 scenarios of US-253, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

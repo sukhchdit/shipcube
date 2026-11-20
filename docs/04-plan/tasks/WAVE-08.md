@@ -525,7 +525,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-178 (M1 Should) Step 1: carrier address suggestions<br>US-185 (M1 Should) Incoterm choice and de-minimis hint |
 | REQs | REQ-BOOK-007, REQ-CUST-005, REQ-CUST-008 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-195, TASK-199 |
@@ -540,6 +540,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-178 and US-185 scenarios
 - D-ARCH-106: read-then-call route: load (the addressed shipment under RLS, 404 on a miss), call (carrier address validation, no transaction open), the handler returns the result (audit as declared); never a carrier call inside the tenant transaction
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: suggestShipmentAddress (carrier address validation in call) is class read
 - AT-US-178-01 … AT-US-178-05: all 5 scenarios of US-178, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-185-01 … AT-US-185-06: all 6 scenarios of US-185, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -688,7 +689,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-239 (M1 Should) Drop-off service points and drop-off confirmation |
 | REQs | REQ-PICK-010, REQ-PICK-013 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-008 |
+| Spikes / security / decisions | D-ARCH-008, D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-203, TASK-163 |
@@ -703,6 +704,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-239 scenarios
 - D-ARCH-106: read-then-call route: load (the addressed shipment under RLS, 404 on a miss), call (carrier service points, no transaction open), the handler returns the result (audit as declared); never a carrier call inside the tenant transaction
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: listServicePoints (carrier service points in call) is class read
 - AT-US-239-01 … AT-US-239-10: all 10 scenarios of US-239, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -799,7 +801,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-217 (M1 Should) Saved payment methods |
 | REQs | REQ-PAY-014 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-COND-01, SEC-COND-06, D-ARCH-191 |
+| Spikes / security / decisions | SEC-COND-01, SEC-COND-06, D-ARCH-191, D-ARCH-206, D-SECPR040-04, D-PM-086, D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-174, TASK-187 |
@@ -814,6 +816,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-217 scenarios
 - SEC-TC-37 (amended, saved-card part): auth_time > 12 h -> require_cvc_recollection=true; after createReauthProof retried checkout has cvc_recollection_required=false
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createPaymentMethod, createPaymentMethodSetup, updatePaymentMethod, deletePaymentMethod (optional) (D-SD-007)
+- PAYMENT METHOD CALLS (ADR-0012 amendment 7; ADR-0003 amendment 2026-11-20 rule (j); D-ARCH-206): createPaymentMethodSetup has a call of class inert; createPaymentMethod a call of class reachable that acts only on the setup its committed row names; updatePaymentMethod and deletePaymentMethod have no call; deletePaymentMethod marks the method removed under the version check and publishes its event, and a worker step detaches at the gateway with its own key and then deletes the row (an already detached method counts as done); the contract description of deletePaymentMethod becomes: Removes the saved method; the gateway detach follows after the commit (change request to api-designer, in this pull request); housekeeping detaches the method of a completed setup that never became a saved method (with security-analyst); tests: a delete that loses its conditional write leaves the method attached and usable; a delete whose detach fails is retried and the method is not listed meanwhile; LIMIT (D-PM-086): a method marked removed does not count towards the limit of 10 saved methods; test: with 10 methods of which one is removed and not yet detached, an eleventh can be added
+- PAYMENT METHOD SECURITY CONDITIONS (D-SECPR040-04 C-3 to C-9; security-analyst reviews the record): C-3 removed means unusable at once: from the commit of the handler a method marked removed is neither listed nor accepted by checkoutOrder or any other charge path, and the charge path checks the status, not only the list; test: a checkout naming a removed method is refused while its detach is still pending; C-4 the event carries only the method id (no gateway token); the worker step re-reads the row under the job context of the organisation and detaches only a row still marked removed, uses a gateway key derived from the method id, treats already detached as done, and deletes the row only after the gateway answers; C-5 retries are bounded: a detach that keeps failing goes to the dead-letter queue and is visible to operations (TASK-214 signal); the marked row, which holds the gateway reference but no card data, stays until the detach succeeds and no other cleanup deletes it first; C-6 the worker logs the method id and the outcome class only, never the gateway token; the DELETE audit entry of the user is written by the handler and the detach adds no user-attributed entry; C-7 the housekeeping acts only on setups the Platform itself started: it works from the own setup rows of the Platform, never from a list of the methods of the gateway customer, and a setup row qualifies when it is older than its TTL (24 h unless this task sets otherwise) and has no saved method; C-8 the housekeeping and a late createPaymentMethod exclude each other: each setup row is claimed by one conditional update (ACTIVE to ABANDONED), and createPaymentMethod refuses a setup that is no longer active, so a setup is either saved or detached, never both; test: the race in both orders; C-9 the gateway key is derived from the setup id; the step is idempotent and runs under the job context of the organisation, with SYSTEM batches only where ADR-0013 allows them; it logs counts and classes only; test: a completed setup that is never saved is detached after the TTL, and its method no longer exists at the gateway fake
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: createPaymentMethodSetup is class inert and createPaymentMethod class reachable, each with its fault test; updatePaymentMethod and deletePaymentMethod declare no call (PAYMENT METHOD CALLS, D-ARCH-206)
 - AT-US-217-01 … AT-US-217-16: all 16 scenarios of US-217, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -827,7 +832,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-227 (M1 Should) Integrity check before download |
 | REQs | REQ-DOC-009 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-162 |
@@ -841,6 +846,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-227 scenarios
 - D-ARCH-106: the object read for the integrity check runs in the call phase (no transaction open); load resolves the document under RLS first and the handler writes the VIEW or DOWNLOAD audit entry before the response is released (fail closed)
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: the integrity-check route (the object read in call) is class read
 - AT-US-227-01 … AT-US-227-05: all 5 scenarios of US-227, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

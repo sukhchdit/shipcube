@@ -440,3 +440,155 @@ Changing any of these sets then needs a security decision.
 | orchestrator | Rename this record once the PR exists |
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** Round 1, bound to `3dc1e225` (which includes `d0a82a24`, the pure-union merge `40fce4b2` and fix cycle 2).<br>**Findings:** 0 Critical, 0 High, 0 Medium. New: PR040-SEC-01 to -05 LOW, all due before part 040-B merges; PR040-SEC-06 to -09 INFO.<br>**Rulings:**<br>- D-TASK040-04 stands with the PR040-SEC-01 derivation change, and its rotation effect is accepted.<br>- D-ARCH-193 is confirmed with T187-1 to T187-6.<br>- The D-ARCH-195 form is accepted (F2-2 to F2-4 met; F2-1 waits for -02).<br>- D-PM-081: concurrence, except for a claim lost after `call`.<br>- D-ARCH-192: concurrence with P-1 to P-5 (CODEOWNERS yes, `security-paths.mjs` no).<br>- A SENSITIVE VIEW/DOWNLOAD replay needs no entry of its own.<br>- The retention gap before 040-B carries no exposure.<br>**Owed before merge:** lane B PASS on the final head, the hosted `security-integration` job, the rename and the merge-ref check |
+
+---
+
+# Round 2: delta for fix cycle 3, head `e96bd979` (2026-11-20)
+
+| Field | Value |
+|---|---|
+| Head | e96bd97984b5749d3c755f6306da1dbc114ba0b8 |
+| What was reviewed | **`3dc1e225..e96bd979`.**<br>- **Three merges of main, each a pure union:** `5bea60ad`, `2ae719aa` and `a8b69fed`. For each, the merge commit's tree equals `git merge-tree --write-tree` of its two parents. Since `af4a1b48`, main has changed no path outside `docs/` and `.claude/`.<br>- **Code delta, 13 files:**<br>&nbsp;&nbsp;- `idempotency/{store,problem}.ts` and `tx/execute.ts`;<br>&nbsp;&nbsp;- the new `idempotency/enum-checks.test.ts`;<br>&nbsp;&nbsp;- the tests `store`, `problem`, `request`, `scope`, `store.int`, `idempotency.api`;<br>&nbsp;&nbsp;- `prisma/tests/catalog/c01-c12.int.test.ts` and `prisma/tests/idempotency/idempotency-keys.int.test.ts`;<br>&nbsp;&nbsp;- `apps/worker/src/platform/queues/open-queue.test.ts`.<br>- **Commits:** `db92e7f1`, `427373a7` and `20758572` (fix cycle 3: C9 lists, randomised test keys, the R3-M1 origin envelope), and `e96bd979` (D-PM-084).<br>- **The PR head will be `93f0f126`.** It is `e96bd979` plus a merge of main that touches only `docs/`, so no owned path changes after this head row |
+| Merge base with main | `afb2b73c`. Main tip when this round was written: `1012fa6f`. `git merge-tree --write-tree 1012fa6f e96bd979` is clean |
+| Owned paths changed | 39 (main's checker, `--base afb2b73c --head e96bd979`). The classifier gives `security_paths=true` (36 paths) |
+| Method | - Static review of the delta.<br>- **P5:** a new single-process probe of the R3-M1 envelope, run on a `git archive a8b69fed` extract. It uses the real store over the branch's in-memory delegate.<br>- **P1 and P2** re-run on the same extract: 29/29, and the same lease table. `e96bd979` changes only `execute.ts` and one test.<br>- **Gitleaks.** An emulation of the pinned v8.30.1 rules over the branch range, plus `git grep` of the final tree for the literal.<br>- Nothing ran in either worktree. No npm, Jest or Docker |
+
+## R2.1 What changed and what I verified
+
+| Item | Result |
+|---|---|
+| **R3-M1: an origin envelope `{origin, body}`** (`store.ts` `complete` and `readStored`; D-TASK040-14) | **P5, 6 of 6.**<br>- **Inside the GCM plaintext:** the origin (`handler` or `slot-problem`), so the tag authenticates it. Only a sealed `slot-problem` row replays through `RenderedProblemError`.<br>- **Slot-problem rows:**<br>&nbsp;&nbsp;- a clear `Content-Type` changed to `text/html` is ignored: the row still replays as a problem;<br>&nbsp;&nbsp;- a status flip is refused (`IdempotencyReplayError`);<br>&nbsp;&nbsp;- a sealed body without the envelope (the old form) is refused.<br>**This closes the "marker flipped to `text/html`" path of PR040-SEC-02.**<br>**What stays open of PR040-SEC-02:**<br>- On a `handler` row, a database writer can still change the status, `Location` and `Content-Type` of the replay. P5: a tampered 201 replays as 409 `text/html` with a foreign `Location`.<br>- Nulling the body and its key id (allowed by the CHECK) turns any row, a slot-problem row included, into a body-less `handler` replay of a chosen status and headers.<br>So PR040-SEC-02 is **narrowed and stays open**. The D-ARCH-204 envelope `{v, status, headers, body}`, the CHECK `(status = 'COMPLETED') = (response_body IS NOT NULL)` and the `Content-Type` allow-list close it in part 040-B |
+| **PR040-SEC-05: a claim lost after `call`** (`execute.ts` `renew(phase, callRan)`; D-PM-084, D-TASK040-17) | **Closed.**<br>- Whenever a renewal finds the claim taken over, the request logs WARN `api.idempotency_claim_lost {phase, correlation_id}`.<br>- `before-handler` with `call` run: the FAILED entry is written. `failedOutcomeApplies` holds for a 409 of an authenticated mutating route, and `skipsFailedEntry` concerns only DbError reasons.<br>- `before-call`: no entry (D-PM-081).<br>- The two new API tests assert one `failed-entry 409` and one WARN line for the first case, none and one WARN line for the second, and no key in any log line.<br>- A public route gets no FAILED entry, because REQ-AUDIT-010 covers authorised requests. `recordConsent` has no `call` anyway |
+| **C9 enum lists** (D-TASK040-15) | - `ck_idempotency_keys__method` and `__status` are added to `ENUM_CHECKS` from the data model.<br>- `enum-checks.test.ts` compares `IDEMPOTENT_METHODS` and the new `IDEMPOTENCY_KEY_STATUSES` with the migration text.<br>- The store now writes `status` only through those constants.<br>No security effect beyond keeping the CHECK and the code in step |
+| **Test keys** (D-TASK040-16) | - The four test files now use `randomUUID()`.<br>- `git grep` of `e96bd979` finds the literal only in main's EPIC-16 Gherkin line (`Idempotency-Key "…"`). That line cannot match `generic-api-key`, because the rule needs an assignment operator between the key word and the value.<br>- No key-shaped literal is assigned to a key-named identifier in the branch's final tree.<br>- The three old commits remain (§R2.3) |
+| **`open-queue.test.ts`** (unowned) | A test-only clean-up of the PR64-SEC-01 test: it force-disconnects the queues that a metrics scrape opened. The spy wrapper calls the original method, and no assertion changed. No security effect |
+| **Unchanged** | PR040-SEC-01 (P1 still decrypts with the configured bytes), -04 (P2 table unchanged) and -09 (`storedProblemOf` still runs before `settleClaim`). D-ARCH-200 and D-ARCH-204 place all three in part 040-B |
+
+## R2.2 Status of the round-1 findings at `e96bd979`
+
+| ID | Status |
+|---|---|
+| PR040-SEC-01 (LOW) | **Open; due in part 040-B, first pull request** (D-ARCH-204: the configured key only derives) |
+| PR040-SEC-02 (LOW) | **Narrowed, open** (R2.1). Due in part 040-B, first pull request, as the D-ARCH-204 envelope |
+| PR040-SEC-03 (LOW) | **Closed by ruling.** D-ARCH-204 accepts and records it. The SEC-TC-04 text says "no secret in clear" (`b9c0ddeb`). The contract pin is PR040-SEC-07 (c) |
+| PR040-SEC-04 (LOW) | **Open; due in part 040-B** (D-ARCH-200: the lease counts the renewal after `call` and three transactions) |
+| PR040-SEC-05 (LOW) | **Closed** at `e96bd979` (D-PM-084) |
+| PR040-SEC-06 (INFO) | **Closed by ruling.** D-ARCH-204: `idem_key` stays in clear until the contract step that drops the clear response columns, and api/README §5 tells clients to keep personal data out of a key |
+| PR040-SEC-07, -09 (INFO) | Open; part 040-B, first pull request (D-ARCH-204) |
+| PR040-SEC-08 (INFO) | **Closed by ruling.** D-ARCH-202 item 6: every effect of a `call` carries a derived key, and bookings, pickups, captures, voids and refunds are saga steps with their keys |
+
+**New findings in this delta: none.**
+
+## R2.3 Ruling: the synthetic UUID literal in three unpushed commits (gitleaks-full, PR33-SEC-08)
+
+**Facts.**
+- **The hits.** `a633eb84`, `9f08ecb5` and `5e0dc1b0` add a synthetic UUID assigned to key-named identifiers: in `scope.test.ts`, `idempotency.api.test.ts` and `idempotency-keys.int.test.ts`; maybe also `request.test.ts`. `generic-api-key` reports them in the full-history scan of the head. They are not credentials, and nothing needs rotating. The final tree no longer has them (D-TASK040-16).
+- **The branch has never been pushed:** `git ls-remote` shows no `feat/TASK-040*` ref.
+- **Every PR lands on main as a squash.** All 65 `(#NN)` commits on main's first-parent line have one parent. So these commits never enter main's ancestry.
+- **Lane A cannot read the baseline.** Its gitleaks step scans `RANGE_BASE..RANGE_HEAD` with only the base ref's `.gitleaks.toml` (`ci.yml`, "Gitleaks (PR commit range)"). On the first `pull_request` event it would report the same lines.
+
+**Ruling.**
+
+1. **No change to `tools/quality/gitleaks-baseline.txt`, `BASELINE_COUNT` or the sec-static pin.** Nothing is committed for this.
+   - **Lane A.** The baseline does not reach lane A, so the PR would still be red at its first push.
+   - **Scope.** The baseline is for main's own history (D-SEC-PR25-01).
+   - **Dead entries.** Fingerprints of commits that a squash keeps off main would stay in an exact, count-pinned list for good.
+2. **Preferred: a supersede branch with clean history (PR #18 and #19 precedent).** Before the first push, the developer publishes TASK-040 from a new branch whose only commit carries the final tree:
+   ```
+   git switch -c feat/TASK-040-idempotency-keys-v2 origin/main   # in a free worktree, not ../Shipqube-TASK-040
+   git merge --squash <final head>                                # the head that already merged the same main tip
+   git commit -F <message: the feature subject plus the D-TASK040 decision texts, without quoting the literal>
+   git diff --quiet <final head> HEAD                             # must be empty: identical tree
+   ```
+   - **Not a history rewrite.** No existing ref moves and nothing is force-pushed. The old branch stays as it is, unpushed, as the archive of the reviewed SHAs. A squash is what main's merge does anyway.
+   - **What it then costs:**
+     - lane B runs once on the new head, which then has 0 new gitleaks-full findings;
+     - the code review and this record each append a short supersede round with the new Head row. Main's checker requires the head row to name a commit of the PR. With an identical tree, that round is a tree-equality proof and nothing more.
+3. **Accepted alternative, if the orchestrator judges a lane B re-run dearer: one exact entry per finding in `.gitleaks.toml`, under D-SEC-PR45-01 conditions 1 to 7.**
+   - **The entries.** One `[[allowlists]]` table each, with all of: `condition = "AND"`, `regexTarget = "line"`, the full 40-hex commit, `targetRules = ["generic-api-key"]`, an anchored path, and `^\n?<exact line>$` with the value class pinned to the one UUID. Plus a fingerprint comment and the sec-static pin change.
+   - **How they land.** In their own PR to main, with a record and a real-image before/after (a Docker slot from the coordinator).
+   - **Why D-SEC-PR45-01 still applies.** It reserves this class for commits already pushed. I extend it to commits that review records and evidence have already bound. The rationale is the same: the history cannot be replaced without redoing that work.
+   - **What they cover.** These entries serve lanes A, B and C at once, because `gitleaks-full.mjs` reads the same `.gitleaks.toml`.
+   - **When to remove them.** Only once the branch is closed and the commits are not ancestors of main.
+4. **The orchestrator chooses option 2 or 3.**
+   - Under option 2, the lane B run queued on `93f0f126` cannot be the PR's gitleaks evidence, because its ancestry holds the commits.
+   - Under option 3, the config PR must be on main before the PR's lane A and before lane B's gitleaks-full step reads its base ref.
+   - **Exact fingerprints.** For option 3 they must come from the lane B report (rule, commit, path, line; never the value). My emulation over-reports and is not a source of fingerprints.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 (delta, fix cycle 3) at `e96bd979`.<br>**Findings:** 0 Critical, 0 High, 0 Medium; no new findings.<br>**Closed:**<br>- PR040-SEC-05 (code);<br>- PR040-SEC-03, -06 and -08 (by ruling, D-ARCH-204 and D-ARCH-202).<br>**Narrowed and open:** PR040-SEC-02 (R3-M1 envelope).<br>**Open, due in part 040-B:** PR040-SEC-01, -02, -04, -07, -09.<br>**Gitleaks ruling (R2.3):**<br>- no baseline change;<br>- preferred: a supersede branch with clean history, which needs a short supersede round on its head;<br>- accepted alternative: D-SEC-PR45-01 commit-bound entries in their own PR.<br>**Owed before merge:**<br>- the gitleaks choice carried out;<br>- lane B PASS on the PR head;<br>- the hosted `security-integration` job;<br>- the rename and the merge-ref check |
+
+---
+
+# Round 3: supersede round, head `2abd665f` on branch `feat/TASK-040-idempotency-keys-v2` (2026-11-20)
+
+This round carries out the preferred option of the R2.3 ruling (D-SECPR040-02 item (2)). The orchestrator built `feat/TASK-040-idempotency-keys-v2` from main and squashed the reviewed head `e96bd979` onto it as one commit, `2abd665f`. Its parent is `f65d7955`. The old branch `feat/TASK-040-idempotency-keys` keeps its commits, unpushed, as the archive of the reviewed SHAs. No ref was moved and nothing was force-pushed.
+
+| Field | Value |
+|---|---|
+| Head | 2abd665f3f955986c20915f9c6374f118c02cdbb |
+| Merge base with main | `f65d7955`, the commit's only parent. Main tip when this round was written: `c83e059e`. The two commits after `f65d7955` are documents only. `git merge-tree --write-tree c83e059e 2abd665f` is clean |
+| Owned paths changed | 39 (main's checker, `--base f65d7955 --head 2abd665f`), the same set as round 2. The classifier gives `security_paths=true` (36 paths). One commit is in the PR range |
+| Method | Plumbing comparisons from the main checkout, and a rebuilt gitleaks emulation (details in R3.2). Nothing ran in a worktree. No npm, Jest or Docker |
+
+## R3.1 Tree equality: the code reviewed in round 2 is the code of this head
+
+| Check | Result |
+|---|---|
+| `tree(2abd665f)` against `git merge-tree --write-tree e96bd979 f65d7955` | **Equal**: `a6b0bf97` for both |
+| Code paths that differ between `e96bd979` and `2abd665f` (everything outside `docs/` and `.claude/`) | **0** |
+| Code paths that differ between `93f0f126` (the old PR head) and `2abd665f` | **0** |
+| The PR's net code diff | **Identical**, ignoring `index` lines: `git diff afb2b73c e96bd979` (the old branch against its merge base) equals `git diff f65d7955 2abd665f`. Between `afb2b73c` and `f65d7955`, main changed no code path |
+| Documents in the squash commit | None. `2abd665f` touches no path under `docs/` or `.claude/` |
+
+So every result of rounds 1 and 2 stands for `2abd665f` unchanged:
+- **Closed:** PR040-SEC-05 (code); PR040-SEC-03, -06 and -08 (by ruling).
+- **Narrowed and open:** PR040-SEC-02.
+- **Open, due in the first pull request of part 040-B:** PR040-SEC-01, -02, -04, -07 and -09.
+- **Conditions:** the D-ARCH-192 conditions P-1 to P-5 and the TASK-187 conditions T187-1 to T187-6.
+
+The commit message gives the feature subject and a summary of the decisions. It does not contain the literal (`git log -1 --format=%B` checked).
+
+## R3.2 Gitleaks: the PR range holds no finding
+
+**The emulator.** I rebuilt the emulation, because the scratch area was wiped when the disk filled. It now follows gitleaks v8.30.1 git mode more closely than the round-2 emulator, which over-reported:
+- **Scan unit:** each hunk's added lines form one fragment, so a match can span lines.
+- **Per rule:** keyword prefilter, regex, secret group, entropy (`<=` skips), and the digit check of the `generic-*` rules.
+- **Allowlists:** with their `regexTarget` (`secret`, `match`, `line`), `condition`, paths, commits and stopwords.
+- **Configuration:** the pinned default ruleset, plus the repository's own `.gitleaks.toml` read from main, as lane A reads it from the base ref.
+
+**Controls.**
+- The old test literal on a key-named constant fires, and so does a generic key.
+- A `keyId: 'idempotency-body-v1'` line does not fire, because of the `match`-target allowlist (`key[_.-]?id`). The round-2 emulator flagged lines of that kind.
+- **Differential against the real image.** Over the old branch range `4e1163aa..e96bd979`, the emulation reports **exactly the three findings that lane B reported:**
+  - `a633eb84` `scope.test.ts:24`;
+  - `9f08ecb5` `idempotency.api.test.ts:33`;
+  - `5e0dc1b0` `prisma/tests/idempotency/idempotency-keys.int.test.ts:58`.
+
+  No others, and no `request.test.ts`.
+
+**Results.**
+
+| Range | Added lines | Findings |
+|---|---|---|
+| `4e1163aa..e96bd979` (old branch, control) | 72,987 | 3, the lane B set above |
+| `f65d7955..2abd665f` (lane A's PR range: event base = merge base) | 3,720 | **0** |
+| `origin/main..2abd665f` | 3,720 | **0** |
+
+**What this means for each lane.**
+- **Lane A** scans only `f65d7955..2abd665f`, so the PR is clean there.
+- **Lane B and lane C** (gitleaks-full) scan the head's ancestry, which is main's history plus this one commit. Main's history is covered by the 17-entry baseline, unchanged, and the commit adds nothing.
+- The baseline and `.gitleaks.toml` stay as they are.
+
+**This is an emulation.** The real-image result comes from lane B on this head, once Docker Desktop is back. If lane B's gitleaks-full reports anything on `2abd665f`, send me its fingerprints (rule, commit, path, line), never the value.
+
+## R3.3 What is owed now
+
+- **Lane B PASS on `2abd665f`.** None of the earlier lane B runs (`95945b7e`, `93f0f126`) count for this head.
+- **The hosted `security-integration` job** on the first `pull_request` event of the v2 branch.
+- **The rename of this record** to `PR-<NNNN>-TASK-040-security-review.md` once the v2 PR exists, then the merge-ref check.
+
+Main's checker accepts this record for the v2 PR through the Head row above. That is the only Head row whose commit lies in the v2 range: the earlier rows (`3dc1e225`, `e96bd979`) name commits outside it, and the checker skips those rows. A simulation on a shared clone gives `pass` for `--base f65d7955 --head 2abd665f`. Without this round the result is `missing` ("its head row names no commit of this PR").
+
+**A later change.** If an owned path changes after `2abd665f`, a new round is needed. A merge of main that brings only documents needs a merge-only round.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 3 (supersede) at `2abd665f` on `feat/TASK-040-idempotency-keys-v2`.<br>- **Tree equality:** `2abd665f`'s tree is the merge of the reviewed `e96bd979` with main (`a6b0bf97`), and the net code diff is identical, so rounds 1 and 2 hold unchanged.<br>- **Findings:** 0 Critical, 0 High, 0 Medium; no new findings. Open findings are due in part 040-B, as in round 2.<br>- **Gitleaks:** the emulation finds 0 in the PR range `f65d7955..2abd665f`; on the old range it reproduces exactly lane B's three findings. No baseline or configuration change.<br>- **Owed:** lane B PASS on `2abd665f`; the hosted `security-integration` job; the rename and the merge-ref check |
