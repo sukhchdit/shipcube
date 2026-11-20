@@ -102,7 +102,7 @@ Feature: Audit entry content
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-086
 - **Linked REQs:** REQ-AUDIT-004, REQ-AUDIT-010
 - **As a** Compliance Auditor **I want** entries to commit atomically with the change and record denials and failures **so that** the trail never lies.
-- **Notes:** EC-A19, EC-A21; DR-A09, DR-A10. `FAILED` entries use a separate transaction. 400 schema failures are logged, not audited (GAP-A-09).
+- **Notes:** EC-A19, EC-A21; DR-A09, DR-A10. `FAILED` entries use a separate transaction. 400 schema failures are logged, not audited (GAP-A-09). The same holds for the refusals of the idempotency-key protocol that precede the handler: 409 IDEMPOTENCY_IN_PROGRESS, 422 IDEMPOTENCY_KEY_REUSED and a retry whose stored response cannot be read back; they are not attempts at the business action and are logged only (D-PM-081; REQ-AUDIT-010 as amended). The scenario "Authorised mutation ends 409, 422 or 5xx" (AT-US-088-04) therefore covers the 409 and 422 that a handler produces and every 5xx of a new request, a failed idempotency claim included, and not those three refusals.
 
 #### Acceptance criteria
 ```gherkin

@@ -196,3 +196,67 @@ Merge conditions at `da996002`, replacing R2.5:
 - **R2-C4:** a security record on `da996002`.
 - **R2-C5:** R2-m3 recorded as a card line for the next lint-lock holder.
 - **R2-C1:** met.
+
+---
+
+# Round 3 (delta review, verdict bound to head `93f9faa0`)
+
+| Field | Value |
+|---|---|
+| Head | `93f9faa0`. Path from the round-2 head `da996002`: `6388aef2` (merge of main `feb00326`), `07788996` (fix cycle 2), `93f9faa0` (merge of main `af4a1b48`). The evidence worktree is at `93f9faa0`; lane B is queued |
+| Reviewer | code-reviewer, 2026-11-20 |
+| Bindings added | Security record round 1 (PR043-SEC-01..05, D-SECPR043-01); ADR-0004 amendment 4 (D-ARCH-196..199: column-level UPDATE, `ck_outbox_events__actor`, the gauge rule); D-TASK043-11, -12 in the body of `07788996` |
+
+```
+VERDICT: APPROVED_WITH_NITS at 93f9faa0 (merge conditions R3-C1 to R3-C4)
+SUMMARY: Both merges are pure unions. Fix cycle 2 is correct: column-level UPDATE that still allows the FOR UPDATE claim
+         and both marks, ck_outbox_events__actor, the last-tick gauge only on locked ticks, the seam moved to ./testing
+         with a tripwire, the closed-schema walk, and the two lane B fixes. Two MINOR security-owned gaps in the new
+         guards, both shown by probes: the walk ignores Joi `when` branches and trusts any `pattern`, and the tripwire
+         misses a relative import of routing/tests/timing.js, which now carries the seam.
+```
+
+## R3.1 What I verified myself
+
+Same host rule. I worked in a `git archive 93f9faa0` extract, with `node_modules` junctioned to the evidence worktree (HEAD `93f9faa0`) and `prisma/generated` copied in, and removed it afterwards. The worktree is unchanged: `git status` clean, 748 entries in `node_modules`.
+
+| Check | Result |
+|---|---|
+| Merge `6388aef2` (da996002 + feb00326) | `git merge-tree --write-tree` gives a conflict in `docs/sdlc/DECISIONS.md` only. The only difference between the actual merge and the automatic one is that file, and the resolution equals main's `feb00326` version byte for byte. Pure union |
+| Merge `93f9faa0` (07788996 + af4a1b48) | `git diff <merge-tree> 93f9faa0` is empty: a clean automatic merge. DECISIONS.md equals `af4a1b48` |
+| PR delta vs main | `af4a1b48..93f9faa0` changes 54 files. `git merge-tree origin/main 93f9faa0` (main `5451a677`) has no conflict |
+| ESLint and Prettier on the changed files of `07788996` | Clean |
+| `tsc -b` shared, config, api, worker, prisma, tools | Clean |
+| Unit tests: writer, relay, purge, events, start-worker, worker processors, `tools/repo/test-seams`, grants-manifest, system-db (`--maxWorkers=2`) | 10 suites, 99 tests pass |
+| `lint-migrations` | No findings |
+| Probe A: the closed-schema walk, using `event-definition.ts` at the head with the repository's Joi | An object schema with `.when(a = 'x', { then: Joi.object({ a: Joi.any(), email: Joi.string() }) })`: the walk says closed, and the payload `{ a: 'x', email: 'p@e.com' }` validates. `Joi.object({ email: Joi.string().pattern(/^.*$/) })`: closed, and the e-mail validates. `base64` is closed and accepted (by design). A key-level `when` on a guid key stays safe: the merged schema keeps the guid rule |
+| Probe B: the tripwire | `apps/api/src/modules/orders/zz-probe.ts` imports `createTestOutbox` from `../../platform/routing/tests/timing.js`. `tools/repo/test-seams.test.ts` still passes (5/5), and ESLint is clean |
+| Not re-run | All `*.int.test.ts`, including the two lane B fixes (`fetchOnce`/`closeLoopbackServer`, `TEST_LANE_TX_IDLE_TIMEOUT_MS`), the 42501 and 23514 rows and the column-privilege listing; the C5 catalogue against the column-level manifest line; the `relay-queues.test.ts` open handle (n2) |
+
+## R3.2 The fix-cycle-2 delta
+
+| Item | Ruling |
+|---|---|
+| F14 / PR043-SEC-05: column-level UPDATE | Correct. The migration, the manifest line `(published_at, attempts, last_error, updated_at, updated_by, version)` and the pin in `grants-manifest.test.ts` agree. `FOR UPDATE` needs UPDATE on one column only, so the claim keeps working, and the marks touch only granted columns (their `WHERE` reads under the table SELECT). Lane B asserts the column list, 42501 for `org_id`/`actor_id`/`payload`/`correlation_id`, and that a failed mark followed by a publish mark gives `attempts` 2. The `payload` overwrite for `token_enc` belongs to TASK-078 (amendment 4). The C5 catalogue match on the column form is lane B's |
+| F15: `ck_outbox_events__actor` | Correct. The writer sets `actor_id` and `created_by` from the same `ctx.actor`, so its own inserts can never trip it. The lane B 23514 row is present |
+| PR043-SEC-04: `tickEnded` only when locked | Correct (`relay.ts`: `if (tick.locked)`). The 61 s lockless-ticks unit row and the HELP text are updated |
+| PR043-SEC-03: `./testing/outbox` removed, seam re-exported from `routing/tests/timing.ts` | Accepted. See R3-m2 |
+| PR043-SEC-02: tripwire | Good shape: every import form, positive controls, relative specifiers resolved against the importing file (D-TASK043-12), and a non-vacuous barrel check. It catches the `@platform/api/testing` imports from my round-2 probes, so R2-m3 is partly closed; the lint twin stays routed (R2-C5). Gap: R3-m2 |
+| PR043-SEC-01: closed-schema walk (D-TASK043-11) | A good structural allow-list, and the twelve refused shapes are pinned. Gaps: R3-m1 |
+| Lane B unit fixes | They follow the repository's loopback and idle-timeout conventions. Lane B is the evidence |
+
+## R3.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-m1 | MINOR (security-owned; for security-analyst) | `packages/shared/src/events/event-definition.ts` `closedNode` | (a) The walk never reads `whens`. An object- or value-level `.when(cond, { then: <open schema> })` passes as closed, yet validates an e-mail address (probe A). (b) Any `pattern` rule counts as "bounded", so `.pattern(/^.*$/)` (or `/./`) admits free text. (c) `base64` admits encoded free text. That is by design for `token_enc`, but it is open to any key. The catalogue is empty today, and the first publisher is TASK-049. | (a) Refuse any node that has `whens` (Joi conditionals), with a refused-shapes row. (b) Check every `pattern` regex against a fixed probe set it must refuse (an address with `@`, text with a space, an empty string), or have security-analyst rule that pattern quality stays a review duty of every catalogue PR. (c) Allow `base64` only under keys named `*_enc`, or record it. Due before the first event type is catalogued at the latest; security-analyst decides whether before merge. |
+| R3-m2 | MINOR (security-owned) | `tools/repo/test-seams.test.ts` `SEAM_SPECIFIER`; `apps/api/src/platform/routing/tests/timing.ts:86-88` | The seam now lives in `routing/tests/timing.ts`. The tripwire knows `test-outbox`, `query-counter` and `@platform/api/testing`, but not a relative import of `.../routing/tests/timing.js`, which hands production code `createTestOutbox` (probe B). The lint does not stop it either. | Flag any relative specifier from a non-test file that resolves into a `tests/` folder (the general rule, which also covers future seams), or at least add `routing/tests/timing`. Add a positive-control row. `tools/repo/**` is not lint-locked, so this can be done now. |
+
+The round-2 NITs (n2, R2-n2, R2-n3, R2-n4) are unchanged and remain NITs.
+
+## R3.4 Merge conditions at `93f9faa0`
+
+1. **R3-C1:** lane B PASS on the final head. This includes the api `writer.int.test.ts` with its two fixes, every outbox lane B row (ordering arms, held lock, 42501, 23514, column privileges, purge), and C5 against the column-level manifest line.
+2. **R3-C2:** a security record on the final head that rules R3-m1 and R3-m2 (fix now, or due before the first catalogued event type).
+3. **R3-C3:** R2-C5 still stands: the lint twin of the tripwire goes on the next lint-lock holder's card.
+4. **R3-C4:** if main moves again, merge it and take main's DECISIONS.md. A merge with the current main (`5451a677`) is clean.
