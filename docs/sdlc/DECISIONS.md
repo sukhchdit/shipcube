@@ -4687,3 +4687,61 @@ Format: ID · date · who · decision · why · alternatives · reversibility
   - A late task for the operator grants: another PR and its CI minutes while R-CI-MIN is HIGH, and two security reviews of the same guard.
   - AT-US-010-01 on TASK-094: TASK-092 builds the job and already completes the US-008 split.
 - **Reversibility:** High (plan data only).
+
+### D-ARCH-168 · 2026-11-20 · principal-architect · TASK-075 code review merge condition C2: two accepted deviations from ADR-0010 §Interface — `getRates` returns `RateResponse { quotes, noServiceReason? }`, and the canonical vocabularies stay in `packages/carriers` until TASK-080 moves them to `packages/shared` (ADR-0010 amendment 12)
+- **Trigger:** `docs/05-quality/reviews/PR-pending-TASK-075-code-review.md` §4 (rulings on D-TASK075-01 and D-TASK075-02) and §5 condition C2; CLAUDE.md §5 architecture-change guardrail. Read on the branch at `dde830b`: `packages/carriers/src/canonical/{types,codes}.ts`.
+- **Decision 1 (D-TASK075-01):** `getRates(req, ctx): Promise<RateResponse>` with `RateResponse = { quotes: readonly RateQuote[]; noServiceReason?: CarrierErrorCode }` replaces the bare `RateQuote[]` of brief §4.3.
+  - An empty `quotes` is the status `NO_SERVICE` of REQ-CARR-008. `noServiceReason` may say why and is set only when `quotes` is empty.
+  - The reason describes the request, never the call. A failed call is still thrown and becomes `ERROR` or `TIMEOUT`; `AUTH_FAILED`, `RATE_LIMITED`, `TIMEOUT`, `CARRIER_UNAVAILABLE`, `CARRIER_BUSY`, `CAPABILITY_NOT_SUPPORTED` and `CARRIER_UNKNOWN_ERROR` are never a reason.
+  - The contract suite (TASK-101) asserts both rules per adapter. Narrowing the field's type in TASK-075 is allowed and is not a merge condition.
+- **Decision 2 (D-TASK075-02):** the code lists and their types stay in `packages/carriers/src/canonical/codes.ts` for now.
+  - **The move to `packages/shared` is planned, owner TASK-080** (the first consumer outside the carrier layer), or an earlier web or pricing task that needs a list. D-SD-003 already put it on the TASK-080 card for the surcharge codes, `CARRIER_ERROR_CODES`, `TRACKING_STATUSES` and `DOCUMENT_FORMATS`.
+  - The other lists (tiers, direction, content type, package type, Incoterms) follow the same rule when their first outside consumer or database CHECK arrives: data-model §1.7 makes `packages/shared` the single source of every enumeration that backs a CHECK, so a list is never written twice.
+  - What moves is the list with its type, its guard and its DR-B30 pin; `packages/carriers` re-exports it, so no adapter import changes.
+  - A parity test with the enums of `packages/shared/src/api/types.gen.ts` comes with the move.
+  - The request and response types of the port stay in `packages/carriers`.
+  - Until the move, no file outside `packages/carriers`, `apps/api` and `apps/worker` imports a vocabulary, and nobody copies a list.
+- **Why:**
+  - US-122 requires "no services with reason WEIGHT_EXCEEDED, not an exception", and REQ-QUOTE-004 and EC-B09 show a reason per carrier. An array cannot carry it, and an exception would report the carrier as `ERROR`.
+  - The rule on thrown codes keeps an outage from being reported as "no service" (EC-B40). It goes one step beyond what the review asked; without it the new field could blur the four statuses of REQ-CARR-008.
+  - `packages/pricing` may import `@platform/shared` only (ADR-0003) and `apps/web` does not depend on `@platform/carriers`, so both will need the lists from `packages/shared`. Nothing needs them there before TASK-080.
+- **Alternatives rejected:**
+  - Keep `RateQuote[]` and throw a `CarrierError` for "no service": against US-122, and it merges two statuses.
+  - Move the vocabularies now, in the TASK-075 fix cycle: more files under review in a PR that already has a fix cycle, for no consumer yet.
+  - Move the port's request and response types too: they belong to the port, and no browser or pricing consumer needs them.
+- **Card lines for the next fold:**
+  - TASK-080: the move and the parity test are already on its card (D-SD-003 item 5). Add to that line: "(ADR-0010 amendment 12 item 2; D-ARCH-168) packages/carriers re-exports each moved list so no adapter import changes; the request and response types of the port stay in packages/carriers; the moved lists go to the browser-safe side of packages/shared".
+  - TASK-087, and any later task whose table CHECK or web code needs one of the remaining lists: "a canonical list that packages/carriers already holds is moved to packages/shared and re-exported, never written a second time (ADR-0010 amendment 12 item 2; D-ARCH-168; data-model 1.7)".
+  - TASK-101: "RATE RESPONSE RULES (ADR-0010 amendment 12 item 1; D-ARCH-168): per adapter, noServiceReason is set only when quotes is empty, and it is never AUTH_FAILED, RATE_LIMITED, TIMEOUT, CARRIER_UNAVAILABLE, CARRIER_BUSY, CAPABILITY_NOT_SUPPORTED or CARRIER_UNKNOWN_ERROR (a failed call throws)".
+- **Applied in:** ADR-0010 amendment 12 and two dated pointers in §Interface. Condition C2 of the TASK-075 code review is met by this entry.
+- **Not verified:** nothing was run; the code was read on the branch.
+- **Reversibility:** High before the first real adapter (TASK-135/139/140); afterwards a change of the return type touches four adapters and the contract suite.
+
+### D-ARCH-169 · 2026-11-20 · principal-architect · TASK-076 code review R1-m4 (merge condition): the static ISO 4217 exponent table of `packages/shared/src/money/currency.ts` is the authority for computation, and the `currencies` reference table is its database copy, held equal by a parity test on TASK-066 (ADR-0009 amendment 2 item 3)
+- **Trigger:** `docs/05-quality/reviews/PR-pending-TASK-076-code-review.md` R1-m4, R1-n5 and §6 condition 3; developer decision D-TASK076-06. ADR-0009 decision 3 said the reference table drives the exponents.
+- **Decision:**
+  1. `CURRENCY_EXPONENTS` is the authority for every computation (arithmetic, parsing, formatting, FX rounding) in api, worker, web and `packages/pricing`. An unknown code throws; there is no default exponent.
+  2. `currencies` (`code`, `minor_unit`) stays the seeded reference data of REQ-DATA-006: foreign-key target, names, symbols, the public list. It feeds no computation.
+  3. Both hold the same codes with the same exponents. **A parity test, both directions, owner TASK-066.**
+  4. A change of the ISO list changes the table and the seed in one PR; the header of `currency.ts` records the date checked. TASK-066 re-checks `ANG`, `CUC` and `SLL`.
+  5. The exponent of a code with stored amounts never changes in place; that is a data-changing migration.
+- **Why:** the engine performs no I/O (REQ-PRICE-001) and the money helpers run in the browser, so neither can read a table. Two copies are unavoidable; the risk is that they differ, which would misread stored minor units by a power of ten. One authority and a test in both directions removes that.
+- **Alternatives rejected:**
+  - Exponents as an input read from the table by every caller: one more argument through every money helper, and the browser would need the list before it can format a price.
+  - Generating the code table from the seed dataset at build time: `packages/shared` would depend on the seed.
+  - The seed as the authority with a test in one direction: a code in the table and missing from the seed would pass, and then fail a foreign key at run time.
+- **Card line for the next fold (TASK-066):** "CURRENCY PARITY (ADR-0009 amendment 2 item 3; D-ARCH-169; TASK-076 code review R1-m4 and R1-n5): a test shows the seeded currencies (code, minor_unit) equal CURRENCY_EXPONENTS of @platform/shared in both directions (same codes, same exponents); re-check ANG, CUC and SLL against ISO 4217 List One on the day, correct the table and the seed in this PR if needed, and record the date checked in the header of currency.ts; no computation reads the currencies table".
+- **Applied in:** ADR-0009 amendment 2 item 3 and a dated pointer in decision 3. Merge condition 3 of the TASK-076 code review is met by this entry; the test itself is TASK-066's.
+- **Not verified:** the ISO list was not consulted, and nothing was run.
+- **Reversibility:** High.
+
+### D-ARCH-170 · 2026-11-20 · principal-architect · TASK-076 code review R1-m5: the billable-weight rule is chosen by the origin country's unit system, never by the unit of entry (ADR-0009 amendment 2 item 4)
+- **Trigger:** the same review, R1-m5; developer decision D-TASK076-02 (the helper takes the rule from the caller).
+- **Decision:** the caller chooses METRIC (divisor in cm³ per kg, default 5000; increment default 500 g) or IMPERIAL (divisor in in³ per lb, default 139; increment default 100 hundredths of a pound) by `countries.unit_system` of the quote's origin country: IMPERIAL for a US origin, METRIC otherwise. `quotes.entry_unit_system` is display data and plays no part. The server and the quote widget choose alike.
+- **Why:** the two rules give different weights. The package of AT-US-139-04 bills 12,701 g under the IMPERIAL rule and 13,000 g under the METRIC rule (the review's probe). Choosing by the unit of entry would let the units toggle change the price of the same parcel, against REQ-PRICE-004, AT-US-139-05 and REQ-QUOTE-005. REQ-QUOTE-006 already says "the origin unit system" for the widget.
+- **Alternative rejected:** the rule of the entry unit ("imperial entry, imperial rule", the obvious reading of AT-US-139-04 alone): it breaks the parity scenario at the quote level.
+- **Card lines for the next fold:**
+  - TASK-093, or the task that builds the pricing input if senior-developer places it elsewhere: "BILLABLE-WEIGHT RULE BY ORIGIN (ADR-0009 amendment 2 item 4; D-ARCH-170; TASK-076 code review R1-m5): the rule passed to the billable-weight helper is chosen by countries.unit_system of the quote origin country (IMPERIAL for a US origin, METRIC otherwise), never by the unit of entry; test: the package of AT-US-139-04 entered in inches and in centimetres bills the same weight for the same origin, 12,701 g for a US origin and 13,000 g for a metric origin with the default rules".
+  - TASK-201: "the live billable weight uses the rule of the origin country unit system (REQ-QUOTE-006; ADR-0009 amendment 2 item 4; D-ARCH-170); the units toggle changes the displayed unit only; test: toggling units changes no weight beyond the unit conversion".
+- **Applied in:** ADR-0009 amendment 2 item 4 and a dated pointer in decision 4. Not a merge condition of TASK-076.
+- **Reversibility:** High until the first quote is priced.
