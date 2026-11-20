@@ -446,3 +446,67 @@ The case was read, not run (lane B). **PR64-SEC-11 closes when lane B passes thi
   - **INFO residual of PR039-SEC-04** (`org_ids`, homoglyphs): optional, whoever next changes `payload-v2.ts`.
 
 | Verdict | PASS_WITH_FOLLOW-UPS: round 2 at `766ae52`. PR039-SEC-01 to -05 are closed (SEC-03 with its residual (b) routed), and PR64-SEC-11 closes on the lane B pass of its key-level case. Nothing Critical, High or Medium is open |
+
+---
+
+# Round 3: security delta round at `f08948e` (the C15 pin)
+
+| Field | Value |
+|---|---|
+| Delta | `766ae52..49941626`, two commits. `f08948eb` changes one file, `prisma/tests/catalog/c15-std-columns-guard.int.test.ts` (4 lines added, 2 removed). `49941626` adds lane B evidence only: 9 files under `docs/05-quality/tests/runs/20261120T0525Z_f08948e/`, an unowned path |
+| Head | f08948eb8cc9f9f04ef5a01eb385856018384483 |
+| Why a new binding | `/prisma/` is a CODEOWNERS path, so `f08948eb` voids the round-2 binding to `766ae52` under rule (d) of `tools/ci/check-security-owned-paths.mjs`. The later evidence commit leaves the new binding valid |
+| Owned paths changed | 10, as main's checker counts them (`--base 2960391 --head 49941626`): the 9 of rounds 1 and 2 plus the C15 test |
+| Lane B evidence | `20261120T0525Z_f08948e` (commit `49941626`): profile `pr`, verdict PASS, `git_sha` `f08948eb…`, `git_dirty` false. api 179, catalog C1-C14 113, integration 416, migrations 30, rls-cross-tenant 157 and unit 7557: 0 failures, 2 unit cases skipped. The C15 case `[SEC-TC-74] C15 (a) committed` is in `integration.junit.xml` and passed |
+| Reviewer / date | security-analyst, 2026-11-20, round 3. A diff review only, read from the main checkout's object store (`git show`, `git diff`). Nothing ran in the PR worktree, and no npm, Jest or Docker ran. Main's checker ran in a scratch clone (R3.3) |
+
+## R3.1 What changed
+
+The commit changes one assertion in the committed-state test `[SEC-TC-74] C15 (a) committed` (line 213 at `f08948eb`). The literal list of tables in scope gains `job_executions`:
+
+```diff
+-      expect(scope).toEqual(['invitations', 'membership_roles', 'memberships', 'organisations', 'users']);
++      expect(scope).toEqual(['invitations', 'job_executions', 'membership_roles', 'memberships', 'organisations', 'users']);
+```
+
+The comment above it is extended to say that TASK-039 added `job_executions` (the worker manifest, the first SYSTEM table in scope). A task that adds a guarded table extends the pin beside its manifest entry.
+
+## R3.2 No assertion is weakened
+
+- **The pin is still an exact equality.** `toEqual` on an array is ordered and exact. The new entry is in sorted position, the order that `SCOPE_SQL` returns (`ORDER BY 1`). No entry was removed.
+- **The pin is stronger, not looser.** The manifest equality above it is unchanged: the scope minus exemptions equals `stdColumnsTables(ENTRIES)`. It already required `job_executions`, through `tools/db/table-classes/worker.json` (`"stdColumns": true`, class SYSTEM). The old literal contradicted the manifest, which is why lane B's early run on `64eefab` failed on it alone. The new literal adds one protection the manifest equality lacks: it fails if `job_executions` leaves the scope and the manifest together, a matching removal on both sides.
+- **The rest of the test and file is unchanged:**
+  - `EXEMPTIONS` is still empty.
+  - The trigger-list equality and the per-table shape check (`expectedGuard`) are unchanged.
+  - The `guardShapeFindings` check (PR43-SEC-05 (b)) and the `AFTER_GUARD_SQL` check (PR43-SEC-05 (c)) are unchanged.
+  - The `READ_ONLY` and `AUDIT_TABLES` floor is unchanged.
+  - So are `SCOPE_SQL`, `GUARD_TRIGGERS_SQL`, `GUARD_SHAPE`, the probe tests and the timeout.
+- **The commit touches nothing else.** No production code, migration, grant or manifest changed. The guard on `job_executions` is the one round 2 checked (R2.4, byte-identical to `renderStdColumnsGuard`). The lane B run at `f08948e` now proves the guard on the committed schema, through this case.
+- **The evidence commit adds no secret.** I grepped the 14,881 added lines for credential shapes: connection strings with passwords, private keys, AWS and GitHub tokens, and `password=`. The only hits are synthetic values inside test-case names (for example `postgresql://app:pw@db.test/platform` in a redaction test name), the same as earlier lane B evidence. No host path or environment value is recorded (`env_overrides: []`).
+
+## R3.3 Record binding and simulation (round 3)
+
+- **The binding.** This round's `Head` row names `f08948eb`. Only `docs/05-quality/tests/runs/**` changed after it, and that path is not owned. The round-1 and round-2 rows stay. Both are voided: the round-1 row by the migration change, and the round-2 row by the C15 change.
+- **Simulation.** Main's real checker (tip `f665429b`) ran in a `--shared` scratch clone. The record, with this round appended, was committed on the main tip as `PR-9999-TASK-039-security-review.md`, replacing the `PR-pending-…` file. That commit was merged with `49941626` (`merge-tree`, then `commit-tree`) and checked out. The checker then ran with `--pr 9999 --base 2960391 --head 49941626`.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| R3-S1 Merge ref: the record with this round, merged with `49941626` | pass | pass (`@ f08948e`). The merge is clean, and the merged tree holds only the `PR-9999-…` file |
+| R3-S2 Control: the record as of round 2 (last `Head` row `766ae52`), merged with `49941626` | fail | fail (`names 766ae52, but prisma/tests/catalog/c15-std-columns-guard.int.test.ts changed after it`) |
+| R3-S3 Control: as R3-S1, with this round's `Head` row naming `766ae52` | fail | fail (the same note) |
+
+All 3 scenarios gave the expected result. The file has three `Head` rows and three `Verdict` rows, one of each per round. This round's `Verdict` row is the last table row of the file.
+
+## R3.4 Merge conditions and routes (replace R2.6 C1)
+
+- **C1, lane B part: met** at `f08948e` (`20261120T0525Z_f08948e`, PASS). `integration.junit.xml` lists the cases R2.6 C1 named, and all of them passed (the file has no `<failure>`, `<error>` or `<skipped>` element):
+  - `retention.int`, 8 cases. These include `[PR64-SEC-11] … the api user is refused every bull:* key (key-level NOPERM)`, the STALLED case, and AT-US-010-05 and -06.
+  - `consumer.int`, 14 cases.
+  - `prisma/tests/worker/job-executions.int`, 5 cases.
+
+  These files are unchanged since `766ae52`, so they are the versions round 2 read. **PR64-SEC-11 is closed.** Still owed on the pushed head: lane A and the hosted `security-integration` job.
+- **C2.** Unchanged: rename the record on main, then confirm that the merge ref contains it (D-ORCH-136, D-ORCH-138).
+- **No further security round is needed** unless an owned path changes after `f08948eb`. Evidence-only and record commits do not void the binding.
+- **Routes:** unchanged from R2.6 (TASK-047 and the saga and carrier tasks, TASK-043, devops PR64-SEC-09, the INFO residual of PR039-SEC-04).
+
+| Verdict | PASS_WITH_FOLLOW-UPS: round 3 at `f08948e`. The only owned change adds `job_executions` to the exact committed-scope pin of C15 and weakens no assertion. No new finding. PR64-SEC-11 is closed on the lane B pass at `f08948e`. Nothing Critical, High or Medium is open for TASK-039 |

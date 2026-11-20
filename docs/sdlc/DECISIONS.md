@@ -5633,3 +5633,19 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Closes a loose end of D-ARCH-181:** the user's acceptance of the in-house engine is now on record as D-ORCH-140.
 - **Applied in:** ADR-0016 amendment 13 and dated pointers in amendment 12 items 3 and 4; risks.md 1.22 (R-ARCH-36 (b)); `rulings/wave-1-task-041-rulings.md` revision 2.
 - **Reversibility:** High (a selector and a path set; nothing of part 041-B is built).
+
+### D-SECPR039-03 · 2026-11-20 · security-analyst · TASK-039 security round 3 (delta `766ae52..49941626`: `f08948eb`, the C15 pin, plus the lane B evidence commit `49941626`) = PASS_WITH_FOLLOW-UPS at code head `f08948e`; no new finding (round appended to `docs/05-quality/security/PR-pending-TASK-039-security-review.md` on main)
+- **Trigger:** `f08948eb` changes `prisma/tests/catalog/c15-std-columns-guard.int.test.ts`. `/prisma/` is a CODEOWNERS path, so under rule (d) of `check-security-owned-paths.mjs` the round-2 binding to `766ae52` is void.
+- **Decision:** the change adds `job_executions` to the exact, sorted committed-scope literal of `[SEC-TC-74] C15 (a) committed` and extends its comment. Nothing else changed.
+  - No assertion is weakened. The manifest equality, the trigger and shape checks, the PR43-SEC-05 (b) and (c) checks and the empty `EXEMPTIONS` are unchanged.
+  - The literal now agrees with `worker.json`, as it should. It adds a check against a matching removal from the scope and the manifest.
+  - The evidence commit adds no secret: its only credential-shaped strings are the synthetic values inside test-case names.
+- **The binding:** the new `Head` row names `f08948eb8cc9f9f04ef5a01eb385856018384483`. Only `docs/05-quality/tests/runs/**`, which is not owned, changed after it. The owned set is 10 paths.
+- **Simulation:** main's real checker ran on the merge-ref form, with `--pr 9999 --base 2960391 --head 49941626`. All 3 scenarios gave the expected result: pass with this round; fail with the round-2 record alone; fail with this round's `Head` row naming `766ae52`.
+- **Closed:** PR64-SEC-11. Lane B `20261120T0525Z_f08948e` (PASS, clean tree) passed the key-level NOPERM case. The same run passed every `retention.int`, `consumer.int` and `job-executions.int` case, unchanged since `766ae52`.
+- **Still owed:**
+  - lane A and the hosted `security-integration` job on the pushed head;
+  - the rename of the record on main, then the merge-ref check (D-ORCH-136, D-ORCH-138).
+  - The routes of round 2 are unchanged.
+- **Next round:** none, unless an owned path changes after `f08948eb`.
+- **Reversibility:** High. This is a review record only.
