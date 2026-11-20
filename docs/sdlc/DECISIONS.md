@@ -7453,3 +7453,34 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Routed:** api-designer (the `deletePaymentMethod` description, with that task). security-analyst (the abandoned-setup housekeeping; the detach as a worker step). product-manager (REQ-PAY-014 says "Removal detaches at the gateway", which stays true; no rewording needed).
 - **Applied in:** ADR-0012 amendment 7; ADR-0003 (code block comment, classes in the corrected bullet); ADR-0014 amendment 17 with notes in amendments 10 and 15; ADR-0018 amendment 9 (pointer); data-model §3.5; risks.md 1.27 (R-ARCH-40).
 - **Reversibility:** High (the routes are not built).
+
+### D-SECPR040-04 · 2026-11-20 · security-analyst · QG-040-C7 (c) of D-QG-004, the security part of D-ARCH-205 and D-ARCH-206 (ADR-0012 amendments 6 and 7): concurrence on all three points, with conditions
+- **Input:** D-ARCH-205 and D-ARCH-206 (`686dfc20`); D-QG-004 QG-040-C7; threat model T-71, AC-31, SEC-TC-24, SEC-TC-37; SEC-P3-28 / SEC-COND-06 (P3 review §8); `packages/config/src/guards.ts`, where `PAYMENT_PROVIDER=mock` is forbidden in production; D-ARCH-202 rules (i) to (l).
+- **(1) A simulated gateway may authorise in a `call`: concur.**
+  - **Why rule (j) does not bind the Mock.** Rule (j) protects against an external hold with no row behind it. The Mock is an in-process simulator that holds no funds and no card, so a Mock `AUTHORISED` without a committed row has no effect outside the process. The retry with the same key gets the same simulated result (US-199).
+  - **What the concurrence rests on.**
+    - The Mock never runs in production: the config guard forbids `PAYMENT_PROVIDER=mock` there, and SEC-TC-24 / AC-31 cover the webhook route and the `mock_*` tokens.
+    - The suite assertion that a non-simulated adapter never returns `AUTHORISED` and creates its intent unconfirmed.
+  - **Where the SEC checks stay.** SEC-COND-06 / SEC-P3-28 and SEC-TC-37 stay where they ran: the synchronous Mock path of `checkoutOrder` with its `x-audit.additional` void entry, `confirmPayment`, and the webhook path. The one derivation function keeps serving all three.
+  - **Conditions (TASK-085 card):**
+    - **C-1.** `simulated` is a constant of the adapter class, never configuration or request input. The composition refuses any payment adapter whose `capabilities().simulated` is `true` when `APP_ENV=production`, so the refusal keys on the capability and not only on the provider name. SEC-TC-24 gains that case: an adapter declaring `simulated: true` in a production composition ends the start.
+    - **C-2.** The suite assertion runs for every adapter registered with `simulated: false`, and a planted adapter returning `AUTHORISED` from `authorise` makes the suite fail (a negative control).
+  - **Accepted residual.** The M0 demo no longer exercises "no hold without a row" on a real gateway. The Stripe fixtures of TASK-167 and TASK-170 carry that proof, as D-ARCH-205 says.
+- **(2) The `deletePaymentMethod` detach as a worker step after the commit: concur.**
+  - **Why.** A detach that runs before the conditional write can break a card that a concurrent winner keeps. After the commit it is right by construction.
+  - **Conditions (on the card that builds the routes):**
+    - **C-3. Removed means unusable at once.** From the handler's commit, a method marked removed is neither listed nor accepted by `checkoutOrder` or any other charge path; the charge path checks the status, not only the list. Test: a checkout naming a removed method is refused while its detach is still pending.
+    - **C-4. The event carries only the method id** (no gateway token, as D-ARCH-206 decides). The worker step re-reads the row under the organisation's job context and detaches only a row still marked removed. It uses a gateway key derived from the method id, treats "already detached" as done, and deletes the row only after the gateway answers.
+    - **C-5. Retries are bounded.** A detach that keeps failing goes to the dead-letter queue and is visible to operations (TASK-214 signal). The marked row, which holds the gateway reference but no card data, stays until the detach succeeds; no other cleanup deletes it first.
+    - **C-6. Logs and audit.** The worker logs the method id and the outcome class only, never the gateway token. The user's DELETE audit entry is written by the handler; the detach adds no user-attributed entry.
+- **(3) Housekeeping of abandoned setups by the task that builds the payment-method routes: concur.**
+  - **The case.** The orphan card is not reachable through the Platform, which charges only methods that its own rows name. But it stays attached to the gateway customer against the user's intent.
+  - **Conditions (on that card; security-analyst reviews its record):**
+    - **C-7. Act only on setups the Platform itself started.** The housekeeping works from the Platform's own setup rows, never from a list of the gateway customer's methods, because a list-and-detach could remove a method saved concurrently. A setup row qualifies when it is older than its TTL (24 h unless that task sets otherwise) and has no saved method.
+    - **C-8. The housekeeping and a late `createPaymentMethod` exclude each other.** Each setup row is claimed by one conditional update (`ACTIVE` to `ABANDONED`), and `createPaymentMethod` refuses a setup that is no longer active, so a setup is either saved or detached, never both. Test: the race in both orders.
+    - **C-9.** The gateway key is derived from the setup id. The step is idempotent and runs under the organisation's job context, with SYSTEM batches only where ADR-0013 allows them. It logs counts and classes only. Test: a completed setup that is never saved is detached after the TTL, and its method no longer exists at the gateway fake.
+- **Routed:**
+  - **senior-developer:** C-1 and C-2 on the TASK-085 card; C-3 to C-9 on the card that builds the saved-payment-method routes.
+  - **quality-gatekeeper:** QG-040-C7 (c) answered.
+  - **security-analyst (self):** the threat-model row for T-71 gains C-1 (before G3, with the T-79 and R-05 text).
+- **Reversibility:** High (TASK-085 and the payment-method routes are not built).
