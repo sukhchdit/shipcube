@@ -379,7 +379,10 @@ describe('[PR64-SEC-07] dequeue check: payload and job identity agree (D-TASK039
   });
 
   it('accepts a scheduled occurrence: schedule payload, name = schedule, id repeat:<schedule>:<millis>; the occurrence is the correlation id', () => {
-    expect(SCHEDULED_JOBS).toEqual([{ schedule: 'queue-retention', queue: 'housekeeping' }]);
+    expect(SCHEDULED_JOBS).toEqual([
+      { schedule: 'outbox-purge', queue: 'housekeeping' },
+      { schedule: 'queue-retention', queue: 'housekeeping' },
+    ]);
     const data = scheduledPayload('queue-retention');
     expect(data).toEqual({ v: 2, schedule: 'queue-retention' });
     expect(validateDequeuedJob(housekeeping, { id: 'repeat:queue-retention:1763550000000', name: 'queue-retention', data })).toEqual({

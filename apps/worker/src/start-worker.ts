@@ -1,10 +1,12 @@
 // Worker process start (ADR-0003, ADR-0013, US-009, US-012, NFR-AVAIL-002; D-ORCH-073, D-TASK020-91, D-ARCH-136):
 // the composition root that main.ts calls. Configuration (exit 78 on a rejected configuration or secret,
 // PR3-SEC-05), the runtime services shared with the API (`@platform/api/runtime`), the named queues with their
-// consumers and dead-letter queues (TASK-035), the health and metrics server on APP_HEALTH_PORT and graceful shutdown.
+// consumers and dead-letter queues (TASK-035), the outbox relay and the outbox purge (TASK-043), the health and metrics
+// server on APP_HEALTH_PORT and graceful shutdown.
 // The process seams are injectable so the whole sequence runs under test; main.ts passes none, so production always
 // gets WORKER_PROCESS. No top-level await: main.ts stays importable.
 import {
+  createJobProducer,
   createRuntimeLog,
   createRuntimeServices,
   createShutdown,
@@ -21,7 +23,11 @@ import {
 import { loadRuntimeConfigOrExit, type Config, type RuntimeConfig, type Secret } from '@platform/config';
 
 import { createWorkerHealthServer, type MetricsSource } from './platform/health/server.js';
+import type { ScheduleHandler } from './platform/jobs/schedulers.js';
 import { jobLogContext } from './platform/logging/job-context.js';
+import { createOutboxPurge } from './platform/outbox/purge.js';
+import { createOutboxRelay, ENQUEUE_TIMEOUT_MS, type OutboxRelay } from './platform/outbox/relay.js';
+import type { SystemTxRunner } from './platform/outbox/system-tx.js';
 import { queueConnectionOptions } from './platform/queues/connection.js';
 import { PRODUCTION_RETENTION } from './platform/queues/retention.js';
 import { createWorkerQueues, type ProcessorRegistry, type WorkerQueues, type WorkerQueuesOptions } from './platform/queues/runtime.js';
@@ -49,6 +55,19 @@ export interface WorkerQueuesInput {
   readonly config: Config;
   readonly log: RuntimeLog;
   readonly processors: ProcessorRegistry;
+  /** The handler of the `outbox-purge` schedule (TASK-043). */
+  readonly outboxPurge: ScheduleHandler;
+}
+
+/** The tenant-transaction runner as the outbox relay and purge use it (`RuntimeServices.tenantTx`). */
+export type WorkerTxRunner = SystemTxRunner & { readonly transactionOptions: { readonly timeout: number } };
+
+export interface OutboxRelayInput {
+  readonly config: Config;
+  readonly log: RuntimeLog;
+  readonly runner: WorkerTxRunner;
+  /** The worker queue runtime's `queueFor` (openQueue, fail-fast profile; PR64-SEC-13). */
+  readonly queueFor: WorkerQueues['queueFor'];
 }
 
 export interface StartWorkerDependencies {
@@ -68,6 +87,10 @@ export interface StartWorkerDependencies {
   ) => RuntimeServices;
   /** The named queues, their dead-letter queues and the consumers of the registered processors. */
   readonly createQueues: (input: WorkerQueuesInput) => WorkerQueues;
+  /** The `outbox-purge` schedule handler over the runtime's runner. */
+  readonly createOutboxPurge: (input: { readonly log: RuntimeLog; readonly runner: WorkerTxRunner }) => ScheduleHandler;
+  /** The outbox relay (built stopped). */
+  readonly createOutboxRelay: (input: OutboxRelayInput) => OutboxRelay;
   readonly createHealthServer: (probe: ReadinessProbe, metrics: MetricsSource) => WorkerServer;
   /** The processor registry (`processors.ts`). */
   readonly processors: ProcessorRegistry;
@@ -77,7 +100,7 @@ export interface StartWorkerDependencies {
  * BullMQ queues over the worker's own connections (ACL user `worker`, key prefix `bull:`): the blocking profile for the
  * consumers' `Worker`s, the fail-fast profile for every `Queue` (metrics, dead-letter writes; PR64-SEC-03; R2-n2 pins it).
  */
-export function productionQueuesOptions({ config, log, processors }: WorkerQueuesInput): WorkerQueuesOptions {
+export function productionQueuesOptions({ config, log, processors, outboxPurge }: WorkerQueuesInput): WorkerQueuesOptions {
   const url = config.REDIS_URL.reveal();
   return {
     connection: queueConnectionOptions(url, 'worker-consumers', 'worker'),
@@ -86,7 +109,7 @@ export function productionQueuesOptions({ config, log, processors }: WorkerQueue
     processors,
     // The scheduled jobs (housekeeping: the hourly queue-retention sweep) and the three ADR-0013 am. 3 bounds, passed
     // explicitly so the composition is pinned (start-worker.test.ts); the tests pass small bounds instead.
-    schedules: {},
+    schedules: { handlers: { 'outbox-purge': outboxPurge } },
     retention: PRODUCTION_RETENTION,
   };
 }
@@ -94,6 +117,29 @@ export function productionQueuesOptions({ config, log, processors }: WorkerQueue
 /** The production queues: `productionQueuesOptions` built into the worker queue runtime. */
 export function createProductionQueues(input: WorkerQueuesInput): WorkerQueues {
   return createWorkerQueues(productionQueuesOptions(input));
+}
+
+/** The production purge: the daily `outbox-purge` handler (TASK-043). */
+export function createProductionOutboxPurge(input: { readonly log: RuntimeLog; readonly runner: WorkerTxRunner }): ScheduleHandler {
+  return createOutboxPurge(input).handler;
+}
+
+/**
+ * The production relay: the api job producer over the worker queues (the row's correlation id is always explicit, so
+ * no request context is consulted), the configured poll interval and batch size, and a tick budget of half the
+ * transaction timeout, each enqueue bounded by the smaller of ENQUEUE_TIMEOUT_MS and that budget (D-TASK043-06).
+ */
+export function createProductionOutboxRelay({ config, log, runner, queueFor }: OutboxRelayInput): OutboxRelay {
+  const budgetMs = Math.max(1, Math.floor(runner.transactionOptions.timeout / 2));
+  return createOutboxRelay({
+    runner,
+    producer: createJobProducer({ queueFor, contextCorrelationId: () => undefined }),
+    log,
+    batchSize: config.OUTBOX_RELAY_BATCH_SIZE,
+    pollIntervalMs: config.OUTBOX_RELAY_POLL_INTERVAL_MS,
+    budgetMs,
+    enqueueTimeoutMs: Math.min(ENQUEUE_TIMEOUT_MS, budgetMs),
+  });
 }
 
 /** The production process: what main.ts runs with. */
@@ -104,6 +150,8 @@ export const WORKER_PROCESS: StartWorkerDependencies = {
   processEvents: process,
   createRuntimeServices,
   createQueues: createProductionQueues,
+  createOutboxPurge: createProductionOutboxPurge,
+  createOutboxRelay: createProductionOutboxRelay,
   createHealthServer: createWorkerHealthServer,
   processors: PROCESSORS,
 };
@@ -131,13 +179,17 @@ export async function startWorker(overrides: Partial<StartWorkerDependencies> = 
   // A StorageConfigError thrown here reaches the handlers above as one redacted fatal line (PR30-SEC-11).
   const services = deps.createRuntimeServices(config, 'worker', log, secrets);
   // Built stopped: no consumer takes a job before the start-up checks below.
-  const queues = deps.createQueues({ config, log, processors: deps.processors });
-  const server = deps.createHealthServer(services.probe, () => queues.metrics());
+  const outboxPurge = deps.createOutboxPurge({ log, runner: services.tenantTx });
+  const queues = deps.createQueues({ config, log, processors: deps.processors, outboxPurge });
+  // Built stopped too: the relay polls only after the start-up checks.
+  const relay = deps.createOutboxRelay({ config, log, runner: services.tenantTx, queueFor: (name) => queues.queueFor(name) });
+  const server = deps.createHealthServer(services.probe, async () => `${await queues.metrics()}${relay.metrics()}`);
 
   // Session-integrity check on a dedicated connection before the health server opens and before any consumer takes
   // a job (PR-0009 M1, D-ARCH-104); never rejects.
   await services.startup();
   queues.start();
+  relay.start();
 
   server.listen(config.APP_HEALTH_PORT, () => log.info('worker.health_listening', { port: config.APP_HEALTH_PORT }));
   server.on('error', (error: Error) => {
@@ -151,6 +203,8 @@ export async function startWorker(overrides: Partial<StartWorkerDependencies> = 
     // listener (also when a consumer fails to close); both inside the drain bound of the 30 s stop window.
     drain: async () => {
       try {
+        // The relay stops first (its running tick commits or rolls back), then the consumers drain.
+        await relay.stop();
         await queues.drain();
       } finally {
         await new Promise<void>((resolve, reject) => {

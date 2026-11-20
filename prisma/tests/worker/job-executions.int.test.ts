@@ -8,7 +8,8 @@
  * - The key is unique per queue: the same job id on two queues is two claims (code review R1-m1, PR039-SEC-02).
  * - Two concurrent claims of one key: the second waits on `ux_job_executions__queue_job_key` until it commits, then
  *   inserts nothing; after a rollback it claims the key (the effect's retry runs).
- * - The standard-columns guard holds the row to the SYSTEM actor, and platform_app may not UPDATE or DELETE it.
+ * - The standard-columns guard holds the row to the SYSTEM actor, and platform_app may not UPDATE it (DELETE is granted
+ *   for the TASK-043 purge, D-ARCH-171).
  * The claim-then-effect logic of `idempotentProcessor` is unit-tested in apps/worker (jobs.test.ts); prisma/tests may
  * import only the api database platform, so the worker module itself is not imported here.
  */
@@ -133,17 +134,18 @@ describe('[REQ-PLAT-014] job_executions claims (PostgreSQL 18)', () => {
     expect(await withTenantTx(SYSTEM_JOB, (db) => claim(db, key))).toBe(true);
   });
 
-  it('platform_app holds SELECT and INSERT only: UPDATE and DELETE are refused', async () => {
+  it('[D-ARCH-171] platform_app holds SELECT, INSERT and (since the TASK-043 purge) DELETE: UPDATE is refused', async () => {
     const app = new pg.Client({ connectionString: postgres.appUrl(database) });
     await app.connect();
     try {
       await expect(app.query("UPDATE public.job_executions SET status = 'completed'")).rejects.toMatchObject({ code: '42501' });
-      await expect(app.query('DELETE FROM public.job_executions')).rejects.toMatchObject({ code: '42501' });
+      // DELETE is granted for the outbox-purge housekeeping job (hard-delete allow-list); a no-op predicate here.
+      await expect(app.query('DELETE FROM public.job_executions WHERE false')).resolves.toMatchObject({ rowCount: 0 });
       const { rows: grants } = await app.query(
         "SELECT privilege_type FROM information_schema.role_table_grants WHERE table_name = 'job_executions' AND grantee = $1 ORDER BY 1",
         [APP_ROLE],
       );
-      expect(grants.map((row: { privilege_type: string }) => row.privilege_type)).toEqual(['INSERT', 'SELECT']);
+      expect(grants.map((row: { privilege_type: string }) => row.privilege_type)).toEqual(['DELETE', 'INSERT', 'SELECT']);
     } finally {
       await app.end();
     }

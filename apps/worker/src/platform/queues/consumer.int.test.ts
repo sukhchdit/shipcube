@@ -451,12 +451,14 @@ describe('US-009 named queues with retries and dead-letter queues (Valkey 8)', (
   it('createProductionQueues builds every named queue on the worker connection from REDIS_URL; without registered processors only the scheduled jobs are consumed', async () => {
     const captured = captureLog();
     const config = { REDIS_URL: { reveal: () => url } } as unknown as Config;
-    const queues = createProductionQueues({ config, log: captured.log, processors: {} });
+    // The outbox purge needs a database (relay.int.test.ts runs it); a no-op handler here (TASK-043).
+    const queues = createProductionQueues({ config, log: captured.log, processors: {}, outboxPurge: () => Promise.resolve() });
     try {
-      // The scheduled jobs run in production: the housekeeping consumer and the queue-retention Job Scheduler.
+      // The scheduled jobs run in production: the housekeeping consumer and the outbox-purge and queue-retention Job
+      // Schedulers.
       expect(queues.consuming).toEqual(['housekeeping']);
       queues.start();
-      expect(await queues.registerSchedules()).toEqual(['queue-retention']);
+      expect(await queues.registerSchedules()).toEqual(['outbox-purge', 'queue-retention']);
       expect(await queues.metrics()).toContain('platform_queue_jobs{queue="tracking-poll",state="waiting"} 0\n');
     } finally {
       await queues.close();

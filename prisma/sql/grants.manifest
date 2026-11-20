@@ -23,6 +23,20 @@ platform_app SELECT public.reference_dataset_versions
 # job idempotency ledger (TASK-039, migration 20261119000000_job_executions): SYSTEM, module worker; insert-only.
 platform_app SELECT public.job_executions
 platform_app INSERT public.job_executions
+# TASK-043 (migration 20261120000000_outbox_events): job_executions joins the hard-delete allow-list with its 30-day
+# purge (D-ARCH-171).
+platform_app DELETE public.job_executions
+
+# transactional outbox and consumer dedupe (TASK-043, migration 20261120000000_outbox_events; data-model §3.5, §4.4):
+# SYSTEM hard-delete allow-list. outbox_events is mutable (the relay sets published_at, attempts, last_error);
+# processed_events is insert-only (no UPDATE). DELETE only by the outbox-purge job (published/processed > 30 days).
+platform_app SELECT public.outbox_events
+platform_app INSERT public.outbox_events
+platform_app UPDATE public.outbox_events
+platform_app DELETE public.outbox_events
+platform_app SELECT public.processed_events
+platform_app INSERT public.processed_events
+platform_app DELETE public.processed_events
 
 # audit store (TASK-021, bootstrap lane prisma/bootstrap/10-audit.sql; data-model §4.4 grant matrix, C5): SYSTEM.
 # Append-only tables exactly SELECT, INSERT; audit_entries on the parent only, never on a partition (partitions carry

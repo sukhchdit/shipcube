@@ -1,4 +1,5 @@
-// Platform module (data-model.md §3.5). SYSTEM tables: no org_id, no RLS. `platform_app` holds SELECT, INSERT and UPDATE.
+// Platform module (data-model.md §3.5). SYSTEM tables: no RLS (`outbox_events.org_id` is informational for the relay and
+// authoritative for platform.job_context). Grants per table in prisma/sql/grants.manifest.
 //
 // Not expressible in Prisma and kept in the migration SQL: CHECK constraints (`ck_reference_dataset_versions__version`,
 // `ck_reference_dataset_versions__content_sha256` = 32 bytes, `ck_reference_dataset_versions__row_count` >= 0).
@@ -44,4 +45,53 @@ model JobExecution {
   @@unique([queue, jobKey], map: "ux_job_executions__queue_job_key")
   @@index([completedAt], map: "ix_job_executions__completed_at")
   @@map("job_executions")
+}
+
+/// Transactional outbox (ADR-0004; REQ-PLAT-016/017; data-model §3.5, §6.1; TASK-043). SYSTEM class, module `outbox`
+/// (tools/db/table-classes/outbox.json): written by apps/api/src/platform/outbox/writer.ts inside the business
+/// transaction, relayed and purged by apps/worker/src/platform/outbox/**. Kept in the migration SQL: the partial indexes
+/// `ix_outbox_events__unpublished` (relay batch, `WHERE published_at IS NULL`) and `ix_outbox_events__published_at`
+/// (purge, `WHERE published_at IS NOT NULL`), the CHECKs `ck_outbox_events__version`, `__type`, `__aggregate_type`,
+/// `__correlation_id`, `__attempts`, `__last_error`, the autovacuum settings and the standard-columns guard trigger.
+model OutboxEvent {
+  id            String    @id(map: "pk_outbox_events") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy     String    @map("created_by") @db.Uuid
+  updatedBy     String    @map("updated_by") @db.Uuid
+  version       Int       @default(1)
+  type          String
+  aggregateType String    @map("aggregate_type")
+  aggregateId   String    @map("aggregate_id") @db.Uuid
+  orgId         String?   @map("org_id") @db.Uuid
+  actorId       String    @map("actor_id") @db.Uuid
+  payload       Json
+  correlationId String    @map("correlation_id")
+  traceContext  String?   @map("trace_context")
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  attempts      Int       @default(0)
+  lastError     String?   @map("last_error")
+
+  @@index([aggregateType, aggregateId, createdAt], map: "ix_outbox_events__aggregate")
+  @@map("outbox_events")
+}
+
+/// Consumer dedupe of outbox events (ADR-0004 item 4; REQ-PLAT-017; data-model §3.5; TASK-043). SYSTEM class, module
+/// `worker`: a consumer inserts `(consumer, event_id)` in its business transaction with ON CONFLICT DO NOTHING. Insert-only;
+/// purged 30 days after `processed_at`. Kept in the migration SQL: `ck_processed_events__version`, `__consumer` and the
+/// standard-columns guard trigger.
+model ProcessedEvent {
+  id          String   @id(map: "pk_processed_events") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String   @map("updated_by") @db.Uuid
+  version     Int      @default(1)
+  consumer    String
+  eventId     String   @map("event_id") @db.Uuid
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@unique([consumer, eventId], map: "ux_processed_events__consumer_event")
+  @@index([processedAt], map: "ix_processed_events__processed_at")
+  @@map("processed_events")
 }

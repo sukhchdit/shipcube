@@ -9,11 +9,11 @@
  * closes every connection.
  */
 import { deadLetterQueueName, QUEUE_NAMES, QUEUES, type QueueName, type ScheduleName } from '@platform/shared/queues';
-import type { ConnectionOptions } from 'bullmq';
+import type { ConnectionOptions, Queue } from 'bullmq';
 
 import type { RuntimeLog } from '@platform/api/runtime';
 
-import { createScheduleProcessor, registerSchedules } from '../jobs/schedulers.js';
+import { createScheduleProcessor, registerSchedules, type ScheduleHandler } from '../jobs/schedulers.js';
 import { type ConsumerTuning, createQueueConsumer, type JobProcessor, type QueueConsumer } from './consumer.js';
 import { errorClass } from './job-handler.js';
 import { collectQueueMetrics, createDeadLetteredCounter, renderQueueMetrics } from './metrics.js';
@@ -28,6 +28,11 @@ export const SCHEDULE_REGISTRATION_RETRY_MS = 30_000;
 export interface ScheduleOptions {
   /** Interval overrides per schedule (test seam; production uses SCHEDULE_EVERY_MS). */
   readonly every?: Partial<Readonly<Record<ScheduleName, number>>>;
+  /**
+   * Handlers of the schedules the runtime does not own itself (`outbox-purge`, TASK-043). `queue-retention` is always
+   * the runtime's own sweep. Only schedules with a handler get a Job Scheduler, so no occurrence lands without one.
+   */
+  readonly handlers?: Readonly<Partial<Record<Exclude<ScheduleName, 'queue-retention'>, ScheduleHandler>>>;
 }
 
 export interface WorkerQueuesOptions {
@@ -53,6 +58,11 @@ export interface WorkerQueuesOptions {
 export interface WorkerQueues {
   /** The queues with a consumer, sorted. */
   readonly consuming: readonly QueueName[];
+  /**
+   * The runtime's BullMQ queue of a named queue: built by `openQueue` (class-only error listener, PR64-SEC-01) on the
+   * fail-fast `queue` profile. The outbox relay's producer enqueues through it (PR #64 R2-n5, PR64-SEC-13; TASK-043).
+   */
+  queueFor(name: QueueName): Queue;
   /** Starts every consumer (after the start-up checks) and, with schedules on, registers the Job Schedulers. */
   start(): void;
   /** Upserts every Job Scheduler (idempotent); `start()` calls it and retries on failure. */
@@ -99,16 +109,19 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
     });
 
   const processors: Partial<Record<QueueName, JobProcessor>> = { ...options.processors };
+  const scheduleHandlers: Partial<Record<ScheduleName, ScheduleHandler>> = {
+    ...options.schedules?.handlers,
+    'queue-retention': async (job) => {
+      await sweep(job.signal);
+    },
+  };
   if (options.schedules !== undefined) {
     for (const name of QUEUE_NAMES) {
       if ((QUEUES[name].schedules ?? []).length === 0) continue;
-      processors[name] = createScheduleProcessor({
-        'queue-retention': async (job) => {
-          await sweep(job.signal);
-        },
-      });
+      processors[name] = createScheduleProcessor(scheduleHandlers);
     }
   }
+  const handled: ReadonlySet<ScheduleName> = new Set(Object.keys(scheduleHandlers) as ScheduleName[]);
 
   const consumers: QueueConsumer[] = queues.flatMap(({ queue, deadLetter }) => {
     const processor = processors[queue];
@@ -131,7 +144,7 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
     ];
   });
 
-  const register = (): Promise<readonly ScheduleName[]> => registerSchedules(queueOf, options.schedules?.every ?? {});
+  const register = (): Promise<readonly ScheduleName[]> => registerSchedules(queueOf, options.schedules?.every ?? {}, handled);
   let closed = false;
   let retryTimer: NodeJS.Timeout | undefined;
   const registerUntilDone = (): void => {
@@ -155,6 +168,7 @@ export function createWorkerQueues(options: WorkerQueuesOptions): WorkerQueues {
   };
   return {
     consuming: consumers.map((consumer) => consumer.queue),
+    queueFor: queueOf,
     start() {
       for (const consumer of consumers) consumer.start();
       log.info('worker.queues_started', { queues: consumers.map((consumer) => consumer.queue).join(',') });

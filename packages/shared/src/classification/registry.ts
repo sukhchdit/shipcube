@@ -242,6 +242,25 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
   }),
   // TASK-039: the job idempotency ledger; identifiers and bookkeeping only (the job id names no person).
   job_executions: table({ ...STD, job_key: INT, queue: INT, status: INT, result: INT, completed_at: INT }),
+  // TASK-043 (data-model §3.5): the outbox. payload holds identifiers, codes and a locale only (schema-validated per
+  // event type, never a personal value); a one-time token travels as payload.token_enc (ciphertext, SEC for log
+  // redaction, §12), added with the first token-carrying event type. org_id/actor_id are internal identifiers.
+  outbox_events: table({
+    ...STD,
+    type: INT,
+    aggregate_type: INT,
+    aggregate_id: INT,
+    org_id: INT,
+    actor_id: INT,
+    payload: INT,
+    correlation_id: INT,
+    trace_context: INT,
+    published_at: INT,
+    attempts: INT,
+    last_error: INT,
+  }),
+  // TASK-043: consumer dedupe of outbox events; a consumer name and an event id.
+  processed_events: table({ ...STD, consumer: INT, event_id: INT, processed_at: INT }),
   // PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): INT except the PUB description and category.
   permissions: table({ ...STD, key: INT, description: PUB, category: PUB, operator_only: INT }),
   reference_dataset_versions: table({

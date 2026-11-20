@@ -11,6 +11,6 @@
  * Effect: these delegates are absent from `TenantDb` (type and run time) and reachable only through
  * `systemDelegates(tx)` (`./system-db.ts`).
  */
-export const SYSTEM_MODELS = ['jobExecution', 'referenceDatasetVersion'] as const;
+export const SYSTEM_MODELS = ['jobExecution', 'outboxEvent', 'processedEvent', 'referenceDatasetVersion'] as const;
 
 export type SystemModelName = (typeof SYSTEM_MODELS)[number];

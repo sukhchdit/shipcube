@@ -1,0 +1,5 @@
+{
+  "$comment": "Transactional outbox (ADR-0004; data-model §3.5, §6.1; TASK-043): outbox_events. SYSTEM: no RLS; org_id is the authoritative tenant context platform.job_context reads, never copied into a job. Owner module outbox: eslint SYSTEM_MODEL_OWNERS maps it to apps/*/src/platform/outbox/** (the api writer and the worker relay and purge). Grants (prisma/sql/grants.manifest; data-model §4.4 SYSTEM hard-delete allow-list): platform_app SELECT, INSERT, UPDATE (the relay sets published_at, attempts, last_error), DELETE (the outbox-purge housekeeping job, published more than 30 days ago; D-ARCH-167). stdColumns: the full standard-column set, written by a runtime role, so the standard-columns guard trigger is rendered.",
+  "module": "outbox",
+  "tables": [{ "name": "outbox_events", "class": "SYSTEM", "hardDelete": true, "stdColumns": true }]
+}

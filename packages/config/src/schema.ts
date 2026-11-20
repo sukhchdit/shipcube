@@ -332,6 +332,14 @@ export const CONFIG_SCHEMA = {
     sensitivity: 'secret',
   }),
 
+  // Outbox relay (OUTBOX_RELAY_*; ADR-0004 item 3, data-model §6.1; TASK-043). Read by the worker only.
+  OUTBOX_RELAY_POLL_INTERVAL_MS: withDefault(t.int(50, 60_000), 500, {
+    description: 'Milliseconds between two outbox relay polls when the last batch was not full (ADR-0004: 500).',
+  }),
+  OUTBOX_RELAY_BATCH_SIZE: withDefault(t.int(1, 1_000), 100, {
+    description: 'Outbox rows one relay transaction claims (FOR UPDATE SKIP LOCKED) and enqueues (data-model §6.1: 100).',
+  }),
+
   // Identity and sessions (AUTH_*; ADR-0006)
   AUTH_ACCESS_TOKEN_TTL_SECONDS: withDefault(t.int(60, 15 * MINUTE), 15 * MINUTE, {
     description: 'Access-token lifetime in seconds (≤ 15 min).',

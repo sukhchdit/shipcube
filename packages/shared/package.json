@@ -16,6 +16,11 @@
       "types": "./dist/logging/index.d.ts",
       "default": "./dist/logging/index.js"
     },
+    "./events": {
+      "@platform/source": "./src/events/index.ts",
+      "types": "./dist/events/index.d.ts",
+      "default": "./dist/events/index.js"
+    },
     "./queues": {
       "@platform/source": "./src/queues/index.ts",
       "types": "./dist/queues/index.d.ts",

@@ -24,7 +24,7 @@ const job = (overrides: Partial<ProcessorJob> = {}): ProcessorJob => ({
 });
 
 describe('Job Schedulers (ADR-0013 §5, REQ-PLAT-015; D-TASK039-01)', () => {
-  it('upserts each schedule on its queue under its own name, hourly, with retries and both retention bounds in the template', async () => {
+  it('upserts each schedule on its queue under its own name, at its interval, with retries and both retention bounds in the template', async () => {
     const upserts: [QueueName, string, { every: number }, ScheduleTemplate][] = [];
     const names = await registerSchedules((queue) => ({
       upsertJobScheduler: (id, repeat, template) => {
@@ -32,9 +32,17 @@ describe('Job Schedulers (ADR-0013 §5, REQ-PLAT-015; D-TASK039-01)', () => {
         return Promise.resolve();
       },
     }));
-    expect(names).toEqual(['queue-retention']);
+    expect(names).toEqual(['outbox-purge', 'queue-retention']);
     expect(SCHEDULE_EVERY_MS['queue-retention']).toBe(3_600_000);
+    // TASK-043: the outbox purge runs daily (data-model §6.1).
+    expect(SCHEDULE_EVERY_MS['outbox-purge']).toBe(86_400_000);
     expect(upserts).toEqual([
+      [
+        'housekeeping',
+        'outbox-purge',
+        { every: 86_400_000 },
+        expect.objectContaining({ name: 'outbox-purge', data: { v: 2, schedule: 'outbox-purge' } }),
+      ],
       [
         'housekeeping',
         'queue-retention',
@@ -51,6 +59,17 @@ describe('Job Schedulers (ADR-0013 §5, REQ-PLAT-015; D-TASK039-01)', () => {
         },
       ],
     ]);
+  });
+
+  it('registers only the schedules of the given set (the runtime passes the schedules it has a handler for)', async () => {
+    const ids: string[] = [];
+    const names = await registerSchedules(
+      () => ({ upsertJobScheduler: (id) => Promise.resolve(void ids.push(id)) }),
+      {},
+      new Set(['queue-retention'] as const),
+    );
+    expect(names).toEqual(['queue-retention']);
+    expect(ids).toEqual(['queue-retention']);
   });
 
   it('dispatches an occurrence to its handler; anything else is non-retryable', async () => {

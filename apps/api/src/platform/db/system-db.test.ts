@@ -42,7 +42,7 @@ const read = (value: unknown, key: PropertyKey): unknown => (value as Record<Pro
 describe('SYSTEM-model access control (PR19-SEC-01, D-ARCH-080)', () => {
   it('[PR19-SEC-01] the SYSTEM delegate is not on TenantDb: a read throws naming the systemDelegates port', () => {
     const { db } = createTenantDb(new FakeTx());
-    expect(SYSTEM_MODELS).toEqual(['jobExecution', 'referenceDatasetVersion']);
+    expect(SYSTEM_MODELS).toEqual(['jobExecution', 'outboxEvent', 'processedEvent', 'referenceDatasetVersion']);
     expect(() => read(db, 'referenceDatasetVersion')).toThrow(new TenantDbAccessError('referenceDatasetVersion', SYSTEM_MODEL_HINT));
     expect(SYSTEM_MODEL_HINT).toContain('systemDelegates(tx)');
     expect('referenceDatasetVersion' in db).toBe(false);

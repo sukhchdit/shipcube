@@ -22,8 +22,14 @@ import {
 import { NonRetryableError } from '../queues/errors.js';
 import type { JobProcessor, ProcessorJob } from '../queues/job-handler.js';
 
-/** The interval of each schedule (ADR-0013 §5 "housekeeping hourly"; am. 3 item 10 `queue-retention` hourly). */
-export const SCHEDULE_EVERY_MS: Readonly<Record<ScheduleName, number>> = Object.freeze({ 'queue-retention': 3_600_000 });
+/**
+ * The interval of each schedule (ADR-0013 §5 "housekeeping hourly"; am. 3 item 10 `queue-retention` hourly; ADR-0004
+ * item 6 and data-model §6.1 `outbox-purge` daily, TASK-043).
+ */
+export const SCHEDULE_EVERY_MS: Readonly<Record<ScheduleName, number>> = Object.freeze({
+  'outbox-purge': 86_400_000,
+  'queue-retention': 3_600_000,
+});
 
 /** The job template of a schedule's Job Scheduler. */
 export interface ScheduleTemplate {
@@ -44,15 +50,18 @@ export function scheduleTemplate(schedule: ScheduleName): ScheduleTemplate {
 /**
  * Upserts every schedule on its queue (idempotent). The schedules and their handlers follow the conditions (i)-(iv) of
  * D-SECPR039-01, stated on SCHEDULE_NAMES (queue-definition.ts): handler parameters from code only, policy predicates
- * in the handler, a closed list of names of at most 47 characters, and "run now" only through the scheduler. `every` overrides intervals (test seam). Rejects on the first
- * failed upsert; the runtime retries the whole registration.
+ * in the handler, a closed list of names of at most 47 characters, and "run now" only through the scheduler. `every` overrides intervals (test seam); `only` limits the
+ * registration to the schedules this worker has a handler for (default: all). Rejects on the first failed upsert; the
+ * runtime retries the whole registration.
  */
 export async function registerSchedules(
   queueFor: (queue: QueueName) => SchedulableQueue,
   every: Partial<Readonly<Record<ScheduleName, number>>> = {},
+  only?: ReadonlySet<ScheduleName>,
 ): Promise<readonly ScheduleName[]> {
   const registered: ScheduleName[] = [];
   for (const { schedule, queue } of SCHEDULED_JOBS) {
+    if (only !== undefined && !only.has(schedule)) continue;
     await queueFor(queue).upsertJobScheduler(
       schedule,
       { every: every[schedule] ?? SCHEDULE_EVERY_MS[schedule] },

@@ -6,9 +6,13 @@ import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
 
 describe('grant manifest (data-model §4.4, C5)', () => {
-  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), the TASK-039 insert-only job_executions, and agrees with the table classes', () => {
+  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), the TASK-039 job_executions with its TASK-043 DELETE, the TASK-043 outbox_events and processed_events (hard-delete allow-list), and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
+      // TASK-043: the hard-delete allow-list (outbox_events, processed_events, job_executions) and the outbox writes.
+      'platform_app DELETE public.job_executions *',
+      'platform_app DELETE public.outbox_events *',
+      'platform_app DELETE public.processed_events *',
       'platform_app INSERT public.audit_anchors *',
       'platform_app INSERT public.audit_chain_verifications *',
       'platform_app INSERT public.audit_checkpoint_heads *',
@@ -22,6 +26,8 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app INSERT public.membership_roles *',
       'platform_app INSERT public.memberships *',
       'platform_app INSERT public.organisations *',
+      'platform_app INSERT public.outbox_events *',
+      'platform_app INSERT public.processed_events *',
       'platform_app INSERT public.users *',
       'platform_app SELECT public.audit_anchors *',
       'platform_app SELECT public.audit_chain_verifications *',
@@ -36,7 +42,9 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app SELECT public.membership_roles *',
       'platform_app SELECT public.memberships *',
       'platform_app SELECT public.organisations *',
+      'platform_app SELECT public.outbox_events *',
       'platform_app SELECT public.permissions *',
+      'platform_app SELECT public.processed_events *',
       'platform_app SELECT public.reference_dataset_versions *',
       'platform_app SELECT public.role_permissions *',
       'platform_app SELECT public.roles *',
@@ -48,6 +56,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app UPDATE public.membership_roles *',
       'platform_app UPDATE public.memberships *',
       'platform_app UPDATE public.organisations *',
+      'platform_app UPDATE public.outbox_events *',
       'platform_app UPDATE public.users *',
       'platform_definer SELECT public.invitations *',
       'platform_definer SELECT public.memberships *',
