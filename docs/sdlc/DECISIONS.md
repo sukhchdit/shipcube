@@ -5410,3 +5410,44 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Held:** `../.orch/held/api-designer-readme-fixes.patch` (D-API-004; README §12/§13, REQ-SEC-012, the openapi `acceptInvitation` wording plus `types.gen.ts`) lands when no lane-B evidence is pending, because those files are tooling inputs.
 - **New blocker:** GHSA-7589-6fvf-x4pw (`effect`, HIGH, dev closure) fails the dependency audit on every PR from 2026-11-20 (PR #73 run 44679323524). Patched in 3.22.1, but the patched versions are younger than `min-release-age=7`. Routed to security-analyst for a bump or a waiver that expires when the bump becomes installable (D-SECAUDIT-02), on the PR #67 pattern.
 - **Reversibility:** High.
+
+### D-SECPR041-02 · 2026-11-20 · security-analyst · TASK-041 part 041-A security round 2 (delta) = PASS_WITH_FOLLOW-UPS at code head `3a6b4c8b` (merge `ba4d0aaa` of main `6ab40f28` + fix `3a6b4c8b`; record `docs/05-quality/security/PR-pending-TASK-041-security-review.md`, round 2 appended on main); QG-041-C4 first half answered
+- **Decision:** nothing Critical, High or Medium is open for part 041-A.
+  - **Method.** As in round 1: static review plus single-process Node 24 probes on a `git archive` extract of `3a6b4c8b`, with the `e6f484a` extract as the positive control. No npm, Jest or Docker; nothing run in either PR worktree.
+  - **The record is a merge condition.** 27 owned paths at this head (`--base 6ab40f28`), now including `apps/api/package.json`, `package-lock.json` and `packages/config/src/guards.ts`. Main's classifier selects `security-integration` (the lockfile is a production-closure change).
+- **Closed:**
+  - PR041-SEC-01: `BoundedMap`, O(1) per new key. Probe at 50,000 live windows: 0.0165 ms per request against 1.12 ms at `e6f484a`.
+  - PR041-SEC-02 (a): the credentialed ceiling only for non-`OPTIONS` requests under `/api/v1`. 19 of 19 request shapes take the expected rule, against 11 of 19 at `e6f484a`.
+  - PR041-SEC-05 in the code: default 0, staging/production guard. 15 spellings × 3 environments through the real `loadConfig`; no hardened spelling reaches 0 without an issue. The IaC pin stays with TASK-215 and the smoke check with devops.
+  - PR041-SEC-08: `RateLimitMissingError` for a live composition without `rateLimit`. `live` means production only; in staging the startApi test is the control.
+  - Also checked: the lockfile delta is the two `rate-limit-redis` entries only; the merge is a pure union; `rate_limit_auth` is emitted once per key and window from the store's count.
+- **QG-041-C4 (first half), on ADR-0016 amendment 12:**
+  - **Concur:** items 2, 3, 5, 6 and 9. Item 5 holds on the condition that the authenticator cost rules are pinned by the forged-credential tests of TASK-052, -055, -091, -171 and -261, and I rate R-ARCH-36 (a) at TASK-055.
+  - **Item 4, `exp` before the signature, `ACCESS_TOKEN_EXPIRED` spends nothing:** concur. An early refusal from an unverified claim can only reject, and forged and genuine expired tokens get one answer, so it is no signature oracle. Probe on this host: full ES256 verification about 400 µs, the `exp` pre-check 4.6 µs.
+    - **E1.** The unverified `exp` decides an early refusal only; every other token is verified in full (ES256 only, issuer, audience, the same clock tolerance); nothing else from the unverified payload is read or logged.
+    - **E2.** Only a well-formed token with a finite past `exp` is "expired"; anything else is a refused credential and spends.
+    - **E3.** The pre-check is bounded: a length cap, three segments, `alg` `ES256` before the payload is decoded.
+    - **E4.** `ACCESS_TOKEN_EXPIRED` comes only from that check, emits no security event and no extra log line; the wrapper's exemption keys on that code alone.
+    - **E5.** TASK-052 tests: 200 forged past-`exp` tokens give 401 with zero verifications, zero store or database calls, no event and no 429; a future-`exp` forgery is verified once and spends.
+  - **Item 4, 120 bad credentials stop all credentialed traffic of the IP:** partial concurrence. New finding **PR041-SEC-09 (LOW, CWE-410)**: the lock is wider than item 4 and R-ARCH-36 (b) record.
+    - Every browser that has signed in sends `__Host-rt_web` (`Path=/`, same host) on every `/api/v1` request, so during a lock its sign-in is refused too.
+    - Valid bearers and quote tokens of everyone behind the address are refused.
+    - One co-located client sustains the lock at 2 bad credentials a second.
+    - My round-1 sketch ("NAT neighbours keep their per-user budgets") was incomplete, and QG-041-C4 is right that the `auth`-class comparison understates the effect.
+    - **Recommendation to principal-architect, before part 041-B merges:** R1, the refresh cookie selects the credentialed rule (and the lock) only on the paths of routes that declare `refresh-cookie`, derived by `createApp` from route metadata; plus R2 (i), keep the lock for the other kinds, record its true scope, pin a B1 row in which a valid bearer from a locked IP gets 429, and alert on `rate_limit_auth` class `authn-failed`. Alternative R2 (ii): lock only the I/O-bearing kind, trading about 400 µs per forged bearer.
+  - **Items 4 (rest), 7 and 8:** in the part 041-B round, before TASK-052 is dispatched.
+- **Binding.** The round-2 `Head` row names `3a6b4c8b`; round 1's `e6f484a` row is voided by the fix and only gives a note.
+  - The coming `.env.example` and evidence commits touch no owned path, so the binding survives them. I did not open `.env.example`; the simulation used a synthetic placeholder blob.
+  - Simulation with main's real checker, `--base 6ab40f28`: 10 of 10 as expected.
+  - Pass: the merge ref with rounds 1 and 2 on main; the head plus a `.env.example` and an evidence commit; an `app.ts`-only change.
+  - Fail: round 1 only; no record; the placeholder name; `store.ts` changed after the head; a later FAIL verdict; the round-2 `Head` row naming a main commit; `guards.ts` changed after the user and evidence commits.
+- **Conditions:**
+  - **C1.** Lane B at the pushed head, including the first real-Valkey run of `rate-limit.int.test.ts`, and the hosted `security-integration` job green.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A delta round only if a later commit touches an owned path, `app.ts`, `start-api.ts` or `packages/config/src/schema.ts`.
+- **Routed:**
+  - PR041-SEC-09: principal-architect, before part 041-B merges.
+  - E1-E5: TASK-052 and the part 041-B wrapper.
+  - PR041-SEC-02 (b), -03 (HTTP side), -07 and the breaker: the part 041-B round.
+  - Mine, before G3: threat model R-13, T-11, T-39 and T-93 aligned with amendment 12, plus PR041-SEC-06.
+- **Reversibility:** High (a review record; the routed items bind work not yet built).
