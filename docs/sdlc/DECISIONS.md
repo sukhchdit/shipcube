@@ -5396,3 +5396,17 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Applied in:** ADR-0016 (amendment 1 pointer; amendment 12 items 1, 4 and 11), ADR-0025, ADR-0010 amendment 13 item 6, platform.md §4.3, §10.4 and OI-01, risks.md 1.21, `rulings/wave-1-task-041-rulings.md` section 6 line 9.
 - **Not changed:** the rulings of D-ARCH-173 to D-ARCH-179 and the change lists of parts 041-A and 041-B.
 - **Reversibility:** High (documents only).
+
+### D-ORCH-140 · 2026-11-20 · sdlc-orchestrator (session A) · User acceptance of the in-house rate limiter; Wave 1 batch progress; new audit advisory
+- **User decision (2026-11-20):** the user accepts TASK-041's in-house rate-limit engine (Valkey scripts plus a per-instance fallback; `express-rate-limit` kept for `ipKeyGenerator` only) as a departure from brief §3.2, a SHOULD ("express-rate-limit with a Redis store"), under the CLAUDE.md §2 fixed-stack rule. This is the record D-ARCH-181 names. Asked with the in-house engine as the recommended default; answer "Accept the in-house engine".
+- **User input pending:** the 18 rate-limit placeholder lines and `TRUST_PROXY_HOPS=0` in `.env.example` on TASK-041's branch. Agents are denied `.env*` files by this session's permissions, so the user commits them; this is not worked around.
+- **Batch in flight (dispatch plan D-SD-002/003):**
+  - **TASK-075 → PR #73**, code head `28044845`, three fix cycles; code review round 4 and security round 4 approved; lane B PASS `20261120T0405Z_2804484`.
+  - **TASK-076**, head `82b50233`, fix cycle 2; security round 2 bound to it; code review round 3 running; lane B queued.
+  - **TASK-039**, head `f08948eb`, fix cycle 2 (a C15 table-list pin found by lane B on PostgreSQL 18); code and security round 2 approved; lane B queued.
+  - **TASK-041** part 041-A, head `3a6b4c8b`; ADR-0016 amendment 12 verified with conditions by quality-gatekeeper (D-QG-001); QG-041-C3 closed (D-ARCH-181); QG-041-C2 (requirement wording) is with product-manager; round-2 reviews running.
+- **Accepted developer decisions:** D-TASK075-01..25, D-TASK076-01..18, D-TASK039-01..12 and D-TASK041-01..13, as ruled by their reviewers and security records.
+- **Rulings adopted:** D-ARCH-162..181, D-SECT39-01, D-API-001..004, D-PM-071/072 and D-SD-003/004.
+- **Held:** `../.orch/held/api-designer-readme-fixes.patch` (D-API-004; README §12/§13, REQ-SEC-012, the openapi `acceptInvitation` wording plus `types.gen.ts`) lands when no lane-B evidence is pending, because those files are tooling inputs.
+- **New blocker:** GHSA-7589-6fvf-x4pw (`effect`, HIGH, dev closure) fails the dependency audit on every PR from 2026-11-20 (PR #73 run 44679323524). Patched in 3.22.1, but the patched versions are younger than `min-release-age=7`. Routed to security-analyst for a bump or a waiver that expires when the bump becomes installable (D-SECAUDIT-02), on the PR #67 pattern.
+- **Reversibility:** High.
