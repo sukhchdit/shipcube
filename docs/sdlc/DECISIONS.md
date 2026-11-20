@@ -6554,3 +6554,43 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **For G3:** proofs (a) to (f) green on PostgreSQL 18, read in the test code and not in STATUS; the round 3 checks of the stored problem document (byte for byte, the first `correlation_id`, its own `X-Correlation-Id`); the purge schedule in `SCHEDULE_NAMES` with its interval pinned; the negative lint fixture; the mount refusal still in place; the two TASK-096 tests and the outcome of QG-040-C2; the TASK-187 tests when Wave 7 is reached; US-038 Implemented only with both parts merged; the contract change of QG-040-C3; the T-79 row.
 - **No evidence note:** as for D-QG-001 and D-QG-002, a verification under CLAUDE.md §5 has no file convention, so this entry is the record.
 - **Reversibility:** High (a verification record; it changes no artefact).
+
+### D-SECPR043-02 · 2026-11-20 · security-analyst · TASK-043 security round 2 (delta `da996002..93f9faa0`: merges `6388aef2` and `93f9faa0` of main, fix cycle 2 `07788996`, pre-push) = PASS_WITH_FOLLOW-UPS at code head `93f9faa0` (round appended to `docs/05-quality/security/PR-pending-TASK-043-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** I re-ran the round-1 probes on `git archive` extracts of `93f9faa0`: Joi 18, the image-exports predicate and the type-stripped relay. I also checked merge purity and ran main's real checker. No npm, Jest, lint, Docker or PostgreSQL, and nothing in the evidence worktree.
+- **The merges are pure.**
+  - `6388aef2` equals the clean three-way merge on every path except `DECISIONS.md`, which takes main's file whole, so the PR carries no DECISIONS delta. `tools/lint/negative-fixtures.test.ts` is byte-identical to the clean merge, the union of both sides.
+  - `93f9faa0` is clean and brought documents only.
+  - PR against main: 27 owned paths. `apps/api/package.json` is out, `routing/tests/timing.ts` is in.
+- **Closed:**
+  - **PR043-SEC-01.** The `describe()` walk refuses all ten round-1 shapes and accepts both controls.
+  - **PR043-SEC-03.** The seam is served from `./testing`, and no pruned export is left unskipped.
+  - **PR043-SEC-04.** A foreign lock holder now fires `OutboxRelayStalled`; with the lock held, it stays off.
+  - **PR043-SEC-05, UPDATE and actor arms.** Column-level `UPDATE` on the six mark columns, which are exactly what the relay writes, and `ck_outbox_events__actor`. The 42501 and 23514 lane B rows are read, not run.
+- **Open with owners:**
+  - **PR043-SEC-05, `org_id` INSERT arm:** TASK-047 (D-ARCH-197 item 3).
+  - **PR043-SEC-06:** accepted residual R-ARCH-38 until the definer-purge late task before G3 (D-ARCH-198). I close it there.
+  - **PR043-SEC-07:** TASK-047 (D-ARCH-199).
+  - **QG-043-C4:** C4-2 is met. C4-1 and C4-3 are open as before.
+- **Rulings on code review round 3 (`74a91e1d`):**
+  - **R3-m2 reopens the tripwire arm of PR043-SEC-02 (LOW).** The seam now lives in `routing/tests/timing.ts`, and a production import of that file is seen by neither the tripwire nor the lint.
+    - **Fix:** the general rule. Any non-test file under `apps/*/src` or `packages/*/src` whose relative specifier resolves into a `test`, `tests` or `__tests__` folder fails, and so does any `@platform/<pkg>/testing` specifier. Add positive controls.
+    - **Due:** recommended in this PR (about 15 lines in unowned `tools/repo`, so the binding holds); required before TASK-049 merges.
+    - **Not a merge blocker:** the image preflight refuses a production import of a pruned `tests/` file. That is the preflight's design; I did not run it.
+    - **The R2-C5 lint twin** must cover the same rule and the template-literal `import()` spelling.
+  - **R3-m1 is folded into PR043-SEC-08 below and is not a merge condition of TASK-043.** The catalogue is empty, and `event-definition.ts` is unowned.
+- **New: PR043-SEC-08 (INFO, CWE-1173), widened by R3-m1.** The walk does not read `whens`, `ordered`, `custom` rules, inverted patterns or default functions. Five shapes pass `mergeEvents` and store an e-mail address. My round-1 proposal had the same gap.
+  - **Fix.** Two lines in `closedNode`, validated on a scratch copy: the five are refused and the controls are unchanged. A permissive regex stays a review item.
+  - **Widened by R3-m1.** Every `pattern` regex must refuse a fixed probe set when the catalogue loads (an e-mail address, a string with a space, the empty string, 257 letters). `base64` is allowed only under keys that end in `_enc`. Pattern quality beyond the probe set stays a review duty of each catalogue PR, so `packages/shared/src/events/` joins PR64-SEC-09.
+  - **Owner and due.** A merge prerequisite of TASK-049, or any earlier commit that touches the file. The file is unowned, so this fix keeps the binding.
+- **Binding.** The round-2 `Head` row names `93f9faa0`. It holds for the later docs-only merge `320933c1` (0 owned paths).
+  - **Simulation** with main's real checker in merge-ref form on main `a3d0a02b`: 8 of 8 as expected.
+  - **Pass:** rounds 1 and 2 merged with `93f9faa0`; a later commit in `apps/worker` only; a later SEC-08 fix in `packages/shared/src/events`.
+  - **Fail:** round 1 only (its head `da996002` is followed by owned changes); a later FAIL verdict; the round-2 `Head` row naming the base; a later commit in `prisma/sql/grants.manifest`; main as it stands without this round.
+- **Conditions:**
+  - **C1.** Lane B PASS at `93f9faa0` (the 42501 and 23514 rows, C5 with the column tuples) and the hosted `security-integration` job.
+  - **C2.** Rename the record, then check the merge ref.
+- **Routed:**
+  - **senior-developer:** PR043-SEC-02 tripwire (R3-m2) in fix cycle 3 if one runs, otherwise on TASK-049; PR043-SEC-08 with R3-m1 on TASK-049; the `tests/`-folder rule and the template-literal spelling on the R2-C5 card line.
+  - **principal-architect:** nothing new.
+- **Reversibility:** High (a review record).

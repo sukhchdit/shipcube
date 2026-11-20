@@ -303,3 +303,87 @@ P7, item by item:
 | quality-gatekeeper | QG-043-C4 first half answered (§3, conditions C4-1 to C4-3); QG-043-C3 answered (§4) |
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** Round 1 at `da996002`: 0 Critical, 0 High, 0 Medium. New: PR043-SEC-01, -02, -04, -05, -06 LOW; PR043-SEC-03 (merge-relevant: lane A unit) and PR043-SEC-07 INFO. QG-043-C4: concurrence with the T-83 exception, the PostgreSQL lock and "nothing is parked", conditions C4-1 to C4-3. QG-043-C3: ADR-0004 amendment 3 item 21 confirmed, conditions T078-1 to T078-5. Owed: lane B PASS on the head, the hosted `security-integration` job at the pushed head, the rename and merge-ref check, and a merge-only round if the branch merges main |
+
+---
+
+# Round 2 (delta, bound to head `93f9faa0`)
+
+| Field | Value |
+|---|---|
+| Head | 93f9faa02797a191081a51192a1b6e5d3d83fa73 |
+| Path since round 1 | From `da996002` the branch gained three commits: `6388aef2`, a merge of main `feb00326` (which carries round 1 of this record); `07788996`, fix cycle 2 (PR043-SEC-01 to -04, plus D-ARCH-197 F14 and F15); and `93f9faa0`, a merge of main `af4a1b48` (ADR-0004 amendment 4, D-ARCH-196 to -199). Main tip when this round was written: `a3d0a02b` (docs only after `af4a1b48`). The evidence worktree is detached at `93f9faa0` with lane B queued; I ran nothing in it |
+| Owned paths, PR against main | 27 (`--base af4a1b48 --head 93f9faa0`). Compared with round 1, `apps/api/package.json` dropped out (it now equals main) and `apps/api/src/platform/routing/tests/timing.ts` came in. Fix cycle 2 changed 11 owned paths: the migration, `grants.manifest`, `platform.prisma` (comment), `tools/db/grants-manifest.test.ts`, `apps/api/package.json`, `routing/tests/timing.ts`, and `outbox/{index,writer,tests/test-outbox,writer.int.test}.ts` with `runtime/index.ts` (comments) |
+| Method | Static review of `6388aef2..07788996`, plus the round 1 probes re-run on `git archive` extracts of `93f9faa0`: the Joi walk with the real Joi 18, the image-exports predicate, and the relay with type-stripped sources and a fake runner. Also a merge-purity check of both merges and a record simulation with main's real checker. No npm, Jest, lint run, Docker or PostgreSQL. The `*.int.test.ts` rows (42501, 23514, column privileges) are read, not run |
+
+## R2.1 The two merges of main are pure
+
+| Merge | Parents | Result |
+|---|---|---|
+| `6388aef2` | `da996002`, main `feb00326` | The only conflict is `docs/sdlc/DECISIONS.md`, and the merge takes main's file whole (byte-identical to `feb00326`; the PR carries no DECISIONS.md delta any more, code review R2-C3). Every other path, all 52 non-docs paths that main brought (PR #77, #78, #79 among them) included, equals the clean three-way merge. **`tools/lint/negative-fixtures.test.ts` is byte-identical to the clean merge,** so it is the union of main's rows and this PR's TASK-043 rows |
+| `93f9faa0` | `07788996`, main `af4a1b48` | No conflict. The tree equals the clean three-way merge on every path. Main brought documents only |
+
+## R2.2 Round 1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| PR043-SEC-01 (LOW) | **Closed** | `isClosedObjectSchema` (`event-definition.ts`) now walks `describe()`: no `unknown` flag, no `allowUnknown` preference and no `patterns` at any depth; objects need `keys`; arrays need exactly one closed `items`; strings need `pattern`/`guid`/`isoDate`/`base64` or `valid`; other leaves are only number, boolean and date. Probe with the real Joi: all ten round-1 shapes are now refused by `mergeEvents`, and both controls (`identifierPayload`, a `valid` locale) are accepted. `events.test.ts` carries the ten shapes as `[PR043-SEC-01]` refusal rows and five accepted forms. The residual shapes outside the round-1 list are PR043-SEC-08 |
+| PR043-SEC-02 (LOW) | **Tripwire arm extended, but incomplete: reopened by code review R3-m2 (R2.5).** The boundaries arm stays with the next lint-lock holder (code review R2-C5) | `tools/repo/test-seams.test.ts` (D-TASK043-12) adds `test-outbox` and `@platform/api/testing[/…]` to the seam specifiers. A second scan resolves relative specifiers against the importing file and refuses any production file under `apps/*/src` other than `outbox/index.ts` that reaches `platform/outbox/writer`. Planted positive controls cover five forms each, plus negatives (`test-outboxes`, `testingx`, `./writer.js` elsewhere). A non-vacuity check shows the barrel is seen. On `93f9faa0` no production file names the seam or the writer (`git grep`: comments only). This covers the five round-1 forms A1, A2, A3, A5 and A9. **Residual:** the scan reads quoted specifiers only, so a no-substitution template literal (`` import(`../outbox/writer.js`) ``, lint-legal under `platform/static-module-specifier`) passes it. The resolved-file boundaries twin of R2-C5 is what catches every spelling; that card line must name this form |
+| PR043-SEC-03 (INFO) | **Closed** | `./testing/outbox` is removed. `createTestOutbox` is re-exported from `routing/tests/timing.ts`, the target of the one sanctioned `./testing` subpath. Re-running the `image-exports.test.ts` predicate with the head's `shouldRemove` and `SKIPPED_EXPORTS` finds no pruned, non-skipped export in `@platform/api`, `@platform/worker` or `@platform/shared`; the `./testing` control is pruned and skipped. `@platform/api/testing` is in the tripwire's seam set, so api production code cannot use it. Worker production code was already refused by boundaries (round 1, A4/A6), and the subpath is pruned from the image |
+| PR043-SEC-04 (LOW) | **Closed** | `relay.ts`: `if (tick.locked) metrics.tickEnded(...)`, and the HELP text and the module comment say "held the relay lock" (D-ARCH-196, ADR-0004 amendment 4 item 24). Probe P5 R1 on `93f9faa0`: with a foreign holder, `OutboxRelayStalled` (> 60 s) now fires; the control with the lock still shows lag 600; and in normal operation (the lock held) Stalled stays off. The `[PR043-SEC-04]` unit rows match D-ARCH-196's change list |
+| PR043-SEC-05 (LOW) | **UPDATE and actor arms closed (F14, F15); the `org_id` INSERT arm is open and routed to TASK-047 (D-ARCH-197 item 3)** | `migration.sql`: `GRANT SELECT, INSERT, DELETE` plus `GRANT UPDATE (published_at, attempts, last_error, updated_at, updated_by, version)`; `grants.manifest` holds the column line and the pins list six column tuples. The relay's two mark statements write exactly those columns, and the standard-columns guard sets `NEW` values, which needs no column privilege. `ck_outbox_events__actor CHECK (actor_id = created_by)` binds the actor through the guard's pin on `created_by`. Lane B rows (read, not run): column privileges listed from `information_schema.column_privileges`; `UPDATE` of `org_id`, `actor_id` or `payload` as `platform_app` gives 42501 while the marks pass; an insert with `actor_id` ≠ `created_by` gives 23514. Migration-linter rule 8 tests `delete|all` in the privilege text, which a column list does not contain; lane A's `lint-migrations` run is the evidence. TASK-078 adds `payload` to the grant (T078-3) |
+| PR043-SEC-06 (LOW) | **Accepted residual with an owner** (D-ARCH-198, R-ARCH-38): the definer-function purge, 45-day ledgers and the 14-day replay bound land in a late task before G3. TASK-043 is unchanged for it, as ruled. I close it on that task |
+| PR043-SEC-07 (INFO) | Routed to TASK-047 (D-ARCH-199: admission key `system` for organisation-less SYSTEM-actor transactions) |
+| QG-043-C4 conditions | C4-1 unchanged: still one producer call site (`relay.ts`). C4-2 met by the SEC-04 fix. C4-3 (threat-model T-83 row) is still my action before G3 |
+| QG-043-C3 (T078-1 to T078-5) | Unchanged. D-ARCH-197 adds nothing contrary; T078-3's column-grant extension is now concrete (`payload` joins the `UPDATE` column list) |
+
+## R2.3 New finding
+
+| ID | Title | Severity | CWE | OWASP | File:line | Owner / due |
+|---|---|---|---|---|---|---|
+| PR043-SEC-08 | The closed-schema walk does not see `when`, `ordered`, `custom`, inverted patterns or default functions (with code review R3-m1, widened in R2.5) | INFO | CWE-1173 | A04 | `packages/shared/src/events/event-definition.ts` (`closedNode`) | TASK-049 merge prerequisite (the first event file), or any earlier fix cycle that touches the file |
+
+- **Description.** Six shapes were probed against the round-2 walk. My round-1 proposal had the same gaps; the developer implemented it as proposed. Five of them pass `mergeEvents` and store an e-mail address:
+  - `Joi.object({}).when('b', { then: Joi.object().unknown() })`: `whens` is not read.
+  - `Joi.array().items(Joi.number()).ordered(Joi.any())`: `ordered` is not read.
+  - `Joi.string().guid().custom(() => value)`: a custom rule replaces the value even with `convert: false`.
+  - `Joi.string().pattern(re, { invert: true })`: the walk counts the rule as a grammar.
+  - `Joi.number().default(() => value)`: a default function inserts a value.
+  - The sixth, a pattern that matches anything (`/^[\s\S]*$/`), cannot be decided mechanically and stays a review item.
+- **Refused already** (controls): `Joi.link` to a shared free string, a `Joi.extend` custom type, `items(guid, any)` and `concat` with an open object. A `when` that switches a `guid` string to a free string passes the walk but is harmless: the base rule still applies and the value is refused.
+- **Exploitability and impact.** Each shape is deliberate code in an event file, and none is a natural spelling of "an open payload". The event catalogue is empty until TASK-049. INFO.
+- **Remediation.** In `closedNode`, after the existing first check:
+
+  ```ts
+  if (node.whens !== undefined || node.ordered !== undefined || node.externals !== undefined || node.flags?.default !== undefined) return false;
+  if ((node.rules ?? []).some((rule) => rule.name === 'custom' || (rule.name === 'pattern' && rule.args?.options?.invert === true))) return false;
+  ```
+
+  `SchemaNode` gains `whens`, `ordered`, `externals`, `flags.default` and `rules[].args`. Validated on a scratch copy of the round-2 module: the five gaps are refused; the two controls, `.empty()` and the round-1 rows are unchanged. The permissive-pattern case stays with the reviewer of each event file (PR64-SEC-09 path `packages/shared/src/events/`).
+- **Verification test.** Five more `[PR043-SEC-08]` refusal rows in `events.test.ts`.
+
+## R2.5 Rulings on code review round 3 (`74a91e1d`, R3-m1 and R3-m2)
+
+- **R3-m1 is PR043-SEC-08, widened. Ruling: not a merge condition of TASK-043.**
+  - **Due:** a merge prerequisite of TASK-049, the first catalogued event type. It may land earlier in any commit that touches `event-definition.ts`.
+  - **Why not now:** the catalogue is empty, so no payload can be stored until an event file exists. The file is not an owned path, so the fix keeps this binding. TASK-043's last fix cycle is better kept for lane B outcomes.
+  - **Scope of the fix, as one item:**
+    - (a) **The walk refuses** any node with `whens`, `ordered`, `externals` or `flags.default`, any `custom` rule, and a `pattern` with `invert` (validated, R2.3).
+    - (b) **Patterns.** Every `pattern` regex must refuse a fixed probe set when the catalogue loads: an e-mail address, a string with a space, the empty string and a 257-letter string. Pattern quality beyond that stays a review duty of every catalogue PR, which is why `packages/shared/src/events/` joins the PR64-SEC-09 owned paths.
+    - (c) **`base64`** is allowed only under keys that end in `_enc`, the ciphertext convention of the token amendment (`token_enc`). `closedNode` takes the key name for that.
+  - **Tests:** one refusal row per shape and rule, plus the controls (`identifierPayload`, a `valid` locale, a `token_enc` ciphertext key).
+- **R3-m2 reopens the tripwire arm of PR043-SEC-02 (LOW). Ruling: recommended in this PR, required at the latest before TASK-049 merges.**
+  - **The gap.** Fix cycle 2 moved the seam into `apps/api/src/platform/routing/tests/timing.ts`, and the tripwire does not know that file. A production import of `…/routing/tests/timing.js` hands out `createTestOutbox`, and neither lint nor the tripwire sees it. So my R2.2 closure of the tripwire arm was incomplete.
+  - **Why it is not a merge blocker.** The image preflight imports every compiled production module after prune-dist has deleted `tests/` (this is from the preflight's design; I did not run it). A production module that imports a `tests/` file therefore fails `docker build`, so the bypass cannot ship.
+  - **Why it is still worth doing now.** The fix is about 15 lines in `tools/repo/test-seams.test.ts`. That path is not owned, so the fix keeps this binding. If TASK-043 runs a fix cycle 3, it belongs there.
+  - **Form of the fix: the general rule.** Flag any non-test file under `apps/*/src` and `packages/*/src` whose relative specifier, resolved against the file, lands in a `test`, `tests` or `__tests__` folder. Also flag any `@platform/<pkg>/testing` specifier, beyond `@platform/api/testing`. Add positive-control rows for `../routing/tests/timing.js` and one `packages/` form.
+  - **Lint twin.** The resolved-file boundaries policy of R2-C5 must cover the same rule, plus the no-substitution template-literal `import()` spelling (R2.2).
+
+## R2.4 Binding
+
+- **Head and simulation.** The `Head` row of this round names `93f9faa0`. The later docs-only merge of main, `320933c1` (story notes), changes no owned path (main's checker: `not-required`, 0), so this binding holds for it. Main's real checker ran in merge-ref form on main `a3d0a02b` with this record committed as `PR-9999-…`; the scenarios are listed in D-SECPR043-02.
+- **Why the round-1 row no longer binds.** It names `da996002`, and owned paths changed after it (the fix cycle and main's paths through the merges). Only this round's row binds.
+- **Later commits.**
+  - A later commit that touches only unowned paths (`apps/worker/**`, `packages/shared/src/**`, `DECISIONS.md`) keeps this binding. A PR043-SEC-08 fix in `packages/shared/src/events/` is such a commit.
+  - A later merge of main voids it only if main has by then changed an owned path that this PR also changes. Main's changes after `af4a1b48` are documents only.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 at `93f9faa0`: 0 Critical, 0 High, 0 Medium. Both merges are pure, `negative-fixtures.test.ts` included. Closed: PR043-SEC-01, -03 and -04; PR043-SEC-05 UPDATE and actor arms (F14, F15). PR043-SEC-02 reopened for its tripwire arm by code review R3-m2: the general `tests/`-folder rule is recommended in this PR and required before TASK-049 merges; it is not a merge blocker, because the image preflight refuses a production import of a pruned `tests/` file. Open with owners: PR043-SEC-05 `org_id` INSERT arm (TASK-047), PR043-SEC-06 (late task before G3, accepted residual R-ARCH-38), PR043-SEC-07 (TASK-047). New: PR043-SEC-08 INFO, widened by code review R3-m1 (whens, ordered, custom, inverted and permissive patterns, default functions, `base64` only under `*_enc` keys): a merge prerequisite of TASK-049, not of this PR. QG-043-C4: C4-2 met; C4-1 and C4-3 open as before. Owed: lane B PASS at `93f9faa0` (the 42501 and 23514 rows, C5 with the column tuples), the hosted `security-integration` job, the rename and merge-ref check |
