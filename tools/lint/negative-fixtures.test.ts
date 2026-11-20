@@ -758,6 +758,8 @@ const RESOLUTION: readonly Violation[] = [
   ],
 ];
 
+const TOKEN_LINT = 'platform/token-lint';
+
 const CSS: readonly Violation[] = [
   ['platform/hover-in-media: :hover outside any @media', 'css/bad-hover-outside-media.css', 'platform/hover-in-media', ':hover'],
   ['platform/hover-in-media: :hover inside @media (hover: none)', 'css/bad-hover-wrong-media.css', 'platform/hover-in-media', ':hover'],
@@ -776,6 +778,14 @@ const CSS: readonly Violation[] = [
     ['--report-invalid-scope-disables', '--report-needless-disables'],
     'color-no-invalid-hex',
   ],
+  // platform/token-lint (US-101, TASK-038): one fixture per refused shape.
+  ['[AT-US-101-02] a hex colour (#ff0000) fails with the literal named', 'css/bad-token-hex-colour.css', TOKEN_LINT, '#ff0000'],
+  ['[AT-US-101-02] rgb(0, 0, 0) fails', 'css/bad-token-rgb-colour.css', TOKEN_LINT, 'rgb('],
+  ['[AT-US-101-02] hsl() fails', 'css/bad-token-hsl-colour.css', TOKEN_LINT, 'hsl('],
+  ['[AT-US-101-02] a named colour in a colour property fails', 'css/bad-token-named-colour.css', TOKEN_LINT, 'rebeccapurple'],
+  ['[AT-US-101-03] margin: 13px (off the 4/8 grid) fails', 'css/bad-token-off-grid-px.css', TOKEN_LINT, '13px'],
+  ['[AT-US-101-03] an off-grid rem length (0.8125rem = 13px) fails', 'css/bad-token-off-grid-rem.css', TOKEN_LINT, '0.8125rem'],
+  ['[AT-US-101-05] var(--colour-nonexistent) fails as an unknown token', 'css/bad-token-unknown.css', TOKEN_LINT, '--colour-nonexistent'],
 ];
 
 const TENANT_CONTEXT = 'platform/tenant-context-sql';
@@ -1998,8 +2008,12 @@ describe('seeded negative fixtures: Stylelint (NFR-I18N-003, NFR-A11Y-006)', () 
     expectClean(report.stylelint, 'css/ok-logical-and-hover.css');
   });
 
+  it('[AT-US-101-01] allowed: token variables, on-grid lengths, keywords, component-local and Tailwind runtime variables', () => {
+    expectClean(report.stylelint, 'css/ok-tokens.css');
+  });
+
   exactOnly('every CSS fixture is listed in the case table', () => {
-    const listed = new Set([...CSS.map(([, file]) => file), 'css/ok-logical-and-hover.css']);
+    const listed = new Set([...CSS.map(([, file]) => file), 'css/ok-logical-and-hover.css', 'css/ok-tokens.css']);
     expect(Object.keys(report.stylelint).filter((file) => !listed.has(file))).toEqual([]);
   });
 });

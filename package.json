@@ -28,6 +28,7 @@
     "authz:generate": "tsx --conditions=@platform/source tools/authz/generate.ts",
     "authz:matrix": "tsx --conditions=@platform/source tests/generated/rbac/write-matrix.ts",
     "gen:modules": "tsx tools/api/gen-module-registry.ts",
+    "tokens:build": "node tools/ui/compile-tokens.mjs",
     "openapi:lint": "node tools/openapi/lint.mjs",
     "openapi:types": "tsx tools/openapi/types.ts",
     "lint": "npm run typegen && eslint . --max-warnings 0 && stylelint \"**/*.css\" --max-warnings 0 && node tools/lint/check-suppressions.mjs",
