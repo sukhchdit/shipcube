@@ -5695,3 +5695,32 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Waiting on the user:** the `.env.example` commit on TASK-041. Main is already merged into that branch at `3bdacb08`.
 - **Still held:** the api-designer README/OpenAPI patch (D-API-004, minus the REQ-SEC-012 hunk). It changes `openapi.yaml` and `types.gen.ts`, so it goes in its own small PR.
 - **Reversibility:** High.
+
+### D-SECPR079-01 · 2026-11-20 · security-analyst · TASK-079 security round 1 (pre-push, `f9cc7ca1..7815e1c8`) = PASS_WITH_FOLLOW-UPS at code head `7815e1c8` (record `docs/05-quality/security/PR-pending-TASK-079-security-review.md` on main; rename at PR time per D-ORCH-136/138)
+- **Trigger:** the one owned path is `tools/lint/carrier-wire-boundary.test.ts` (`/tools/lint/`). The AT-US-121-05 barrel scan now lets exactly `./adapters/mock/index.js` through (D-TASK079-01). `security_paths=false`, so no hosted `security-integration` job runs.
+- **Decision:**
+  - **D-TASK079-01 is accepted.** The exception does not weaken the control's purpose today:
+    - the Mock has no wire format;
+    - a transitive walk from the barrel reaches 25 modules, and none is a wire module or another carrier's adapter;
+    - the deep-import lint pattern and the `.`-only exports map are unchanged and pinned.
+  - **The condition is PR079-SEC-01.** The control's guarantee has narrowed to "the barrel enters `adapters/` only through the Mock entry". The scan does not look inside that entry, so a `wire` re-export from `adapters/mock/` (value or type) passes it. The only other guard is an unowned value-key pin.
+  - **Probe:** of 9 cases, the owned test misses M3/M4, which are new with this PR, and M5/M6/M8, which pass the base test too. The proposed transitive walk refuses all of them and passes the real head and base trees.
+- **Findings:**
+  - **PR079-SEC-01 LOW** (CWE-693). Replace the one-level scan with the walk (code in the record). Owner: this PR's fix cycle, else TASK-097 (owned file, security round required). Due before the first `adapters/<carrier>/wire*` module merges (TASK-135).
+  - **PR079-SEC-02 LOW** (CWE-400; code review m3). The latency sleep ignores `ctx.deadlineAt` and cannot be cancelled. A deadline 60 s in the past still slept the full directive. Production cannot reach it (strict boolean flag, default off, `productionGuard`). Once TASK-097 wires `X-Mock-Scenario` or the `MOCK:` customer reference, a caller can hold each Mock call for up to 30 s.
+    - Fix: cap the wait at the deadline through an injected `nowMs` seam and end with `TIMEOUT`. TASK-097 honours directives only for sandbox contexts, and reads the `MOCK:` source only in local/test. TASK-083/TASK-132 enforce `deadlineAt` and bulkhead accounting independently of the adapter.
+    - Due: before TASK-097 merges.
+  - **PR079-SEC-03 INFO** (code review m1). `maxCallRecords` set to `NaN`, `Infinity` or `'abc'` makes the ring unbounded (3,000 of 3,000 calls kept). The ring is process-wide and ordered by completion, so consumers must match records by `correlationId`. Owner: TASK-092 and principal-architect.
+  - **PR079-SEC-04 INFO.** A throwing logger in `finally` replaces the call's outcome with a non-`CarrierError`. For the real adapters that copy the wrapper, that turns a booked shipment into EXCEPTION. Owner: card lines on TASK-135/139/140, and TASK-132.
+  - **PR079-SEC-05 INFO.** The Mock serves production-environment contexts. Production exclusion is configuration plus the composition root (nothing in this PR wires the factory). Owner: TASK-097 (refuse `ctx.environment === 'production'`; pin the factory's single composition-root reference).
+- **Checked with no finding:**
+  - AT-US-008-03: one `carrier.call` line per operation that enters the adapter, the 8 allow-listed keys, 0 of 11 PII sentinels in lines, records or warnings.
+  - Zero network: wider traps (DNS, UDP, TLS, `child_process` as well as sockets and `fetch`), 0 attempts, no import-time side effect.
+  - The egress table is empty, and an empty table derives no rule.
+  - PR075-SEC-14 / D-SECPR075-03: 80,040 hostile and fuzzed labels pass `createLabelDocument` and the sniffers, with exact PDF/ZPL structure. Lead cases behave as ruled. The guarded `createShipment` drops no label.
+  - Hostile tracking text never reaches a label, log or event.
+  - PR076-SEC-06 not triggered (the line moves on). ReDoS: all added regexes are anchored and linear. Secrets: none in the added lines.
+- **Simulation:** main's real checker on the merge-ref form (main tip `7c7ed3e3` plus the record renamed to `PR-9999-…`, merged with `7815e1c8`, `--pr 9999`): 6/6 scenarios as expected. Pass with the renamed record (base = merge base, and base = tip). Missing with no record, with a FAIL verdict, with a `Head` row that names a main commit, and with the pending name only.
+- **Still owed:** lane B on `7815e1c8` (code review C1); lane A on the pushed head; the rename of the record and the merge-ref check. A new round is needed only if an owned path changes after `7815e1c8`.
+- **Alternatives considered:** PASS_WITH_CONDITIONS with SEC-01 as a merge condition. Rejected: no wire module exists before TASK-135, so a due date before that merge is enough.
+- **Reversibility:** High. This is a review record only.
