@@ -159,7 +159,7 @@ _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuati
 | Wave | Goal | Tasks | Batches | State |
 |---|---|---|---|---|
 | 0 | Foundation: skeleton, CI lanes, generators, SPK-01..08 | 47 | 13 | ▶ IN_PROGRESS |
-| 1 | M0 DC I | 42 (incl. TASK-295, D-SD-005) | 11 | ▶ IN_PROGRESS (7 merged) |
+| 1 | M0 DC I | 43 (incl. TASK-295, D-SD-005; TASK-297, D-SD-009) | 11 | ▶ IN_PROGRESS (7 merged) |
 | 2 | M0 DC II | 22 | 6 | ▶ back-fill (TASK-075, 076, 079 merged) |
 | 3 | M0 non-DC Must → ★ v0.1.0-m0 (110 of 113 M0 Must complete; US-040, US-061, US-062 partial, D-PM-078) | 28 | 7 | ⏳ |
 | 4 | M1 DC I | 24 | 7 | ⏳ |
@@ -170,6 +170,7 @@ _none_ (batch 0.2: 80-turn stops on TASK-002/004/005 resumed via opus continuati
 | 9 | Could (cuttable, ladder rung 1) | 7 | 2 | ⏳ |
 
 ## Next Actions
+- senior-developer fold D-SD-009 (2026-11-20, D-PM-084 + qa-lead report): TASK-040 part 040-B carries CLAIM LOST AFTER CALL and the m4 test change; TASK-033 the idempotency rows of the audit generator; TASK-214 the claim-lost alert; new TASK-297 `gherkinnotes` (batch 1.11, test-engineer, dispatch when no PR evidence is pending; qa-lead supplies the seed test titles).
 - senior-developer fold D-SD-008 (2026-11-20, D-SECPR040-01 / D-SECPR043-02): part 040-B of TASK-040 also carries PR040-SEC-01/02/04/05/07/09, purge conditions P-3..P-5 and proof (g); P-1 CODEOWNERS (`/apps/worker/src/platform/idempotency/`) is devops-engineer on TASK-015 part 015-C, before part 040-B merges; TASK-187 carries T187-1..6; TASK-049 gains merge prerequisites PR043-SEC-08 and the PR043-SEC-02 tripwire.
 - senior-developer fold D-SD-007 (2026-11-20, QG-040-C6): TASK-040 carries TWO PARTS, STORED RESPONSES, the D-PM-081 audit lines and the part 040-B scope, proofs (sharpened), files and locks, purge and gates; `task-map.csv` lists US-038 as partial until part 040-B. **Part 040-B gates 33 cards** that mount one of the 47 idempotent operations, among them **TASK-062 (Wave 1, batch 1.7: `updateMe` from the locale persistence)** and TASK-092 (Wave 2), so part 040-B (after 041-A, which waits on the user `.env.example` commit) is on the path of batch 1.7 and of the M0 booking. TASK-047 carries FOLLOW-UP JOBS, T-83 LINT, OUTBOX ORG BINDING, SYSTEM ADMISSION KEY and C4-1 (locks + `lint`, `outbox`). TASK-078: TOKEN OVERWRITE and T078-1..5. TASK-096: QG-040-C2 gate. New TASK-296 (batch 7.10, before G3).
 - senior-developer fold D-SD-006 (2026-11-20, QG-043-C6): TASK-043 card carries F1–F12, the `apps/worker/src/platform/outbox/**` path and the QG-043-C7 (a) test (merge condition). Batch 1.4 order: **TASK-047 hosts the dispatcher** (now M; gains `api-tenant-db` for the correlation grammar) and merges before TASK-049; TASK-047 dispatch waits on QG-043-C2 (principal-architect, placeholder line on the card). TASK-078 dispatch waits on QG-043-C3 and owns the 24 h `token_enc` housekeeping. TASK-214 carries OUTBOX ALARMS.
