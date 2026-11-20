@@ -20,6 +20,10 @@ platform_app SELECT public.roles
 # platform_migrator (owner) is the single writer (data-model §3.5, §4.4; PR13-SEC-04, D-ARCH-075).
 platform_app SELECT public.reference_dataset_versions
 
+# job idempotency ledger (TASK-039, migration 20261119000000_job_executions): SYSTEM, module worker; insert-only.
+platform_app SELECT public.job_executions
+platform_app INSERT public.job_executions
+
 # audit store (TASK-021, bootstrap lane prisma/bootstrap/10-audit.sql; data-model §4.4 grant matrix, C5): SYSTEM.
 # Append-only tables exactly SELECT, INSERT; audit_entries on the parent only, never on a partition (partitions carry
 # zero privileges). Mutable SYSTEM tables SELECT, INSERT, UPDATE. Never DELETE/TRUNCATE for platform_app.

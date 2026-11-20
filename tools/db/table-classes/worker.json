@@ -1,0 +1,5 @@
+{
+  "$comment": "Worker bookkeeping tables in public (ADR-0013 §4; data-model §3.5 as added by TASK-039): job_executions, the idempotency ledger of job effects (REQ-PLAT-014). SYSTEM: no org_id and no RLS (a scheduled job has no organisation; a tenant job's organisation comes from platform.job_context, TASK-047). Owner module worker: eslint SYSTEM_MODEL_OWNERS maps it to apps/worker/src/platform/**. Grants (prisma/sql/grants.manifest; data-model §4.4, D-ARCH-171): platform_app SELECT, INSERT; never UPDATE (a row is written once, in the effect's transaction). The claim itself needs INSERT only; SELECT is the read of operators and of the TASK-043 purge. DELETE and hardDelete arrive with that purge (30 days after completed_at). stdColumns: the full standard-column set, written by a runtime role, so the standard-columns guard trigger is rendered.",
+  "module": "worker",
+  "tables": [{ "name": "job_executions", "class": "SYSTEM", "stdColumns": true }]
+}

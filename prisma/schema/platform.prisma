@@ -21,3 +21,27 @@ model ReferenceDatasetVersion {
   @@unique([dataset], map: "ux_reference_dataset_versions__dataset")
   @@map("reference_dataset_versions")
 }
+
+/// Idempotency ledger of job effects (ADR-0013 §4, REQ-PLAT-014; data-model §3.5, D-ARCH-171). SYSTEM class, module `worker`
+/// (tools/db/table-classes/worker.json): reached only through the worker's SYSTEM accessor. One row per completed job,
+/// inserted in the effect's transaction (`createMany` with `skipDuplicates`), never updated. Kept in the migration SQL:
+/// `ck_job_executions__version`, `__job_key` (1..200 chars), `__queue` (kebab name), `__status` ('completed'),
+/// `__result_unset` (reserved column, PR039-SEC-05) and the
+/// standard-columns guard trigger.
+model JobExecution {
+  id          String   @id(map: "pk_job_executions") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String   @map("updated_by") @db.Uuid
+  version     Int      @default(1)
+  jobKey      String   @map("job_key")
+  queue       String
+  status      String   @default("completed")
+  result      Json?
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([queue, jobKey], map: "ux_job_executions__queue_job_key")
+  @@index([completedAt], map: "ix_job_executions__completed_at")
+  @@map("job_executions")
+}

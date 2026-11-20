@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createRuntimeLog } from '@platform/api/runtime';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { Queue } from 'bullmq';
 
 import { queueConnectionOptions } from './connection.js';
 import { createQueueConsumer } from './consumer.js';
@@ -133,6 +134,29 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
     expect(consoleErrors.join('\n')).not.toContain(PASSWORD);
     expect(stderrWrites.join('')).not.toContain(PASSWORD);
     expect(consoleErrors).toEqual([]);
+  });
+
+  it('[PR64-SEC-12] metrics() is single-flight: N scrapes against a never-ready connection leave one pending collection', async () => {
+    const valkey = await fakeValkey();
+    cleanups.push(() => new Promise<void>((resolve) => valkey.server.close(() => resolve())));
+    const log = createRuntimeLog('worker', { write: () => true }, { level: 'debug' });
+    const url = `redis://worker:${PASSWORD}@127.0.0.1:${String(valkey.port)}/0`;
+    const counts = jest.spyOn(Queue.prototype, 'getJobCounts');
+    const queues = createWorkerQueues({
+      connection: queueConnectionOptions(url, 'worker-consumers', 'worker'),
+      queueConnection: queueConnectionOptions(url, 'worker-queues', 'queue'),
+      log,
+      processors: {},
+    });
+    cleanups.push(async () => {
+      await bounded(queues.close(), 3_000);
+    });
+    const scrapes = Array.from({ length: 25 }, () => queues.metrics());
+    for (const scrape of scrapes) scrape.catch(() => undefined);
+    await sleep(300);
+    expect(new Set(scrapes).size).toBe(1);
+    // One collection: 9 queues and 9 dead-letter queues, each counted once.
+    expect(counts).toHaveBeenCalledTimes(18);
   });
 
   it('logs an error event as its class name, and a non-Error value as its type; never the message', async () => {
