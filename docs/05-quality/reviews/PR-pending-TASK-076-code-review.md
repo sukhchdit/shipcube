@@ -142,3 +142,114 @@ HOST RULE: static review and single-process Node probes on a `git archive e01979
 - The cross-process determinism test perturbs TZ and LANG, and the in-process property perturbs the clock, randomness and input key order (JSON round-trip).
 - The imperial ladder is documented with the exact derivation `n >= (2w - 1) / (2 x increment)`, and it is property-tested against `toGrams(n, 'lb')`.
 - `price-child.ts` and the fixtures sit under `src/tests/`, outside both the coverage scope and pricing-purity, by the existing conventions.
+
+---
+
+# Round 2 (delta `e01979b..f6de9578`, one commit), 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | `f6de9578` (`fix(pricing): purity reach, compound money-arith, runtime re-validation, money operands`), on `e01979b` |
+| Delta | 26 files, +627 / -115: `tools/eslint-rules/{pricing-purity,money-arith}.mjs`, `packages/pricing/src/{state,rounding,engine,index}.ts` plus `state.test.ts` and `rounding.test.ts`, `packages/shared/src/money/money.ts` plus `operands.test.ts`, 14 new lint fixtures, `negative-fixtures.test.ts` rows |
+| Claims | Closes R1-m1, R1-m2, R1-m3, R1-n3, R1-n7, R1-n9 and security PR076-SEC-01..05. R1-m4 and R1-m5 are ruled by D-ARCH-169/170 (`71a2d36`, ADR-0009 amendment 2). NITs not taken: R1-n1, n2, n4, n5, n6, n8, n10, n11. Decisions D-TASK076-11..15. Developer reports unit 273/273 and 100 % coverage on pricing, money and units. |
+
+## R2.1 Verdict
+
+```
+VERDICT: CHANGES_REQUESTED
+SUMMARY: R1-m1, R1-m3, R1-m4 and R1-m5 are closed, and the purity rewrite is sound (every fixture form reported, no false
+         positive on the 89 real files). One MAJOR: the `+=` exemption added for R1-m2 tests hard-coded TypeFlags that
+         mean Undefined|BigInt|Union|Intersection in TypeScript 6.0.3, not String-like. So a Minor-typed accumulator's
+         `+=` (an Intersection) is no longer reported, a regression of the PR #2 m10 branch, and string building is
+         reported. The fix is one line plus two fixtures. 7 NITs.
+```
+
+## R2.2 Verification performed
+
+Same host rule. The setup was a `git archive f6de9578` copy (`review/T076-cr/copy2`) with a node_modules junction to the worktree, which sits at `f6de9578`. Nothing ran in the worktree except a read-only `prettier --check`. The copy and junction were removed afterwards.
+
+- **Type-check:** `tsc -p` over `packages/shared/src` and `packages/pricing/src` (scratch tsconfig, noEmit): exit 0.
+- **Lint on the real sources:** type-aware ESLint with the repository config on all 89 files of `packages/shared/src` and `packages/pricing/src`, plus both rule files and `negative-fixtures.test.ts`: **0 messages, so the rewritten rules raise no false positive on the real code**. Wall time was 17.0 s.
+  - Per-rule time: `platform/money-arith` 3.9 ms and `platform/pricing-purity` 1.4 ms in total, against `import-x/no-cycle` 991 ms and `boundaries` 621 ms. **The typed-lint cost is still negligible.**
+  - A repo-wide grep of `apps/*`, `packages/*/src` and `prisma/seed` finds no compound assignment with a money-named right side. The new right-side check therefore lands on no existing code.
+- **Fixture harness:** `node tools/lint/lint-fixtures.mjs` took 17.7 s. Every new row reports exactly its rule and form: 11 new pricing-purity files, `bad-tests-import`, `bad-compound` and the typed `bad-minor-compound`. `ok-pure` and every typed `ok`/stand-in file are clean.
+- **Format:** `prettier --check` on the 26 changed files: clean.
+- **Not re-run:** Jest. I relied on the developer's 273/273 and 100 %. Lane B is binding.
+- **TypeScript flags** (`node -e "require('typescript').TypeFlags"`, 6.0.3, which is also the copy typescript-eslint resolves):
+  - String = 32, StringLiteral = 1024, TemplateLiteral = 4194304, StringMapping = 8388608, StringLike = 12583968.
+  - The rule's `4 | 128 | 134_217_728 | 268_435_456` decodes to **Undefined | BigInt | Union | Intersection**. (R2-M1)
+- **money-arith probes** (`zz-arith2.ts` in the copy's `packages/pricing/src`, real config):
+
+| Form | f6de9578 | with `STRING_LIKE_FLAGS = 12_583_968` (mutant) |
+|---|---|---|
+| `let s = 'total: '; s += m.amount` (string building, meant to be allowed) | **reported** (false positive) | allowed |
+| `let t = m.amount; t += 5` (`t: Minor`) | **not reported** (false negative; r1 head reported it) | reported |
+| `let t: Minor = m.amount; t += k` | **not reported** | reported |
+| `for (...) total += x.amount` (`total: number`) | reported | reported |
+| `let t = m.amount as number; t *= 2` / `cents -= 1` (`cents: number`) | not reported (documented limit: conversion strips the brand) | same |
+
+- **pricing-purity probes:**
+  - Not reported (R2-n1, R2-n2):
+    - `navigator.language`, a Node 24 global (it also exposes `hardwareConcurrency`, `platform` and `userAgent`);
+    - `setTimeout(...)`;
+    - `export { "uuidv7" as id } from '@platform/shared'`, a string-named specifier.
+  - Reported, although they read no clock (R2-n3): `v instanceof Date` and `type T = ReturnType<typeof Date.now>`.
+  - Correctly reported: `new Date(2026, 0, 1)`, because local-time construction depends on TZ.
+  - Correctly allowed: `Date.parse`, `new Date(s)`, `Math.abs`/`Math.max`, `structuredClone`, `isUuidV7`.
+- **Runtime probes** (`probe2.ts`, tsx):
+  - **`chargeLine`:**
+    - `taxCode` as an object, `informational` as a string, a missing `labelKey` and a `null` line all throw PricingError `PRICING_INPUT_INVALID`.
+    - An inherited `amount` throws MONEY_INVALID.
+    - A flipping getter is read exactly once, and the copy holds the value that was validated.
+  - **Explanation entries, warnings and counts:** NaN inputs, a bad `outcome`, an unknown warning and a count of `-1` all throw PricingError.
+  - **Money operands:**
+    - A string, bigint or inherited `amount` on `add`, `percentage` or `toMajorString` throws MONEY_INVALID.
+    - `isMoney` refuses a getter.
+  - **`rateRatio`:** a rate with both keys, neither key, `null` or an inherited `bps` throws PRICING_CONFIG_INVALID.
+  - **Remaining gaps:**
+    - An inputs key `__proto__` (from `JSON.parse`, with value `null` or `"x"`) is **silently dropped** from the copied inputs. (R2-n4)
+    - A step that returns `null`, or a state without `lines`, still throws a raw TypeError from `runPricing`. (R2-n5)
+
+## R2.3 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-M1 | MAJOR | `tools/eslint-rules/money-arith.mjs:22` (`STRING_LIKE_FLAGS`), used at `:148` | The hard-coded "TypeFlags.String \| StringLiteral \| TemplateLiteral \| StringMapping" are the bit values of another TypeScript enumeration. In TypeScript 6.0.3 they are **Undefined \| BigInt \| Union \| Intersection**. `isStringTyped(node.left)` is therefore true for every `Minor` (an intersection), every union or bigint left side, and false for `string`. Effects: <br>(1) A `+=` whose left operand is `Minor`-typed returns early and is never reported, whatever the right side. `let total = first.amount; for (...) total += line.amount` passes. At `e01979b` the type-aware branch reported it, so this reopens PR #2 m10 for `+=`. <br>(2) The stated exemption `text += m.amount` (string building) is reported. <br>No fixture covers either side of the exemption, which is how the wrong constants passed. | Do not hard-code flags. Use `ts.TypeFlags.StringLike` (`import ts from 'typescript'`; the repo resolves one copy), or `checker.isTypeAssignableTo(type, checker.getStringType())`. Exempt only when the left side is string-like **and** does not carry the brand. Add a typed bad fixture `let t: Minor = …; t += k`, and a typed ok fixture `let s = ''; s += m.amount` (or, if string `+=` with a Minor operand should be refused after all, drop the exemption and say so in the header). Mutant: the constant `12_583_968` makes both probes behave as documented (§R2.2). |
+| R2-n1 | NIT | `tools/eslint-rules/pricing-purity.mjs:29` | `navigator` is a Node 24 global (`language`, `hardwareConcurrency`, `platform`, `userAgent`), i.e. locale and environment. It is not in `ALWAYS_IMPURE`. Timers (`setTimeout`, `setInterval`, `queueMicrotask`) are not listed under "Limits". | Add `navigator` to `ALWAYS_IMPURE`, and add the timers to it or name them in the Limits sentence. |
+| R2-n2 | NIT | `tools/eslint-rules/pricing-purity.mjs:176-185` | String-named module specifiers bypass the PR076-SEC-01 name refusal: `import { "uuidv7" as id }` and `export { "uuidv7" as id } from '@platform/shared'`. `imported`/`local` are `Literal`, and only `Identifier` names are collected. The syntax is valid ES2022 and TypeScript, and it parses and lints clean. | Read the name as `specifier.imported.type === 'Identifier' ? .name : .value` (the same for `local`), and add a fixture. |
+| R2-n3 | NIT | `tools/eslint-rules/pricing-purity.mjs:92-106, 205` | Conservative false positives: `v instanceof Date`, and `typeof Date.now` inside a type query (scope-manager marks it as a value reference). Neither reads the clock. | Allow `BinaryExpression` `instanceof` with `Date` on the right and references under a `TSTypeQuery`, or name both in the Limits sentence. |
+| R2-n4 | NIT | `packages/pricing/src/state.ts:84-90` | `copy[key] = item` on a plain object turns an own `__proto__` input key into a prototype write. With `null` the copy's prototype is replaced; with a string the key is ignored. Either way the key **silently disappears** from the stored explanation. Configuration loaded with `JSON.parse` can carry such a key. | Refuse `__proto__` as an inputs key (PRICING_INPUT_INVALID), or build the copy with `Object.defineProperty(copy, key, { value, enumerable: true })`. |
+| R2-n5 | NIT | `packages/pricing/src/engine.ts:77-92` | `runPricing` still reads `state.lines`/`state.entries` raw. A step that returns `null`, or a state without `lines`, throws a raw TypeError instead of PricingError. The commit's "no raw TypeError" holds for lines and entries, not for the state shape. | Check the state shape once after each step (`own(state, 'lines')` is an array, the same for `entries`), with PRICING_INPUT_INVALID. |
+| R2-n6 | NIT | `tools/eslint-rules/pricing-purity.mjs:33-34` | `IMPURE_SHARED_EXPORTS` is a hand-kept deny-list. A future clock or random export added to the `@platform/shared` root (allow-listed for pricing) passes silently. Today the list is complete: of the root's modules, only `ids/uuidv7.ts` reads randomness or the clock. | Add a pin test: scan the modules re-exported by `packages/shared/src/index.ts` for `Date.now`, `new Date()`, `random`, `crypto.` and `uuid` imports, and assert that the exports found equal `IMPURE_SHARED_EXPORTS`. Or note the list in the shared index header next to the `uuidv7` export. |
+| R2-n7 | NIT | `tools/lint/negative-fixtures.test.ts` (R1-m2 rows) | Neither side of the `+=` string exemption has a fixture (see R2-M1). | This is covered by the R2-M1 fix. It is listed so the r3 check confirms both rows exist. |
+
+## R2.4 Round-1 closure
+
+| Item | Status |
+|---|---|
+| R1-m1 purity reach | **Closed.** The global-scope pass (`through` plus defs-less configured globals) reports every form I probed in r1: destructuring, alias, `Date(x)`, `new Date(...[])`, `process.hrtime`/`uptime`/`argv`, `performance.timeOrigin` and `Reflect.get(Math, …)`. Each has a fixture row. The residual gaps are R2-n1..n3. |
+| R1-m2 compound right side | **Partly closed.** The right side is checked in both branches (`bad-compound` and `bad-minor-compound` report). The new string exemption is broken. See **R2-M1**. |
+| R1-m3 runtime re-validation | **Closed.** Fields are copied once from own properties, then validated and frozen, and codes appear in messages only after validation. Counts and warnings are validated. Every r1 probe now throws PricingError or MoneyError. Residuals: R2-n4, R2-n5. |
+| R1-m4 static ISO table vs ADR-0009 §3 | **Closed** by D-ARCH-169 (ADR-0009 amendment 2 item 3, `71a2d36`). The parity test and the ANG/CUC/SLL re-check are on TASK-066. **Merge condition 3 is met.** |
+| R1-m5 rule by origin | **Closed** by D-ARCH-170 (ADR-0009 amendment 2 item 4). The card line is on TASK-093 or the pricing-input task, with the 12,701 g / 13,000 g test. |
+| R1-n3 rate with both keys or neither | **Closed** (own keys; probe). |
+| R1-n7 rounding tests location | **Closed** (`rounding.test.ts`). |
+| R1-n9 money-arith limits | **Closed** (the header states the conversion and unary limits). |
+| R1-n1, n2, n4, n6, n10 | Not taken. They stay open as NITs, at the developer's discretion. |
+| R1-n5 | Folded into the TASK-066 card line (D-ARCH-169). |
+| R1-n8 | Spec observation for product-manager. |
+| R1-n11 | AT-US-138-04 interpretation for qa-lead. |
+| PR076-SEC-01..05 | Code side verified by probe: own-property operand checks in every Money helper, `rateRatio` own keys, the shared-root name and whole-module refusals, test-module import refusal. R2-n2 is a bypass of SEC-01 for security-analyst to grade. |
+
+## R2.5 Merge conditions (replace §6)
+
+1. **R2-M1 fixed** with the two fixtures (round-3 delta check: the harness rows plus the two probe forms).
+2. Lane B evidence on the final head, and the PR body quotes the pricing and money 95/95 coverage figures (PR40-SEC-05).
+3. A security-analyst record on the final head, including a grade for R2-n2.
+4. ~~Architect ruling on R1-m4~~: met (D-ARCH-169, `71a2d36`).
+
+## R2.6 Good
+
+- The purity rule is now a scope-based pass rather than a list of member spellings, so new spellings of the same global are reported by construction. Its "Limits" header is honest.
+- `state.ts` reads each field exactly once and validates the copy, which defeats accessor tricks by design rather than by probe. Messages interpolate a code only after validating it.
+- `operand()` gives every Money helper the same input contract as its output contract, and the own-data-property reads close the inherited and getter routes.
