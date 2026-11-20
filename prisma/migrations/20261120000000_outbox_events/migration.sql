@@ -8,7 +8,9 @@
 --   apps/api/src/platform/outbox/writer.ts in the business transaction; the worker relay claims unpublished rows in
 --   (created_at, id) order with FOR UPDATE SKIP LOCKED (ix_outbox_events__unpublished), enqueues one payload v2 job per
 --   row and sets published_at. org_id has no foreign key on purpose (§6.1: an event of a deleted organisation stays a
---   fact). correlation_id has the ADR-0016 §15 grammar of a job payload, so a row can always be relayed.
+--   fact). correlation_id has the ADR-0016 §15 grammar of a job payload, so a row can always be relayed. created_at
+--   is the insert time: the writer sets created_at = updated_at = clock_timestamp() (the relay's order key; ADR-0004
+--   amendment 2 item 13, D-ARCH-185); the column default (transaction start) is not used for this table.
 -- - processed_events, module worker (tools/db/table-classes/worker.json): (consumer, event_id) dedupe of outbox
 --   consumers; insert-only.
 -- Both are on the hard-delete allow-list (hardDelete): the daily outbox-purge housekeeping job deletes rows published

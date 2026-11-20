@@ -1,12 +1,12 @@
-// `@platform/shared/events`: the domain event catalogue of the transactional outbox (ADR-0004 item 5; TASK-043). Each
-// module owns `events/<module>.ts` (a `ModuleEvents` record) and adds ONE import line and one entry here (PLAN.md §5
-// rule 2); events.test.ts fails when a file of this folder is not listed. A subpath of its own because the payload
-// schemas need Joi, which the browser-safe root barrel does not carry.
+// `@platform/shared/events`: the domain event catalogue of the transactional outbox (ADR-0004 amendment 2 item 12;
+// TASK-043). Each module owns `events/<module>.ts` (a `ModuleEvents` record) and adds ONE import line and one entry
+// here (PLAN.md §5 rule 2); events.test.ts fails when a file of this folder is not listed. A subpath of its own because
+// the payload schemas need Joi, which the browser-safe root barrel does not carry.
 //
-// TASK-043 ships the mechanism with no event type: the first module that publishes (TASK-049 registration, TASK-084
-// the shipment state machine, ...) adds its file. Delivery does not route by type here: the relay enqueues every event
-// as one `outbox_event` job on the `outbox-relay` queue (payload v2, ADR-0013 amendment 1), and the consumer of that
-// queue dispatches by type (TASK-078 and later).
+// TASK-043 ships the mechanism with no event type. Delivery does not route by type here (there is no `eventRouting`
+// map, D-ARCH-184): the relay enqueues every event as one `outbox_event` job on the `outbox-relay` queue, and that
+// queue's processor dispatches by type (TASK-047). No event type enters this catalogue before that processor exists:
+// apps/worker/src/processors.test.ts fails otherwise (item 12; TASK-049 is the first publisher).
 import { type EventCatalogue, mergeEvents, type ModuleEvents } from './event-definition.js';
 
 /** Module name (the event file name) to that module's events. */
@@ -25,6 +25,7 @@ export {
   AGGREGATE_TYPE_PATTERN,
   EVENT_TYPE_PATTERN,
   identifierPayload,
+  isClosedObjectSchema,
   mergeEvents,
   validateEventPayload,
   type EventCatalogue,

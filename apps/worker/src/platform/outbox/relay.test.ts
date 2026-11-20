@@ -4,12 +4,20 @@
 import { createJobProducer, createRuntimeLog, type EnqueueOptions, JobProducerError, type TenantContext } from '@platform/api/runtime';
 import type { Config } from '@platform/config';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { SYSTEM_ACTOR_ID } from '@platform/shared';
+import { CORRELATION_ID_PATTERN, SYSTEM_ACTOR_ID } from '@platform/shared';
 import type { JobRef, QueueName } from '@platform/shared/queues';
 
 import { createProductionOutboxRelay } from '../../start-worker.js';
 import { createRelayMetrics, RELAY_LATENCY_BUCKETS } from './relay-metrics.js';
-import { createOutboxRelay, OutboxEnqueueTimeoutError, RELAY_LOCK_KEY, type RelayRow, within } from './relay.js';
+import {
+  createOutboxRelay,
+  OutboxEnqueueTimeoutError,
+  RELAY_LOCK_KEY,
+  RELAY_MAX_BACKOFF_MS,
+  relayBounds,
+  type RelayRow,
+  within,
+} from './relay.js';
 import { type RawDb, systemContext, type SystemTxRunner } from './system-tx.js';
 
 const TRACEPARENT = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`;
@@ -119,6 +127,7 @@ const relayOf = (db: FakeDatabase, producer: ReturnType<typeof fakeProducer>, ov
     batchSize: overrides.batchSize ?? 100,
     pollIntervalMs: 500,
     budgetMs: overrides.budgetMs ?? 2_500,
+    enqueueTimeoutMs: 1_250,
     wallMs: () => 1_763_600_000_000,
   });
 
@@ -148,6 +157,8 @@ describe('[US-011] outbox relay tick (ADR-0004 item 3; data-model §6.1)', () =>
     expect(mark?.sql).toContain('version = version + 1');
     expect(mark?.values[0]).toBe(SYSTEM_ACTOR_ID);
     expect(db.contexts).toEqual([systemContext('outbox-relay-1763600000000')]);
+    // D-ARCH-187 (F12): the tick's own correlation id is inside ADR-0016 §15, so it could publish.
+    expect(db.contexts[0]?.correlationId).toMatch(CORRELATION_ID_PATTERN);
   });
 
   it('[AT-US-008-03] copies each row correlation id unchanged into the job (D-062)', async () => {
@@ -186,7 +197,7 @@ describe('[US-011] outbox relay tick (ADR-0004 item 3; data-model §6.1)', () =>
     const db = fakeDatabase([row(1, A), row(2, B), row(3, A)]);
     const producer = fakeProducer(() => new Error('Connection is closed.'));
     const tick = await relayOf(db, producer).runOnce();
-    expect(tick).toEqual({ locked: true, claimed: 3, published: 0, failed: 1, full: false });
+    expect(tick).toEqual({ locked: true, claimed: 3, published: 0, failed: 1, full: false, failure: 'Error' });
     expect(db.published).toEqual([]);
     const failed = db.statements.at(-1);
     expect(failed?.sql).toContain('last_error =');
@@ -217,6 +228,7 @@ describe('[US-011] outbox relay tick (ADR-0004 item 3; data-model §6.1)', () =>
       batchSize: 10,
       pollIntervalMs: 500,
       budgetMs: 1_000,
+      enqueueTimeoutMs: 500,
       monotonicMs: () => now,
     });
     expect(await relay.runOnce()).toMatchObject({ claimed: 3, published: 2 });
@@ -234,7 +246,15 @@ describe('[AT-US-011-06] relay latency metric', () => {
   it('observes commit-to-enqueue latency per published event after the commit; a rolled-back tick counts nothing', async () => {
     const metrics = createRelayMetrics();
     const crashed = fakeDatabase([row(1, A, { age_seconds: 0.3 })], { commit: false });
-    const options = { producer: fakeProducer(), log: capture().log, batchSize: 10, pollIntervalMs: 500, budgetMs: 2_000, metrics };
+    const options = {
+      producer: fakeProducer(),
+      log: capture().log,
+      batchSize: 10,
+      pollIntervalMs: 500,
+      budgetMs: 2_000,
+      enqueueTimeoutMs: 1_000,
+      metrics,
+    };
     await expect(createOutboxRelay({ ...options, runner: crashed.runner }).runOnce()).rejects.toThrow();
     expect(metrics.render()).toContain('platform_outbox_relay_latency_seconds_count 0\n');
     const db = fakeDatabase([row(1, A, { age_seconds: 0.3 }), row(2, B, { age_seconds: 1.5 })]);
@@ -289,66 +309,179 @@ describe('enqueue bound', () => {
   });
 });
 
-describe('relay loop', () => {
-  it('polls after the interval, at once after a full batch, logs a failure streak once and its recovery, and stops', async () => {
-    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'] });
-    const outcomes: (() => Promise<unknown>)[] = [];
-    let calls = 0;
+describe('[ADR-0004 am. 2 item 11] relay liveness gauges (D-ARCH-183 F7)', () => {
+  const gauges = (text: string): [number, number] => [
+    Number(/^platform_outbox_relay_oldest_pending_age_seconds (\S+)$/m.exec(text)?.[1]),
+    Number(/^platform_outbox_relay_last_tick_timestamp_seconds (\S+)$/m.exec(text)?.[1]),
+  ];
+  const relayWith = (db: FakeDatabase, metrics: ReturnType<typeof createRelayMetrics>, wall: number) =>
+    createOutboxRelay({
+      runner: db.runner,
+      producer: fakeProducer(),
+      log: capture().log,
+      batchSize: 10,
+      pollIntervalMs: 500,
+      budgetMs: 2_500,
+      enqueueTimeoutMs: 1_250,
+      metrics,
+      wallMs: () => wall,
+    });
+
+  it('a tick with the lock and rows reports the age of the first claimed row and its end time', async () => {
+    const metrics = createRelayMetrics();
+    expect(gauges(metrics.render())).toEqual([0, 0]);
+    await relayWith(fakeDatabase([row(1, A, { age_seconds: 42.5 }), row(2, B, { age_seconds: 3 })]), metrics, 1_763_600_000_000).runOnce();
+    expect(gauges(metrics.render())).toEqual([42.5, 1_763_600_000]);
+  });
+
+  it('a tick with the lock and no rows, and a tick without the lock, report 0 and move the timestamp', async () => {
+    const metrics = createRelayMetrics();
+    await relayWith(fakeDatabase([row(1, A, { age_seconds: 9 })]), metrics, 1_000_000).runOnce();
+    await relayWith(fakeDatabase([]), metrics, 2_000_000).runOnce();
+    expect(gauges(metrics.render())).toEqual([0, 2_000]);
+    await relayWith(fakeDatabase([row(1, A, { age_seconds: 9 })]), metrics, 3_000_000).runOnce();
+    await relayWith(fakeDatabase([row(1, A)], { locked: false }), metrics, 4_000_000).runOnce();
+    expect(gauges(metrics.render())).toEqual([0, 4_000]);
+  });
+
+  it('a tick that threw reports nothing: the timestamp stops', async () => {
+    const metrics = createRelayMetrics();
+    await relayWith(fakeDatabase([row(1, A, { age_seconds: 7 })]), metrics, 5_000_000).runOnce();
+    await expect(relayWith(fakeDatabase([row(2, B)], { commit: false }), metrics, 6_000_000).runOnce()).rejects.toThrow();
+    expect(gauges(metrics.render())).toEqual([7, 5_000]);
+    const text = metrics.render();
+    expect(text).toContain('# TYPE platform_outbox_relay_oldest_pending_age_seconds gauge');
+    expect(text).toContain('# TYPE platform_outbox_relay_last_tick_timestamp_seconds gauge');
+  });
+});
+
+describe('[ADR-0004 am. 2 item 11] relay loop (D-ARCH-183 F6)', () => {
+  const settle = async (): Promise<void> => {
+    for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const idle = { locked: true, claimed: 0, published: 0, failed: 0, full: false };
+
+  /** A runner whose ticks return (or throw) the queued outcomes in turn, recording the fake time of each call. */
+  function scripted(outcomes: (() => Promise<unknown>)[]) {
+    const at: number[] = [];
     const runner: SystemTxRunner = {
       withTenantTx: () => {
-        calls += 1;
-        const next = outcomes.shift();
-        return (next?.() ?? Promise.resolve({ locked: false, claimed: 0, published: 0, failed: 0, full: false })) as never;
+        at.push(Date.now());
+        return (outcomes.shift()?.() ?? Promise.resolve(idle)) as never;
       },
     };
+    return { runner, at };
+  }
+
+  it('a run of failing ticks logs one WARN, its wait doubles from the poll interval to 5 s; recovery logs once and resets it', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'], now: 0 });
+    const queueDown = { locked: true, claimed: 3, published: 0, failed: 1, full: false, failure: 'OutboxEnqueueTimeoutError' };
+    const { runner, at } = scripted([
+      () => Promise.reject(new Error('db down: secret detail')),
+      () => Promise.resolve(queueDown),
+      () => Promise.resolve(queueDown),
+      () => Promise.resolve(queueDown),
+      () => Promise.resolve(queueDown),
+      () => Promise.resolve({ locked: true, claimed: 1, published: 1, failed: 0, full: false }),
+      () => Promise.resolve(idle),
+    ]);
     const captured = capture();
     const relay = createOutboxRelay({
       runner,
       producer: fakeProducer(),
       log: captured.log,
+      batchSize: 10,
+      pollIntervalMs: 500,
+      budgetMs: 2_500,
+      enqueueTimeoutMs: 1_250,
+    });
+    relay.start();
+    relay.start();
+    for (let step = 0; step < 50; step += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await settle();
+    }
+    await relay.stop();
+    const waits = at.slice(1).map((time, index) => time - (at[index] ?? 0));
+    // After each failing tick: 1 s, 2 s, 4 s, then the 5 s cap; after the recovery the poll interval again.
+    expect(waits.slice(0, 6)).toEqual([1_000, 2_000, 4_000, RELAY_MAX_BACKOFF_MS, RELAY_MAX_BACKOFF_MS, 500]);
+    const events = captured.lines().map((line) => line['event']);
+    expect(events.filter((event) => event === 'worker.outbox_relay_failed')).toHaveLength(1);
+    expect(events.filter((event) => event === 'worker.outbox_relay_recovered')).toHaveLength(1);
+    expect(captured.lines().find((line) => line['event'] === 'worker.outbox_relay_failed')).toMatchObject({ error: 'Error' });
+    expect(JSON.stringify(captured.lines())).not.toContain('secret detail');
+  });
+
+  it('polls after the interval, runs at once after a full batch, and stops', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'], now: 0 });
+    const { runner, at } = scripted([() => Promise.resolve({ locked: true, claimed: 1, published: 1, failed: 0, full: true })]);
+    const relay = createOutboxRelay({
+      runner,
+      producer: fakeProducer(),
+      log: capture().log,
       batchSize: 1,
       pollIntervalMs: 500,
       budgetMs: 1_000,
+      enqueueTimeoutMs: 250,
     });
-    outcomes.push(
-      () => Promise.reject(new Error('db down')),
-      () => Promise.reject(new Error('db down')),
-      () => Promise.resolve({ locked: true, claimed: 1, published: 1, failed: 0, full: true }),
-    );
-    const settle = async (): Promise<void> => {
-      for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
-    };
     relay.start();
-    relay.start();
-    await jest.advanceTimersByTimeAsync(0);
-    await settle();
-    expect(calls).toBe(1);
-    await jest.advanceTimersByTimeAsync(500);
-    await settle();
-    expect(calls).toBe(2);
-    await jest.advanceTimersByTimeAsync(500);
-    await settle();
-    expect(calls).toBe(3);
-    // A full batch: the next tick runs without waiting for the 500 ms interval.
     await jest.advanceTimersByTimeAsync(10);
     await settle();
-    expect(calls).toBe(4);
+    await jest.advanceTimersByTimeAsync(10);
+    await settle();
+    expect(at).toHaveLength(2);
+    await jest.advanceTimersByTimeAsync(500);
+    await settle();
+    expect(at).toHaveLength(3);
     await relay.stop();
     await jest.advanceTimersByTimeAsync(5_000);
-    expect(calls).toBe(4);
-    const events = captured.lines().map((line) => line['event']);
-    expect(events.filter((event) => event === 'worker.outbox_relay_failed')).toHaveLength(1);
-    expect(events).toContain('worker.outbox_relay_recovered');
-    expect(JSON.stringify(captured.lines())).not.toContain('db down');
+    expect(at).toHaveLength(3);
+  });
+
+  it('a partly failed tick that still published resets the wait (it made progress)', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick', 'queueMicrotask'], now: 0 });
+    const { runner, at } = scripted([
+      () => Promise.resolve({ locked: true, claimed: 2, published: 1, failed: 1, full: false, failure: 'Error' }),
+      () => Promise.resolve(idle),
+    ]);
+    const captured = capture();
+    const relay = createOutboxRelay({
+      runner,
+      producer: fakeProducer(),
+      log: captured.log,
+      batchSize: 10,
+      pollIntervalMs: 500,
+      budgetMs: 1_000,
+      enqueueTimeoutMs: 250,
+    });
+    relay.start();
+    for (let step = 0; step < 4; step += 1) {
+      await jest.advanceTimersByTimeAsync(500);
+      await settle();
+    }
+    await relay.stop();
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBe(500);
+    expect(captured.lines().map((line) => line['event'])).not.toContain('worker.outbox_relay_failed');
+  });
+});
+
+describe('[ADR-0004 am. 2 item 10] relay bounds (D-ARCH-183 F5; code review m6)', () => {
+  it('W = min(transaction timeout, idle-in-transaction timeout): budget W / 2, one enqueue min(2,000 ms, W / 4)', () => {
+    // The defaults: transaction timeout 5,000 ms (DB_TX_STATEMENT_TIMEOUT_MS), idle 15,000 ms.
+    expect(relayBounds(5_000, 15_000)).toEqual({ budgetMs: 2_500, enqueueTimeoutMs: 1_250 });
+    // The idle timeout is the smaller value.
+    expect(relayBounds(10_000, 4_000)).toEqual({ budgetMs: 2_000, enqueueTimeoutMs: 1_000 });
+    // A long window: the enqueue bound stops at 2 s.
+    expect(relayBounds(60_000, 60_000)).toEqual({ budgetMs: 30_000, enqueueTimeoutMs: 2_000 });
+    expect(relayBounds(1, 1)).toEqual({ budgetMs: 1, enqueueTimeoutMs: 1 });
   });
 });
 
 describe('createProductionOutboxRelay (composition)', () => {
-  it('takes the batch size and poll interval from the configuration and a budget of half the transaction timeout', async () => {
-    const statements: string[] = [];
+  const runnerWith = (timeout: number, statements: string[] = []) => {
     let started = 0;
-    const runner = {
-      transactionOptions: { timeout: 5_000 },
+    return {
+      transactionOptions: { timeout },
       withTenantTx: <R>(_ctx: TenantContext, fn: (db: RawDb) => Promise<R>): Promise<R> =>
         fn({
           $queryRaw: <T>(strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -359,13 +492,34 @@ describe('createProductionOutboxRelay (composition)', () => {
           $executeRaw: () => Promise.resolve(0),
         }),
     };
-    const config = { OUTBOX_RELAY_BATCH_SIZE: 7, OUTBOX_RELAY_POLL_INTERVAL_MS: 500 } as unknown as Config;
-    const relay = createProductionOutboxRelay({ config, log: capture().log, runner, queueFor: () => ({}) as never });
+  };
+  const configWith = (idle: number): Config =>
+    ({ OUTBOX_RELAY_BATCH_SIZE: 7, OUTBOX_RELAY_POLL_INTERVAL_MS: 500, DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS: idle }) as unknown as Config;
+
+  it('takes the batch size and poll interval from the configuration and the bounds of the defaults (2,500 / 1,250 ms)', async () => {
+    const statements: string[] = [];
+    const relay = createProductionOutboxRelay({
+      config: configWith(15_000),
+      log: capture().log,
+      runner: runnerWith(5_000, statements),
+      queueFor: () => ({}) as never,
+    });
+    expect([relay.budgetMs, relay.enqueueTimeoutMs]).toEqual([2_500, 1_250]);
     expect(await relay.runOnce()).toEqual({ locked: true, claimed: 0, published: 0, failed: 0, full: false });
     expect(statements[1]).toContain('[7]');
     expect(relay.metrics()).toContain('platform_outbox_relay_published_total 0');
     // The producer the composition builds needs the row's correlation id: it never falls back to a request context.
     const producer = createJobProducer({ queueFor: () => ({ add: () => Promise.resolve({}) }), contextCorrelationId: () => undefined });
     await expect(producer.enqueue('outbox-relay', { kind: 'outbox_event', id: A })).rejects.toThrow(JobProducerError);
+  });
+
+  it('follows DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS when it is the smaller value', () => {
+    const relay = createProductionOutboxRelay({
+      config: configWith(4_000),
+      log: capture().log,
+      runner: runnerWith(10_000),
+      queueFor: () => ({}) as never,
+    });
+    expect([relay.budgetMs, relay.enqueueTimeoutMs]).toEqual([2_000, 1_000]);
   });
 });

@@ -3,7 +3,9 @@ import { ANONYMOUS_ACTOR_ID } from '@platform/shared';
 import { EVENT_CATALOGUE } from '@platform/shared/events';
 import Joi from 'joi';
 
-import { createOutbox, MAX_PAYLOAD_BYTES, outbox, OutboxWriteError, type OutboxDb } from './index.js';
+import * as barrel from './index.js';
+import { createTestOutbox } from './tests/test-outbox.js';
+import { createOutbox, MAX_PAYLOAD_BYTES, outbox, OutboxWriteError, type OutboxDb } from './writer.js';
 
 const ID = '0193a5b2-7c1e-7d4a-9f3b-000000000f01';
 const EVENT_ID = '0193a5b2-7c1e-7d4a-9f3b-000000000e01';
@@ -51,6 +53,22 @@ describe('[US-011] outbox writer (ADR-0004 item 2; REQ-PLAT-016)', () => {
     expect(call?.sql).toContain('platform.app_actor_id()');
     // AT-US-008-03 (D-062): the row's correlation id is the transaction's, set by withTenantTx from the request.
     expect(call?.sql).toContain("pg_catalog.current_setting('app.correlation_id', true)");
+  });
+
+  it('[D-ARCH-185] sets created_at and updated_at to one clock_timestamp() read: the insert time is the order key', async () => {
+    const { db, calls } = fakeDb();
+    await createOutbox(catalogue).publish(db, { type: 'shipment.booked', aggregateId: ID, payload: { shipment_id: ID } });
+    const sql = (calls[0]?.sql ?? '').replace(/\s+/g, ' ');
+    expect(sql).toContain('trace_context, created_at, updated_at, created_by, updated_by)');
+    expect(sql).toContain('ctx.at, ctx.at, ctx.actor, ctx.actor');
+    expect(sql.match(/clock_timestamp\(\)/g)).toEqual(['clock_timestamp()']);
+    expect(sql).toContain('pg_catalog.clock_timestamp() AS at) AS ctx');
+    expect(sql).not.toMatch(/\bnow\(\)|CURRENT_TIMESTAMP/);
+  });
+
+  it('[m5] the public barrel exports only the platform outbox; the catalogue factory is the test-only export', () => {
+    expect(Object.keys(barrel).sort()).toEqual(['MAX_PAYLOAD_BYTES', 'OutboxWriteError', 'outbox']);
+    expect(createTestOutbox).toBe(createOutbox);
   });
 
   it('drops an invalid traceparent and stores none when the caller has none', async () => {

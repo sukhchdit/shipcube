@@ -8,6 +8,7 @@ import { createServer, type Server } from 'node:net';
 
 import { createJobProducer, createRuntimeLog } from '@platform/api/runtime';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { QUEUE_NAMES } from '@platform/shared/queues';
 import { Queue } from 'bullmq';
 
 import { queueConnectionOptions } from '../queues/connection.js';
@@ -86,7 +87,8 @@ describe('[PR64-SEC-13] [R2-n5] the relay producer enqueues through the worker q
     });
     cleanups.push(async () => {
       await bounded(queues.close(), 3_000);
-      await bounded(queues.queueFor('outbox-relay').disconnect(), 1_000);
+      // n2: end every queue's reconnect loop (a refused handshake never lets a graceful close finish).
+      await Promise.all(QUEUE_NAMES.map((name) => bounded(queues.queueFor(name).disconnect(), 1_000)));
     });
     const producer = createJobProducer({ queueFor: (name) => queues.queueFor(name), contextCorrelationId: () => undefined });
     // The relay over a fake SYSTEM transaction serving one pending row: the refused queue leaves it pending.
@@ -118,7 +120,7 @@ describe('[PR64-SEC-13] [R2-n5] the relay producer enqueues through the worker q
       budgetMs: 2_500,
       enqueueTimeoutMs: 1_500,
     });
-    expect(await relay.runOnce()).toEqual({ locked: true, claimed: 1, published: 0, failed: 1, full: false });
+    expect(await relay.runOnce()).toMatchObject({ locked: true, claimed: 1, published: 0, failed: 1, full: false });
     expect(executed).toHaveLength(1);
     expect(executed[0]).toContain('last_error');
     const deadline = Date.now() + 10_000;

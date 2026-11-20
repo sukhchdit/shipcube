@@ -4,10 +4,12 @@
  * D-ARCH-171; TASK-043). Lane B (Testcontainers).
  *
  * The writer runs on the worker's production database runtime (`databaseRuntimeFromConfig`, the one runner of the
- * process) inside a tenant transaction whose context carries the correlation id the API pipeline sets from
- * `X-Correlation-Id` (apps/api/src/platform/outbox/writer.int.test.ts proves that first hop through createApp). The
- * relay runs on the same runner with the api job producer over the worker queue runtime's queues (openQueue, the
- * fail-fast profile). The purge runs through its schedule handler.
+ * process) inside a tenant transaction whose context carries a correlation id, as the API pipeline sets it from
+ * `X-Correlation-Id`. AT-US-008-03 is pinned by two tests with the same literal `Client-Corr-0103`: the api-side
+ * apps/api/src/platform/outbox/writer.int.test.ts sends it as the header of a `transaction: 'tenant'` route and asserts
+ * the row; the AT-US-011-03 case below asserts that the row's value is the job payload's. The relay runs on the same
+ * runner with the api job producer over the worker queue runtime's queues (openQueue, the fail-fast profile). The purge
+ * runs through its schedule handler.
  */
 import { randomUUID } from 'node:crypto';
 
@@ -15,11 +17,12 @@ import {
   type ActiveDatabaseRuntime,
   type AppTransactionClient,
   createJobProducer,
-  createOutbox,
   createRuntimeLog,
   databaseRuntimeFromConfig,
   type TenantContext,
+  type TenantDb,
 } from '@platform/api/runtime';
+import { createTestOutbox } from '@platform/api/testing/outbox';
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { Config } from '@platform/config';
 import { ANONYMOUS_ACTOR_ID } from '@platform/shared';
@@ -30,7 +33,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 
 import { queueConnectionOptions } from '../queues/connection.js';
 import { createWorkerQueues, type WorkerQueues } from '../queues/runtime.js';
-import { createOutboxPurge, PURGE_BATCH_SIZE } from './purge.js';
+import { createOutboxPurge, PURGE_BATCH_SIZE, rawJobExecutionLedger } from './purge.js';
 import { createOutboxRelay, type OutboxRelay } from './relay.js';
 import { systemContext, type SystemTxRunner } from './system-tx.js';
 import { type MigratedPostgres, startMigratedPostgres } from './tests/migrated-postgres.js';
@@ -45,7 +48,7 @@ const ORG = '0193a5b2-7c1e-7d4a-9f3b-0000000c0002';
 const catalogue = {
   'shipment.booked': { aggregateType: 'shipment', payload: identifierPayload('shipment_id') },
 } as const;
-const outbox = createOutbox(catalogue);
+const outbox = createTestOutbox(catalogue);
 
 let postgres: MigratedPostgres;
 let runtime: ActiveDatabaseRuntime<AppTransactionClient>;
@@ -86,8 +89,9 @@ async function superuser<T>(fn: (client: pg.Client) => Promise<T>): Promise<T> {
 async function eventRows(ids: readonly string[]): Promise<Record<string, unknown>[]> {
   return superuser(async (client) => {
     const result = await client.query(
-      `SELECT id::text, org_id::text, actor_id::text, correlation_id, trace_context, published_at IS NOT NULL AS published,
-              attempts, last_error, created_by::text, version
+      `SELECT id::text, type, aggregate_type, aggregate_id::text, payload, org_id::text, actor_id::text, correlation_id,
+              trace_context, published_at IS NOT NULL AS published, attempts, last_error, created_by::text, version,
+              created_at IS NOT NULL AS created_set, created_at = updated_at AS created_is_updated
          FROM public.outbox_events WHERE id = ANY($1::uuid[]) ORDER BY created_at, id`,
       [ids],
     );
@@ -137,6 +141,19 @@ function relayOver(queues: WorkerQueues, runner: SystemTxRunner = runtime.tenant
     batchSize: 100,
     pollIntervalMs: 500,
     budgetMs: 5_000,
+    enqueueTimeoutMs: 2_000,
+  });
+}
+
+/** A business row in the same transaction: a `job_executions` claim (a table platform_app may write; m2). */
+async function businessChange(db: TenantDb<AppTransactionClient>, key: string): Promise<void> {
+  expect(await rawJobExecutionLedger().claim(db, { jobKey: key, queue: 'booking' })).toBe(true);
+}
+
+async function businessRows(key: string): Promise<number> {
+  return superuser(async (client) => {
+    const result = await client.query<{ n: number }>('SELECT count(*)::int AS n FROM public.job_executions WHERE job_key = $1', [key]);
+    return result.rows[0]?.n ?? 0;
   });
 }
 
@@ -164,10 +181,19 @@ afterAll(async () => {
 describe('[US-011] outbox writer on PostgreSQL 18', () => {
   it('[AT-US-011-01] the event is committed with the business change, with the transaction org, actor and correlation id', async () => {
     const aggregate = randomUUID();
-    const [id] = await publishAll([aggregate], 'Client-Corr-0101');
-    expect(await eventRows([id ?? ''])).toEqual([
+    const key = `business.${randomUUID()}`;
+    const { id } = await runtime.tenantTx.withTenantTx(request('Client-Corr-0101'), async (db) => {
+      await businessChange(db, key);
+      return outbox.publish(db, { type: 'shipment.booked', aggregateId: aggregate, payload: { shipment_id: aggregate } });
+    });
+    expect(await businessRows(key)).toBe(1);
+    expect(await eventRows([id])).toEqual([
       {
         id,
+        type: 'shipment.booked',
+        aggregate_type: 'shipment',
+        aggregate_id: aggregate,
+        payload: { shipment_id: aggregate },
         org_id: ORG,
         actor_id: USER,
         correlation_id: 'Client-Corr-0101',
@@ -177,21 +203,40 @@ describe('[US-011] outbox writer on PostgreSQL 18', () => {
         last_error: null,
         created_by: USER,
         version: 1,
+        created_set: true,
+        created_is_updated: true,
       },
     ]);
     await drainOutbox();
   });
 
-  it('[AT-US-011-02] a rolled-back change leaves no event', async () => {
+  it('[AT-US-011-02] a rolled-back change leaves no event and no business row', async () => {
     let id = '';
+    const key = `business.${randomUUID()}`;
     await expect(
       runtime.tenantTx.withTenantTx(request('outbox-it-0102'), async (db) => {
+        await businessChange(db, key);
         ({ id } = await outbox.publish(db, { type: 'shipment.booked', aggregateId: randomUUID(), payload: { shipment_id: randomUUID() } }));
         throw new Error('business rule refused');
       }),
     ).rejects.toThrow('business rule refused');
     expect(id).not.toBe('');
     expect(await eventRows([id])).toEqual([]);
+    expect(await businessRows(key)).toBe(0);
+  });
+
+  it('[D-ARCH-187] [F12] the correlation check refuses a value outside ADR-0016 §15 with 23514 (a BullMQ occurrence id, 7 characters)', async () => {
+    for (const correlation of ['repeat:outbox-purge:1763550000000', 'abc-123']) {
+      await expect(
+        superuser((client) =>
+          client.query(
+            `INSERT INTO public.outbox_events (type, aggregate_type, aggregate_id, actor_id, payload, correlation_id, created_by, updated_by)
+             VALUES ('shipment.booked', 'shipment', gen_random_uuid(), $1, '{}'::jsonb, $2, $1, $1)`,
+            [ANONYMOUS_ACTOR_ID, correlation],
+          ),
+        ),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'ck_outbox_events__correlation_id' });
+    }
   });
 
   it('platform_app may not UPDATE processed_events (insert-only); it may DELETE it (purge)', async () => {
@@ -292,6 +337,134 @@ describe('[US-011] outbox relay on PostgreSQL 18 and Valkey 8', () => {
     expect(text).toContain('# TYPE platform_outbox_relay_latency_seconds histogram');
     expect(text).toContain('platform_outbox_relay_latency_seconds_count 1\n');
     expect(text).toContain('platform_outbox_relay_published_total 1\n');
+  });
+
+  it('[n5] two relays tick at once: the advisory lock lets one claim, and each event is enqueued exactly once', async () => {
+    const ids = await publishAll([randomUUID(), randomUUID(), randomUUID()]);
+    const queues = workerQueues();
+    const ticks = await Promise.all([relayOver(queues).runOnce(), relayOver(queues).runOnce()]);
+    expect(ticks.reduce((sum, tick) => sum + tick.published, 0)).toBe(3);
+    const jobs = await queues.queueFor('outbox-relay').getJobs(['waiting'], 0, -1, true);
+    expect(jobs.map((job) => job.id).sort()).toEqual(ids.map((id) => `outbox_event.${id}`).sort());
+  });
+
+  it('[AT-US-011-03] [ADR-0004 am. 2 item 18] while one tick is held inside an enqueue, a second relay gets no lock and claims nothing; then every event is enqueued once, in order', async () => {
+    const ids = await publishAll([randomUUID(), randomUUID(), randomUUID()]);
+    const queues = workerQueues();
+    const real = createJobProducer({ queueFor: (name) => queues.queueFor(name), contextCorrelationId: () => undefined });
+    let entered = (): void => undefined;
+    const inside = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = createOutboxRelay({
+      runner: runtime.tenantTx,
+      producer: {
+        enqueue: async (queue, ref, enqueueOptions) => {
+          entered();
+          await gate;
+          return real.enqueue(queue, ref, enqueueOptions);
+        },
+      },
+      log,
+      batchSize: 100,
+      pollIntervalMs: 500,
+      budgetMs: 8_000,
+      enqueueTimeoutMs: 8_000,
+    });
+    const first = held.runOnce();
+    await inside;
+    expect(await relayOver(queues).runOnce()).toEqual({ locked: false, claimed: 0, published: 0, failed: 0, full: false });
+    release();
+    expect(await first).toMatchObject({ locked: true, claimed: 3, published: 3, failed: 0 });
+    const jobs = await queues.queueFor('outbox-relay').getJobs(['waiting'], 0, -1, true);
+    expect(jobs.map((job) => job.id)).toEqual(ids.map((id) => `outbox_event.${id}`));
+    expect((await eventRows(ids)).map((row) => row['attempts'])).toEqual([1, 1, 1]);
+  });
+});
+
+/** Waits (no sleep: one catalogue query per turn, bounded) until a backend of this database waits on a lock. */
+async function untilLockWaiter(): Promise<void> {
+  await superuser(async (client) => {
+    for (let turn = 0; turn < 10_000; turn += 1) {
+      const { rows } = await client.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_catalog.pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+      );
+      if ((rows[0]?.n ?? 0) > 0) return;
+    }
+    throw new Error('no backend waited on the lock');
+  });
+}
+
+/**
+ * The interleaving of D-ARCH-185 F3: T1 begins; T2 begins, locks the aggregate row (`SELECT … FOR UPDATE` on a
+ * published outbox row both may lock), inserts E2 and holds; T1 asks for the same lock and waits (seen in
+ * pg_stat_activity); T2 commits; T1 gets the lock, inserts E1 and commits. Returns [E1, E2].
+ */
+async function interleave(insert: (db: TenantDb<AppTransactionClient>, label: string) => Promise<string>): Promise<[string, string]> {
+  const [lockRow] = await publishAll([randomUUID()], 'order-it-lockrow');
+  await drainOutbox();
+  const gate = (): { promise: Promise<void>; open: () => void } => {
+    let open = (): void => undefined;
+    const promise = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    return { promise, open };
+  };
+  const t1Began = gate();
+  const t2Locked = gate();
+  const t2Release = gate();
+  const t1 = runtime.tenantTx.withTenantTx(request('order-it-txn-0001'), async (db) => {
+    await db.$queryRaw`SELECT 1`;
+    t1Began.open();
+    await t2Locked.promise;
+    await db.$queryRaw`SELECT id FROM public.outbox_events WHERE id = ${lockRow ?? ''}::uuid FOR UPDATE`;
+    return insert(db, 'E1');
+  });
+  await t1Began.promise;
+  const t2 = runtime.tenantTx.withTenantTx(request('order-it-txn-0002'), async (db) => {
+    await db.$queryRaw`SELECT id FROM public.outbox_events WHERE id = ${lockRow ?? ''}::uuid FOR UPDATE`;
+    const id = await insert(db, 'E2');
+    t2Locked.open();
+    await t2Release.promise;
+    return id;
+  });
+  await t2Locked.promise;
+  await untilLockWaiter();
+  t2Release.open();
+  const [e1, e2] = await Promise.all([t1, t2]);
+  return [e1, e2];
+}
+
+describe('[US-011] per-aggregate order under the aggregate row lock (ADR-0004 amendment 2 items 13 and 14; D-ARCH-185)', () => {
+  it('[AT-US-011-03] two transactions serialised by the row lock: the writer orders by insert time (E2, E1); the column default would invert it (E1, E2)', async () => {
+    const aggregate = randomUUID();
+    // Writer arm: outbox.publish sets created_at = clock_timestamp().
+    const [writerE1, writerE2] = await interleave(async (db) => {
+      const { id } = await outbox.publish(db, { type: 'shipment.booked', aggregateId: aggregate, payload: { shipment_id: aggregate } });
+      return id;
+    });
+    const writerQueues = workerQueues();
+    expect(await relayOver(writerQueues).runOnce()).toMatchObject({ published: 2, failed: 0 });
+    const writerJobs = await writerQueues.queueFor('outbox-relay').getJobs(['waiting'], 0, -1, true);
+    expect(writerJobs.map((job) => job.id)).toEqual([`outbox_event.${writerE2}`, `outbox_event.${writerE1}`]);
+
+    // Control arm: a raw insert that leaves created_at to the column default (the transaction start).
+    const [controlE1, controlE2] = await interleave(async (db, label) => {
+      const rows = await db.$queryRaw<{ id: string }[]>`
+        INSERT INTO public.outbox_events (type, aggregate_type, aggregate_id, actor_id, payload, correlation_id, created_by, updated_by)
+        VALUES ('shipment.booked', 'shipment', ${aggregate}::uuid, ${USER}::uuid, '{}'::jsonb, ${`order-it-ctrl-${label}`}, ${USER}::uuid,
+                ${USER}::uuid)
+        RETURNING id::text AS id`;
+      return rows[0]?.id ?? '';
+    });
+    const controlQueues = workerQueues();
+    expect(await relayOver(controlQueues).runOnce()).toMatchObject({ published: 2, failed: 0 });
+    const controlJobs = await controlQueues.queueFor('outbox-relay').getJobs(['waiting'], 0, -1, true);
+    expect(controlJobs.map((job) => job.id)).toEqual([`outbox_event.${controlE1}`, `outbox_event.${controlE2}`]);
   });
 });
 

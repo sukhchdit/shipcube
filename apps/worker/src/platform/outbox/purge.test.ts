@@ -3,7 +3,7 @@
 // relay.int.test.ts (lane B).
 import { createRuntimeLog, type TenantContext } from '@platform/api/runtime';
 import { describe, expect, it } from '@jest/globals';
-import { ANONYMOUS_ACTOR_ID } from '@platform/shared';
+import { ANONYMOUS_ACTOR_ID, CORRELATION_ID_PATTERN } from '@platform/shared';
 
 import type { JobExecutionLedger } from '../jobs/idempotent-processor.js';
 import type { ProcessorJob } from '../queues/job-handler.js';
@@ -89,6 +89,8 @@ describe('[ADR-0004 item 6] outbox-purge (D-ARCH-167, D-ARCH-171)', () => {
     expect(new Set(db.contexts.map((ctx) => `${ctx.actorScope}/${ctx.orgId}/${ctx.correlationId}`))).toEqual(
       new Set(['TENANT//outbox-purge-1763600000000']),
     );
+    // D-ARCH-187 (F12): the purge context's correlation id is inside ADR-0016 §15.
+    for (const ctx of db.contexts) expect(ctx.correlationId).toMatch(CORRELATION_ID_PATTERN);
   });
 
   it('D-SECPR039-01 (ii): the age predicate is part of each DELETE (published, processed, completed > 30 days)', async () => {

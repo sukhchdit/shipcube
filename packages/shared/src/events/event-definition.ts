@@ -31,7 +31,18 @@ export type ModuleEvents = Readonly<Record<string, EventDefinition>>;
 export type EventCatalogue = Readonly<Record<string, EventDefinition>>;
 
 /**
- * Merges module event files; a type declared twice, a type or aggregate type outside its grammar fails at load time.
+ * True for a Joi object schema that refuses unknown keys. A schema declared `.unknown(true)` would override the
+ * `allowUnknown: false` preference of `validateEventPayload` and let unreviewed keys into the outbox (code review m5).
+ */
+export function isClosedObjectSchema(schema: unknown): boolean {
+  if (!Joi.isSchema(schema)) return false;
+  const description = schema.describe() as { readonly type?: string; readonly flags?: { readonly unknown?: boolean } };
+  return description.type === 'object' && description.flags?.unknown !== true;
+}
+
+/**
+ * Merges module event files; a type declared twice, a type or aggregate type outside its grammar, and a payload
+ * schema that is not a closed object fail at load time.
  */
 export function mergeEvents(modules: Readonly<Record<string, ModuleEvents>>): EventCatalogue {
   const merged: Record<string, EventDefinition> = {};
@@ -41,6 +52,8 @@ export function mergeEvents(modules: Readonly<Record<string, ModuleEvents>>): Ev
       if (!EVENT_TYPE_PATTERN.test(type)) throw new Error(`Event type ${type} of ${module} is not <area>.<fact>`);
       if (!AGGREGATE_TYPE_PATTERN.test(definition.aggregateType))
         throw new Error(`Aggregate type of ${type} (${module}) is not a lower-case identifier`);
+      if (!isClosedObjectSchema(definition.payload))
+        throw new Error(`Payload schema of ${type} (${module}) must be a closed Joi object (no .unknown(true))`);
       const previous = owner.get(type);
       if (previous !== undefined) throw new Error(`Event type ${type} is declared by both ${previous} and ${module}`);
       owner.set(type, module);

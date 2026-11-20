@@ -5,7 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from '@jest/globals';
 import Joi from 'joi';
 
-import { EVENT_CATALOGUE, EVENT_MODULES, EVENT_TYPE_PATTERN, identifierPayload, mergeEvents, validateEventPayload } from './index.js';
+import {
+  EVENT_CATALOGUE,
+  EVENT_MODULES,
+  EVENT_TYPE_PATTERN,
+  identifierPayload,
+  isClosedObjectSchema,
+  mergeEvents,
+  validateEventPayload,
+} from './index.js';
 
 const ID = '0193a5b2-7c1e-7d4a-9f3b-000000000f01';
 const booked = { aggregateType: 'shipment', payload: Joi.object({ shipment_id: Joi.string().guid().required() }) };
@@ -28,6 +36,15 @@ describe('domain event catalogue (ADR-0004 item 5; TASK-043)', () => {
     );
     expect(() => mergeEvents({ a: { 'Shipment.Booked': booked } })).toThrow('is not <area>.<fact>');
     expect(() => mergeEvents({ a: { 'shipment.booked': { ...booked, aggregateType: 'Ship ment' } } })).toThrow('lower-case identifier');
+  });
+
+  it('[m5] refuses a payload schema that is open (.unknown(true)) or not a Joi object', () => {
+    const open = { aggregateType: 'shipment', payload: Joi.object({ shipment_id: Joi.string() }).unknown(true) };
+    expect(() => mergeEvents({ a: { 'shipment.booked': open } })).toThrow('must be a closed Joi object');
+    const notObject = { aggregateType: 'shipment', payload: Joi.string() as unknown as Joi.ObjectSchema };
+    expect(() => mergeEvents({ a: { 'shipment.booked': notObject } })).toThrow('must be a closed Joi object');
+    expect(isClosedObjectSchema({})).toBe(false);
+    expect(isClosedObjectSchema(Joi.object({}).unknown(false))).toBe(true);
   });
 
   it('validates a payload closed and without conversion; issues name paths and rules, never values', () => {

@@ -120,6 +120,8 @@ function harness(): Harness {
   let relayInput: OutboxRelayInput | undefined;
   const purge = (): Promise<void> => Promise.resolve();
   const relay: OutboxRelay = {
+    budgetMs: 2_500,
+    enqueueTimeoutMs: 1_250,
     runOnce: () => Promise.reject(new Error('not in this test')),
     start: () => calls.push('relay.start'),
     stop: () => {
@@ -429,6 +431,50 @@ describe('[D-ORCH-073] WORKER_PROCESS: main.ts runs with the real process', () =
       undefined,
     ]);
     expect([queueProfile['connectionName'], queueProfile['enableOfflineQueue']]).toEqual(['worker-queues', false]);
+  });
+
+  it('[m6] createProductionOutboxPurge: the outbox-purge handler over the runtime runner, one claimed batch per table, SYSTEM scope', async () => {
+    const statements: string[] = [];
+    const contexts: string[] = [];
+    const runner: WorkerTxRunner = {
+      transactionOptions: { timeout: 5_000 },
+      withTenantTx: (ctx, fn) => {
+        contexts.push(`${ctx.actorScope}/${ctx.orgId}/${ctx.correlationId}`);
+        return fn({
+          $queryRaw: () => Promise.reject(new Error('unused')),
+          // The ledger claim inserts its row (1); every DELETE finds nothing past the horizon (0).
+          $executeRaw: (strings: TemplateStringsArray) => {
+            const sql = strings.join('$');
+            statements.push(/^\s*(\w+ \w+ public\.\w+)/.exec(sql)?.[1] ?? sql);
+            return Promise.resolve(sql.includes('INSERT INTO public.job_executions') ? 1 : 0);
+          },
+        });
+      },
+    };
+    const log = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    } as unknown as WorkerQueuesInput['log'];
+    const handler = WORKER_PROCESS.createOutboxPurge({ log, runner });
+    await handler({
+      queue: 'housekeeping',
+      id: 'repeat:outbox-purge:1763600000000',
+      name: 'outbox-purge',
+      attemptsMade: 0,
+      correlationId: 'outbox-purge-1763600000000',
+      signal: new AbortController().signal,
+    });
+    expect(statements).toEqual([
+      'INSERT INTO public.job_executions',
+      'DELETE FROM public.outbox_events',
+      'INSERT INTO public.job_executions',
+      'DELETE FROM public.processed_events',
+      'INSERT INTO public.job_executions',
+      'DELETE FROM public.job_executions',
+    ]);
+    expect(new Set(contexts)).toEqual(new Set(['TENANT//outbox-purge-1763600000000']));
   });
 
   it('exitProcess is process.exit', () => {

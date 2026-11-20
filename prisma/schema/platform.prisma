@@ -53,6 +53,8 @@ model JobExecution {
 /// `ix_outbox_events__unpublished` (relay batch, `WHERE published_at IS NULL`) and `ix_outbox_events__published_at`
 /// (purge, `WHERE published_at IS NOT NULL`), the CHECKs `ck_outbox_events__version`, `__type`, `__aggregate_type`,
 /// `__correlation_id`, `__attempts`, `__last_error`, the autovacuum settings and the standard-columns guard trigger.
+/// `createdAt` is the insert time: the writer sets created_at = updated_at = clock_timestamp(), the relay's order key
+/// (ADR-0004 amendment 2 item 13, D-ARCH-185); the default (transaction start) is not used for this table.
 model OutboxEvent {
   id            String    @id(map: "pk_outbox_events") @default(dbgenerated("uuidv7()")) @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

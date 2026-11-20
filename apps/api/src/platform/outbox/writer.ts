@@ -59,7 +59,23 @@ export interface PublishedEvent {
 }
 
 export interface Outbox<TType extends string> {
-  /** Writes the event row in the transaction behind `db`; it commits or rolls back with it. */
+  /**
+   * Writes the event row in the transaction behind `db`; it commits or rolls back with it.
+   *
+   * Order (ADR-0004 amendment 2 items 13 and 14; D-ARCH-185; R-ARCH-37): `created_at` is the insert time on the
+   * database clock (`clock_timestamp()`, read once, so `created_at = updated_at`), never the transaction start, and the
+   * relay enqueues in `(created_at, id)` order. Events of one aggregate are therefore enqueued in the order of the
+   * business changes ONLY when the publishing transaction holds the row lock of the aggregate when it publishes: call
+   * `publish` after the `UPDATE` of the aggregate row (a state transition) or the `INSERT` of a new aggregate, or after
+   * `SELECT … FOR UPDATE` on that row when the transaction only adds child rows. A publish before the write, or without
+   * the lock, has no order against a concurrent writer of the same aggregate. The writer cannot check this; the caller
+   * owns it. The guarantee ends at the enqueue: consumers read the current state and never derive it from event order.
+   *
+   * Correlation grammar (ADR-0004 amendment 2 item 16; D-ARCH-187): the row keeps the transaction's correlation id
+   * unchanged and `ck_outbox_events__correlation_id` requires ADR-0016 §15 (`^[A-Za-z0-9-]{8,64}$`). A transaction
+   * whose correlation id is outside that grammar cannot publish: the INSERT fails with SQLSTATE 23514 and the
+   * transaction rolls back. Request contexts, scheduled jobs (`<schedule>-<millis>`) and the relay are inside it.
+   */
   publish(db: OutboxDb, event: OutboxEventInput<TType>): Promise<PublishedEvent>;
 }
 
@@ -85,19 +101,25 @@ function validate(catalogue: EventCatalogue, event: OutboxEventInput<string>): V
   return { type: event.type, aggregateType: definition.aggregateType, aggregateId: event.aggregateId, payloadJson, traceparent };
 }
 
-/** The outbox over a catalogue (a test seam; production code uses `outbox`, the full catalogue). */
+/**
+ * The outbox over a catalogue. Not on the public barrels (code review m5): production code uses `outbox`, the closed
+ * platform catalogue, so no module can publish an unreviewed type; tests reach this through the test-only export
+ * `@platform/api/testing/outbox` (`createTestOutbox`).
+ */
 export function createOutbox<TCatalogue extends EventCatalogue>(catalogue: TCatalogue): Outbox<Extract<keyof TCatalogue, string>> {
   return {
     async publish(db, event) {
       const row = validate(catalogue, event);
+      // created_at = updated_at = one clock_timestamp() read: the insert time, the relay's order key (D-ARCH-185).
       const inserted = await db.$queryRaw<{ id: string }[]>`
         INSERT INTO public.outbox_events
                (type, aggregate_type, aggregate_id, org_id, actor_id, payload, correlation_id, trace_context,
-                created_by, updated_by)
+                created_at, updated_at, created_by, updated_by)
         SELECT ${row.type}::text, ${row.aggregateType}::text, ${row.aggregateId}::uuid, platform.app_org_id(), ctx.actor,
                ${row.payloadJson}::jsonb, pg_catalog.current_setting('app.correlation_id', true), ${row.traceparent}::text,
-               ctx.actor, ctx.actor
-          FROM (SELECT COALESCE(platform.app_actor_id(), ${ANONYMOUS_ACTOR_ID}::uuid) AS actor) AS ctx
+               ctx.at, ctx.at, ctx.actor, ctx.actor
+          FROM (SELECT COALESCE(platform.app_actor_id(), ${ANONYMOUS_ACTOR_ID}::uuid) AS actor,
+                       pg_catalog.clock_timestamp() AS at) AS ctx
         RETURNING id::text AS id`;
       const id = inserted[0]?.id;
       if (inserted.length !== 1 || id === undefined) throw new OutboxWriteError('the outbox insert returned no row');

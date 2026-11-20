@@ -26,7 +26,7 @@ import { createWorkerHealthServer, type MetricsSource } from './platform/health/
 import type { ScheduleHandler } from './platform/jobs/schedulers.js';
 import { jobLogContext } from './platform/logging/job-context.js';
 import { createOutboxPurge } from './platform/outbox/purge.js';
-import { createOutboxRelay, ENQUEUE_TIMEOUT_MS, type OutboxRelay } from './platform/outbox/relay.js';
+import { createOutboxRelay, type OutboxRelay, relayBounds } from './platform/outbox/relay.js';
 import type { SystemTxRunner } from './platform/outbox/system-tx.js';
 import { queueConnectionOptions } from './platform/queues/connection.js';
 import { PRODUCTION_RETENTION } from './platform/queues/retention.js';
@@ -126,19 +126,18 @@ export function createProductionOutboxPurge(input: { readonly log: RuntimeLog; r
 
 /**
  * The production relay: the api job producer over the worker queues (the row's correlation id is always explicit, so
- * no request context is consulted), the configured poll interval and batch size, and a tick budget of half the
- * transaction timeout, each enqueue bounded by the smaller of ENQUEUE_TIMEOUT_MS and that budget (D-TASK043-06).
+ * no request context is consulted), the configured poll interval and batch size, and the tick bounds of ADR-0004
+ * amendment 2 item 10 (D-ARCH-183 F5): with W = min(transaction timeout, DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS), no new
+ * row after W / 2 and one enqueue at most min(2,000 ms, W / 4); 2,500 ms and 1,250 ms at the defaults.
  */
 export function createProductionOutboxRelay({ config, log, runner, queueFor }: OutboxRelayInput): OutboxRelay {
-  const budgetMs = Math.max(1, Math.floor(runner.transactionOptions.timeout / 2));
   return createOutboxRelay({
     runner,
     producer: createJobProducer({ queueFor, contextCorrelationId: () => undefined }),
     log,
     batchSize: config.OUTBOX_RELAY_BATCH_SIZE,
     pollIntervalMs: config.OUTBOX_RELAY_POLL_INTERVAL_MS,
-    budgetMs,
-    enqueueTimeoutMs: Math.min(ENQUEUE_TIMEOUT_MS, budgetMs),
+    ...relayBounds(runner.transactionOptions.timeout, config.DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS),
   });
 }
 
