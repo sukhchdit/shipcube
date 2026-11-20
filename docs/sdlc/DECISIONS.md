@@ -7081,3 +7081,300 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **For G3, beyond D-QG-003:** the lease table test of amendment 10 (5, 8, 9, 12 and 120 s) and the claim-lost entry; the envelope and its check; the three contract pins of PR040-SEC-07; the TASK-096 tests (a stale `If-Match` with a `call` phase: 412 and the call fake not invoked; a version that changes during `call`: 412, one call, WARN `api.call_without_commit`); the call table with every `call` operation and a fault test per `inert` and `reachable` row; the outcome of QG-040-C7 in the contract and in the Mock gateway; R-ARCH-39.
 - **No evidence note:** as for D-QG-001 to D-QG-003, this entry is the record.
 - **Reversibility:** High (a verification record; it changes no artefact).
+
+### D-ORCH-142 · 2026-11-20 · sdlc-orchestrator (session A) · Developer decisions of TASK-040 part 040-A and TASK-043, recorded from their commit bodies
+- **Why here:** the branches were kept free of DECISIONS.md edits to stop repeated merge conflicts; the developers put their decisions in commit bodies, appended below verbatim. Rulings that replaced or amended them are cited inside each entry.
+
+#### TASK-040 commit 95945b7e
+
+```text
+US-038, REQ-API-009..011, SEC-TC-04, SEC-TC-53. The commits on this branch add these parts:
+- The idempotency_keys table (SYSTEM, hard-delete), its table-class manifest idempotency.json,
+  the grants and the catalog pins.
+- Slot 7a: key parsing and the request fingerprint.
+- The store port over systemDelegates(tx). Response bodies are AES-256-GCM ciphertext.
+- Tx-slot changes: the claim, the replay, the 2xx completion in the handler transaction, the
+  returned-4xx completion after the FAILED entry, and the release.
+- Tests: unit, API, contract (x-idempotency) and integration on PostgreSQL 18 (integration
+  not yet run).
+
+Developer decisions (orchestrator appends them to DECISIONS.md on main):
+D-TASK040-01 The claim, replay, completion and release run in the tx slot. Slot 7a is a plain
+  RouteSlot constant in pipeline.ts (TASK-041 lock), so it cannot get the runner or the key. It
+  parses the key, fingerprints the validated input and records a branded request in res.locals.
+  The store reaches the tx slot as ExecuteOptions.idempotency, which flows through
+  defaultPipelineSlots with no edit. The claim commits in its own transaction before load.
+D-TASK040-02 Fail closed at mount. A required/optional route without a store throws
+  IdempotencyNotWiredError. An idempotent mode on a safe method or on a transaction none route
+  throws IdempotencyRouteError. Production wiring (idempotencyStoreFrom in start-api.ts, through
+  AppDependencies into app.ts defaultSlots) needs TASK-041 files and waits for that lock. No
+  route on main is idempotent yet.
+D-TASK040-03 Only returned results are stored: a 2xx in the handler transaction, and a 4xx
+  other than 429 in its own transaction after the FAILED entry. A thrown error, AppError 4xx
+  included, releases the key: its problem body carries the first correlation id, and nothing
+  committed.
+D-TASK040-04 Anonymous scope = HMAC-SHA256 of the client network (IPv4 /32, IPv6 /64). The key
+  is HKDF-SHA256 of the current IDEMPOTENCY_BODY_KEY (info
+  platform-idempotency-scope-network-v1). Rotation changes anonymous scopes. An actor with no
+  organisation is scoped by the actor alone. scope_hash = SHA-256 of
+  JCS([version, kind, owner, actorScope, actor, method, path, key]).
+D-TASK040-05 The single scope_hash column of data-model 6.2 is used. The ADR-0014 am. 1
+  guest_token_hash / client_ip_hash columns are not added.
+D-TASK040-06 The lease (30 s) and the expiry (24 h) use the application clock. Takeover and
+  completion are conditional on the row version. A request that lost its claim rolls its 2xx
+  back (IdempotencyClaimLostError).
+D-TASK040-07 409 IDEMPOTENCY_IN_PROGRESS and 422 IDEMPOTENCY_KEY_REUSED write no audit entry.
+D-TASK040-08 errors/classify.ts keeps Retry-After for an exact allow-list of client codes
+  (IDEMPOTENCY_IN_PROGRESS). TASK-041 adds RATE_LIMITED: union-merge the set.
+D-TASK040-09 Extra CHECKs: __method, __response_status, __completed, __body_key_id. Migration
+  20261120100000 sorts after TASK-043's 20261120000000.
+D-TASK040-10 No purge job here (data-model 6.2 step 5, housekeeping follow-up). New test project
+  tests/contract (root tsconfig reference, root-scripts pin). No new dependency.
+
+
+```
+
+#### TASK-040 commit d0a82a24
+
+```text
+Code review PR-pending-TASK-040 round 1:
+- M1: a read-only (VIEW/DOWNLOAD) idempotent route completes its key only after the fail-closed
+  entry is written. If the entry fails, the key is released and the error is rethrown, so the
+  retry runs the handler again.
+- M2: a thrown 4xx other than 429 is stored and replayed, like a returned one.
+- m4: the lease is sized to the longest phase and renewed before call and before the handler
+  transaction.
+- m5: tests for a failed release and for the two-round fall-through. The MemoryRunner.refuse
+  seam is gone.
+- m6: store.int.test.ts runs store.ts on PostgreSQL 18 (copy of the migrated-postgres helper).
+- n1: the TASK-040 registry block moved above the invitations comment.
+- n3: the scope path is the normalised template path built from the validated parameters.
+- n4: an unreadable stored row is logged at ERROR as api.idempotency_replay_unreadable.
+- n6: an anonymous caller without a client IP gets no scope.
+
+D-PM-081 (REQ-AUDIT-010 amended):
+- 409 IDEMPOTENCY_IN_PROGRESS (from the claim or from a renewal) and 422 IDEMPOTENCY_KEY_REUSED
+  write no audit entry. They log api.idempotency_conflict with the code and the correlation id.
+- A retry whose stored response cannot be read answers 500. The ERROR event carries the class
+  and a fixed reason, never the key, the body or the scope. No FAILED entry is written.
+- A claim that fails on a new request writes exactly one FAILED entry, as any 5xx does. The
+  same applies to the 503 of a required route without a scope.
+
+Decisions (append to DECISIONS.md; revised and new entries):
+D-TASK040-03 (revised) Store returned AND thrown 4xx other than 429; 5xx and 429 release.
+  - A thrown 4xx (AppError, or a DbError with a 4xx code, classified like the problem handler)
+    is stored as its problem source: status, Content-Type application/problem+json as the
+    marker, and the encrypted body {code, detail, errors}.
+  - A replay rethrows an equivalent AppError (ReplayedProblemError, plus Idempotent-Replayed:
+    true), which the problem handler renders.
+  - The replay matches the original byte for byte (type, title, status, detail, instance, code,
+    errors), except correlation_id. ADR-0016 ties that id to the response's X-Correlation-Id;
+    a replay is a new request.
+  - Storing the rendered document instead would contradict the replay's header and duplicate
+    the problem handler's configurable type base inside the tx slot.
+D-TASK040-06 (amended) Lease = max(30 s, longest stretch between renewals + 5 s skew margin).
+  - Longest stretch = max(call deadline, 2 x (maxWait + tx timeout) + FAILED wait); the tx
+    numbers come from the runner's transactionOptions.
+  - The lease is renewed before call and before the handler transaction (only when the route
+    has load or call), conditional on the version.
+  - A lost claim answers 409 IDEMPOTENCY_IN_PROGRESS before any further phase, so call never
+    runs twice.
+  - The application clock stays: the database clock would mean raw SQL statements throughout
+    the store, and the version-conditional writes keep correctness under skew.
+D-TASK040-08 (corrected) classify.ts keeps Retry-After for IDEMPOTENCY_IN_PROGRESS only. TASK-041
+  does not edit classify.ts; there is no union to make.
+D-TASK040-11 n6: with no client network, an anonymous caller has no scope. An optional route
+  runs without idempotency and a required route answers 503 SERVICE_UNAVAILABLE (with its
+  FAILED entry). Both log api.idempotency_scope_unavailable. One scope shared by every
+  anonymous caller would let a key replay another caller's response.
+D-TASK040-12 n3: scope path = matched template with validated params, percent-encoded.
+  Parameter case follows the Joi schema.
+Held for rulings (not implemented): m7 ordering (architect); purge owner and cadence, 040-B
+  wiring (architect).
+
+
+```
+
+#### TASK-040 commit 3dc1e225
+
+```text
+Architect rulings D-ARCH-191..195 (ADR-0014 amendments 5 to 9), change list F1 to F6:
+- F1/F2: a 4xx other than 429, returned or thrown, in load, call or the handler transaction,
+  is the response as sent. A thrown one is rendered ONCE in the tx slot with the first request's
+  correlation_id, by renderProblem (errors/rendered-problem.ts). renderProblem is the problem
+  handler's own classification and rendering, now shared by both. That exact document is
+  stored (Content-Type joins STORED_HEADERS), then sent through the problem handler as is
+  (RenderedProblemError). A replay sends the stored bytes again, correlation_id included, with
+  its own X-Correlation-Id header and Idempotent-Replayed: true. The order is FAILED entry,
+  then completion, then response. The {code, detail, errors} re-render path is removed.
+  ExecuteOptions.problemTypeBase keeps the document equal to the problem handler's when a type
+  base is configured; part 040-B passes the same value to both.
+- F3: API tests cover thrown 409, 422 and 400 (replayed byte for byte, handler once), a 4xx
+  thrown in load and one in call (replayed, call once), and a thrown 429 and 5xx (no row). Unit
+  tests cover problem.ts and rendered-problem.ts.
+- F4: M1 is kept (entry before completion on read-only routes; a failed entry releases).
+- F6: header comments of execute.ts and store.ts corrected; the purge is the 040-B worker
+  schedule (D-ARCH-192).
+- origin/main merged; DECISIONS.md is main's.
+
+Decisions (append to DECISIONS.md; these replace or annotate the earlier texts):
+D-TASK040-01 Claim, replay, completion and release run in the tx slot (ADR-0014 amendment 7).
+D-TASK040-02 Fail closed at mount without a store; production wiring is part 040-B (ADR-0014
+  amendment 9).
+D-TASK040-03 (replaced; cites D-ARCH-195, ADR-0014 amendment 6) Every 2xx and every 4xx other
+  than 429 produced after the claim is stored, returned or thrown, as sent. A thrown 4xx is
+  stored as its problem document rendered once (first correlation_id included) and replayed
+  byte for byte. A 5xx, a 429, a deadline or disconnect 503 and any unclassified failure
+  release the key.
+D-TASK040-05 Single scope_hash column per data-model 6.2 (ADR-0014 amendment 5).
+D-TASK040-06, -08, -11, -12 as in the fix cycle 1 commit (d0a82a24). The m4 lease renewal
+  matches the architect's preference; the 30 s value is unchanged.
+D-TASK040-10 No purge in 040-A (ADR-0014 amendment 8: the 040-B worker schedule); tests/contract
+  project; no new dependency.
+D-TASK040-13 The problem handler and the tx slot share renderProblem. A RenderedProblemError is
+  sent as is by the problem handler (status, problem+json, Cache-Control and error mark as for
+  any problem). A forged look-alike is not recognised (WeakSet brand) and is classified as
+  usual.
+
+
+```
+
+#### TASK-040 commit 20758572
+
+```text
+Lane B on 95945b7e and code review round 3 (R3-M1):
+- C9: ck_idempotency_keys__method and __status are registered in prisma/tests/catalog ENUM_CHECKS,
+  pinned from data-model 6.2. The TS sources of truth are IDEMPOTENT_METHODS (request.ts) and the
+  new IDEMPOTENCY_KEY_STATUSES (store.ts). enum-checks.test.ts compares them with the migration.
+- gitleaks (PR33-SEC-08): the UUID literal '7f1c0c1e-...' assigned to key-named identifiers is
+  gone. Tests now use randomUUID() at run time (api test KEY, scope.test, request.test and the
+  prisma integration claim). The old commits still hold it:
+  a633eb84 scope.test.ts:24, 9f08ecb5 idempotency.api.test.ts:33,
+  5e0dc1b0 prisma/tests/idempotency/idempotency-keys.int.test.ts:58.
+- Late ioredis log: the open-queue unit tests now force-disconnect every Queue their metrics
+  scrape touched. A queue that never passed the refused handshake could outlive its bounded
+  close and log after the file ended. Only BullMQ queue-profile connections set
+  enableOfflineQueue false.
+- R3-M1: the origin of a stored response is sealed inside the AES-GCM body envelope
+  {origin, body}, never derived from Content-Type. Only a slot-problem row replays through
+  RenderedProblemError ("malformed" applies only to those rows). A route's own problem+json
+  result replays as an ordinary result through send, with the same bytes and stored
+  Content-Type.
+
+Decisions (append to DECISIONS.md):
+D-TASK040-14 Stored body = sealed JSON envelope {origin: handler | slot-problem, body}. The origin is
+  authenticated by the GCM tag (AAD: table, column, scope hash, key id) and set only by this port,
+  so no column or header can forge a slot-rendered row (R3-M1 option (ii)). A body-less result
+  (204) stores no ciphertext and is a handler result.
+D-TASK040-15 C9 lists for idempotency_keys are pinned in prisma/tests (which may not import apps/api)
+  and tied to the code by apps/api/src/platform/idempotency/enum-checks.test.ts, the organisations
+  module pattern.
+D-TASK040-16 Test idempotency keys are generated with randomUUID(); no key-shaped literal in tests.
+Not changed now: R3-m1 single-source problemTypeBase (part 040-B).
+
+
+```
+
+#### TASK-040 commit e96bd979
+
+```text
+When a lease renewal finds the key taken over:
+- The answer is still 409 IDEMPOTENCY_IN_PROGRESS.
+- It logs WARN api.idempotency_claim_lost with the phase (before-call or before-handler) and the
+  correlation id, never the key or a body. This replaces the INFO api.idempotency_conflict line
+  of that path.
+- If call already ran (the renewal before the handler transaction of a route with call), exactly
+  one FAILED entry is written (D-PM-084).
+- A takeover before call (the renewal after load, or before the handler of a load-only route)
+  still writes none (D-PM-081).
+
+Tests (idempotency.api.test.ts):
+- Takeover during call: one FAILED 409 entry, one WARN line with phase before-handler, no key.
+- New row, takeover during load: call not run, no audit entry, one WARN line with phase
+  before-call.
+
+Decision (append to DECISIONS.md):
+D-TASK040-17 Lost-claim audit follows the external effect: FAILED iff call ran before the claim
+  was found lost (D-PM-084), else none (D-PM-081). WARN api.idempotency_claim_lost {phase,
+  correlation_id} in both cases.
+
+
+```
+
+#### TASK-043 commit c60959bd
+
+```text
+Code review round 1 and rulings D-ARCH-183..187 (ADR-0004 amendment 2):
+- F1/F2/F11 writer sets created_at = updated_at = one clock_timestamp(); JSDoc states the
+  publish-after-aggregate-lock contract and the correlation grammar (23514 outside it)
+- F3 lane B two-arm ordering test under the aggregate row lock (pg_stat_activity, no sleep)
+- F4 wording (relay header, metrics, migration header, schema comment); F8 lock-key comment
+- F5 relayBounds: W = min(tx timeout, idle-in-tx timeout), budget W/2, enqueue min(2 s, W/4)
+- F6 loop backs off from the poll interval to 5 s, one WARN per streak, recovery INFO
+- F7 gauges oldest_pending_age_seconds and last_tick_timestamp_seconds
+- F10 worker test: no event type before the outbox-relay processor exists
+- F12 lane B 23514 rows; unit rows for the relay and purge correlation ids
+- m1 api lane B test X-Correlation-Id -> row (Client-Corr-0103), own migration helper copy
+- m2 01/02 write a business row in the same transaction; more columns asserted
+- m5 createOutbox off the public barrels (test export @platform/api/testing/outbox);
+  mergeEvents refuses an open (.unknown(true)) or non-object payload schema
+- m6 unit rows for createProductionOutboxPurge and the bounds (2,500/1,250; idle smaller)
+- n2 relay-queues test disconnects every queue; n5 and QG-043-C7 lane B two-relay rows
+- M2/D-QG-002: docs/sdlc/DECISIONS.md equals origin/main; decisions below, for the log
+
+Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchestrator):
+- D-TASK043-01 outbox_events in table-class module outbox (outbox.json), processed_events in
+  worker.json, not platform.json: matches the SYSTEM_MODEL_OWNERS lint map; avoids a
+  conflict with TASK-040.
+- D-TASK043-02 relay and purge in apps/worker/src/platform/outbox/** (owned by both the
+  outbox and worker modules), not processors/outbox-relay/**.
+- D-TASK043-03 the writer is one raw tagged INSERT on the business TenantDb; org, actor,
+  correlation and (D-ARCH-185) created_at come from the transaction, never the caller.
+- D-TASK043-04 processed_events: SELECT, INSERT, DELETE, no UPDATE (ruled D-ARCH-186).
+- D-TASK043-05 the purge claims each 5,000-row batch with a raw job_executions INSERT ON
+  CONFLICT DO NOTHING until TASK-047 binds the worker SYSTEM accessor; retirement is a
+  TASK-047 item.
+- D-TASK043-06 enqueue inside the claim transaction under bounds, PostgreSQL advisory lock,
+  in-process loop in every worker, no BullMQ fallback (ruled D-ARCH-183).
+- D-TASK043-07 every event on the one queue outbox-relay; its processor dispatches by type;
+  no eventRouting map (ruled D-ARCH-184).
+- D-TASK043-08 an invalid stored traceparent is dropped by the writer and the relay; the
+  producer drops only an invalid tracestate.
+- D-TASK043-09 the catalogue-parameterised outbox factory is exported only as the test seam
+  @platform/api/testing/outbox (apps/api package.json export), not from the barrels (m5).
+- D-TASK043-10 no shared constant for the postgres:18 digest (code review n3, not done):
+  apps may not import the prisma/tests harness or each other's test layers without a lint
+  change (eslint.config.mjs is TASK-041's lock); the two helper copies carry the digest.
+
+
+```
+
+#### TASK-043 commit 07788996
+
+```text
+Security review round 1 (D-SECPR043-01) and ADR-0004 amendment 4 (D-ARCH-196, D-ARCH-197):
+- PR043-SEC-03: the outbox test factory is served from the existing ./testing subpath
+  (routing/tests/timing.ts re-exports createTestOutbox); the ./testing/outbox export is gone
+- PR043-SEC-01: isClosedObjectSchema walks describe(): declared keys at every depth, no
+  unknown/allowUnknown/patterns, one closed array item, string leaves bound to a grammar or
+  a valid list, only number/boolean/date otherwise; the ten open shapes are refused rows
+- PR043-SEC-02: tools/repo/test-seams.test.ts tripwire for test-outbox, @platform/api/testing
+  and any production import of the outbox writer module but the outbox barrel
+- PR043-SEC-04 / F7: only a tick that held the relay lock moves the last-tick gauge (HELP
+  text updated); unit row: 61 s of lockless ticks leave time() - gauge > 60
+- F14 (PR043-SEC-05): outbox_events gets SELECT, INSERT, DELETE and column-level UPDATE on
+  published_at, attempts, last_error, updated_at, updated_by, version; manifest, pins and the
+  lane B privilege listing follow; lane B row: UPDATE of org_id, actor_id, payload,
+  correlation_id as platform_app is 42501 while claim and both marks pass
+- F15: ck_outbox_events__actor CHECK (actor_id = created_by); lane B 23514 row
+- lane B unit fixes: writer.int.test uses fetchOnce/closeLoopbackServer (loopback ratchet)
+  and the lane idle timeout TEST_LANE_TX_IDLE_TIMEOUT_MS (D-ARCH-106 (6))
+
+Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchestrator):
+- D-TASK043-11 the closed-schema walk also refuses a top-level allowUnknown preference at
+  catalogue load (stronger than the validator-time refusal the record describes).
+- D-TASK043-12 the writer tripwire resolves relative specifiers against the importing file,
+  so a same-folder './writer.js' import is caught, not only deep 'platform/outbox/writer'.
+
+
+```
