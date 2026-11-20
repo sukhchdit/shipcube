@@ -4648,3 +4648,42 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Found while ruling:** no card owns the outbox purge (nor the `processed_events` purge). senior-developer assigns it at the next fold; the card line is in rulings file §6.
 - **Applied in:** ADR-0004 item 6; ADR-0013 amendment 3 (one note); data-model §3.5, §6.1, §10.1, §10.5, A32.
 - **Reversibility:** High (one interval; nothing is built).
+
+### D-SD-003 · 2026-11-20 · senior-developer · Plan fold for D-ARCH-161..167 (rulings/wave-1-r-arch-34-operator-rulings.md §6), the US-010 delivery split, a TASK-289 note from TASK-041 and the TASK-075 follow-ups: 19 cards updated; TASK-051 becomes M, hosts the operator staff grants with lock `mod-organisations`, and TASK-089 depends on it (plan regenerated: 294 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **Decision:** applied in `plan-data.mjs`, then regenerated.
+  1. **Architect card lines (rulings §6, verbatim):**
+     - **TASK-051:** the D-SD-002 DISPATCH GATE line is replaced by "R-ARCH-34 RULED". It also gains C16 AS AMENDED, GUEST BINDING TESTS (G1–G7, T1–T5, S1–S4, C1–C6) and ONE ANSWER FOR A REFUSED REFERENCE.
+     - **OPERATOR STAFF GRANTS on TASK-051**, as the architect recommended and the orchestrator accepted. It is a second migration directory in the same PR. TASK-051 takes lock `mod-organisations` (free in batch 1.5), gains dependency `orgs`, goes from size S to M (rulings §7 item 2), and must merge before TASK-089 opens its PR.
+     - **TASK-089:** the gate line is replaced by OPERATOR STAFF GRANT, and **dependency TASK-089 → TASK-051** is added.
+     - **TASK-087, TASK-146, TASK-194, TASK-237:** the quote-table lines.
+     - **TASK-057:** "no users transition guard" (D-ARCH-166) replaces the conditional sentence of D-SD-002.
+     - **TASK-043 is the owner of the outbox purge** (it is still undispatched; rulings §7 item 1): 30 days, batches of 5,000, a 29-day row stays (D-ARCH-167).
+  2. **TASK-204:** the RECURRING JOB ID line of D-ARCH-161, `tracking_poll.<schedule_id>.<occurrence>`.
+  3. **US-010 delivery split in the D-062 form.** It is product-manager's default, confirmed by the TASK-039 developer, who could not prove -01 or -07 without a stand-in.
+     - TASK-039 is partial and proves AT-US-010-02..06.
+     - TASK-047 is partial and proves AT-US-010-07 (cross-tenant job data).
+     - **TASK-092 (`saga`, the task that builds the M0 mock-booking job) completes US-010** with AT-US-010-01. This is the same owner as the US-008 split of D-062.
+     - The completing wave stays 2, inside the M0 DC band, so no wave exception is needed.
+  4. **TASK-289:** a note from TASK-041. The matrix app passes no `rateLimit` option, so the step-0 and step-5 limiters are absent (the PR48-SEC-06 seam), until a matrix run needs real limits.
+  5. **TASK-075 follow-ups:**
+     - TASK-124: `isTimeZone` via `Intl` in `packages/shared/src/intl` (R1-m3).
+     - TASK-080: CarrierMoney becomes ADR-0009 Money (R1-m6); the vocabulary move to `packages/shared` with an OpenAPI parity test (D-TASK075-02).
+     - TASK-113: PR075-SEC-02 (b), most-specific-entry tier rule plus three SEC-TC-66 rows; PR075-SEC-09.
+     - TASK-132: PR075-SEC-04 (b), with CarrierContractError local and non-ambiguous only before the adapter is reached.
+     - TASK-128: PR075-SEC-09.
+     - TASK-079: `capabilityIssues` on the real Mock under AT-US-121-02 (R1-n9).
+  6. **TASK-047 DISPATCH GATE:** product-manager rewrites the US-078/US-010 payload-v1 wording (PR64-SEC-10), after principal-architect answers what `job_context` returns for a job whose organisation was deleted.
+  7. **TASK-040 unchanged:** the rulings do not touch it.
+- **Check:** `gen.mjs` reports 0 errors and 0 warnings. `task-map.csv`: 294 rows, 19 changed. The columns changed are refs on all 19, plus:
+  - stories on TASK-039, TASK-047 and TASK-092;
+  - complexity and depends_on on TASK-051;
+  - depends_on on TASK-089.
+
+  No ID, batch, title or branch changed.
+- **Effect:**
+  - TASK-051 holds `prisma-rls` and `mod-organisations`. TASK-056 (batch 1.6, `mod-organisations`) cannot overlap it, and depends on TASK-052 anyway.
+  - TASK-089 now waits for TASK-051 as well. Both are on the human-priority path to demo users.
+- **Alternatives rejected:**
+  - A late task for the operator grants: another PR and its CI minutes while R-CI-MIN is HIGH, and two security reviews of the same guard.
+  - AT-US-010-01 on TASK-094: TASK-092 builds the job and already completes the US-008 split.
+- **Reversibility:** High (plan data only).

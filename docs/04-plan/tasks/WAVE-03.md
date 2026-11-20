@@ -537,7 +537,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-047 (M0 Must) SSRF-safe outbound client and security events |
 | REQs | REQ-SEC-010, REQ-SEC-012 |
 | NFRs | NFR-RES-001, NFR-SEC-010 |
-| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076 |
+| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076, PR075-SEC-02, PR075-SEC-09, D-SECPR075-01, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-010, TASK-029 |
@@ -563,6 +563,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #20 code review R4-m1 (the next PR that touches packages/shared/src/logging/string-redaction.test.ts carries it, and this task is the first planned one): the PR20-SEC-18 relative-growth test raises its limit from toBeLessThanOrEqual(20) to 40 (the linear ratio is 9-15 idle and reached 20.7 once in 56 samples under 7-way CPU load, the quadratic shape gives 87-141, so 40 keeps a 2x margin); the test keeps its shape (ratio of timings, minimum of three)
 - PR44-SEC-12 (INFO; D-SEC-PR44-02; D-ORCH-076): the call and afterCommit deadlines of the route pipeline bound the WAIT, not the WORK — a hung outbound call keeps running after the 503; the outbound client passes the request signal (ctx.signal of the phase context, PR #44 fc1 D-TASK020-62..72) to every undici request and aborts the socket at the deadline, and the first afterCommit route (createQuote fan-out, TASK-091) asserts that an aborted fan-out releases its sockets; D-TASK020-88: the fake-timer harness that counts requestLifetime timers belongs here with the client timeouts
 - PR44-SEC-14 FETCH ALIAS FORMS (D-TASK020-84; the lint half of SEC-14 landed in 020-D): outbound-http-via-client reports the X09/X10 alias forms (const f = fetch; f(url); const { fetch: g } = globalThis; g(url); globalThis.fetch through an alias or a computed key) with one negative fixture each, and the SSRF rule covers the same forms in the same change
+- PR075-SEC-02 (b) TIER BY THE MOST SPECIFIC ENTRY (LOW, CWE-183; D-SECPR075-01 ruling 1): egressAllowed decides the tier by the most specific matching entry across all tiers of the origin (an exact path beats a prefix, a longer prefix beats a shorter one) and refuses when that tier differs from ctx.environment; SEC-TC-66 gains three rows: production to .../mydhlapi/test/rates blocked, sandbox to .../mydhlapi/rates blocked, an exact path shared by both tiers allowed for both
+- PR075-SEC-09 (INFO; D-SECPR075-01; shared with TASK-128): before G4 a production-tier carrier call is refused at the client even when a carrier_accounts row says production under APP_ENV=production, so sandbox only holds for the rows as well as for configuration
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

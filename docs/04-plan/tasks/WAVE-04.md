@@ -95,7 +95,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-127 **DC** (M1 Must) Carrier service reference data |
 | REQs | REQ-CARR-021 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-TASK075-08, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-075, TASK-023 |
@@ -111,6 +111,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-127 scenarios
 - PR #13 code review m4 (a): carrier_services and transit_days.carrier_service_id reference per-environment carrier ids — uses the fk / seedId resolution extension of the Dataset contract (first landed by TASK-066; extend it here if this task lands first)
+- IANA ZONE CHECK (TASK-075 code review R1-m3; D-TASK075-08): add isTimeZone(name) to packages/shared/src/intl/ (try new Intl.DateTimeFormat with that timeZone, true, else false; it resolves aliases such as US/Eastern and GMT) and use it for the carrier service and capability time zones in place of the Area/<anything> heuristic of packages/carriers/src/capabilities.ts; a misspelled zone is refused at registration; the JSDoc and the test title of capabilities.test.ts say what is checked
 - AT-US-127-01 … AT-US-127-05: all 5 scenarios of US-127, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -213,7 +214,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-128 **DC** (M1 Must) Platform carrier accounts and credential handling |
 | REQs | REQ-CARR-015 |
 | NFRs | NFR-SEC-002 |
-| Spikes / security / decisions | SEC-P3-08, D-012 |
+| Spikes / security / decisions | SEC-P3-08, D-012, PR075-SEC-09, D-SECPR075-01, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-075, TASK-005, TASK-113 |
@@ -228,6 +229,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-128 scenarios
 - SEC-TC-49 (vault part): ciphertext columns carry key_id; retired key decrypts, new writes use current; AAD swap fails
+- PR075-SEC-09 (INFO; D-SECPR075-01; shared with TASK-113): before G4 a carrier_accounts row with environment production is refused (or never used) under every APP_ENV, so sandbox only holds for the rows as well as for configuration; test: a production row under APP_ENV=production is not selected for a call
 - AT-US-128-01 … AT-US-128-07: all 7 scenarios of US-128, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -338,7 +340,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-130 (M1 Must) Resilience: timeouts, retries, circuit breaker and bulkhead |
 | REQs | REQ-CARR-017 |
 | NFRs | NFR-RES-001, NFR-RES-002, NFR-RES-003, NFR-RES-007 |
-| Spikes / security / decisions | SEC-P3-02, SEC-COND-02, D-048, PR6-SEC-04, PR6-SEC-05, PR6-SEC-11, SEC-TC-67, D-ARCH-068 |
+| Spikes / security / decisions | SEC-P3-02, SEC-COND-02, D-048, PR6-SEC-04, PR6-SEC-05, PR6-SEC-11, SEC-TC-67, D-ARCH-068, PR075-SEC-04, D-SECPR075-01, D-SD-003 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-075, TASK-113 |
@@ -358,6 +360,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR6-SEC-04 / ADR-0010 am. 11 item 8 (D-ARCH-068): `carrierPath` validates every interpolated value against the carrier identifier allow-pattern (default `^[A-Za-z0-9]{1,35}$`; adapters tighten, e.g. UPS `^1Z[0-9A-Z]{16}$`) and throws INVALID_CARRIER_IDENTIFIER with zero network I/O; `carrierUrl(base, path, query)` builds from the adapter EGRESS base, sets query parameters only through URLSearchParams and throws URL_ESCAPE if the result leaves the base origin or prefix; adapters never string-concatenate paths, comma lists or query strings; batch tracking validates each element, joins validated elements only and maps the response BY REQUESTED tracking number, dropping unrequested ones
 - SEC-TC-67 (fast-check property): arbitrary strings incl. `..`, `../..`, `%2e%2e`, `/`, `,`, `&`, `?`, `#`, CR/LF and Unicode used as tracking number, dispatch number, city or postcode are either rejected with CarrierInputError and zero nock requests, or yield a URL whose origin and prefix equal the base with exactly the expected segment count and exactly one accountNumber parameter; a batch input containing `,` is rejected; a response containing an unrequested number is not returned
 - PR6-SEC-05 / PR6-SEC-11 (ADR-0010 am. 11 item 5, with TASK-131): the gateway consults the token negative cache and the carrier cool-down BEFORE any token or API request and fails fast (AUTH_FAILED for a negative-cached account, CARRIER_UNAVAILABLE for a cooled-down carrier), both counting toward the account breaker; a token-endpoint 403 under `account-negative-cache` opens only that account breaker
+- PR075-SEC-04 (b) (LOW, CWE-532; D-SECPR075-01): a failure that is not a CarrierError is converted to a CarrierError with a safe cause ({ name, code? } only), so no raw carrier text reaches the logs; a CarrierContractError is local and non-ambiguous ONLY when it is thrown before the adapter is reached (ruling 2), and nothing thrown after a successful createShipment carries that class, so a retry never books a second label
 - AT-US-130-01 … AT-US-130-12: all 12 scenarios of US-130, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
