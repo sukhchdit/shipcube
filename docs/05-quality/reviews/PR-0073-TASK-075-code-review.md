@@ -207,3 +207,161 @@ The approval holds only if (i) lane B passes on `dde830b` and (ii) principal-arc
 
 - R2-n4: the sandbox exact path under a production prefix (PR075-SEC-02 (a), exact-path form).
 - R2-m1: a format false negative destroys the only label copy for DHL/FedEx (availability and integrity, not confidentiality).
+
+---
+
+# Round 3 (pre-push delta), 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | `82aa275`: one commit on `dde830b` |
+| Diff reviewed | `git diff dde830b 82aa275`: 11 files, +276 / -50, all under `packages/carriers/src` |
+| Inputs | round-2 findings above; security PR075-SEC-10 (MEDIUM), -11, -12, -13; D-TASK075-19..24 (in the hand-off); D-ARCH-168 / ADR-0010 amendment 12 (`71a2d36`) |
+
+## R3.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-m1 and R2-n1..n4 are closed, and C2 is met (D-ARCH-168, ADR-0010 am. 12, on main). PR075-SEC-10 is implemented:
+         a CarrierContractError leaving the guard now means the adapter was not entered, and anything raised after entry
+         becomes CarrierError(CARRIER_UNKNOWN_ERROR). One new MINOR: the contract still tells adapters to build labels
+         with createLabelDocument, which inside createShipment turns a bad label into an ambiguous failure.
+```
+
+The approval holds only if lane B passes on `82aa275`; lane B passed every suite on `dde830b`. R3-m1 does not block. It is a guidance line, and its consumers are the adapter tasks.
+
+## R3.2 Verification performed (same HOST RULE: static review and single-process Node probes on a `git archive` extract; no npm, no Jest, no Docker)
+
+- **Gates on the `82aa275` archive** (node_modules junction; the worktree was not touched and is clean):
+  - `tsc -p` over `packages/carriers/src` and the config test: exit 0;
+  - type-aware ESLint with `--max-warnings 0` on the 29 changed `.ts` files of `5145d52..82aa275`: exit 0;
+  - `prettier --check`: clean.
+- **Not re-run:** Jest. Lane B on `82aa275` is queued.
+- **C2:** `71a2d36` is an ancestor of `origin/main`. D-ARCH-168 and ADR-0010 amendment 12 item 1 record `getRates: Promise<RateResponse>`, and item 2 records the vocabularies staying in `packages/carriers` until TASK-080.
+- **Probes** (`probe3.ts`, tsx):
+  - Z1: `isZpl` over 10 MB of `^` with no `^XA` returns false in about 350 ms. That is linear, and bounded by the outbound client's size cap.
+  - Z2: `^XA` in the last 3 bytes of 10 MB is found in about 4 ms.
+  - Z3: a trailing `^X` is refused.
+  - P1: 1 KiB of `%` is refused.
+  - P2: a `%PDF-` header that starts at byte 1021 and ends past byte 1024 is refused (R3-n1).
+  - E1: the ADR-0010 am. 11 item 6 tables for UPS, FedEx (including ETD) and DHL Express, plus an empty MOCK table, all pass the new cross-carrier check with four sandbox accounts, so it gives no false positive on the real layout.
+  - E2: a sandbox exact path `/v1` next to a production prefix `/v1/` is accepted. This is correct, because the prefix does not cover it.
+  - G1: an adapter that builds its labels with `createLabelDocument` inside `createShipment` and meets a bad label rejects with `CarrierError(CARRIER_UNKNOWN_ERROR)`. The tracking number `T1` never reaches the caller, and the guard's drop policy is bypassed (R3-m1).
+
+## R3.3 Round-2 closure
+
+| R2 item | Status | Evidence |
+|---|---|---|
+| m1 label false negatives | **Closed** | `labels.ts`: `isZpl` searches the whole payload with `indexOf`; `isPdf` accepts `%PDF-` within 1024 bytes; tests cover a 4,800-byte `~DG` preamble, a BOM lead, a CR/LF lead and a header beyond 1024 bytes. The residual is recorded in the `labels.ts` JSDoc for TASK-101/135/139/140. |
+| n1 "never throws" overclaim | **Closed** | `guard.ts` JSDoc now says that a `null` result or a throwing getter still throws a non-contract error, which is ambiguous for the gateway. `errors.ts` states the TASK-132 rule. |
+| n2 optional logger | **Closed** | `createCarrierRegistry` requires `logger` at type level, and tests go through `registryOf` with `SILENT_LOGGER`. |
+| n3 `safeCause` throw | **Closed** | try/catch, with a Proxy test. |
+| n4 sandbox exact path under a production prefix | **Closed** | `crossTierIssues` handles the exact-path arm, and a shared exact path stays valid (test). It is extended across carriers in `deriveCarrierEgressRules` (PR075-SEC-11; test with a `NEWCO` sandbox on `apis.fedex.com`). |
+
+**Security items (code-review view):**
+- **PR075-SEC-10:** `run()` takes the context snapshot outside the try, and contract errors from `call` are re-wrapped. The new property holds that a `CarrierContractError` leaves the guard only with zero adapter calls, over all 11 operations and both valid and invalid contexts. The `recoverLabel` refusals now leave as `CARRIER_UNKNOWN_ERROR` with a `carrier.label.refused` line. That is correct: the operation is idempotent, so a retry is safe.
+- **PR075-SEC-12:** `description` was renamed to `carrierDescription`, which matches the data-model column.
+- **PR075-SEC-13:** a non-list `labels` value gets its own `(not a list)` line, on both the drop path and the refuse path.
+
+## R3.4 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-m1 | MINOR | `packages/carriers/src/canonical/types.ts:126`; `guard.ts:15-24` | `LabelDocument`'s JSDoc says "Build through `createLabelDocument`". An adapter that does this inside `createShipment` throws `CarrierContractError` for a bad label after the carrier has accepted the shipment. The guard now re-wraps that as `CarrierError(CARRIER_UNKNOWN_ERROR)`, which is ambiguous, so the gateway marks the shipment `EXCEPTION` (G1). The `ref` (tracking number) is lost to the caller, and the guard's drop-and-recover policy (PR075-SEC-03 (b)) never applies. Following the contract's own advice defeats its label policy. | Change the JSDoc to: "in `createShipment`, return `{ format, content }` as decoded and let the guard check and drop; use `createLabelDocument` only where a throw is safe (`recoverLabel`, tests)". Alternatively, add a non-throwing `toLabelDocument(format, content): LabelDocument \| undefined` for adapters. Route a contract-suite case to TASK-101 (a bad label inside `createShipment` resolves with `ref` intact and a dropped line) and a card line to TASK-079/135/139/140. |
+| R3-n1 | NIT | `packages/carriers/src/labels.ts:51-58` | `isPdf` cuts the window before matching, so a header that starts at byte 1020..1023 and ends past 1024 is refused (P2). Readers require only the header's *start* within 1024 bytes. | Search 0x25 within `[0, 1024)` but match `PDF_MAGIC` against the full buffer: `startsWith(bytes.subarray(index), PDF_MAGIC)`. |
+
+## R3.5 Rulings (D-TASK075-19..24 as summarised in the dispatch)
+
+- **PR075-SEC-10, "a contract error leaving the guard means the adapter was not entered": accepted.** It gives TASK-132 a sound type-level rule. The cost is that an adapter's own pre-I/O refusal inside `createShipment` (such as a `carrierPath` identifier refusal) is also reported as ambiguous. That is conservative: EXCEPTION rather than a duplicate. TASK-132 may later special-case a dedicated no-I/O error type thrown by `carrierPath`/`carrierUrl` (TASK-132's own design).
+- **Whole-payload `^XA` search and a 1024-byte `%PDF-` window: accepted** (R3-n1 is cosmetic).
+- **Cross-carrier sandbox-reaches-production check at derivation (PR075-SEC-11): accepted.** No false positive on the ADR tables (E1).
+- **`carrierDescription` rename (PR075-SEC-12) and the `(not a list)` log line (PR075-SEC-13): accepted.**
+- **Logger required on `createCarrierRegistry` only (type level): accepted.**
+
+## R3.6 Merge conditions (replace R2.6)
+
+- C1: met. R3-m1 is fixed here or routed (JSDoc line, TASK-101 case, adapter card lines) in the hand-off.
+- C2: **met** (D-ARCH-168, `71a2d36`).
+- C3: lane B passes on `82aa275`, and the security round is recorded on the same head.
+
+---
+
+# Round 4 (pre-push delta, final; fix cycle 3), 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | `28044845`: one commit on `82aa275` |
+| Diff reviewed | `git diff 82aa275 28044845`: 3 files, +87 / -25 (`labels.ts`, `canonical/types.ts`, `hardening-misc.test.ts`) |
+| Inputs | R3-m1, R3-n1; security PR075-SEC-14 (the cycle-2 regression: `isPdf` accepted `%PDF-` after arbitrary leading data); D-TASK075-25; D-SD-004 (plan fold) |
+
+## R4.1 Verdict
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R3-m1 and R3-n1 are closed, and PR075-SEC-14 is fixed. Only blank or BOM bytes may precede a PDF or ZPL header;
+         the PDF header must start within 1024 bytes and is matched on the full buffer; ZPL is searched over the whole
+         payload with native Buffer.includes. The LabelDocument JSDoc now tells createShipment to return raw
+         { format, content }. One NIT. No BLOCKER, MAJOR or MINOR is open.
+```
+
+The approval holds only if lane B passes on `28044845`. C1 and C2 are met. C3 remains: lane B and the security round on this head.
+
+## R4.2 Verification performed (same HOST RULE: static review and single-process Node probes on a `git archive` extract; no npm, no Jest, no Docker)
+
+- **Gates on the `28044845` archive** (node_modules junction, since removed; the worktree is untouched and clean):
+  - `tsc -p` over `packages/carriers/src` and the config test: exit 0;
+  - type-aware ESLint with `--max-warnings 0` on the 3 changed files: exit 0;
+  - `prettier --check`: clean.
+- **Not re-run:** Jest. Lane B on `28044845` is the binding evidence.
+- **Probes** (`probe4.ts`, tsx):
+
+  | Probe | Input | Result |
+  |---|---|---|
+  | A3 | `subarray` view whose `^XA` is inside the view | ZPL |
+  | A4 | `subarray` view whose `^XA` is only outside the view | not ZPL (`byteOffset`/`byteLength` handled) |
+  | A5 | 10 MB of `^` | about 230 ms, linear (was about 350 ms) |
+  | A6 | a 5 KB `~DG` preamble | ZPL |
+  | A7 | the `CT~~CD,~CC^~CT~` prefix | ZPL |
+  | A8 | a BOM before `%PDF-` | PDF |
+  | A9 | `%PDF-` at byte 1023 | PDF |
+  | A10 | `%PDF-` at byte 1024 | not PDF |
+  | A2 | 1100 blanks then `%PDF-` | not PDF |
+  | A11 | EPL with `^XA` in its field data | ZPL (the residual recorded as D-TASK075-21) |
+  | A1 | 1100 blanks then `<html>^XA` | ZPL (R4-n1) |
+
+- **Routing:** D-SD-004 on main carries the TASK-101 LABEL CONTRACT CASE ("an adapter returns raw `{ format, content }`; a bad label is dropped, never thrown") and the TASK-079/135/139/140 LABEL FIXTURES line. R3-m1's contract half is therefore owned.
+
+## R4.3 Round-3 closure
+
+| R3 item | Status | Evidence |
+|---|---|---|
+| m1 `createLabelDocument` inside `createShipment` | **Closed** | `canonical/types.ts:124-130`: return raw `{ format, content }` from `createShipment`, and use `createLabelDocument` only where a throw is safe. The contract case and fixtures are routed (D-SD-004). |
+| n1 `isPdf` window cut | **Closed** | `isPdf` takes the first significant byte (< 1024) and matches on the full buffer. Test at byte 1020; probes A9/A10. |
+| PR075-SEC-14 (security) | **Closed (code-review view)** | Leading data other than blank/BOM is refused for both formats. There are tests for HTML, PNG and ZPL before `%PDF-`, for PDF, PNG and HTML (after a lead) as ZPL, and a property over leads × raster/markup magics. |
+
+## R4.4 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R4-n1 | NIT | `packages/carriers/src/labels.ts:46-58` | `firstSignificant` stops at the 1024-byte window, which is right for PDF but means that `isZpl` checks the foreign magics at byte 1024 when the lead is longer: 1100 spaces followed by `<html>^XA` pass as ZPL (A1). Impact is negligible: the payload still contains `^XA`, and serving uses the format's content type. | Either skip blanks without the window bound for the ZPL check, or refuse a ZPL payload whose first 1024 bytes are all blank. Optional. |
+
+## R4.5 Ruling
+
+- **D-TASK075-25 (only blank/BOM bytes before a header; PDF start within 1024 bytes, matched on the full buffer; ZPL via native `Buffer.includes` over four case spellings): accepted.**
+  - `node:buffer` in `packages/carriers` is fine: the package is server-only.
+  - The `LEADING` set admits the three BOM bytes individually, in any order. That is harmless, because none of them begins a raster or markup magic.
+
+## R4.6 Merge conditions (final)
+
+- C1: met.
+- C2: met (D-ARCH-168).
+- C3: lane B passes on `28044845`, and the security round is recorded on the same head.
+
+Code review is complete for TASK-075. The carried items are owned elsewhere:
+- R1-m2 → TASK-076;
+- R1-m3 → TASK-124;
+- R1-m6 and the vocabulary move → TASK-080;
+- R1-n9 → TASK-079;
+- the R3-m1 contract case → TASK-101, with fixtures in TASK-079/135/139/140;
+- PR075-SEC-02 (b) → TASK-113;
+- the post-call classification rule → TASK-132.

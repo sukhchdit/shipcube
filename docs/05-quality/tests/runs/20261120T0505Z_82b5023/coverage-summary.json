@@ -1,0 +1,6450 @@
+{
+ "total": {
+  "lines": {
+   "total": 25165,
+   "covered": 25031,
+   "skipped": 0,
+   "pct": 99.46
+  },
+  "statements": {
+   "total": 25165,
+   "covered": 25031,
+   "skipped": 0,
+   "pct": 99.46
+  },
+  "functions": {
+   "total": 1429,
+   "covered": 1412,
+   "skipped": 0,
+   "pct": 98.81
+  },
+  "branches": {
+   "total": 6621,
+   "covered": 6445,
+   "skipped": 0,
+   "pct": 97.34
+  }
+ },
+ "apps/admin/app/components/error-view.tsx": {
+  "lines": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 50
+  },
+  "branches": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/components/no-index.tsx": {
+  "lines": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/i18n/error-messages.ts": {
+  "lines": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/i18n/locale-context.tsx": {
+  "lines": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/i18n/locales.ts": {
+  "lines": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/i18n/messages.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 10,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 90
+  }
+ },
+ "apps/admin/app/root.tsx": {
+  "lines": {
+   "total": 61,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 68.85
+  },
+  "statements": {
+   "total": 61,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 68.85
+  },
+  "functions": {
+   "total": 5,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 80
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/routes/home.tsx": {
+  "lines": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/routes/not-found.tsx": {
+  "lines": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/admin/app/routes/shell.tsx": {
+  "lines": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/app.ts": {
+  "lines": {
+   "total": 173,
+   "covered": 173,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 173,
+   "covered": 173,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 28,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 96.42
+  }
+ },
+ "apps/api/src/main.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/modules/organisations/index.ts": {
+  "lines": {
+   "total": 48,
+   "covered": 48,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 48,
+   "covered": 48,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/modules/organisations/policies/organisation-rules.ts": {
+  "lines": {
+   "total": 148,
+   "covered": 148,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 148,
+   "covered": 148,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 36,
+   "covered": 36,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/modules/organisations/repository/organisation-repository.ts": {
+  "lines": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/modules/organisations/service/organisation-service.ts": {
+  "lines": {
+   "total": 109,
+   "covered": 109,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 109,
+   "covered": 109,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/audit/capture.ts": {
+  "lines": {
+   "total": 256,
+   "covered": 253,
+   "skipped": 0,
+   "pct": 98.82
+  },
+  "statements": {
+   "total": 256,
+   "covered": 253,
+   "skipped": 0,
+   "pct": 98.82
+  },
+  "functions": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 68,
+   "covered": 64,
+   "skipped": 0,
+   "pct": 94.11
+  }
+ },
+ "apps/api/src/platform/audit/descriptor-runtime.ts": {
+  "lines": {
+   "total": 251,
+   "covered": 251,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 251,
+   "covered": 251,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 95,
+   "covered": 95,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/audit/writer.ts": {
+  "lines": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/authn/authenticate.ts": {
+  "lines": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/authz/authorise.ts": {
+  "lines": {
+   "total": 121,
+   "covered": 121,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 121,
+   "covered": 121,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 47,
+   "covered": 45,
+   "skipped": 0,
+   "pct": 95.74
+  }
+ },
+ "apps/api/src/platform/context/api-mode.ts": {
+  "lines": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/context/request-context.ts": {
+  "lines": {
+   "total": 92,
+   "covered": 92,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 92,
+   "covered": 92,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/cors/preflight.ts": {
+  "lines": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/client.ts": {
+  "lines": {
+   "total": 126,
+   "covered": 126,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 126,
+   "covered": 126,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/config-exit.ts": {
+  "lines": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/dedicated-connection.ts": {
+  "lines": {
+   "total": 26,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 88.46
+  },
+  "statements": {
+   "total": 26,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 88.46
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 66.66
+  }
+ },
+ "apps/api/src/platform/db/expect-affected.ts": {
+  "lines": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/extensions/standard-columns.ts": {
+  "lines": {
+   "total": 304,
+   "covered": 304,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 304,
+   "covered": 304,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 124,
+   "covered": 119,
+   "skipped": 0,
+   "pct": 95.96
+  }
+ },
+ "apps/api/src/platform/db/generated.ts": {
+  "lines": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/health-check.ts": {
+  "lines": {
+   "total": 25,
+   "covered": 25,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 25,
+   "covered": 25,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/index.ts": {
+  "lines": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/map-db-error.ts": {
+  "lines": {
+   "total": 249,
+   "covered": 249,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 249,
+   "covered": 249,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 82,
+   "covered": 82,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/query-counter.ts": {
+  "lines": {
+   "total": 183,
+   "covered": 183,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 183,
+   "covered": 183,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 50,
+   "covered": 48,
+   "skipped": 0,
+   "pct": 96
+  }
+ },
+ "apps/api/src/platform/db/raw-statement.ts": {
+  "lines": {
+   "total": 346,
+   "covered": 346,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 346,
+   "covered": 346,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 158,
+   "covered": 157,
+   "skipped": 0,
+   "pct": 99.36
+  }
+ },
+ "apps/api/src/platform/db/runtime.ts": {
+  "lines": {
+   "total": 367,
+   "covered": 366,
+   "skipped": 0,
+   "pct": 99.72
+  },
+  "statements": {
+   "total": 367,
+   "covered": 366,
+   "skipped": 0,
+   "pct": 99.72
+  },
+  "functions": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 83,
+   "covered": 79,
+   "skipped": 0,
+   "pct": 95.18
+  }
+ },
+ "apps/api/src/platform/db/session-integrity.ts": {
+  "lines": {
+   "total": 212,
+   "covered": 212,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 212,
+   "covered": 212,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/system-db.ts": {
+  "lines": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/system-models.ts": {
+  "lines": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/system-port.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 83.33
+  }
+ },
+ "apps/api/src/platform/db/tenant-admission.ts": {
+  "lines": {
+   "total": 234,
+   "covered": 233,
+   "skipped": 0,
+   "pct": 99.57
+  },
+  "statements": {
+   "total": 234,
+   "covered": 233,
+   "skipped": 0,
+   "pct": 99.57
+  },
+  "functions": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 41,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 97.56
+  }
+ },
+ "apps/api/src/platform/db/tenant-db.ts": {
+  "lines": {
+   "total": 529,
+   "covered": 529,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 529,
+   "covered": 529,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 56,
+   "covered": 56,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 176,
+   "covered": 176,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/db/with-tenant-tx.ts": {
+  "lines": {
+   "total": 468,
+   "covered": 468,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 468,
+   "covered": 468,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 25,
+   "covered": 25,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 123,
+   "covered": 122,
+   "skipped": 0,
+   "pct": 99.18
+  }
+ },
+ "apps/api/src/platform/errors/classify.ts": {
+  "lines": {
+   "total": 102,
+   "covered": 102,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 102,
+   "covered": 102,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/errors/error-response.ts": {
+  "lines": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/errors/problem-handler.ts": {
+  "lines": {
+   "total": 165,
+   "covered": 160,
+   "skipped": 0,
+   "pct": 96.96
+  },
+  "statements": {
+   "total": 165,
+   "covered": 160,
+   "skipped": 0,
+   "pct": 96.96
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 43,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 93.02
+  }
+ },
+ "apps/api/src/platform/errors/problem.ts": {
+  "lines": {
+   "total": 53,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 53,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/etag/etag.ts": {
+  "lines": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/health/checks/audit-chain.ts": {
+  "lines": {
+   "total": 53,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 53,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 95
+  }
+ },
+ "apps/api/src/platform/health/checks/audit-partitions.ts": {
+  "lines": {
+   "total": 180,
+   "covered": 180,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 180,
+   "covered": 180,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 56,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 94.64
+  }
+ },
+ "apps/api/src/platform/health/checks/catalog-reader.ts": {
+  "lines": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/health/checks/object-storage.ts": {
+  "lines": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/health/router.ts": {
+  "lines": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/health/types.ts": {
+  "lines": {
+   "total": 17,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "statements": {
+   "total": 17,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "functions": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "branches": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  }
+ },
+ "apps/api/src/platform/http/fallback.ts": {
+  "lines": {
+   "total": 131,
+   "covered": 127,
+   "skipped": 0,
+   "pct": 96.94
+  },
+  "statements": {
+   "total": 131,
+   "covered": 127,
+   "skipped": 0,
+   "pct": 96.94
+  },
+  "functions": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 58,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 91.37
+  }
+ },
+ "apps/api/src/platform/http/json-body.ts": {
+  "lines": {
+   "total": 175,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 97.71
+  },
+  "statements": {
+   "total": 175,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 97.71
+  },
+  "functions": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 70,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 95.71
+  }
+ },
+ "apps/api/src/platform/idempotency/idempotency.ts": {
+  "lines": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/logging/correlation.ts": {
+  "lines": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/logging/request-logger.ts": {
+  "lines": {
+   "total": 91,
+   "covered": 91,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 91,
+   "covered": 91,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/logging/security-events.ts": {
+  "lines": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/mfa/mfa-gate.ts": {
+  "lines": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/openapi/deprecation.ts": {
+  "lines": {
+   "total": 65,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 90.76
+  },
+  "statements": {
+   "total": 65,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 90.76
+  },
+  "functions": {
+   "total": 6,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 83.33
+  },
+  "branches": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/openapi/serve.ts": {
+  "lines": {
+   "total": 168,
+   "covered": 168,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 168,
+   "covered": 168,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 28,
+   "covered": 28,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/queues/producer.ts": {
+  "lines": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/rate-limit/limits.ts": {
+  "lines": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/routing/define-route.ts": {
+  "lines": {
+   "total": 709,
+   "covered": 707,
+   "skipped": 0,
+   "pct": 99.71
+  },
+  "statements": {
+   "total": 709,
+   "covered": 707,
+   "skipped": 0,
+   "pct": 99.71
+  },
+  "functions": {
+   "total": 30,
+   "covered": 30,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 222,
+   "covered": 211,
+   "skipped": 0,
+   "pct": 95.04
+  }
+ },
+ "apps/api/src/platform/routing/pipeline.ts": {
+  "lines": {
+   "total": 215,
+   "covered": 215,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 215,
+   "covered": 215,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 52,
+   "covered": 50,
+   "skipped": 0,
+   "pct": 96.15
+  }
+ },
+ "apps/api/src/platform/routing/route-registry.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 50
+  }
+ },
+ "apps/api/src/platform/routing/route-state.ts": {
+  "lines": {
+   "total": 159,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 98.11
+  },
+  "statements": {
+   "total": 159,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 98.11
+  },
+  "functions": {
+   "total": 23,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 95.65
+  },
+  "branches": {
+   "total": 34,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 97.05
+  }
+ },
+ "apps/api/src/platform/routing/slot.ts": {
+  "lines": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/runtime/index.ts": {
+  "lines": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/runtime/log.ts": {
+  "lines": {
+   "total": 67,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 67,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/runtime/process-errors.ts": {
+  "lines": {
+   "total": 100,
+   "covered": 100,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 100,
+   "covered": 100,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 95
+  }
+ },
+ "apps/api/src/platform/runtime/readiness.ts": {
+  "lines": {
+   "total": 246,
+   "covered": 246,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 246,
+   "covered": 246,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 17,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 94.11
+  },
+  "branches": {
+   "total": 62,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 95.16
+  }
+ },
+ "apps/api/src/platform/runtime/services.ts": {
+  "lines": {
+   "total": 95,
+   "covered": 95,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 95,
+   "covered": 95,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 66.66
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/runtime/shutdown.ts": {
+  "lines": {
+   "total": 91,
+   "covered": 91,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 91,
+   "covered": 91,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 23,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 95.65
+  }
+ },
+ "apps/api/src/platform/storage/object-storage.port.ts": {
+  "lines": {
+   "total": 125,
+   "covered": 125,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 125,
+   "covered": 125,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/storage/s3-object-storage.ts": {
+  "lines": {
+   "total": 504,
+   "covered": 502,
+   "skipped": 0,
+   "pct": 99.6
+  },
+  "statements": {
+   "total": 504,
+   "covered": 502,
+   "skipped": 0,
+   "pct": 99.6
+  },
+  "functions": {
+   "total": 34,
+   "covered": 34,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 224,
+   "covered": 219,
+   "skipped": 0,
+   "pct": 97.76
+  }
+ },
+ "apps/api/src/platform/tx/abortable.ts": {
+  "lines": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/tx/after-commit.ts": {
+  "lines": {
+   "total": 129,
+   "covered": 129,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 129,
+   "covered": 129,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/tx/execute.ts": {
+  "lines": {
+   "total": 374,
+   "covered": 374,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 374,
+   "covered": 374,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 115,
+   "covered": 112,
+   "skipped": 0,
+   "pct": 97.39
+  }
+ },
+ "apps/api/src/platform/validate/slot.ts": {
+  "lines": {
+   "total": 31,
+   "covered": 31,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 31,
+   "covered": 31,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/api/src/platform/validate/validate.ts": {
+  "lines": {
+   "total": 171,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 171,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 89,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 97.75
+  }
+ },
+ "apps/api/src/platform/valkey/client.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 9,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 88.88
+  }
+ },
+ "apps/api/src/platform/valkey/options.ts": {
+  "lines": {
+   "total": 124,
+   "covered": 124,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 124,
+   "covered": 124,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 41,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 97.56
+  }
+ },
+ "apps/api/src/start-api.ts": {
+  "lines": {
+   "total": 203,
+   "covered": 203,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 203,
+   "covered": 203,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 36,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 97.22
+  }
+ },
+ "apps/web/app/components/error-view.tsx": {
+  "lines": {
+   "total": 43,
+   "covered": 43,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 43,
+   "covered": 43,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 50
+  },
+  "branches": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/components/locale-switcher.tsx": {
+  "lines": {
+   "total": 45,
+   "covered": 45,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 45,
+   "covered": 45,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/i18n/error-messages.ts": {
+  "lines": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/i18n/locales.ts": {
+  "lines": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/i18n/messages.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 12,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 91.66
+  }
+ },
+ "apps/web/app/i18n/use-locale.ts": {
+  "lines": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 90.9
+  }
+ },
+ "apps/web/app/root.tsx": {
+  "lines": {
+   "total": 59,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 69.49
+  },
+  "statements": {
+   "total": 59,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 69.49
+  },
+  "functions": {
+   "total": 5,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 80
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/routes/home.tsx": {
+  "lines": {
+   "total": 29,
+   "covered": 29,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 29,
+   "covered": 29,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/routes/locale-layout.tsx": {
+  "lines": {
+   "total": 30,
+   "covered": 30,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 30,
+   "covered": 30,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/routes/not-found.tsx": {
+  "lines": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/routes/root-redirect.tsx": {
+  "lines": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/seo/page-meta.ts": {
+  "lines": {
+   "total": 37,
+   "covered": 37,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 37,
+   "covered": 37,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/web/app/seo/public-origin.ts": {
+  "lines": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 9,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 88.88
+  }
+ },
+ "apps/worker/src/main.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/db/system-db.ts": {
+  "lines": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/health/server.ts": {
+  "lines": {
+   "total": 109,
+   "covered": 108,
+   "skipped": 0,
+   "pct": 99.08
+  },
+  "statements": {
+   "total": 109,
+   "covered": 108,
+   "skipped": 0,
+   "pct": 99.08
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 35,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 94.28
+  }
+ },
+ "apps/worker/src/platform/logging/job-context.ts": {
+  "lines": {
+   "total": 39,
+   "covered": 39,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 39,
+   "covered": 39,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/connection.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/consumer.ts": {
+  "lines": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 14,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 92.85
+  }
+ },
+ "apps/worker/src/platform/queues/dead-letter.ts": {
+  "lines": {
+   "total": 77,
+   "covered": 77,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 77,
+   "covered": 77,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/errors.ts": {
+  "lines": {
+   "total": 55,
+   "covered": 55,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 55,
+   "covered": 55,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/job-handler.ts": {
+  "lines": {
+   "total": 144,
+   "covered": 144,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 144,
+   "covered": 144,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 34,
+   "covered": 29,
+   "skipped": 0,
+   "pct": 85.29
+  }
+ },
+ "apps/worker/src/platform/queues/metrics.ts": {
+  "lines": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/open-queue.ts": {
+  "lines": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/platform/queues/runtime.ts": {
+  "lines": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 22,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 90.9
+  }
+ },
+ "apps/worker/src/processors.ts": {
+  "lines": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "apps/worker/src/start-worker.ts": {
+  "lines": {
+   "total": 169,
+   "covered": 169,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 169,
+   "covered": 169,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 95
+  }
+ },
+ "packages/audit/src/actions.ts": {
+  "lines": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/entry-hash.ts": {
+  "lines": {
+   "total": 152,
+   "covered": 152,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 152,
+   "covered": 152,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/entry.ts": {
+  "lines": {
+   "total": 656,
+   "covered": 656,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 656,
+   "covered": 656,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 38,
+   "covered": 38,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 279,
+   "covered": 279,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/errors.ts": {
+  "lines": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 48,
+   "covered": 48,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/network.ts": {
+  "lines": {
+   "total": 87,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 87,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/redaction/denylist.ts": {
+  "lines": {
+   "total": 288,
+   "covered": 288,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 288,
+   "covered": 288,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 82,
+   "covered": 82,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/redaction/privacy.ts": {
+  "lines": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/redaction/redact.ts": {
+  "lines": {
+   "total": 122,
+   "covered": 122,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 122,
+   "covered": 122,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/redaction/user-agent.ts": {
+  "lines": {
+   "total": 175,
+   "covered": 175,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 175,
+   "covered": 175,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 51,
+   "covered": 51,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/redaction/vault.ts": {
+  "lines": {
+   "total": 194,
+   "covered": 194,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 194,
+   "covered": 194,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 51,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 96.07
+  }
+ },
+ "packages/audit/src/store/prisma-store.ts": {
+  "lines": {
+   "total": 392,
+   "covered": 392,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 392,
+   "covered": 392,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 118,
+   "covered": 118,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/audit/src/writer.ts": {
+  "lines": {
+   "total": 210,
+   "covered": 210,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 210,
+   "covered": 210,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 60,
+   "covered": 60,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/assign.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/authorise.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/generator/document.ts": {
+  "lines": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 53,
+   "covered": 53,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/generator/index.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/generator/matrix.ts": {
+  "lines": {
+   "total": 288,
+   "covered": 288,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 288,
+   "covered": 288,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 70,
+   "covered": 70,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/generator/org-scope.ts": {
+  "lines": {
+   "total": 61,
+   "covered": 61,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 61,
+   "covered": 61,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 19,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/guard.ts": {
+  "lines": {
+   "total": 261,
+   "covered": 261,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 261,
+   "covered": 261,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 97,
+   "covered": 97,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/matrix-doc.ts": {
+  "lines": {
+   "total": 73,
+   "covered": 73,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 73,
+   "covered": 73,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/account.ts": {
+  "lines": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 41,
+   "covered": 41,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/booking.ts": {
+  "lines": {
+   "total": 56,
+   "covered": 56,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 56,
+   "covered": 56,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/index.ts": {
+  "lines": {
+   "total": 125,
+   "covered": 125,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 125,
+   "covered": 125,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/organisation.ts": {
+  "lines": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/payments.ts": {
+  "lines": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/platform.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/quoting.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/permissions/types.ts": {
+  "lines": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/roles.ts": {
+  "lines": {
+   "total": 210,
+   "covered": 210,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 210,
+   "covered": 210,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/routes.ts": {
+  "lines": {
+   "total": 264,
+   "covered": 264,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 264,
+   "covered": 264,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 78,
+   "covered": 78,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/authz/src/seed-sql.ts": {
+  "lines": {
+   "total": 117,
+   "covered": 117,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 117,
+   "covered": 117,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/brand-rules.ts": {
+  "lines": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/db-tls.ts": {
+  "lines": {
+   "total": 176,
+   "covered": 176,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 176,
+   "covered": 176,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 70,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 95.71
+  }
+ },
+ "packages/config/src/durations.ts": {
+  "lines": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/entry-preflight-cli.ts": {
+  "lines": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/entry-preflight.ts": {
+  "lines": {
+   "total": 171,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 171,
+   "covered": 171,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 49,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/env-input.ts": {
+  "lines": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/environment.ts": {
+  "lines": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 33,
+   "covered": 33,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/errors.ts": {
+  "lines": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 27,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 85.18
+  }
+ },
+ "packages/config/src/file-secret-provider.ts": {
+  "lines": {
+   "total": 166,
+   "covered": 166,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 166,
+   "covered": 166,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 11,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 90.9
+  },
+  "branches": {
+   "total": 52,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 94.23
+  }
+ },
+ "packages/config/src/guards.ts": {
+  "lines": {
+   "total": 356,
+   "covered": 356,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 356,
+   "covered": 356,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 163,
+   "covered": 163,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/holders.ts": {
+  "lines": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 90.9
+  }
+ },
+ "packages/config/src/keys.ts": {
+  "lines": {
+   "total": 558,
+   "covered": 558,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 558,
+   "covered": 558,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 15,
+   "covered": 15,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 82,
+   "covered": 82,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/load-config.ts": {
+  "lines": {
+   "total": 65,
+   "covered": 65,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 65,
+   "covered": 65,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 21,
+   "covered": 19,
+   "skipped": 0,
+   "pct": 90.47
+  }
+ },
+ "packages/config/src/node-options.ts": {
+  "lines": {
+   "total": 51,
+   "covered": 51,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 51,
+   "covered": 51,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 18,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 94.44
+  }
+ },
+ "packages/config/src/placeholders.ts": {
+  "lines": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/process-env.ts": {
+  "lines": {
+   "total": 163,
+   "covered": 163,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 163,
+   "covered": 163,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 9,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 88.88
+  },
+  "branches": {
+   "total": 44,
+   "covered": 36,
+   "skipped": 0,
+   "pct": 81.81
+  }
+ },
+ "packages/config/src/schema.ts": {
+  "lines": {
+   "total": 542,
+   "covered": 542,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 542,
+   "covered": 542,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/secret-refs.ts": {
+  "lines": {
+   "total": 366,
+   "covered": 363,
+   "skipped": 0,
+   "pct": 99.18
+  },
+  "statements": {
+   "total": 366,
+   "covered": 363,
+   "skipped": 0,
+   "pct": 99.18
+  },
+  "functions": {
+   "total": 24,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 95.83
+  },
+  "branches": {
+   "total": 138,
+   "covered": 133,
+   "skipped": 0,
+   "pct": 96.37
+  }
+ },
+ "packages/config/src/secret.ts": {
+  "lines": {
+   "total": 39,
+   "covered": 39,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 39,
+   "covered": 39,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/testing/index.ts": {
+  "lines": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/testing/test-env.ts": {
+  "lines": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 84,
+   "covered": 84,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 31,
+   "covered": 31,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/tooling-env.ts": {
+  "lines": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 85,
+   "covered": 85,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 34,
+   "covered": 34,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/tooling-keys.ts": {
+  "lines": {
+   "total": 44,
+   "covered": 44,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 44,
+   "covered": 44,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/web/index.ts": {
+  "lines": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/config/src/web/load-web-config.ts": {
+  "lines": {
+   "total": 49,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 49,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 21,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 95.23
+  }
+ },
+ "packages/config/src/web/web-schema.ts": {
+  "lines": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 62,
+   "covered": 62,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/billable-weight.ts": {
+  "lines": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 42,
+   "covered": 42,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 25,
+   "covered": 25,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/engine.ts": {
+  "lines": {
+   "total": 102,
+   "covered": 102,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 102,
+   "covered": 102,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 25,
+   "covered": 25,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/errors.ts": {
+  "lines": {
+   "total": 28,
+   "covered": 28,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 28,
+   "covered": 28,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/lines/base-freight.ts": {
+  "lines": {
+   "total": 30,
+   "covered": 30,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 30,
+   "covered": 30,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/rounding.ts": {
+  "lines": {
+   "total": 38,
+   "covered": 38,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 38,
+   "covered": 38,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/state.ts": {
+  "lines": {
+   "total": 149,
+   "covered": 149,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 149,
+   "covered": 149,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 64,
+   "covered": 64,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/pricing/src/types.ts": {
+  "lines": {
+   "total": 120,
+   "covered": 120,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 120,
+   "covered": 120,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/audit/descriptor.ts": {
+  "lines": {
+   "total": 58,
+   "covered": 58,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 58,
+   "covered": 58,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/classification/registry.ts": {
+  "lines": {
+   "total": 336,
+   "covered": 336,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 336,
+   "covered": 336,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 20,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/correlation/correlation-id.ts": {
+  "lines": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/app-error.ts": {
+  "lines": {
+   "total": 74,
+   "covered": 74,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 74,
+   "covered": 74,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue-entry.ts": {
+  "lines": {
+   "total": 14,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "statements": {
+   "total": 14,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "functions": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "branches": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  }
+ },
+ "packages/shared/src/errors/catalogue/audit.ts": {
+  "lines": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/carriers.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/customs.ts": {
+  "lines": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/documents.ts": {
+  "lines": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/identity.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/index.ts": {
+  "lines": {
+   "total": 66,
+   "covered": 66,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 66,
+   "covered": 66,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/orders.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/organisations.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/payments.ts": {
+  "lines": {
+   "total": 24,
+   "covered": 24,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 24,
+   "covered": 24,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/pickups.ts": {
+  "lines": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/platform.ts": {
+  "lines": {
+   "total": 120,
+   "covered": 120,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 120,
+   "covered": 120,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/pricing.ts": {
+  "lines": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 17,
+   "covered": 17,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/quotes.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/shipments.ts": {
+  "lines": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 16,
+   "covered": 16,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/errors/catalogue/tracking.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/http/credentials.ts": {
+  "lines": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 21,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/ids/server-controlled.ts": {
+  "lines": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/ids/uuidv7.ts": {
+  "lines": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 46,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/logging/index.ts": {
+  "lines": {
+   "total": 66,
+   "covered": 66,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 66,
+   "covered": 66,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/logging/logger.ts": {
+  "lines": {
+   "total": 254,
+   "covered": 250,
+   "skipped": 0,
+   "pct": 98.42
+  },
+  "statements": {
+   "total": 254,
+   "covered": 250,
+   "skipped": 0,
+   "pct": 98.42
+  },
+  "functions": {
+   "total": 27,
+   "covered": 27,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 97,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 89.69
+  }
+ },
+ "packages/shared/src/logging/outbound.ts": {
+  "lines": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 14,
+   "covered": 14,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/logging/own-property.ts": {
+  "lines": {
+   "total": 63,
+   "covered": 61,
+   "skipped": 0,
+   "pct": 96.82
+  },
+  "statements": {
+   "total": 63,
+   "covered": 61,
+   "skipped": 0,
+   "pct": 96.82
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 27,
+   "covered": 24,
+   "skipped": 0,
+   "pct": 88.88
+  }
+ },
+ "packages/shared/src/logging/redaction.ts": {
+  "lines": {
+   "total": 261,
+   "covered": 261,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 261,
+   "covered": 261,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 18,
+   "covered": 18,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 114,
+   "covered": 110,
+   "skipped": 0,
+   "pct": 96.49
+  }
+ },
+ "packages/shared/src/logging/security-event.ts": {
+  "lines": {
+   "total": 192,
+   "covered": 190,
+   "skipped": 0,
+   "pct": 98.95
+  },
+  "statements": {
+   "total": 192,
+   "covered": 190,
+   "skipped": 0,
+   "pct": 98.95
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 21,
+   "covered": 20,
+   "skipped": 0,
+   "pct": 95.23
+  }
+ },
+ "packages/shared/src/logging/security-mark.ts": {
+  "lines": {
+   "total": 23,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 91.3
+  },
+  "statements": {
+   "total": 23,
+   "covered": 21,
+   "skipped": 0,
+   "pct": 91.3
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 60
+  }
+ },
+ "packages/shared/src/logging/serializers/error.ts": {
+  "lines": {
+   "total": 195,
+   "covered": 191,
+   "skipped": 0,
+   "pct": 97.94
+  },
+  "statements": {
+   "total": 195,
+   "covered": 191,
+   "skipped": 0,
+   "pct": 97.94
+  },
+  "functions": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 88,
+   "covered": 79,
+   "skipped": 0,
+   "pct": 89.77
+  }
+ },
+ "packages/shared/src/logging/serializers/prisma-error.ts": {
+  "lines": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 83,
+   "covered": 83,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 34,
+   "covered": 34,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/logging/string-redaction.ts": {
+  "lines": {
+   "total": 589,
+   "covered": 587,
+   "skipped": 0,
+   "pct": 99.66
+  },
+  "statements": {
+   "total": 589,
+   "covered": 587,
+   "skipped": 0,
+   "pct": 99.66
+  },
+  "functions": {
+   "total": 37,
+   "covered": 37,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 182,
+   "covered": 169,
+   "skipped": 0,
+   "pct": 92.85
+  }
+ },
+ "packages/shared/src/logging/types.ts": {
+  "lines": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/money/currency.ts": {
+  "lines": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 59,
+   "covered": 59,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 13,
+   "covered": 13,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/money/errors.ts": {
+  "lines": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/money/money.ts": {
+  "lines": {
+   "total": 212,
+   "covered": 212,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 212,
+   "covered": 212,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 88,
+   "covered": 88,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/money/ratio.ts": {
+  "lines": {
+   "total": 112,
+   "covered": 112,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 112,
+   "covered": 112,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 57,
+   "covered": 57,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/audit.ts": {
+  "lines": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 8,
+   "covered": 8,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/documents.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/index.ts": {
+  "lines": {
+   "total": 87,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 87,
+   "covered": 87,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/job-options.ts": {
+  "lines": {
+   "total": 47,
+   "covered": 47,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 47,
+   "covered": 47,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 5,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 80
+  }
+ },
+ "packages/shared/src/queues/notifications.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/payload-v2.ts": {
+  "lines": {
+   "total": 147,
+   "covered": 147,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 147,
+   "covered": 147,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 39,
+   "covered": 38,
+   "skipped": 0,
+   "pct": 97.43
+  }
+ },
+ "packages/shared/src/queues/payments.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/pickups.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/platform.ts": {
+  "lines": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/queue-definition.ts": {
+  "lines": {
+   "total": 29,
+   "covered": 29,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 29,
+   "covered": 29,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/shipments.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/queues/tracking.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/units/billable-weight.ts": {
+  "lines": {
+   "total": 132,
+   "covered": 132,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 132,
+   "covered": 132,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 7,
+   "covered": 7,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 32,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/shared/src/units/units.ts": {
+  "lines": {
+   "total": 129,
+   "covered": 129,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 129,
+   "covered": 129,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 31,
+   "covered": 31,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "packages/ui/src/skip-link.tsx": {
+  "lines": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 23,
+   "covered": 23,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/app-env.ts": {
+  "lines": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 9,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/credential-plan.ts": {
+  "lines": {
+   "total": 100,
+   "covered": 100,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 100,
+   "covered": 100,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 5,
+   "covered": 5,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 52,
+   "covered": 52,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/deferred-provisioner.ts": {
+  "lines": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 1,
+   "covered": 1,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/index.ts": {
+  "lines": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 10,
+   "covered": 10,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/run-demo-seed.ts": {
+  "lines": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 40,
+   "covered": 40,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/demo/users.ts": {
+  "lines": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 35,
+   "covered": 35,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/framework/contracts.ts": {
+  "lines": {
+   "total": 218,
+   "covered": 218,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 218,
+   "covered": 218,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/framework/hash.ts": {
+  "lines": {
+   "total": 67,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 67,
+   "covered": 67,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 34,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 94.11
+  }
+ },
+ "prisma/seed/framework/index.ts": {
+  "lines": {
+   "total": 6,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "statements": {
+   "total": 6,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "functions": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  },
+  "branches": {
+   "total": 1,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 0
+  }
+ },
+ "prisma/seed/framework/runner.ts": {
+  "lines": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 156,
+   "covered": 156,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 46,
+   "covered": 45,
+   "skipped": 0,
+   "pct": 97.82
+  }
+ },
+ "prisma/seed/framework/sql.ts": {
+  "lines": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 86,
+   "covered": 86,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 11,
+   "covered": 11,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 26,
+   "covered": 26,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/framework/validate.ts": {
+  "lines": {
+   "total": 75,
+   "covered": 75,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 75,
+   "covered": 75,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 3,
+   "covered": 3,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 47,
+   "covered": 46,
+   "skipped": 0,
+   "pct": 97.87
+  }
+ },
+ "prisma/seed/framework/version-store.ts": {
+  "lines": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 54,
+   "covered": 54,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 2,
+   "covered": 2,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 4,
+   "covered": 4,
+   "skipped": 0,
+   "pct": 100
+  }
+ },
+ "prisma/seed/index.ts": {
+  "lines": {
+   "total": 155,
+   "covered": 151,
+   "skipped": 0,
+   "pct": 97.41
+  },
+  "statements": {
+   "total": 155,
+   "covered": 151,
+   "skipped": 0,
+   "pct": 97.41
+  },
+  "functions": {
+   "total": 11,
+   "covered": 9,
+   "skipped": 0,
+   "pct": 81.81
+  },
+  "branches": {
+   "total": 35,
+   "covered": 32,
+   "skipped": 0,
+   "pct": 91.42
+  }
+ },
+ "prisma/seed/migrator-connection.ts": {
+  "lines": {
+   "total": 244,
+   "covered": 242,
+   "skipped": 0,
+   "pct": 99.18
+  },
+  "statements": {
+   "total": 244,
+   "covered": 242,
+   "skipped": 0,
+   "pct": 99.18
+  },
+  "functions": {
+   "total": 12,
+   "covered": 12,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 52,
+   "covered": 49,
+   "skipped": 0,
+   "pct": 94.23
+  }
+ },
+ "prisma/seed/reference/authz-parity-step.ts": {
+  "lines": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 89,
+   "covered": 89,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 6,
+   "covered": 6,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 30,
+   "covered": 28,
+   "skipped": 0,
+   "pct": 93.33
+  }
+ },
+ "prisma/seed/reference/index.ts": {
+  "lines": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "statements": {
+   "total": 22,
+   "covered": 22,
+   "skipped": 0,
+   "pct": 100
+  },
+  "functions": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  },
+  "branches": {
+   "total": 0,
+   "covered": 0,
+   "skipped": 0,
+   "pct": 100
+  }
+ }
+}

@@ -362,3 +362,197 @@ One citation note: the twin's line numbers for `state.ts`, `engine.ts` and `roun
 - **R1-n10 (security side):** the M2 task that prices from billable weight.
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** 0 Critical, 0 High, 0 Medium. New: PR076-SEC-01 LOW (pricing purity misses `uuidv7` from the shared root, test-folder modules and respelled globals), PR076-SEC-02 LOW (Money helpers check results, not operands), PR076-SEC-03..06 INFO. No lint control is weakened (58-path effective-config diff with a mutation control). Fixes for 01, 02 and 03 validated on scratch copies, preferred in this PR's fix cycle with code review R1-m1..m3. Conditions: C1 lane B at the pushed head (unit, negative fixtures, coverage quotes), C2 rename and merge-ref confirmation, C3 security delta round if owned paths change or 01/02 are fixed |
+
+---
+
+# Round 2 (security delta round, C3): `e01979b..82b5023`, 2026-11-20
+
+| Field | Value |
+|---|---|
+| Head | 82b502331ca777b0a12aaa9d61f57f1c7d876290 |
+| Delta | Two fix commits on `e01979b`: `f6de957` (fix cycle 1: purity reach, compound money-arith, runtime re-validation, Money operands; D-TASK076-11..15) and `82b5023` (fix cycle 2: `money-arith` string exemption via the checker, purity and state residuals; code review R2-M1, R2-n1..n6). `e01979b..82b5023`: 32 files, +807 / -114. |
+| Owned paths changed since `e01979b` | 23 of the 42 owned paths main's checker counts for `5145d52..82b5023`: `tools/eslint-rules/{money-arith,pricing-purity}.mjs`, `tools/lint/negative-fixtures.test.ts`, the new `tools/lint/pricing-purity-shared.test.ts` and 19 fixtures under `tests/fixtures/lint/`. `eslint.config.mjs`, `tools/eslint-rules/index.mjs` and `tools/lint/lint-fixtures.mjs` are unchanged. Main's classifier: `security_paths=false` (68 changed paths) |
+| Lane B evidence | None read for `82b5023`. The coordinator reports lane B passed on `e01979b` and was queued for `f6de957`. C1 applies to `82b5023` |
+| Reviewer / method | security-analyst, 2026-11-20, round 2. Same host rule. Single-process Node 24 probes on `git archive` extracts of `f6de957`, `e01979b` and `82b5023` (junctioned `node_modules`, `@platform/*` pointing at each extract): the 40 round-1 purity probes, 38 new purity probes, the fixture harness script on three heads (report differentials), 34 type-aware `money-arith` probes with the project service, the 114-row runtime Money/engine probe plus 10 fix-cycle-2 rows through the type-stripping hook, and a one-process emulation of the new pin test with mutants. Nothing ran in the PR worktree |
+
+## R2.1 Summary
+
+Fix cycle 1 (`f6de957`) closes the round-1 findings in the form recommended, and every result below was measured on it:
+
+- **PR076-SEC-01 closed for every reported form.** All 36 bypass probes from round 1 behave as the scratch candidate predicted: 31 are reported, and the 5 left are the documented limits or other rules (`Intl`, `new Function`, `Event().timeStamp`, `import.meta`, timers). The 8 real pricing sources lint clean.
+- **PR076-SEC-02 closed.** The 114-row runtime probe gives exactly the refusals of the validated candidate on all 19 forged-input rows. No valid row changed.
+- **PR076-SEC-03, -04, -05 closed.** Own-key rate reading (both or neither keys refused), codes interpolated only after validation, and copy-once-then-validate (an accessor now yields the validated value in the result, never another one).
+- **No fixture lost a finding.** The fixture harness script on `e01979b` and `f6de957`: 398 common files, 0 findings lost or gained, 13 new `bad-*` files each with exactly its rule. The `effective`, `ignored`, `resolver`, `probes` and `localRules` sections are identical. `eslint.config.mjs`, `tools/eslint-rules/index.mjs` and `tools/lint/lint-fixtures.mjs` are unchanged, so the round-1 effective-configuration diff still holds.
+
+Two new items on `f6de957`:
+
+- **PR076-SEC-08 (LOW):** the `+=` string exemption in `money-arith` tests TypeScript 5 flag values. Under TypeScript 6.0.3 they mean Undefined | BigInt | Union | Intersection, so a `Minor`-typed accumulator (`let total = first.amount; total += x.amount`) is no longer reported. `e01979b` reported it. String building is reported instead. This is code review R2-M1.
+- **PR076-SEC-07 (INFO):** residual purity bypasses that need a deliberately unusual spelling:
+  - string-named specifiers (code review R2-n2, graded here);
+  - an `@platform/shared` **subpath**: `@platform/shared/queues` exports `retryDelayMs`, whose default `random` is `Math.random`;
+  - a `declare const Date` / `process` / `Math` that shadows the global;
+  - `navigator`.
+
+  A four-edit hardening was validated on a scratch copy.
+
+Fix cycle 2 (`82b5023`, the head this round binds to) closes PR076-SEC-08 and most of PR076-SEC-07:
+
+- **PR076-SEC-08 closed.** The `+=` exemption now asks the checker (assignable to `string`, not `any`) and never exempts a `Minor`-branded left side. Both regressed accumulator shapes are reported again, string building is allowed, and a `string | number` left side is now reported.
+- **PR076-SEC-07 partly closed.** String-named specifiers and `navigator` are reported, and `typeof Date` in a type position is no longer a false positive. Still open (INFO): the `@platform/shared/queues` subpath and `declare` shadowing. The new pin test for `IMPURE_SHARED_EXPORTS` covers the shared root only, and only direct textual forms.
+- **No regression from fix cycle 2.** The fixture harness script on `82b5023`: 0 findings lost against either earlier head (411 and 398 common files); the 5 new fixtures report as intended (`ok-string-building.ts` clean). The 114-row runtime probe is identical to `f6de957`. The round-1 purity probes are unchanged (31 of 36).
+
+## R2.2 Round-1 findings: status
+
+| ID | Status at `f6de957` (unchanged at `82b5023`) | Evidence |
+|---|---|---|
+| PR076-SEC-01 (LOW) | Closed for (a), (b) and (c) | 31 of 36 round-1 bypass probes reported (as the candidate), all 3 positive controls report, clean control clean. New probes: renamed `uuidv7`, `export { uuidv7 } from`, default and dynamic imports of the root, `../tests/`, `./tests`, `*.test.js`, `__tests__/`, `export *` and `import()` of a test module, `.mjs` sources, destructured `random`, `Math?.random`, `new Date(Date)` all reported; `import x = require('./tests/…')` is `@typescript-eslint/no-require-imports`; `./testing/` and pure shared imports are not reported. Residuals: PR076-SEC-07 |
+| PR076-SEC-02 (LOW) | Closed | `operand()` in `assertSameCurrency` (so `add`/`sub`/`compare`), `negate`, `equals`, `isZero`, `isNegative`, `mulRatio`, `allocate`, `convert`, `toMajorString`; `isMoney` reads own data properties. The 19 forged-input rows of the 114-row probe fail with `MONEY_INVALID` exactly as the round-1 candidate did; every valid row (20,000-case `allocate` fuzz, conversions, rounding, overflow, engine determinism) is unchanged |
+| PR076-SEC-03 (INFO) | Closed | `Object.hasOwn` for `bps` and `decimal`, both or neither refused: an inherited `bps` and `{ bps, decimal }` are `PRICING_CONFIG_INVALID` |
+| PR076-SEC-04 (INFO) | Closed | A malformed line code is refused before any message names it (`PricingError`, generic text); currencies are validated by `operand()` before the mismatch message. Note: `ruleKey` is still interpolated after a non-empty check only, which matches the contract (openapi `rule_key` has no grammar) and reaches the error log only |
+| PR076-SEC-05 (INFO) | Closed | Every field is read once from an own property into a copy that is validated and frozen. The flipping-getter probes now store the value that was validated (`effectMinor: 1`; line amounts `1`), never a second read |
+| PR076-SEC-06 (INFO) | Open, routed | Unchanged by design (route: the first `@platform/carriers` subpath export) |
+
+## R2.3 New findings
+
+| ID | Severity | CWE / OWASP 2021 | Where (`f6de957`) | Title | Owner, due |
+|---|---|---|---|---|---|
+| PR076-SEC-07 | INFO | CWE-693 / A04 | `tools/eslint-rules/pricing-purity.mjs:29`, `:160-163`, `:176-185`, `:197-209`; `packages/shared/src/queues/job-options.ts:19` | Residual purity bypasses: string-named specifiers, `@platform/shared` subpaths, `declare` shadowing, `navigator` | Partly closed at `82b5023` (R2.4); open parts before TASK-080 |
+| PR076-SEC-08 | LOW | CWE-697 / A04 | `tools/eslint-rules/money-arith.mjs:22`, `:148` | The `+=` string exemption tests TypeScript 5 flag values, so `Minor` accumulators pass under TypeScript 6 | Closed at `82b5023` (fix cycle 2, code review R2-M1) |
+
+### PR076-SEC-08 (LOW): the `+=` string exemption tests TypeScript 5 flag values
+
+**Where.** `STRING_LIKE_FLAGS = 4 | 128 | 134_217_728 | 268_435_456` (`money-arith.mjs:22`) is meant as String | StringLiteral | TemplateLiteral | StringMapping. In the installed TypeScript 6.0.3 those bits are `Undefined` (4), `BigInt` (128), `Union` (134217728) and `Intersection` (268435456); String-like is 12583968. `isStringTyped(node.left)` (`:127-136`, the comparison at `:135`) is therefore true for every intersection (`Minor` is `number & { __brand }`), union and bigint left side, and false for `string`. When it is true, the `AssignmentExpression` visitor returns before either branch looks at the operands (`:148`).
+
+**Probe** (real configuration, project service, real `Minor`):
+
+| Form | `e01979b` | `f6de957` |
+|---|---|---|
+| `let total = money(0, 'USD').amount; for (…) total += x.amount` | reported | **not reported** |
+| `let t = a; t += b` (`a`, `b`: `Minor`) | reported | **not reported** |
+| `let total = 0; for (…) total += x.amount` | not reported | reported |
+| `let s = 'x'; s += m.amount` (string building, meant to be allowed) | allowed | **reported** |
+| `s += m.amount` with `s: string \| number` | not reported | not reported (exempted as a union) |
+| `t *= 2` with `t: Minor` | reported | reported (the exemption is `+=` only) |
+
+**Impact.** A money lint guardrail regresses against the previous head for the exact accumulator shape PR #2 m10 targeted. Against main (`5145d52`, name-only branch, left side only) nothing is weaker, and the runtime helpers now refuse non-integer operands (PR076-SEC-02), so a float that such code produces still fails at the next helper. Impact medium × likelihood low = LOW. It is code review R2-M1 (MAJOR there, a merge condition).
+
+**Remediation.** Never hard-code `TypeFlags`. Use the `typescript` module's `ts.TypeFlags.StringLike` (or `checker.isTypeAssignableTo(type, checker.getStringType())`), require every union constituent to be string-like, and exempt only a left side that does not carry the `Minor` brand. **Test:** a typed bad fixture with a `Minor` accumulator (`let t: Minor = …; t += k`) and a typed ok fixture `let s = ''; s += m.amount`.
+
+### PR076-SEC-07 (INFO): residual purity bypasses
+
+**Probe** (38 new cases on `f6de957`; the fixed forms are in R2.2). Not reported by any control:
+- **String-named specifiers** (code review R2-n2): `import { 'uuidv7' as id } from '@platform/shared'` and `export { 'uuidv7' as id } from '@platform/shared'`. The visitors collect only `Identifier` names (`:176-185`).
+- **`@platform/shared` subpaths.** The rule matches the root only (`:160`), and the boundaries allow-list admits `@platform/shared/**` for pricing (`eslint.config.mjs:674`; only `logging` is denied). `@platform/shared/queues` exports `retryDelayMs(attemptsMade, base, random = Math.random)` (`job-options.ts:19`), so `retryDelayMs(1)` is randomness inside pricing.
+- **Ambient shadowing.** `declare const process: …`, `declare const Date: DateConstructor`, `declare const Math: Math` make the references resolve to a module-scope variable, so the global-scope pass (`:197-209`) never sees them; at run time they are the real globals.
+- **`navigator`** (code review R2-n1): a Node 24 global with `language`, `platform`, `hardwareConcurrency`.
+- **Left as limits** (contrived, or another rule's business): `(new Date(0).constructor as DateConstructor).now()`, locale-sensitive `localeCompare` / `toLocaleUpperCase` (not covered by `no-tofixed-tolocalestring`).
+- **False positive** (harmless): `type T = typeof Date` (code review R2-n3).
+
+**Grade.** INFO: each form is a deliberately unusual spelling that a reviewer sees, unlike the natural forms of PR076-SEC-01. R2-n2 is graded INFO accordingly.
+
+**Remediation (validated on a scratch copy of `f6de957`'s rule).** Four edits:
+1. add `navigator` to `ALWAYS_IMPURE`;
+2. refuse any `@platform/shared/<subpath>` import in pricing (pricing needs the root only);
+3. read `imported`/`local` names as `.name` or, for a string literal, `.value`;
+4. report `VariableDeclaration[declare=true] > VariableDeclarator` whose name is a watched global, and any `declare global` block.
+
+Result: the subpath, both string-named forms, the three `declare` forms and `navigator` are reported; the 40 round-1 probes are unchanged (31 of 36 plus the controls); the 8 real pricing sources stay clean; every pricing-purity fixture (18 `bad-*`) reports exactly once, and `ok-pure.ts` stays clean. **Test:** one `bad-*` fixture each.
+
+## R2.4 Fix cycle 2 (`f6de957..82b5023`)
+
+The commit changes `tools/eslint-rules/{money-arith,pricing-purity}.mjs`, `packages/pricing/src/{state,engine,index}.ts`, adds `tools/lint/pricing-purity-shared.test.ts`, 5 fixtures and their rows. `eslint.config.mjs`, `tools/eslint-rules/index.mjs` and `tools/lint/lint-fixtures.mjs` are unchanged. `money-arith` now imports `typescript` (already the repository compiler; the flag it reads, `TypeFlags.Any`, comes from the installed module).
+
+**`money-arith` (34 typed probes, real configuration, project service, real `Minor`):**
+
+| Form | `e01979b` | `f6de957` | `82b5023` |
+|---|---|---|---|
+| `let total = money(0, 'USD').amount; … total += x.amount` | reported | not reported | **reported** |
+| `let t = a; t += b` (`Minor`) | reported | not reported | **reported** |
+| `let total = 0; … total += x.amount` / `-=` / `*=` | not reported | reported | reported |
+| `s += m.amount` with `s: string \| number` | not reported | not reported | **reported** |
+| `let s = 'x'; s += m.amount` (string building) | allowed | reported | **allowed** |
+| ``s += `${m.amount}` ``, `s += 'x'` | allowed | allowed | allowed |
+| `Number(a)`, `+a`, `a.valueOf()`, `<number>a`, `const n: number = a` | not reported | not reported | not reported (documented limit) |
+
+The 13 other reported round-1 forms (parameters, locals, `T extends Minor`, `reduce`, a `Minor` property, `a ?? 0`, `as`/`satisfies`, destructured, tuple, `Math.round(a * 1.15)`, `a++`) are reported on all three heads, and the two clean controls stay clean.
+
+**`pricing-purity` (40 round-1 + 38 round-2 probes):** the round-1 set is unchanged (31 of 36 plus controls). Of the round-2 set:
+- Now reported: `import { 'uuidv7' as id }`, `export { 'uuidv7' as id } from '@platform/shared'`, `navigator.language`.
+- Now allowed: `type T = typeof Date` (and `instanceof Date`, per the rule header).
+- **Still not reported:**
+  - `import { retryDelayMs } from '@platform/shared/queues'`, with `retryDelayMs(1)` calling `Math.random`. The boundaries allow-list admits `@platform/shared/**`, and the rule matches the root only;
+  - `declare const process`, `declare const Date`, `declare const Math`;
+  - the round-2 limits: the constructor cast, `localeCompare` and `toLocaleUpperCase`.
+
+**The pin test** (`tools/lint/pricing-purity-shared.test.ts`, emulated in one Node process on the extract):
+- On `82b5023` it passes: 14 root modules, only `ids/uuidv7.js` impure, its exports as listed.
+- A mutant that adds `Date.now()` to `money/money.ts` is caught.
+- Not caught:
+  - a mutant that adds `const { getRandomValues } = globalThis.crypto`, because the regex needs `crypto.`;
+  - a mutant that adds a bare `Date()` call;
+  - a root module that imports `uuidv7` from `../ids/uuidv7.js` (transitive, because the regex looks for `from 'uuid'`);
+  - the `queues` subpath, which is outside the scan, although `job-options.ts` matches the regex.
+
+It is a useful tripwire, not proof. It is a test-only file; it adds no gate and no suppression.
+
+**Runtime (`state.ts`, `engine.ts`):**
+- The 114-row probe is identical to `f6de957`.
+- 10 new rows:
+  - A step returning `null`, `{}` or a non-array `lines` throws `PricingError PRICING_INPUT_INVALID` (on `f6de957` a raw `TypeError`).
+  - A `__proto__` inputs key from `JSON.parse` (value `null` or `"x"`) is refused instead of silently dropped. A `constructor` key is kept as data.
+  - `rateRatio(null)` and `isZero` of a forged amount are refused.
+- One residual (no ID, fail-closed): `checkedState` reads `lines` once and `runPricing` reads it again. A step returning an accessor-backed `lines` that flips from an array to a string still ends in a raw `TypeError`. Steps are engine code, and nothing invalid reaches the result. Returning a snapshot of the checked arrays would close it.
+
+**Status of the round-2 items at `82b5023`:**
+
+| ID | Status |
+|---|---|
+| PR076-SEC-07 (INFO) | Partly closed: string-named specifiers and `navigator` closed. Open: `@platform/shared` subpaths (refuse `@platform/shared/` in the rule, or narrow the boundaries allow-list for pricing to the root) and `declare` shadowing (report a `declare` declarator named like a watched global, and `declare global`). The validated four-edit patch's edits 2 and 4 still apply. Widening the pin test to subpaths and transitive relative imports is optional once the subpath refusal exists |
+| PR076-SEC-08 (LOW) | Closed |
+
+## R2.5 Code review twin
+
+Round 2 is on main at `d28b0631`: CHANGES_REQUESTED on `f6de957`, one MAJOR (R2-M1), 7 NITs.
+- **R2-M1:** concur; rated LOW in PR076-SEC-08, reproduced independently (flag values read from the installed TypeScript 6.0.3).
+- **R2-n2:** graded INFO in PR076-SEC-07, which adds the `@platform/shared/queues` subpath and `declare` shadowing (not in the twin's list).
+- **R2-n1, R2-n3:** concur (in PR076-SEC-07).
+- **R2-n4** (`__proto__` input key), **R2-n5** (raw `TypeError` for a malformed state) and **R2-n6** (pin test for `IMPURE_SHARED_EXPORTS`): taken in fix cycle 2. R2-n4 and R2-n5 are closed by probe (R2.4; one fail-closed check-then-use residual noted there). The R2-n6 pin is a tripwire with the limits listed in R2.4, and it does not cover the subpath of PR076-SEC-07.
+- R2.4 closure table: concur with every row.
+
+## R2.6 Record binding and simulation
+
+- **The binding.** This round's `Head` row names `82b5023`. The round-1 row (`e01979b`) stays in the file. The checker passes on any named PR commit with no owned change after it, so only `82b5023` can satisfy it. The last `Verdict` row (below) is this round's.
+- **When it is voided.** Any owned-path change after `82b5023` voids the binding (a further lint, fixture or `tools/lint` edit for PR076-SEC-07 included), and needs a round 3. A `packages/**`-only change keeps it.
+
+**Simulation.** Main's real `check-security-owned-paths.mjs` (copied from `origin/main`, tip `d1054cf` when this round was written) in a `--shared` sparse clone. Scenario commits were built by plumbing; the record was placed as `PR-9999-TASK-076-security-review.md`, `--base 5145d52`.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 Merge ref: rounds 1 and 2 committed on main, merged with `82b5023` | pass | pass (satisfied by `82b5023`) |
+| S2 Control: the round-1-only record (as on main now), head `82b5023` | fail | fail (`e01979b`, owned paths changed after it) |
+| S3 Control: the round-2 `Head` row names `f6de957` | fail | fail (owned paths changed after it) |
+| S4 Control: `tools/eslint-rules/pricing-purity.mjs` changed after `82b5023` | fail | fail |
+| S5 `packages/pricing/src/state.ts` changed after `82b5023` | pass | pass (unowned) |
+| S6 Control: a later `FAIL` verdict row | fail | fail |
+| S7 Control: no record | fail | fail (`missing`) |
+| S8 Control: the placeholder name `PR-pending-TASK-076-…` | fail | fail |
+| S9 Control: the round-2 `Head` row names a main commit | fail | fail |
+
+9 of 9 as expected. The file has two `Head` rows (one per round) and two `Verdict` rows; this round's is the last table row of the file.
+
+## R2.7 Conditions and routes
+
+**Conditions (replace round 1's).**
+- **C1.** Lane B evidence at `82b5023`, quoted in the PR body:
+  - `unit`, including `negative-fixtures` and the new `pricing-purity-shared` pin;
+  - the coverage gate, with the `packages/pricing` and `packages/shared/src/money` figures (PR40-SEC-05).
+  - The hosted `security-integration` job is still not selected (`security_paths=false`).
+- **C2.** Rename the record, then confirm the merge ref contains it (D-ORCH-136/138).
+- **C3.** Another security delta round only if an owned path changes after `82b5023`.
+
+**Routes.**
+- **PR076-SEC-07 (open parts: `@platform/shared` subpaths, `declare` shadowing):** this PR if a further fix cycle happens anyway (that cycle is then C3); otherwise before TASK-080 adds the next pricing step.
+- **PR076-SEC-06:** unchanged (the first `@platform/carriers` subpath export).
+- **R1-n10 (security side):** unchanged (the M2 billable-weight pricing task).
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 at `82b5023`: 0 Critical, 0 High, 0 Medium open. PR076-SEC-01..05 (round 1) and PR076-SEC-08 LOW (TypeScript 6 flag values in the `money-arith` string exemption, new on `f6de957`) closed. Open: PR076-SEC-07 INFO (purity residuals: `@platform/shared` subpaths, `declare` shadowing), PR076-SEC-06 INFO (routed). No fixture lost a finding across `e01979b`, `f6de957` and `82b5023`. Conditions: C1 lane B at `82b5023` with the coverage quotes, C2 rename and merge-ref confirmation, C3 a further round only if an owned path changes after `82b5023` |

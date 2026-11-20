@@ -32,7 +32,7 @@
 ## Amendment after the P3 security review (2026-11-12, `docs/05-quality/security/P3-architecture-security-review.md` SEC-P3-12, SEC-P3-08 item 2; threat-model T-73, R-18; D-ARCH-025)
 
 1. **The worker never trusts tenant context from Redis (SEC-P3-12, MEDIUM; supersedes §3 "Payload contract").** Payload contract **v2** (v1 is never implemented): `{ v: 2, kind, id, correlation_id, trace_context }` — identifiers only, no `org_id`, no `actor_id`, no business data. `kind ∈ {outbox_event, saga, shipment, order, pickup, document, payment, tracking_poll, notification, quote}` names the authoritative row; `id` is its UUID (for `outbox_event` jobs this is the `outbox_events.id`, for saga steps the `saga_id`; the step is part of the deterministic `jobId`, §2).
-2. **Context is resolved from PostgreSQL.** The processor calls the allow-listed `SECURITY DEFINER` function `platform.job_context(kind, id) → (org_id, actor_type, actor_id)` (data-model.md §4.5, owner `platform_definer`, catalog test C11) **before** opening `withTenantTx`, and opens the tenant transaction with the resolved `org_id`. No row → `NonRetryableError('JOB_CONTEXT_NOT_FOUND')` → DLQ. A forged or edited job cannot make the worker act inside another tenant's RLS context, because the context never comes from the job. Any processor that receives a payload carrying `org_id` (schema violation) sends it to the DLQ as non-retryable with security event `job_context_mismatch`.
+2. **Context is resolved from PostgreSQL.** The processor calls the allow-listed `SECURITY DEFINER` function `platform.job_context(kind, id) → (org_id, actor_type, actor_id)` (data-model.md §4.5, owner `platform_definer`, catalog test C11) **before** opening `withTenantTx`, and opens the tenant transaction with the resolved `org_id`. No row → `NonRetryableError('JOB_CONTEXT_NOT_FOUND')` → DLQ. A forged or edited job cannot make the worker act inside another tenant's RLS context, because the context never comes from the job. Any processor that receives a payload carrying `org_id` (schema violation) sends it to the DLQ as non-retryable with security event `job_context_mismatch`. *Amended 2026-11-20 by amendment 4: "no row" means that the identifiers name nothing. A soft-deleted row, or a row of a soft-deleted organisation, resolves and the job runs (items 17–19); the function returns a fourth column, `org_deleted`.*
 3. **Payloads are Joi-validated at dequeue** against the per-queue schema in `packages/shared/queues.ts` (`allowUnknown: false`); invalid → DLQ non-retryable `PAYLOAD_INVALID`. The e2e suite asserts the schema on every job observed in Redis (SEC-TC-50).
 4. **Valkey ACL users per service** (`api`, `worker`; no default user; key-prefix limits) locally and in AWS (platform.md §2.2; ADR-0010 amendment 7). Writing to the `bull:*` prefix requires the `worker` or `api` ACL user; the `requirepass`-only local setup is withdrawn.
 5. **Schedulers** that iterate organisations (§3) read the organisation list from PostgreSQL and enqueue one `kind`/`id` job per aggregate; they never embed `org_id` either. Verification: SEC-TC-20 (now mandatory), SEC-TC-50.
@@ -130,6 +130,64 @@ The bounds are three constants exported from `@platform/shared/queues` (ages in 
     - **A Redis writer.** Whoever can write `bull:*` can fill memory directly, and a forged job can carry data of any size. The budget assumes payloads the producer validated. The per-service ACL users are the control against a writer (threat-model T-73, T-92), and the memory alarms are the detection.
     - **Business state.** Removing a failed job or a record loses no committed state. PostgreSQL stays the source of truth (the outbox row without a `processed_events` row, the saga step, the notification log status), and nothing in Valkey is a system of record (data-model §1.4).
 16. **Verification.** TASK-039: the `jobOptions` pin; integration cases on Valkey 8 for the failed count, the sweep by age on a quiet queue, the record trim at write time and the rule of item 9 (a retained failed job has its record); the ACL case of PR64-SEC-11 also runs one sweep as the `worker` user; unit cases for the counter; the PR body quotes `MEMORY USAGE` of one failed job key and one record key. TASK-214: a lane A test pins the four alarm names, expressions, durations and labels and derives 1,600 from `DEAD_LETTER_RETENTION`; a unit case for the start-up check. TASK-204: two consecutive due polls of one shipment both run.
+
+## Amendment 4 (2026-11-20, TASK-047 dispatch gate): a soft-deleted row or organisation is still a tenant context (D-SD-003 item 6, D-SD-004 item 8, D-PM-072 "Not applied here"; D-ARCH-180)
+
+Items continue at 17.
+
+**Question.** Item 2 says "No row → `JOB_CONTEXT_NOT_FOUND`". It does not say what `platform.job_context` answers when the row exists and its organisation is soft-deleted (`organisations.deleted_at` set), or when the row itself is soft-deleted. US-078 scenario 4, written for payload v1, expects a job of a deleted organisation to fail without retry and to leave an audit entry with outcome `FAILED`. An organisation has no other "not live" state: the table has no status column.
+
+17. **`platform.job_context` resolves ownership, not liveness.** It filters `deleted_at` on neither the row the job names nor that row's organisation.
+
+    | The identifiers name | `job_context` returns | The job |
+    |---|---|---|
+    | nothing: the row never existed, the id is forged, or a purge removed the row | no row | is refused: non-retryable `JOB_CONTEXT_NOT_FOUND`, security event `job_context_mismatch` (item 2, unchanged) |
+    | a row without an organisation (a guest quote, an auth e-mail event) | `org_id` NULL, `org_deleted` NULL | is refused with `MISSING_TENANT_CONTEXT` on a queue that requires a tenant (item 20); runs without an organisation on the two queues that do not |
+    | a soft-deleted row of a live organisation | the row's context, `org_deleted` false | runs; its processor finds the subject deleted (item 19) |
+    | a row of a soft-deleted organisation | the row's context, `org_deleted` true | **runs, in that organisation's own tenant scope** (item 18) |
+
+    - **The fourth column.** `org_deleted boolean` (data-model §4.5): true when the organisation's row has `deleted_at` set or is missing, false when it is live, NULL when the row has no organisation. The runner hands it to the processor with the resolved context, as `orgDeleted`.
+    - **No refusal reason is added.** There is no `ORGANISATION_DELETED` and no `ORGANISATION_INACTIVE`, and the non-retryable reasons of TASK-035 stay as they are.
+18. **Why a job of a deleted organisation runs, and in which scope.**
+    - **Work in flight settles what already exists.** Deleting the organisation does not end what it owes or is owed:
+
+      | Queue | What a job still has to finish |
+      |---|---|
+      | `booking` | a started saga ends booked or compensated; a refused step would leave a captured payment without a booked shipment, a guardrail held at 0 |
+      | `payments` | capture, void and refund of money already authorised or taken, and the gateway's webhooks for it |
+      | `documents` | the label and the customs documents of a paid shipment |
+      | `pickups` | a pickup already scheduled with the carrier is confirmed or cancelled there |
+      | `tracking-poll` | the recipient follows the shipment on the public page, and the recipient is not a member of the organisation |
+      | `notifications` | the notices of the rows above (a refund, a delivery) |
+      | `outbox-relay` | events are facts already committed, including those written by the transaction that deleted the organisation |
+
+    - **The one deletion path of this run needs it.** The expiry of an unverified account soft-deletes the personal organisation (REQ-AUTH-026, US-292) and keeps its drafts, quotes and addresses "for the audit chain". The 30-day draft expiry (REQ-ACCT-004) still has to cancel those drafts, and the later erasure jobs still have to remove them. A refusal would dead-letter a job for every draft that an expired sign-up left behind.
+    - **Deletion is one-way** (US-079: no restore), so a refused job could never be redriven. It would be a dead letter that no operator can fix, on an alarm that pages for `booking` and `payments` (item 14).
+    - **Isolation does not depend on liveness.** The tenant policies compare `org_id` only, and `p_organisations__active` compares `id`. A forged job that names a row of a deleted organisation gets that organisation's context and nothing more, exactly as with a live one, so a refusal would add no control against T-73.
+    - **Tenant scope, never SYSTEM scope.** The worker has no cross-tenant scope (data-model §4.1) and needs none here: the policies above admit the deleted organisation's own context as before. A wider scope for these jobs would turn one forged job into access to every tenant.
+19. **A soft-deleted subject row.** Of the ten source tables only `quotes` is soft-deletable. The other nine are `SD: no` in data-model §3: shipments, orders, pickups, documents and payments end in a status, and a draft is deleted by its transition to `CANCELLED`.
+    - `job_context` returns the context of a soft-deleted quote, because the row still belongs to its organisation.
+    - The processor reads its subject inside the tenant transaction through the default client, which hides soft-deleted rows (data-model §7.6). A processor that finds its quote deleted completes without effect. `withDeleted()` stays limited to audit and erasure code.
+    - For every other kind, a row that `job_context` resolved and the tenant transaction cannot see is a defect (a missing policy, for example the invitee rows of `notification_log`, data-model §12). The processor fails the job. It never reads "not visible" as "nothing to do".
+20. **"A queue that requires a tenant"** (item 17; REQ-RLS-008, EC-A38; data-model §4.5). A queue with payload kinds requires a tenant unless its definition in `@platform/shared/queues` marks the organisation optional.
+    - **Optional: `outbox-relay` and `notifications`.** Auth e-mail events and their notification rows have no organisation.
+    - **Required: `booking`, `payments`, `documents`, `pickups` and `tracking-poll`.** Their kinds come from TENANT tables, where `org_id` is `NOT NULL`, so a refusal there means a data defect or a guest quote on the wrong queue.
+    - On a queue that requires a tenant the runner refuses a context without an organisation before the processor is called, so no tenant data is read.
+    - The schedule-only queues (`housekeeping`, `audit-maintenance`) carry no payload kind and resolve no context (TASK-039).
+21. **Work for a deleted organisation is stopped where it starts, not in the runner.**
+    - **Discovery and producers.** A discovery function or producer that starts new business for an organisation (a new charge, a new carrier booking, a new series of notices) selects live organisations only (`organisations.deleted_at IS NULL`). One that settles, cancels, expires, backfills, retains or erases does not filter: `payment_sweeper_candidates`, `saga_due_candidates`, `void_retry_candidates`, `draft_expiry_candidates` and `org_ids_page`. A backfill that skipped deleted organisations would leave rows on which the contract step then fails.
+    - **Processors.** A processor that would start new business reads `orgDeleted` and completes without effect when it is true. It does not dead-letter the job, for the reason given in item 18 (one-way). Run 1 has no such processor.
+    - **Owed by later designs.** The first organisation-closure path (M2 or later) states what it does with the organisation's pending work. The erasure and retention jobs of M4/M5 (data-model §10.4 and §10.5) act on deleted organisations by design, and their role and scope are that design's to state. Nothing in this amendment stands in their way.
+22. **Evidence.**
+    - A refused job opens no tenant transaction and writes no audit entry, as `api/README.md` §13 already says for `job_context_mismatch`. Its evidence is the dead-letter record with the reason, the log line, and the security event where items 2 and 3 define one. An entry in the SYSTEM stream for every refused job would let a writer to `bull:*` grow an audit chain without bound, where the dead-letter records are bounded (item 9).
+    - A job of a deleted organisation writes its audit entries to that organisation's stream, like any other job.
+    - The step "fails non-retryably with an audit entry outcome `FAILED`" of US-078 scenario 4 is withdrawn with its premise (product-manager rewords the story).
+23. **Verification (TASK-047).**
+    - **The function**, in the integration suite against the migrated schema: a row of a live organisation gives `org_deleted` false; a row of a soft-deleted organisation gives the same `org_id` with `org_deleted` true; a row without an organisation gives NULL and NULL; an unknown id gives no row; an unknown kind raises. The cases use `outbox_events`, the one source table that exists at batch 1.4. The task that creates a later source table adds the case of its kind, and the `quotes` task adds the soft-deleted quote.
+    - **The runner** (AT-US-078-04): an `outbox_event` job whose organisation is soft-deleted completes with `app.org_id` set to that organisation and `orgDeleted` true. It leaves no dead-letter record, and it reads and writes no row of a second organisation.
+    - **The reasons.** The pin of the non-retryable reasons is unchanged: no reason was added.
+    - **Item 20.** A row without an organisation on a queue that requires a tenant is refused with `MISSING_TENANT_CONTEXT` before the processor is called, and the same row on `outbox-relay` runs.
+    - The function sketch of data-model §4.5 was run on PGlite with stub tables (15 cases, no roles and no row-level security); nothing else was run for this amendment.
 
 ## Reversibility
 
