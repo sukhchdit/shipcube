@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from '@jest/globals';
 import Joi from 'joi';
 
-import { EVENT_CATALOGUE, EVENT_MODULES, EVENT_TYPE_PATTERN, mergeEvents, validateEventPayload } from './index.js';
+import { EVENT_CATALOGUE, EVENT_MODULES, EVENT_TYPE_PATTERN, identifierPayload, mergeEvents, validateEventPayload } from './index.js';
 
 const ID = '0193a5b2-7c1e-7d4a-9f3b-000000000f01';
 const booked = { aggregateType: 'shipment', payload: Joi.object({ shipment_id: Joi.string().guid().required() }) };
@@ -36,5 +36,13 @@ describe('domain event catalogue (ADR-0004 item 5; TASK-043)', () => {
     expect(refused).toEqual({ ok: false, issues: ['shipment_id: string.guid', 'email: object.unknown'] });
     expect(JSON.stringify(refused)).not.toMatch(/secret-value|a@b\.c/);
     expect(validateEventPayload(booked, null)).toMatchObject({ ok: false });
+  });
+
+  it('identifierPayload: a closed schema of required lower-case UUID keys', () => {
+    const ids = { aggregateType: 'shipment', payload: identifierPayload('shipment_id', 'order_id') };
+    expect(validateEventPayload(ids, { shipment_id: ID, order_id: ID }).ok).toBe(true);
+    expect(validateEventPayload(ids, { shipment_id: ID })).toEqual({ ok: false, issues: ['order_id: any.required'] });
+    expect(validateEventPayload(ids, { shipment_id: ID.toUpperCase(), order_id: ID }).ok).toBe(false);
+    expect(validateEventPayload(ids, { shipment_id: ID, order_id: ID, extra: 1 }).ok).toBe(false);
   });
 });

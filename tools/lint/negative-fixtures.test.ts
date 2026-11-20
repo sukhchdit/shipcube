@@ -1222,6 +1222,24 @@ const TENANT_DB: readonly Violation[] = [
     'only the database platform core',
   ],
   [
+    '[PR2-SEC-05] [PR11-SEC-05] [D-ARCH-074] the outbox writer (apps/api/src/platform/outbox/writer.ts) imports the pg driver (TASK-043)',
+    'layering/sql-driver/apps/api/src/platform/outbox/writer.ts',
+    BOUNDARIES,
+    'only the database platform core',
+  ],
+  [
+    '[PR2-SEC-05] [PR11-SEC-05] [D-ARCH-074] the outbox writer imports PrismaClient and constructs it (TASK-043)',
+    'rules/prisma-client-construction/apps/api/src/platform/outbox/writer.ts',
+    [CLIENT_CONSTRUCTION, CLIENT_CONSTRUCTION],
+    'apps/*/src/platform/db',
+  ],
+  [
+    '[D-ARCH-106] [T-83] the outbox writer file is a whole-file tenant-transaction root: a fetch anywhere in it is refused (TASK-043)',
+    'rules/tenant-tx-outbox-writer/apps/api/src/platform/outbox/writer.ts',
+    [TENANT_TX_IO, OUTBOUND_HTTP],
+    '',
+  ],
+  [
     'platform/tenant-context-sql: a new file under prisma/tests/catalog/ inherits no exemption (PR11-SEC-08)',
     'rules/tenant-context-sql/prisma/tests/catalog/helper.ts',
     TENANT_CONTEXT,
@@ -1686,6 +1704,10 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
     [
       '[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: outbox.publish(db, event) in a handler',
       `rules/no-external-calls-in-tenant-tx/${API}/orders/routes/ok-handler-outbox.ts`,
+    ],
+    [
+      '[D-ARCH-106] [T-83] no-external-calls-in-tenant-tx: the outbox writer (a whole-file root) doing database work only (TASK-043)',
+      'rules/no-external-calls-in-tenant-tx/apps/api/src/platform/outbox/writer.ts',
     ],
     [
       '[PR32-SEC-01] [D-ARCH-106] no-external-calls-in-tenant-tx: the fixtureRoute default; call and afterCommit are never roots',

@@ -69,7 +69,13 @@ describe('[ADR-0004 item 6] outbox-purge (D-ARCH-167, D-ARCH-171)', () => {
     const ledger = fakeLedger();
     const purge = createOutboxPurge({ runner: db.runner, log: quiet, ledger });
     expect(await purge.run(job())).toEqual({ outbox_events: 12_000, processed_events: 10, job_executions: 0 });
-    expect(db.deletes.map((d) => d.table)).toEqual(['outbox_events', 'outbox_events', 'outbox_events', 'processed_events', 'job_executions']);
+    expect(db.deletes.map((d) => d.table)).toEqual([
+      'outbox_events',
+      'outbox_events',
+      'outbox_events',
+      'processed_events',
+      'job_executions',
+    ]);
     expect(db.deletes.every((d) => d.limit === PURGE_BATCH_SIZE)).toBe(true);
     expect(PURGE_BATCH_SIZE).toBe(5_000);
     expect(ledger.keys).toEqual([
@@ -116,7 +122,9 @@ describe('[ADR-0004 item 6] outbox-purge (D-ARCH-167, D-ARCH-171)', () => {
     const controller = new AbortController();
     controller.abort();
     const db = fakeDatabase({ outbox_events: 1 });
-    await expect(createOutboxPurge({ runner: db.runner, log: quiet, ledger: fakeLedger() }).handler(job({ signal: controller.signal }))).rejects.toThrow();
+    await expect(
+      createOutboxPurge({ runner: db.runner, log: quiet, ledger: fakeLedger() }).handler(job({ signal: controller.signal })),
+    ).rejects.toThrow();
     expect(db.deletes).toEqual([]);
   });
 

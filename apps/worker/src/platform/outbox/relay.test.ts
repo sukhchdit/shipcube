@@ -68,7 +68,11 @@ function fakeDatabase(rows: RelayRow[], options: { locked?: boolean; commit?: bo
       const result = await fn(db);
       if (options.commit === false) throw new Error('crash before commit');
       published.push(...marked);
-      for (const id of marked) pending.splice(pending.findIndex((r) => r.id === id), 1);
+      for (const id of marked)
+        pending.splice(
+          pending.findIndex((r) => r.id === id),
+          1,
+        );
       return result;
     },
   };
@@ -265,7 +269,7 @@ describe('enqueue bound', () => {
   it('within: passes a value or an error through; an enqueue that never settles fails with OutboxEnqueueTimeoutError', async () => {
     await expect(within(Promise.resolve(7), 1_000)).resolves.toBe(7);
     await expect(within(Promise.reject(new TypeError('x')), 1_000)).rejects.toThrow(TypeError);
-    await expect(within(Promise.reject('plain' as unknown as Error), 1_000)).rejects.toThrow('string');
+    await expect(within(Promise.reject(new Error('plain')), 1_000)).rejects.toThrow('plain');
     await expect(within(new Promise<never>(() => undefined), 20)).rejects.toBeInstanceOf(OutboxEnqueueTimeoutError);
   });
 
@@ -298,7 +302,14 @@ describe('relay loop', () => {
       },
     };
     const captured = capture();
-    const relay = createOutboxRelay({ runner, producer: fakeProducer(), log: captured.log, batchSize: 1, pollIntervalMs: 500, budgetMs: 1_000 });
+    const relay = createOutboxRelay({
+      runner,
+      producer: fakeProducer(),
+      log: captured.log,
+      batchSize: 1,
+      pollIntervalMs: 500,
+      budgetMs: 1_000,
+    });
     outcomes.push(
       () => Promise.reject(new Error('db down')),
       () => Promise.reject(new Error('db down')),

@@ -2,7 +2,7 @@
 // TASK-043). Each module owns `events/<module>.ts`; index.ts aggregates them. A payload carries identifiers, codes and
 // a recipient locale only, never a personal value (consumers reload entities under RLS), and is validated per type
 // against a closed Joi schema before the writer stores it.
-import type Joi from 'joi';
+import Joi from 'joi';
 
 /** The `outbox_events.type` grammar (`ck_outbox_events__type`): `<area>.<fact>`, lower case and `_`. */
 export const EVENT_TYPE_PATTERN = /^[a-z_]+\.[a-z_]+$/;
@@ -14,6 +14,14 @@ export interface EventDefinition {
   readonly aggregateType: string;
   /** The closed schema of the payload (identifiers and codes only). */
   readonly payload: Joi.ObjectSchema;
+}
+
+/** A lower-case canonical UUID. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The closed payload schema of an event that carries only these UUID keys, all required (the common case). */
+export function identifierPayload(...keys: readonly string[]): Joi.ObjectSchema {
+  return Joi.object(Object.fromEntries(keys.map((key) => [key, Joi.string().pattern(UUID).required()])));
 }
 
 /** One module's event file: `events/<module>.ts` exports a record of this shape. */

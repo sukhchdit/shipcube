@@ -24,6 +24,7 @@ export const EVENT_CATALOGUE: EventCatalogue = mergeEvents(EVENT_MODULES);
 export {
   AGGREGATE_TYPE_PATTERN,
   EVENT_TYPE_PATTERN,
+  identifierPayload,
   mergeEvents,
   validateEventPayload,
   type EventCatalogue,

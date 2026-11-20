@@ -64,8 +64,16 @@ describe('[US-011] outbox writer (ADR-0004 item 2; REQ-PLAT-016)', () => {
   it.each([
     ['an uncatalogued type', { type: 'shipment.lost', aggregateId: ID, payload: { shipment_id: ID } }, 'not catalogued'],
     ['an inherited key as type', { type: 'toString', aggregateId: ID, payload: {} }, 'not catalogued'],
-    ['an upper-case aggregate id', { type: 'shipment.booked', aggregateId: ID.toUpperCase(), payload: { shipment_id: ID } }, 'lower-case UUID'],
-    ['a payload its schema refuses', { type: 'shipment.booked', aggregateId: ID, payload: { email: 'x@y.z' } }, 'payload of shipment.booked refused'],
+    [
+      'an upper-case aggregate id',
+      { type: 'shipment.booked', aggregateId: ID.toUpperCase(), payload: { shipment_id: ID } },
+      'lower-case UUID',
+    ],
+    [
+      'a payload its schema refuses',
+      { type: 'shipment.booked', aggregateId: ID, payload: { email: 'x@y.z' } },
+      'payload of shipment.booked refused',
+    ],
     [
       'a payload over the size bound',
       { type: 'shipment.booked', aggregateId: ID, payload: { shipment_id: ID, note: 'x'.repeat(MAX_PAYLOAD_BYTES) } },
@@ -92,9 +100,9 @@ describe('[US-011] outbox writer (ADR-0004 item 2; REQ-PLAT-016)', () => {
 
   it('fails when the insert returns no row', async () => {
     const { db } = fakeDb([]);
-    await expect(createOutbox(catalogue).publish(db, { type: 'shipment.booked', aggregateId: ID, payload: { shipment_id: ID } })).rejects.toThrow(
-      'the outbox insert returned no row',
-    );
+    await expect(
+      createOutbox(catalogue).publish(db, { type: 'shipment.booked', aggregateId: ID, payload: { shipment_id: ID } }),
+    ).rejects.toThrow('the outbox insert returned no row');
   });
 
   it('the platform outbox writes the platform catalogue (no event type yet: everything is refused)', async () => {

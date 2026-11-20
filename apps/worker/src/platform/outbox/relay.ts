@@ -164,7 +164,9 @@ export function createOutboxRelay(options: OutboxRelayOptions): OutboxRelay {
     const context = systemContext(`outbox-relay-${String(wall())}`);
     const latencies: number[] = [];
     const tick = await runner.withTenantTx(context, async (db) => {
-      const lock = await db.$queryRaw<{ locked: boolean }[]>`SELECT pg_catalog.pg_try_advisory_xact_lock(${RELAY_LOCK_KEY}::bigint) AS locked`;
+      const lock = await db.$queryRaw<
+        { locked: boolean }[]
+      >`SELECT pg_catalog.pg_try_advisory_xact_lock(${RELAY_LOCK_KEY}::bigint) AS locked`;
       if (lock[0]?.locked !== true) return { locked: false, claimed: 0, published: 0, failed: 0, full: false };
       const rows = await db.$queryRaw<RelayRow[]>`
         SELECT id::text AS id, correlation_id, trace_context, aggregate_type, aggregate_id::text AS aggregate_id,

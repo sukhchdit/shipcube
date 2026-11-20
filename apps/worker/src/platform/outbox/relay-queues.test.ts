@@ -29,7 +29,9 @@ async function fakeValkey(): Promise<{ readonly server: Server; readonly port: n
       for (const part of text.split('*').filter((piece) => /^\d+\r\n/.test(piece))) {
         const words = part.split('\r\n').filter((word, index) => index > 0 && word !== '' && !word.startsWith('$'));
         const name = (words[0] ?? '').toUpperCase();
-        socket.write(name === 'HELLO' || name === 'AUTH' ? '-WRONGPASS invalid username-password pair or user is disabled.\r\n' : '+OK\r\n');
+        socket.write(
+          name === 'HELLO' || name === 'AUTH' ? '-WRONGPASS invalid username-password pair or user is disabled.\r\n' : '+OK\r\n',
+        );
       }
     });
     socket.on('error', () => undefined);
@@ -94,7 +96,16 @@ describe('[PR64-SEC-13] [R2-n5] the relay producer enqueues through the worker q
         Promise.resolve(
           (strings.join('$').includes('pg_try_advisory_xact_lock')
             ? [{ locked: true }]
-            : [{ id: ID, correlation_id: 'relay-corr-0001', trace_context: null, aggregate_type: 'shipment', aggregate_id: ID, age_seconds: 0 }]) as T,
+            : [
+                {
+                  id: ID,
+                  correlation_id: 'relay-corr-0001',
+                  trace_context: null,
+                  aggregate_type: 'shipment',
+                  aggregate_id: ID,
+                  age_seconds: 0,
+                },
+              ]) as T,
         ),
       $executeRaw: (strings: TemplateStringsArray) => Promise.resolve(void executed.push(strings.join('$'))).then(() => 1),
     };

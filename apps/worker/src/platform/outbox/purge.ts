@@ -90,7 +90,10 @@ export interface OutboxPurgeOptions {
 export type PurgeResult = Readonly<Record<PurgeTable, number>>;
 
 /** The `outbox-purge` schedule handler; `run` also returns the counts (tests). */
-export function createOutboxPurge(options: OutboxPurgeOptions): { readonly handler: ScheduleHandler; run(job: ProcessorJob): Promise<PurgeResult> } {
+export function createOutboxPurge(options: OutboxPurgeOptions): {
+  readonly handler: ScheduleHandler;
+  run(job: ProcessorJob): Promise<PurgeResult>;
+} {
   const { runner, log } = options;
   const ledger = options.ledger ?? rawJobExecutionLedger();
   const payload = scheduledPayload('outbox-purge');
