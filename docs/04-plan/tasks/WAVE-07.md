@@ -271,7 +271,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-167 (M1 Must) Expired quote and one-action re-quote<br>US-168 (M1 Must) Rate-relevant change creates a new quote |
 | REQs | REQ-QUOTE-017, REQ-QUOTE-018 |
 | NFRs | — |
-| Spikes / security / decisions | D-UX-015 |
+| Spikes / security / decisions | D-UX-015, D-ARCH-162, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-146, TASK-142, TASK-149 |
@@ -285,6 +285,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-167 and US-168 scenarios
+- requote_of_quote_id is set only when the original quote belongs to the same organisation (D-ARCH-162); a guest quote carries NULL (ck_quotes__requote_org_only)
 - AT-US-167-01 … AT-US-167-09: all 9 scenarios of US-167, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-168-01 … AT-US-168-08: all 8 scenarios of US-168, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -551,7 +552,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-243 (M1 Must) Poll carrier tracking with adaptive intervals and stale flag |
 | REQs | REQ-TRACK-003 |
 | NFRs | NFR-RES-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-161, D-SD-003 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-172, TASK-039 |
@@ -564,6 +565,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-243 scenarios
+- RECURRING JOB ID (ADR-0013 amendment 3 item 11; D-ARCH-161): the poll job id is tracking_poll.<schedule_id>.<occurrence>, the occurrence derived from the due time of that poll (1 to 40 characters of [a-z0-9_-]); an id without it is ignored by BullMQ while the previous poll of the same schedule is retained (24 hours completed, 7 days failed); test: two consecutive due polls of one shipment both run, and a second enqueue of the same occurrence is one job
 - AT-US-243-01 … AT-US-243-07: all 7 scenarios of US-243, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
