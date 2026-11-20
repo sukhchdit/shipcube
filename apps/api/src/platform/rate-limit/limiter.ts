@@ -30,7 +30,13 @@ export interface RateReading {
 
 export type RateDecision =
   | { readonly allowed: true; readonly reading: RateReading | undefined }
-  | { readonly allowed: false; readonly reading: RateReading; readonly retryAfterSeconds: number };
+  | {
+      readonly allowed: false;
+      readonly reading: RateReading;
+      readonly retryAfterSeconds: number;
+      /** The first refusal of this key and window (the hit whose count is the limit plus one; ADR-0016 am. 12 item 6). */
+      readonly first: boolean;
+    };
 
 export type StoreFailureMode = 'fail-open' | 'fallback';
 
@@ -74,7 +80,7 @@ async function evaluate(store: RateLimitStore, rules: readonly RateRule[]): Prom
       remaining: Math.max(rule.limit - count, 0),
       resetSeconds: Math.max(Math.ceil(resetMs / 1000), 1),
     };
-    if (count > rule.limit) return { allowed: false, reading, retryAfterSeconds: reading.resetSeconds };
+    if (count > rule.limit) return { allowed: false, reading, retryAfterSeconds: reading.resetSeconds, first: count === rule.limit + 1 };
     if (closest === undefined || closer(closest, reading)) closest = reading;
   }
   return { allowed: true, reading: closest };

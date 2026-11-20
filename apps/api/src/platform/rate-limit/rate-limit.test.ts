@@ -6,6 +6,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { RATE_LIMIT_DEFAULTS } from '@platform/config';
 
+import { BoundedMap, SWEEP_PER_INSERT } from './bounded-map.js';
 import { createRateLimitCounter } from './counter.js';
 import { createDenialBudget, denialKeys, memoryDenialStore, RESTORE_SCRIPT, windowEndsAt, type DenialSubject } from './denial-budget.js';
 import { createOutageReporter, createRateLimiter, type RateRule } from './limiter.js';
@@ -242,6 +243,53 @@ describe('[US-040] the limiter: fixed windows, headers readings and the class ta
   });
 });
 
+describe('[PR041-SEC-01] [R1-m5] the fallback maps cost O(1) per new key and stay within their bound', () => {
+  it('a new key inspects at most SWEEP_PER_INSERT entries, however many the map holds', () => {
+    let inspected = 0;
+    const map = new BoundedMap<number, { dead: boolean }>(10_000, (value) => {
+      inspected += 1;
+      return value.dead;
+    });
+    for (let key = 0; key < 20_000; key += 1) {
+      const before = inspected;
+      map.set(key, { dead: false });
+      expect(inspected - before).toBeLessThanOrEqual(SWEEP_PER_INSERT);
+    }
+    expect(map.size).toBe(10_000);
+    expect(map.get(0)).toBeUndefined();
+    expect(map.get(19_999)).toBeDefined();
+  });
+
+  it('drops expired entries from the head and keeps live ones; an update keeps its place', () => {
+    const map = new BoundedMap<string, { dead: boolean }>(5, (value) => value.dead);
+    map.set('a', { dead: true });
+    map.set('b', { dead: false });
+    map.set('c', { dead: false });
+    map.set('d', { dead: false });
+    // The next new key swept the dead head entry away; live entries stay and an update keeps its place.
+    expect(map.get('a')).toBeUndefined();
+    expect(map.size).toBe(3);
+    map.set('b', { dead: false });
+    expect(map.size).toBe(3);
+    map.set('e', { dead: false });
+    expect(map.size).toBe(4);
+  });
+
+  it('the window store evicts the oldest window at the cap: 1,000 keys through a cap of 100 leave the recent ones counting', async () => {
+    const store = createMemoryStore(() => 0, 100);
+    for (let key = 0; key < 1_000; key += 1) await store.hit(`k${String(key)}`, 60_000);
+    expect((await store.hit('k999', 60_000)).count).toBe(2);
+    expect((await store.hit('k0', 60_000)).count).toBe(1);
+  });
+
+  it('the slot map is bounded the same way', async () => {
+    const store = createMemoryStore(() => 0, 50);
+    for (let key = 0; key < 500; key += 1) await store.acquire(`s${String(key)}`, 'h', 1, 60_000);
+    expect(await store.acquire('s499', 'other', 1, 60_000)).toBe(false);
+    expect(await store.acquire('s0', 'other', 1, 60_000)).toBe(true);
+  });
+});
+
 describe('the Valkey store: bounded calls and checked replies', () => {
   it('times out a call that does not answer, with a class-only error', async () => {
     const never = new Promise<never>(() => undefined);
@@ -390,7 +438,20 @@ describe('[T-39] [D-SECT39-01] the denial budget', () => {
     expect(() => createDenialBudget({ threshold: 1.5 })).toThrow(RangeError);
   });
 
-  it('the in-memory store is bounded and discards expired windows', async () => {
+  it('[PR041-SEC-01] the in-memory denial store is bounded: past the cap the oldest actors are evicted, windows and carries alike', async () => {
+    const now = 0;
+    const store = memoryDenialStore(() => now, 100);
+    for (let actor = 0; actor < 1_000; actor += 1) {
+      // Three denials above a threshold of 1 leave a carry per actor.
+      for (let denial = 0; denial < 3; denial += 1) await store.take(`b${String(actor)}`, `c${String(actor)}`, 1);
+    }
+    expect((await store.take('b0', 'c0', 1)).count).toBe(1);
+    expect((await store.take('b999', 'c999', 1)).count).toBe(4);
+    // The evicted actor's carry went with it (bounded), the recent one is still claimable in its next window.
+    expect((await store.take('b0', 'c0', 1)).claimed).toBe(0);
+  });
+
+  it('the in-memory denial store is bounded and discards expired windows', async () => {
     let now = 0;
     const store = memoryDenialStore(() => now);
     expect((await store.take('b', 'c', 5)).count).toBe(1);

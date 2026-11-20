@@ -119,7 +119,8 @@ export interface AppDependencies {
   /**
    * The rate limiters (TASK-041): the configuration and the process's Valkey client. startApi always passes it; absent
    * (test compositions, the RBAC matrix app: the seam that keeps the generated matrix below the per-IP budget) the
-   * step-0 limiter passes through and the step-5 slot is the TASK-020 stub. The denial budget (T-39) does not depend on
+   * step-0 limiter passes through and the step-5 slot is the TASK-020 stub. A `live` composition without it is refused
+   * at boot (RateLimitMissingError, PR041-SEC-08). The denial budget (T-39) does not depend on
    * it: the pipeline builds one whenever it builds the audit capture.
    */
   readonly rateLimit?: RateLimitDependencies;
@@ -138,8 +139,17 @@ export class AuthenticateSeamError extends Error {
   }
 }
 
+/** A live composition without the rate limiters (PR041-SEC-08): the pass-through step-0 limiter is a test seam only. */
+export class RateLimitMissingError extends Error {
+  constructor() {
+    super('a live composition needs the rate limiters (AppDependencies.rateLimit); their absence is a test seam');
+    this.name = 'RateLimitMissingError';
+  }
+}
+
 function assertBootable(deps: AppDependencies, routes: readonly RouteDescriptor[]): void {
   if (deps.authenticate !== undefined && deps.apiMode === 'live') throw new AuthenticateSeamError();
+  if (deps.rateLimit === undefined && deps.apiMode === 'live') throw new RateLimitMissingError();
   if (deps.pipeline === undefined) assertPipelineReady(routes, deps.tenantTx);
   assertRouteBindings(routes, { production: deps.apiMode === 'live' });
 }
@@ -190,7 +200,7 @@ export function createApp(deps: AppDependencies): Express {
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));
   app.disable('x-powered-by');
-  app.use(ipLimiter(kit));
+  app.use(ipLimiter(kit, API_PREFIX));
   app.use(corsPreflight());
   app.use(jsonBodyParser(deps.bodyLimit === undefined ? {} : { limit: deps.bodyLimit }));
 

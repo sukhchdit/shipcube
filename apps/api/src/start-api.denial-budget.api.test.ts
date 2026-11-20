@@ -151,6 +151,8 @@ interface Started {
   readonly composed: AppDependencies;
   readonly app: ReturnType<typeof createApp>;
   readonly valkey: FakeValkey;
+  /** The parsed log lines startApi wrote. */
+  lines(): Record<string, unknown>[];
 }
 
 async function start(): Promise<Started> {
@@ -162,6 +164,7 @@ async function start(): Promise<Started> {
     resources: [],
     startup: () => Promise.resolve(),
   } as unknown as RuntimeServices;
+  const raw: string[] = [];
   let composed: AppDependencies | undefined;
   let app: ReturnType<typeof createApp> | undefined;
   const server: ApiServer = Object.assign(new EventEmitter(), {
@@ -176,7 +179,13 @@ async function start(): Promise<Started> {
   };
   await startApi({
     loadConfig: () => Promise.resolve({ config: configuration(), secrets: new Map() }),
-    stdout: { write: (_chunk: string, callback?: (error?: Error | null) => void) => (callback?.(), true) },
+    stdout: {
+      write: (chunk: string, callback?: (error?: Error | null) => void) => {
+        raw.push(chunk);
+        callback?.();
+        return true;
+      },
+    },
     exitProcess: (code: number): never => {
       throw new Error(`exit ${String(code)}`);
     },
@@ -191,7 +200,12 @@ async function start(): Promise<Started> {
     modules: [{ name: 'addresses', routes: [gated] }],
   });
   if (composed === undefined || app === undefined) throw new Error('createApp was not called');
-  return { composed, app, valkey };
+  const lines = (): Record<string, unknown>[] =>
+    raw
+      .flatMap((chunk) => chunk.split('\n'))
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+  return { composed, app, valkey, lines };
 }
 
 describe('[T-39] [D-SECT39-01 item 6] [PR48-SEC-06] startApi composes the real limiters and the denial budget', () => {
@@ -228,5 +242,34 @@ describe('[T-39] [D-SECT39-01 item 6] [PR48-SEC-06] startApi composes the real l
         .filter((key) => key.startsWith('rl:authz-denial'))
         .sort(),
     ).toEqual([`rl:authz-denial-carry:${ORG}:${VIEWER}`, `rl:authz-denial:${ORG}:${VIEWER}`].sort());
+  });
+
+  it('[R1-m3] [D-SECT39-01 item 5] with Valkey down the composition keeps the shape per instance and logs the ERROR event once per scope, with the allow-listed fields', async () => {
+    const { app, valkey, lines } = await start();
+    valkey.failure = new Error('connect ECONNREFUSED valkey.internal:6379');
+    appended.length = 0;
+    const statuses: number[] = [];
+    for (let denial = 1; denial <= BUDGET + 2; denial += 1) {
+      statuses.push(
+        (
+          await request(app)
+            .get('/api/v1/address-book')
+            .set('X-Forwarded-For', `203.0.113.${String(denial)}`)
+        ).status,
+      );
+    }
+    expect(statuses).toEqual([403, 403, 403, 429, 429]);
+    expect(appended).toHaveLength(BUDGET + 1);
+    const outage = lines().filter(
+      (line) => line['event'] === 'security.rate_limit_store_unavailable' || line['message'] === 'security.rate_limit_store_unavailable',
+    );
+    // Both the limiter (scope rate-limit) and the denial budget (scope authz-denial) report it, once each: deleting the
+    // budget's onStoreUnavailable wiring in app.ts fails this test.
+    expect(outage.map((line) => line['scope']).sort()).toEqual(['authz-denial', 'rate-limit']);
+    for (const line of outage) {
+      expect(line).toMatchObject({ level: 'error', event_type: 'security', store: 'valkey' });
+      expect(JSON.stringify(line)).not.toContain('valkey.internal');
+      expect(line['dropped_attributes']).toBeUndefined();
+    }
   });
 });

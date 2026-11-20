@@ -2,9 +2,11 @@
  * Counter stores of the rate limiter (api/README §7, ADR-0016 §8, ADR-0013; TASK-041). Two implementations of one port:
  * the Valkey store (shared by every API replica, one atomic Lua script per call, every call bounded by a timeout) and
  * the in-memory store (the per-instance fallback of the security classes during a Valkey outage, README §7, and the
- * store of test compositions). Keys and values hold internal identifiers, counts and coarse network prefixes only: no
- * e-mail address, user agent, route or correlation id (D-SECT39-01 item 4).
+ * store of test compositions). Keys and values hold internal identifiers, counts and the IPv4 address or the IPv6 /64
+ * of a client, kept for one window at most: no e-mail address, user agent, route or correlation id (D-SECT39-01 item 4).
  */
+
+import { BoundedMap } from './bounded-map.js';
 
 /** One fixed-window hit: the count including this hit, and the milliseconds until the window closes. */
 export interface WindowHit {
@@ -104,30 +106,19 @@ export function createValkeyStore(client: ScriptClient, options: { readonly time
   };
 }
 
-/** Upper bound of the entries one in-memory store keeps (memory safety under a key flood; oldest windows go first). */
-const MEMORY_MAX_ENTRIES = 50_000;
+/** Upper bound of the entries each in-memory map keeps (memory safety under a key flood; oldest-inserted entries go first). */
+export const MEMORY_MAX_ENTRIES = 50_000;
 
-/** The in-memory store: per instance, bounded, with the same window and slot semantics. */
-export function createMemoryStore(now: () => number = Date.now): RateLimitStore {
-  const windows = new Map<string, { count: number; endsAt: number }>();
-  const slots = new Map<string, Map<string, number>>();
-
-  function prune(): void {
-    const t = now();
-    for (const [key, window] of windows) if (window.endsAt <= t) windows.delete(key);
-    // Still over the bound (a flood inside one window): drop the oldest-inserted windows.
-    for (const key of windows.keys()) {
-      if (windows.size <= MEMORY_MAX_ENTRIES) break;
-      windows.delete(key);
-    }
-  }
+/** The in-memory store: per instance, bounded (O(1) per new key, PR041-SEC-01), with the same window and slot semantics. */
+export function createMemoryStore(now: () => number = Date.now, maxEntries: number = MEMORY_MAX_ENTRIES): RateLimitStore {
+  const windows = new BoundedMap<string, { count: number; endsAt: number }>(maxEntries, (window) => window.endsAt <= now());
+  const slots = new BoundedMap<string, Map<string, number>>(maxEntries, (held) => [...held.values()].every((at) => at <= now()));
 
   return {
     hit(key, windowMs) {
       const t = now();
       let window = windows.get(key);
       if (window === undefined || window.endsAt <= t) {
-        if (windows.size >= MEMORY_MAX_ENTRIES) prune();
         window = { count: 0, endsAt: t + windowMs };
         windows.set(key, window);
       }

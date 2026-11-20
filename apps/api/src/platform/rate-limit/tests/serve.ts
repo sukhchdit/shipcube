@@ -90,8 +90,9 @@ class Pending implements PromiseLike<Reply> {
 }
 
 /** The part of Supertest's surface these suites use, over the one-shot loopback transport. */
-export const request = (app: Express): { get(path: string): Pending; post(path: string): Pending } => ({
+export const request = (app: Express): { get(path: string): Pending; post(path: string): Pending; options(path: string): Pending } => ({
   get: (path) => new Pending(app, 'GET', path),
+  options: (path) => new Pending(app, 'OPTIONS', path),
   post: (path) => new Pending(app, 'POST', path),
 });
 

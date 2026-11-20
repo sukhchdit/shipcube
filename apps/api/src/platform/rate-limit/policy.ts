@@ -3,8 +3,8 @@
  * rules a route class consumes for a request, and how a class behaves when Valkey is unreachable. Values come from the
  * configuration (`RATE_LIMIT_*`, `RATE_QUOTE_CREATE_*`, `SSE_MAX_*`), defaults in `RATE_LIMIT_DEFAULTS`.
  *
- * Keys are internal identifiers only: the IPv6 /64 prefix or the IPv4 address (`clientIpKey`), user and organisation
- * UUIDs, and, for the services that count per account or address, the keyed hash they compute themselves (never the
+ * Keys are internal identifiers and the IPv4 address or the IPv6 /64 of a client, kept for one window at most
+ * (`clientIpKey`), user and organisation UUIDs, and, for the services that count per account or address, the keyed hash they compute themselves (never the
  * raw e-mail address, D-SECT39-01 item 4).
  */
 import type { Config } from '@platform/config';
@@ -143,7 +143,8 @@ export function quoteCreateRules(userId: string, orgId: string, s: RateLimitSett
 
 /**
  * Per-IP ceiling of requests that present a credential at step 0: ten times the per-user limit, so users behind one NAT
- * keep their own per-user budget (AT-US-040-11) while a flood of forged credentials from one IP still stops here.
+ * keep their own per-user budget (AT-US-040-11), and a flood from one IP that presents credentials, valid or forged,
+ * stops at this ceiling. It applies to a request under /api/v1 that is not OPTIONS (limits.ts).
  */
 export const CREDENTIALED_IP_CEILING_FACTOR = 10;
 

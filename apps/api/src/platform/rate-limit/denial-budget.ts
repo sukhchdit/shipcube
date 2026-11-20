@@ -17,8 +17,9 @@
  * unlimited writes) and reports `rate_limit_store_unavailable` at most once a minute.
  */
 import type { DenialMark } from '../audit/capture.js';
+import { BoundedMap } from './bounded-map.js';
 import { AUTHZ_DENIAL_BUDGET, type RateLimitCounter } from './counter.js';
-import { type ScriptClient, withStoreTimeout, STORE_TIMEOUT_MS } from './store.js';
+import { MEMORY_MAX_ENTRIES, type ScriptClient, STORE_TIMEOUT_MS, withStoreTimeout } from './store.js';
 
 export const DENIAL_WINDOW_SECONDS = 60;
 const WINDOW_MS = DENIAL_WINDOW_SECONDS * 1000;
@@ -128,13 +129,10 @@ function valkeyDenialStore(client: ScriptClient, timeoutMs: number): DenialStore
   };
 }
 
-/** Upper bound of the actors one instance tracks while Valkey is down (oldest windows are dropped first). */
-const MEMORY_MAX_ACTORS = 50_000;
-
-/** The per-instance fallback: the same atomic step over two maps. */
-export function memoryDenialStore(now: () => number = Date.now): DenialStore {
-  const windows = new Map<string, { count: number; endsAt: number }>();
-  const carries = new Map<string, { suppressed: number; expiresAt: number }>();
+/** The per-instance fallback: the same atomic step over two bounded maps (O(1) per new actor, PR041-SEC-01). */
+export function memoryDenialStore(now: () => number = Date.now, maxEntries: number = MEMORY_MAX_ENTRIES): DenialStore {
+  const windows = new BoundedMap<string, { count: number; endsAt: number }>(maxEntries, (window) => window.endsAt <= now());
+  const carries = new BoundedMap<string, { suppressed: number; expiresAt: number }>(maxEntries, (carry) => carry.expiresAt <= now());
   const carryOf = (key: string, t: number): { suppressed: number; expiresAt: number } | undefined => {
     const carry = carries.get(key);
     if (carry !== undefined && carry.expiresAt <= t) {
@@ -143,20 +141,11 @@ export function memoryDenialStore(now: () => number = Date.now): DenialStore {
     }
     return carry;
   };
-  function prune(t: number): void {
-    for (const [key, window] of windows) if (window.endsAt <= t) windows.delete(key);
-    for (const key of windows.keys()) {
-      if (windows.size <= MEMORY_MAX_ACTORS) break;
-      windows.delete(key);
-    }
-    for (const [key, carry] of carries) if (carry.expiresAt <= t) carries.delete(key);
-  }
   return {
     take(budgetKey, carryKey, threshold) {
       const t = now();
       let window = windows.get(budgetKey);
       if (window !== undefined && window.endsAt <= t) window = undefined;
-      if (window === undefined && windows.size >= MEMORY_MAX_ACTORS) prune(t);
       let claimed = 0;
       if (window === undefined) {
         window = { count: 0, endsAt: t + WINDOW_MS };

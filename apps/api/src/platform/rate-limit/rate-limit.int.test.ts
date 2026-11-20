@@ -22,6 +22,9 @@ const ORG = '0193a5b2-7c1e-7d4a-9f3b-0000000000b2';
 const ACTOR = '0193a5b2-7c1e-7d4a-9f3b-0000000000a2';
 const user: DenialSubject = { orgId: ORG, actorId: ACTOR, credential: 'session', authenticated: true };
 
+/** This suite proves the Lua semantics, not the 250 ms production bound: a slow reply under lane-B load must not look like a Lua defect (R1-n5). */
+const LOAD_TIMEOUT_MS = 5_000;
+
 let container: StartedTestContainer;
 const clients: Redis[] = [];
 
@@ -50,7 +53,7 @@ describe('[US-040] the counter store over a real Valkey', () => {
   it('[AT-US-040-05] two clients share one counter; the window is anchored by the key TTL', async () => {
     const [one, two] = [client('rl-one'), client('rl-two')];
     const limiters = [one, two].map((valkey) =>
-      createRateLimiter({ store: createValkeyStore(valkey), onStoreUnavailable: () => undefined }),
+      createRateLimiter({ store: createValkeyStore(valkey, { timeoutMs: LOAD_TIMEOUT_MS }), onStoreUnavailable: () => undefined }),
     );
     const rule = { name: 'it:public', key: '203.0.113.7', limit: 120, windowMs: 60_000 };
     let refusedAt: number | undefined;
@@ -68,7 +71,7 @@ describe('[US-040] the counter store over a real Valkey', () => {
   });
 
   it('concurrent hits are counted exactly (no lost update) and concurrency slots are capped', async () => {
-    const store = createValkeyStore(client('rl-atomic'));
+    const store = createValkeyStore(client('rl-atomic'), { timeoutMs: LOAD_TIMEOUT_MS });
     const hits = await Promise.all(Array.from({ length: 50 }, () => store.hit('rl:it:atomic', 60_000)));
     expect(hits.map((hit) => hit.count).sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, index) => index + 1));
     const slots = await Promise.all(
@@ -83,7 +86,7 @@ describe('[US-040] the counter store over a real Valkey', () => {
 describe('[T-39] [D-SECT39-01 item 3] the denial budget over a real Valkey', () => {
   it('after the first take the budget key has a TTL of 1..60000 ms, and no key under the two prefixes lacks one', async () => {
     const valkey = client('rl-budget-ttl');
-    const budget = createDenialBudget({ threshold: 3, valkey });
+    const budget = createDenialBudget({ threshold: 3, valkey, timeoutMs: LOAD_TIMEOUT_MS });
     await budget.take(user);
     const keys = denialKeys(user);
     const ttl = await valkey.pttl(keys.budget);
@@ -100,7 +103,7 @@ describe('[T-39] [D-SECT39-01 item 3] the denial budget over a real Valkey', () 
   it('the verdicts, the carry and its restore follow the ruling, for two replicas on one budget', async () => {
     const [one, two] = [client('rl-budget-a'), client('rl-budget-b')];
     const subject: DenialSubject = { orgId: '', actorId: '', credential: 'signature', authenticated: false };
-    const budgets = [one, two].map((valkey) => createDenialBudget({ threshold: 3, valkey }));
+    const budgets = [one, two].map((valkey) => createDenialBudget({ threshold: 3, valkey, timeoutMs: LOAD_TIMEOUT_MS }));
     const kinds: string[] = [];
     for (let denial = 0; denial < 6; denial += 1) kinds.push((await (budgets[denial % 2] as (typeof budgets)[number]).take(subject)).kind);
     expect(kinds).toEqual(['individual', 'individual', 'individual', 'aggregated', 'suppressed', 'suppressed']);
@@ -120,7 +123,9 @@ describe('[T-39] [D-SECT39-01 item 3] the denial budget over a real Valkey', () 
   });
 
   it('concurrent denials of one actor are counted exactly: threshold individual, one aggregated, the rest suppressed', async () => {
-    const budgets = [client('rl-budget-c'), client('rl-budget-d')].map((valkey) => createDenialBudget({ threshold: 5, valkey }));
+    const budgets = [client('rl-budget-c'), client('rl-budget-d')].map((valkey) =>
+      createDenialBudget({ threshold: 5, valkey, timeoutMs: LOAD_TIMEOUT_MS }),
+    );
     const subject: DenialSubject = { ...user, actorId: '0193a5b2-7c1e-7d4a-9f3b-0000000000a9' };
     const verdicts = await Promise.all(
       Array.from({ length: 30 }, (_, index) => (budgets[index % 2] as (typeof budgets)[number]).take(subject)),

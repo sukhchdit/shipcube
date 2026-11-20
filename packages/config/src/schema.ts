@@ -284,7 +284,10 @@ export const CONFIG_SCHEMA = {
   DOCS_ENABLED: withDefault(t.bool(), localOnly, { description: 'Serve the OpenAPI UI (on by default in local and test only).' }),
   WEB_APP_ORIGIN: required(t.origin(), { description: 'Origin of the customer web app (CORS, CSRF Origin check, links).' }),
   ADMIN_APP_ORIGIN: required(t.origin(), { description: 'Origin of the admin app.' }),
-  TRUST_PROXY_HOPS: withDefault(t.int(0, 5), 1, { description: 'Reverse-proxy hops trusted for client IPs (2 behind CloudFront + ALB).' }),
+  TRUST_PROXY_HOPS: withDefault(t.int(0, 5), 0, {
+    description:
+      'Reverse-proxy hops trusted for the client IP: 0 = none (the socket peer), 1 behind the Compose edge, 2 behind CloudFront + ALB. Must be set in staging and production.',
+  }),
   REGION: withDefault(t.string(/^[a-z0-9-]{2,32}$/), 'local', { description: 'Deployment region label (brief §10 multi-region seam).' }),
   LOCALE_DEFAULT: withDefault(t.oneOf(LOCALES), 'en', { description: 'Fallback locale for e-mails and API messages.' }),
   FEATURE_FLAGS_DEFAULTS_PATH: optional(t.string(RELATIVE_PATH), {

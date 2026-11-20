@@ -4,16 +4,18 @@
  * - `ipLimiter`: the step-0 coarse per-IP limiter. createApp mounts it PATH-LESS before `routes`, hence before the
  *   OPTIONS responder and the /api/docs mount (PR21-SEC-01 step 5, PR21-SEC-06, D-ORCH-024 (5)); a limiter mounted
  *   under a path would fail the drift walk by design. It counts every request except the orchestrator probes
- *   (`/health/*`, class `none`): 120/min per IP when no credential is presented ("unauthenticated 120/min/IP"), and the
- *   ten times the `authenticated` limit per IP when one is, so a flood of forged credentials cannot bypass it. It runs before the
- *   authentication slot, so a flood never reaches bcrypt or JWT verification.
+ *   (`/health/*`, class `none`): 120/min per IP ("unauthenticated 120/min/IP") for every request, and against a per-IP
+ *   ceiling of ten times the `authenticated` limit when a request under /api/v1 presents a credential header. The ceiling
+ *   is chosen by the presence of the header, not by its validity: it bounds a flood per IP, it does not tell a forged
+ *   credential from a valid one (ADR-0016 am. 12 items 3 and 4). The two API-prefix conditions below are exact (A1).
  * - `routeRateLimit`: pipeline step 5, the per-class limit of the route's `rateLimit` (per IP, or per user for the
  *   `authenticated` class), after authorisation (DR-A08).
  * Both come in two forms. Without a {@link RateLimitKit} (test compositions) `ipLimiter()` passes through and
  * `routeRateLimit` refuses, when it is mounted, a route of a class whose limit is a security control rather than
  * capacity protection (PR32-SEC-03, condition C3): `auth` (the brute-force limit README §7 keeps even during a Valkey
  * outage) and `email-send` (mail abuse). With a kit (startApi) both are real; the answers are 429 RATE_LIMITED with
- * `Retry-After` and the three draft-06 `RateLimit-*` headers, which every limited response carries.
+ * `Retry-After` and the three draft-06 `RateLimit-*` headers, which every limited response carries. A response that
+ * passed both stages carries the reading of the route's class; a step-0 429 carries the step-0 reading.
  *
  * The client IP is `req.ip`, which Express derives from the trusted proxy chain only (`trust proxy` = TRUST_PROXY_HOPS,
  * app.ts), and IPv6 is counted by /64.
@@ -37,7 +39,7 @@ export interface RateLimitKit {
   readonly limiter: RateLimiter;
   readonly settings: RateLimitSettings;
   readonly counter: RateLimitCounter;
-  /** The security-event sink: `rate_limit_auth` on a refused `auth` request. */
+  /** The security-event sink: `rate_limit_auth` on the first refusal of a key and window in the `auth` and `email-send` classes. */
   readonly events: SecurityEventSink;
 }
 
@@ -70,18 +72,27 @@ function passThrough(): RequestHandler {
   };
 }
 
-export function ipLimiter(kit?: RateLimitKit): RequestHandler {
+/** True for `/api/v1` and `/api/v1/...` (exact and case-sensitive; a path in another spelling takes the anonymous rule). */
+const underPrefix = (path: string, prefix: string): boolean => path === prefix || path.startsWith(`${prefix}/`);
+
+/**
+ * The step-0 limiter over the kit. The credentialed ceiling applies only to a non-OPTIONS request under `apiPrefix` that
+ * presents a credential header (ADR-0016 am. 12 item 3, D-ARCH-174); everything else (API docs, OPTIONS, paths outside the
+ * prefix) takes the anonymous budget, whatever headers it carries.
+ */
+export function ipLimiter(kit?: RateLimitKit, apiPrefix = '/api/v1'): RequestHandler {
   if (kit === undefined) return passThrough();
   return function ipLimiter(req: Request, res: Response, next: NextFunction): void {
     if (isProbe(req.path)) {
       next();
       return;
     }
-    const credentialed = presentsCredential(req.headers);
+    const credentialed = req.method !== 'OPTIONS' && underPrefix(req.path, apiPrefix) && presentsCredential(req.headers);
     const rule = stepZeroRule(clientIpKey(req.ip), credentialed, kit.settings);
     kit.limiter
       .consume([rule], { onStoreFailure: 'fail-open', scope: 'rate-limit' })
-      .then((decision) => answer(decision, res, next, () => kit.counter.refused(credentialed ? 'authenticated' : 'unauthenticated')), next);
+      .then((decision) => answer(decision, res, next, () => kit.counter.refused(credentialed ? 'step0-credentialed' : 'unauthenticated')))
+      .catch(next);
   };
 }
 
@@ -108,15 +119,19 @@ export function createRouteRateLimit(kit: RateLimitKit): RouteSlot {
       const principal = principalOf(res);
       const subject = { ip: clientIpKey(req.ip), ...(principal.authenticated ? { userId: principal.actorId } : {}) };
       const { rules, onStoreFailure } = classPolicy(klass, subject, kit.settings);
-      kit.limiter.consume(rules, { onStoreFailure, scope: 'rate-limit' }).then(
-        (decision) =>
+      kit.limiter
+        .consume(rules, { onStoreFailure, scope: 'rate-limit' })
+        .then((decision) =>
           answer(decision, res, next, () => {
             kit.counter.refused(klass);
-            // A refused brute-force-class request is a security event (AT-US-040-10); the coarse IP is not an attribute yet.
-            if (klass === 'auth') kit.events.emit('rate_limit_auth', { class: klass, key_type: 'ip' });
+            // The first refusal of a key and window is a security event (AT-US-040-10, ADR-0016 am. 12 item 6); the
+            // counter counts every refusal. The coarse IP is not an attribute yet.
+            if (SECURITY_RATE_LIMIT_CLASSES.includes(klass) && !decision.allowed && decision.first) {
+              kit.events.emit('rate_limit_auth', { class: klass, key_type: 'ip' });
+            }
           }),
-        next,
-      );
+        )
+        .catch(next);
     };
   };
 }

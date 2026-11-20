@@ -128,6 +128,9 @@ describe('security event catalogue', () => {
     // Pinned here as well, so a README edit alone cannot widen an allow-list.
     expect(SECURITY_EVENT_FIELDS.audit_mutation_rejected).toEqual(['sql_state']);
     expect(SECURITY_EVENT_FIELDS.audit_partition_squatted).toEqual(['partition_name', 'kind', 'reason', 'sql_state']);
+    // TASK-041 (R1-m3): the rate-limit store event carries exactly these two attributes, at error level.
+    expect(SECURITY_EVENT_FIELDS.rate_limit_store_unavailable).toEqual(['store', 'scope']);
+    expect(SECURITY_EVENT_LEVEL.rate_limit_store_unavailable).toBe('error');
     for (const name of RUNTIME_SECURITY_EVENTS.filter(
       (event) => event !== 'audit_partition_squatted' && event !== 'rate_limit_store_unavailable',
     )) {

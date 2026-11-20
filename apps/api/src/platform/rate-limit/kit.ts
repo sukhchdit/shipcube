@@ -17,12 +17,14 @@ export interface RateLimitDependencies {
   readonly settings: RateLimitSettings & { readonly AUTHZ_DENIAL_BUDGET_PER_MIN: number };
   /** The shared Valkey client; absent (tests) the counters are per instance. */
   readonly valkey?: ScriptClient | undefined;
+  /** The refusal counter (tests read it); default a fresh one. The export owner is TASK-214. */
+  readonly counter?: RateLimitCounter | undefined;
 }
 
 export function createRateLimitKit(
   deps: RateLimitDependencies,
   events: SecurityEventSink,
-  counter: RateLimitCounter = createRateLimitCounter(),
+  counter: RateLimitCounter = deps.counter ?? createRateLimitCounter(),
 ): RateLimitKit {
   const report = createOutageReporter((scope) => events.emit('rate_limit_store_unavailable', { store: 'valkey', scope }));
   return {

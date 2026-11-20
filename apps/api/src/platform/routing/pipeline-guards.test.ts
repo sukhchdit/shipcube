@@ -10,6 +10,7 @@ import type { Express, NextFunction, Request, Response } from 'express';
 
 import { createApp } from '../../app.js';
 import type { TenantContext, TenantTxRunner } from '../db/index.js';
+import { DEFAULT_RATE_LIMIT_SETTINGS } from '../rate-limit/tests/settings.js';
 import { RequestContextError, tenantContextOf, executeSlot } from '../tx/execute.js';
 import { defineRoute, type Principal, type RouteDescriptor, type RouteHandler, type RouteSpec } from './define-route.js';
 import {
@@ -199,7 +200,13 @@ describe('[PR #32 m2] [PR32-SEC-05 (a)/(b)] composition invariants live in creat
       handler: () => ({ status: 204 }),
     });
     const compose = (apiMode: 'test' | 'live') => () =>
-      createApp({ health: [], modules: [{ name: 'w', routes: [webhook] }], logger: silent, apiMode });
+      createApp({
+        health: [],
+        modules: [{ name: 'w', routes: [webhook] }],
+        logger: silent,
+        apiMode,
+        rateLimit: { settings: DEFAULT_RATE_LIMIT_SETTINGS },
+      });
     expect(compose('test')).not.toThrow();
     expect(compose('live')).toThrow(RouteBindingError);
   });

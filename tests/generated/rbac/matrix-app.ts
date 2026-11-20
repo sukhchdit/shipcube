@@ -10,6 +10,11 @@
  *    unknown cookie or token) goes to the production `authenticate` stub, which gives the anonymous principal or 401
  *    `AUTH_REQUIRED` exactly as in production.
  *
+ * A fourth seam is the ABSENCE of createApp's `rateLimit` dependency (TASK-041; PR48-SEC-06, R1-m6): without it the step-0
+ * per-IP limiter passes through and the step-5 slot is the TASK-020 stub, so the matrix's several hundred requests from one
+ * address are not throttled. It is test-only: createApp refuses a `live` composition without `rateLimit` (PR041-SEC-08),
+ * and start-api.denial-budget.api.test.ts pins that startApi passes it. Retired when a matrix run needs real limits.
+ *
  * What the matrix therefore proves (truth in labelling; PR #48 code review R1-m2, PR48-SEC-05/06, D-ARCH-134): the
  * credential-kind selection (`presentedKinds`, D-ARCH-109), the production authenticate stub, the production MFA gate
  * for pending staff, and the PERMISSION gate of the production `authorise`. It does NOT prove the authenticators (they

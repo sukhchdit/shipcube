@@ -9,8 +9,9 @@ import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from '@jest/globals';
 import { createAuditPrivacy } from '@platform/audit';
 
-import { AuthenticateSeamError, createApp, type AppDependencies } from '../../app.js';
+import { AuthenticateSeamError, createApp, RateLimitMissingError, type AppDependencies } from '../../app.js';
 import type { TenantTxRunner } from '../db/index.js';
+import { DEFAULT_RATE_LIMIT_SETTINGS } from '../rate-limit/tests/settings.js';
 import { defineRoute, type RouteDescriptor } from './define-route.js';
 import { defaultPipelineSlots } from './pipeline.js';
 import type { RouteSlot } from './slot.js';
@@ -37,6 +38,8 @@ const audited: RouteDescriptor = defineRoute({
   auth: 'session',
   handler: () => ({ status: 201, body: { id: 'a-1' } }),
 });
+
+const rateLimit = { settings: DEFAULT_RATE_LIMIT_SETTINGS };
 
 const base: AppDependencies = {
   health: [],
@@ -85,6 +88,12 @@ describe('[D-SEC-PR56-01] [D-ARCH-141] createApp composes the capture with the p
   it('[dup-review R1-m6] the authenticate seam is refused in live mode, whatever else the composition holds', () => {
     const authenticate: RouteSlot = () => (_req, _res, next) => next();
     expect(() => createApp({ ...base, auditPrivacy: privacy, authenticate, apiMode: 'live' })).toThrow(AuthenticateSeamError);
-    expect(() => createApp({ ...base, auditPrivacy: privacy, apiMode: 'live' })).not.toThrow();
+    expect(() => createApp({ ...base, auditPrivacy: privacy, apiMode: 'live', rateLimit })).not.toThrow();
+  });
+
+  it('[PR041-SEC-08] a live composition without the rate limiters is refused at boot; a test one is not', () => {
+    expect(() => createApp({ ...base, auditPrivacy: privacy, apiMode: 'live' })).toThrow(RateLimitMissingError);
+    expect(() => createApp({ ...base, auditPrivacy: privacy, apiMode: 'test' })).not.toThrow();
+    expect(() => createApp({ ...base, auditPrivacy: privacy })).not.toThrow();
   });
 });
