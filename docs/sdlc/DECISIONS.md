@@ -6234,3 +6234,51 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Routed:** qa-lead: the AT-US-038-01 row of `gherkin-test-map.md` names the part 040-B test beside the part 040-A one. principal-architect: the purge place and cadence (m2), the M2 fix or amendment, and the m7 ordering (replay before the `If-Match` and re-authentication-proof checks), which decides whether a retried request with a consumed proof is replayed as api/README §5 promises.
 - **Validation:** the part 040-A suite on lane B; the composition test and the purge test of part 040-B; at P6 acceptance product-manager checks both before accepting US-038 (A-117). Nothing was run for this entry.
 - **Reversibility:** High until part 040-A merges (notes, three traceability cells, card lines).
+
+### D-SECPR043-01 · 2026-11-20 · security-analyst · TASK-043 (transactional outbox writer, at-least-once relay, 30-day purge; branch `feat/TASK-043-transactional-outbox-writer-at-least`, not yet pushed) security round 1 = PASS_WITH_FOLLOW-UPS at code head `da996002`; QG-043-C4 concurrence with conditions; QG-043-C3: ADR-0004 amendment 3 item 21 confirmed (record `docs/05-quality/security/PR-pending-TASK-043-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-043-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium is open.
+  - **Method.** Static review plus single-process Node 24 probes on `git archive` extracts of `c60959bd` and of the relay folder at `da996002`. The probes covered the real `eslint.config.mjs` with type-aware rules off, the real Joi 18, and the relay with type-stripped sources and a fake runner. No npm, Jest or Docker, and nothing ran in the evidence worktree. Lane B is the evidence for every `*.int.test.ts`.
+- **The record is a merge condition.** The PR changes 27 owned paths: `/prisma/`, `/tools/db/`, `/apps/api/src/platform/`, both `package.json` files, `/tests/fixtures/lint/` and `/tools/lint/`. Main's classifier selects the hosted `security-integration` job (20 paths).
+- **Held:**
+  - **Writer.** It derives `org_id`, actor and correlation id from the transaction in one bound `INSERT`, with `clock_timestamp()` as the order key.
+  - **Relay.** It reads identifiers only. `last_error` and the log carry class names only: a random sentinel in an error message reached neither.
+  - **The transaction bound.** The callback stays open at most `3W / 4`: 107 to 287 ms at `W` = 400 ms with a hanging or slow producer.
+  - **Purge.** The predicates and batch bounds are in each statement, and D-SECPR039-01 conditions (i) to (iv) hold.
+  - **Raw-table ownership.** All 7 non-owner raw statements and all 3 non-owner delegates on `outbox_events`, `processed_events` and `job_executions` are reported, and both owner controls stay clean.
+  - **Producer grammar.** The producer's grammar equals the row CHECKs, so no row the writer wrote can be refused.
+  - **PR64-SEC-13, TASK-043 half: met.** The relay's producer takes its queues from `openQueue`, and the test refuses AUTH and keeps the password off stderr.
+- **QG-043-C4: concurrence.** It covers the ADR-0005 amendment 11 notes at items 17 and 20, the PostgreSQL lock in place of the Valkey lock, and "nothing is parked".
+  - **The item 20 note is exact.** Today the rule reports nothing in `relay.ts`, and nothing for a `producer.enqueue` in another transaction root. With `producer`/`jobProducer` in `names`, all three are reported.
+  - **C4-1.** No second production call site of the producer before TASK-047's lint change. Today `relay.ts` is the only one. `apps/worker/src/**` is mostly unowned, so PR64-SEC-09 gains `apps/worker/src/platform/outbox/` and `packages/shared/src/events/`.
+  - **C4-2.** PR043-SEC-04 is settled before TASK-214 builds the alarms.
+  - **C4-3.** I align the threat model's T-83 row before G3. The text is in the record, §3.
+- **QG-043-C3: confirmed.** The `token_enc` overwrite is by id, carries no `published_at` predicate and checks for exactly one row. I prefer it to the predicate-plus-retry and to the 24 h backstop. Card conditions T078-1 to T078-5 for TASK-078 replace the D-SD-006 placeholder:
+  - row-relative `SET` expressions and the id as the only predicate;
+  - its own short transaction;
+  - one id-only port, which adds `payload` to the column grant of PR043-SEC-05;
+  - logs carry the event id and row count only;
+  - retry and after-housekeeping tests.
+- **New findings:**
+  - **PR043-SEC-01 (LOW, CWE-1173).** `isClosedObjectSchema` checks one level only. `Joi.object()` with no keys, `.keys()`, `.pattern()`, nested open objects, `any`, `alternatives`, arrays and free strings pass `mergeEvents` and store an e-mail address. Fix: a structural allow-list walk of `describe()`, validated on 16 schemas with 0 mismatches. TASK-043 fix cycle, or a merge prerequisite of TASK-049.
+  - **PR043-SEC-02 (LOW, CWE-1061; extends code review R2-m3).** `createOutbox` is reachable from api production code: a deep import of `writer.ts`, `@platform/api/testing/outbox`, or `tests/test-outbox.js`. All are lint-clean; the worker is stopped. Fix: a `tools/repo/test-seams` tripwire now, and a boundaries resolved-file policy with the next lint-lock holder.
+  - **PR043-SEC-03 (INFO, merge-relevant).** `./testing/outbox` is a pruned export that `SKIPPED_EXPORTS` does not skip. So `tools/docker/image-exports.test.ts` fails in lane A unit, and the worker image preflight would fail `docker build`. In the image the seam fails closed. Fix: serve it from the sanctioned `./testing` subpath.
+  - **PR043-SEC-04 (LOW, CWE-778).** A foreign holder of the relay lock leaves the lag gauge at 0 and the last-tick timestamp fresh, so neither alarm fires. The holder can be an RB-06 replay session, the 24 h housekeeping or a mistaken module transaction. Fix: `if (tick.locked) metrics.tickEnded(…)`, validated by mutation, plus the ADR-0004 amendment 2 item 11 definition (principal-architect).
+  - **PR043-SEC-05 (LOW, CWE-732).** `platform_app` holds `UPDATE` on every column of `outbox_events`, but `org_id` becomes the authoritative tenant of every derived job from TASK-047 on. Fix: a column-level `UPDATE` grant (`published_at`, `attempts`, `last_error`, `updated_at`, `updated_by`, `version`), and optionally a binding guard. principal-architect; before TASK-047 merges.
+  - **PR043-SEC-06 (LOW, CWE-837).** `DELETE` on `processed_events` and `job_executions` has no horizon at the database, and a deleted row reopens a once-only effect. An RB-06 replay near day 30 does the same. Fix: a `BEFORE DELETE` horizon guard or written acceptance (principal-architect), and an RB-06 line "replay only events published less than 29 days ago" (P7). G3.
+  - **PR043-SEC-07 (INFO, CWE-770).** SYSTEM contexts (`orgId ''`) take the worker's `anonymous` admission key, which guest-context jobs share. TASK-047: a key of their own, or an exemption for the relay.
+- **Binding.** The single `Head` row names `da996002` (the code review round 2 head). The dispatched `c60959bd` also binds, and the follow-up `c60959bd..da996002` touches no owned path.
+  - **Simulation with main's real checker** in merge-ref form on main `164be6b0`: 9 of 9 as expected.
+  - **Pass:** the record on main merged with `da996002`; a later commit in `apps/worker` only; a `Head` row naming `c60959bd`.
+  - **Fail:** no record; a `Head` row naming the base; a later FAIL verdict; a later commit in an owned path; the placeholder file name; the branch updated with main.
+  - **The last fail is expected.** Main changed `tools/lint/negative-fixtures.test.ts`, an owned path this PR also changes. Merging main into the branch, which the DECISIONS.md conflict with the current main makes necessary, therefore voids this round, and a merge-only security round is owed on that merge commit.
+- **Conditions:**
+  - **C1.** Lane B PASS and the hosted `security-integration` job at the pushed head.
+  - **C2.** Rename the record, then confirm the merge ref contains it.
+  - **C3.** A merge-only round after the branch update. A delta round if a fix for PR043-SEC-01, -02, -03 or -05 changes an owned path.
+- **Routed:**
+  - **TASK-043 fix cycle:** PR043-SEC-03; PR043-SEC-01 (preferred); PR043-SEC-02 (a).
+  - **principal-architect:** PR043-SEC-04 (item 11 definition), PR043-SEC-05, PR043-SEC-06 (a).
+  - **senior-developer plan fold:** T078-1 to T078-5 on TASK-078; PR043-SEC-07 and C4-1 on TASK-047; PR043-SEC-02 (b) beside code review R2-C5; PR043-SEC-01 on TASK-049 if not fixed here; PR043-SEC-06 (b) on the P7 runbook task; C4-2 on TASK-214.
+  - **devops:** PR64-SEC-09 paths.
+  - **security-analyst:** C4-3.
+- **Reversibility:** High (a review record; the C3 confirmation binds TASK-078, which is not built).
