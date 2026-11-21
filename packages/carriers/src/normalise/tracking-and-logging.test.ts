@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { money } from '@platform/shared';
 import { createLogger } from '@platform/shared/logging';
 import fc from 'fast-check';
 
@@ -134,7 +135,7 @@ describe('[R1-m5 / PR075-SEC-04] no URL path or carrier text reaches a log line 
 
 describe('[R1-n3] CARRIER_OTHER raw labels', () => {
   it('strip format characters (bidi override, zero width) and never end in a lone surrogate', () => {
-    const amount = { amountMinor: 1, currency: 'USD' };
+    const amount = money(1, 'USD');
     const [bidi, zeroWidth, emoji] = [0x202e, 0x200b, 0x1f600].map((point) => String.fromCodePoint(point));
     expect(normaliseSurcharge(DHL, { label: `Weird${bidi ?? ''}Fee${zeroWidth ?? ''}`, amount }).raw).toBe('Weird Fee');
     const raw = normaliseSurcharge(DHL, { label: `${'x'.repeat(MAX_RAW_LABEL_LENGTH - 1)}${emoji ?? ''}`, amount }).raw ?? '';

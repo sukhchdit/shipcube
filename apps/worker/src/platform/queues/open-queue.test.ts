@@ -52,6 +52,21 @@ async function fakeValkey(): Promise<FakeValkey> {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The Queue instances a test's metrics scrape touched (TASK-040 fix cycle 3, lane B 'Cannot log after tests are done'):
+ * a queue that never got past the refused handshake may not finish a bounded graceful close, and its reconnect loop
+ * then logs an unhandled ioredis error after the file ended. The cleanup force-disconnects each of them.
+ */
+function trackScrapedQueues(): { readonly disconnectAll: () => Promise<void> } {
+  const opened = new Set<Queue>();
+  const original = Queue.prototype.getJobCounts;
+  jest.spyOn(Queue.prototype, 'getJobCounts').mockImplementation(function (this: Queue, ...types) {
+    opened.add(this);
+    return original.apply(this, types);
+  });
+  return { disconnectAll: () => bounded(Promise.all([...opened].map((queue) => queue.disconnect())), 1_000) };
+}
+
 /** Waits for `work` (failure ignored) for at most `ms`; the timer never outlives the call. */
 async function bounded(work: Promise<unknown>, ms: number): Promise<void> {
   let timer: NodeJS.Timeout | undefined;
@@ -97,6 +112,7 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
     const connection = queueConnectionOptions(url, 'worker-consumers', 'worker');
     const queueConnection = queueConnectionOptions(url, 'worker-queues', 'queue');
     // The 18 Queue instances of the runtime (the metrics and dead-letter queues) ...
+    const scraped = trackScrapedQueues();
     const queues = createWorkerQueues({ connection, queueConnection, log, processors: {} });
     // ... and one consumer with its own dead-letter queue: its Worker and Queue meet the same refusal.
     const consumer = createQueueConsumer({ queue: 'booking', processor: () => Promise.resolve(), connection, queueConnection, log });
@@ -104,6 +120,7 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
       // Forced: the Worker never got a connection, so a graceful close would wait for one.
       await bounded(consumer.close(true), 3_000);
       await bounded(queues.close(), 3_000);
+      await scraped.disconnectAll();
       // Connections that never got past the refused handshake may not finish a graceful close: end their reconnect loops.
       await bounded(consumer.worker.disconnect(), 1_000);
     });
@@ -141,6 +158,7 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
     cleanups.push(() => new Promise<void>((resolve) => valkey.server.close(() => resolve())));
     const log = createRuntimeLog('worker', { write: () => true }, { level: 'debug' });
     const url = `redis://worker:${PASSWORD}@127.0.0.1:${String(valkey.port)}/0`;
+    const scraped = trackScrapedQueues();
     const counts = jest.spyOn(Queue.prototype, 'getJobCounts');
     const queues = createWorkerQueues({
       connection: queueConnectionOptions(url, 'worker-consumers', 'worker'),
@@ -150,6 +168,7 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
     });
     cleanups.push(async () => {
       await bounded(queues.close(), 3_000);
+      await scraped.disconnectAll();
     });
     const scrapes = Array.from({ length: 25 }, () => queues.metrics());
     for (const scrape of scrapes) scrape.catch(() => undefined);

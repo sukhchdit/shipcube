@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from '@jest/globals';
 
-import { IMPURE_SHARED_EXPORTS } from '../eslint-rules/pricing-purity.mjs';
+import { IMPURE_SHARED_EXPORTS, WATCHED_GLOBALS } from '../eslint-rules/pricing-purity.mjs';
 import { findRepoRoot } from '../test-support/process.js';
 
 const SHARED_SRC = join(findRepoRoot(), 'packages', 'shared', 'src');
@@ -43,5 +43,13 @@ describe('[R2-n6] IMPURE_SHARED_EXPORTS pins the clock and randomness of the @pl
       ['ANONYMOUS_ACTOR_ID', 'OPERATOR_ORG_ID', 'SYSTEM_ACTOR_ID', 'isUuidV7', ...IMPURE_SHARED_EXPORTS].sort(),
     );
     expect([...IMPURE_SHARED_EXPORTS].sort()).toEqual(['uuidV7Timestamp', 'uuidv7']);
+  });
+});
+
+describe('[R1-m3] WATCHED_GLOBALS pins the global names no pricing binding may shadow (PR076-SEC-07, PR080-SEC-02)', () => {
+  it('is exactly the always-impure globals plus Date and Math', () => {
+    expect([...WATCHED_GLOBALS].sort()).toEqual(
+      ['Date', 'Math', 'crypto', 'global', 'globalThis', 'navigator', 'performance', 'process', 'self', 'window'].sort(),
+    );
   });
 });

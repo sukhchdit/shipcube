@@ -102,6 +102,13 @@ describe('scanner', () => {
     expect(isProtected('@typescript-eslint/no-explicit-any')).toBe(false);
   });
 
+  it('[PR080-SEC-01] platform/pricing-purity is protected: an inline disable with a task ID is refused', () => {
+    expect(isProtected('platform/pricing-purity')).toBe(true);
+    const text = ['// eslint-disable-next-line platform/pricing-purity -- TASK-080 x', 'export const now = Date.now();', ''].join('\n');
+    const findings = checkSuppressions([{ path: 'packages/pricing/src/clock.ts', text }]).findings.map((f) => f.rule);
+    expect(findings).toEqual(['suppression/protected-rule']);
+  });
+
   it('skips fixtures, docs and non-source files', () => {
     expect(isScanned('tests/fixtures/lint/suppressions/bad-ts-ignore.ts')).toBe(false);
     expect(isScanned('docs/05-quality/x.ts')).toBe(false);

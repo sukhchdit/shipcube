@@ -1,9 +1,12 @@
 /**
  * Canonical request and response types of the `CarrierAdapter` contract (brief §4.3, ADR-0010 §Interface). Types only.
  * Every value is a Platform canonical code (codes.ts) or a unit-normalised quantity: weights in grams and lengths in
- * millimetres as integers (DR-B15), money as integer minor units with an ISO 4217 code (no floating point on money).
+ * millimetres as integers (DR-B15), money as the ADR-0009 `Money` of `@platform/shared` (integer minor units with an
+ * ISO 4217 code; no floating point on money).
  * Carrier wire formats live inside their adapter folder and are never exported from the package (REQ-CARR-001).
  */
+import type { Money } from '@platform/shared';
+
 import type {
   CarrierErrorCode,
   ContentType,
@@ -16,11 +19,13 @@ import type {
   TrackingStatus,
 } from './codes.js';
 
-/** Integer minor units with an ISO 4217 currency (`{ amountMinor: 12345, currency: 'USD' }` = USD 123.45). */
-export interface CarrierMoney {
-  readonly amountMinor: number;
-  readonly currency: string;
-}
+/**
+ * The ADR-0009 §3 `Money` (branded integer minor units and an ISO 4217 currency; `money(12345, 'USD')` = USD 123.45), so
+ * the pricing boundary takes a carrier amount without a field mapping (TASK-075 code review R1-m6, D-TASK075-10;
+ * TASK-080). The name stays as an alias so no import breaks. Adapters build it with `money` or, from a carrier's
+ * decimal text, with `carrierDecimalToMoney` (normalise/money.ts).
+ */
+export type CarrierMoney = Money;
 
 export interface Address {
   readonly countryCode: string;
