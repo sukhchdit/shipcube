@@ -11038,3 +11038,25 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - security-analyst: a merge-only round if main is merged again; the second pull request's round; the T-79/R-05 text before G3.
   - Concurred: code review R2-n1 and R2-n2, and QG-040-C9 (nothing to add).
 - **Reversibility:** High (a review record).
+
+### D-CRCHORE-01 · 2026-11-21 · code-reviewer · Code review round 1 of the three main-red chore PRs: #85 gitleaks-full baseline 17 -> 22 at `72249e40` = APPROVED_WITH_NITS; #86 Valkey back on the harness digest at `72e3dc9f` = APPROVED_WITH_NITS; #87 Node 24 base images at `0ccac6bf` = APPROVED_WITH_NITS (records `docs/05-quality/reviews/PR-0085-chore-gitleaks-baseline-code-review.md`, `PR-0086-chore-valkey-code-review.md`, `PR-0087-chore-node24-code-review.md`)
+- **Method:** git, grep and reads only (dispatch: no npm, Jest, Docker or Node). Every pin is re-derived from git objects. Merges are tested with `git merge-tree --write-tree`: main with each head, every pair, and all three. Gitleaks: lane B on `72e3dc9f` (exactly the 2 PR080-SEC-07 fingerprints over main up to `88fd7360`), plus an over-approximating grep of the generic-api-key rule over every newer first-parent range. That grep found no new fingerprint.
+- **#85:** the five lines are exact D-SEC-PR45-01 fingerprints of the one non-secret prose line. Line 7697 has the same content hash in `d7585e78` and the three merges. The merge parents match the comments. Across all 203 refs, the only other merges that re-add the line belong to branches already squashed (#81, #82, #83). The int test holds on `72249e40` and on main after the merge (19 used lines, 3 inert, line 1 `63accea` on main). It fails on #86 and #87 as pushed (2 findings) until they merge a main that contains #85.
+  - **R1-m1 (MINOR, process):** lane B runs the worktree's `BASELINE_COUNT` against the baseline at `{base}`. So (a) #85's own lane-B `gitleaks-full` stops with exit 2 (`holds 17 ..., exactly 22 expected`), and (b) after #85 lands, every branch without it stops with `holds 22 ..., exactly 17 expected` until it merges main. Neither is a secret finding, and D-ORCH-170's reading rule does not cover them.
+  - **NITs:** R1-n1 (16 + 1 unit fixtures sized to the old count), R1-n2 (int case 2 relies on line 1 being a main commit), R1-n3 (retire the three branch-only lines once TASK-044, 040-B and 041-B are merged).
+- **#86:** `compose.yaml:44` equals `suite-runners.json:6` and the pre-#49 line, byte for byte. The ignore is valid and in the npm block's form. The light run (sec-static + compose-stack) is green.
+  - **R1-m1 (MINOR):** digest-only and 8.x minor bumps of Valkey (and `postgres:18`) still desync compose from the harness, because Dependabot never edits `suite-runners.json`. Route: devops-engineer, full ignore or a single source.
+  - **R1-n1 (NIT):** the dependabot.yml header.
+- **#87:** the five Dockerfiles are byte-identical to `7db3b8b5`, the parent of #50. Nothing else touched them since. The debian runtime pins are unchanged. Codename parity holds. The semver-major ignore keeps Node 24.x bumps in the one `docker-images` group with debian, so D-ARCH-116 rule 3 holds.
+  - **R1-m1 (MINOR):** no static rule ties the `node:` major to `.node-version` and `engines`. Route: devops-engineer, a `check-dockerfiles` rule.
+  - **R1-n1 (NIT):** the header.
+- **Merge order:** #85 -> #86 -> #87 (#86 and #87 commute). No rebase-by-merge is needed for the squash merges. A merge of main is needed only to get a fresh lane-B record on any branch after #85 lands.
+- **Merge conditions:**
+  - #85: a security record on `72249e40`, and `gitleaks-full.int.test.ts` run once on `72249e40` (nobody has run it yet).
+  - #86: lane-B evidence committed and read per R1-m1. security-analyst confirms O-1 closed.
+  - #87: the api image build on `0ccac6bf` (`prep-chore-node24.out` was empty at review).
+  - All three: hosted CI when billing returns.
+- **Routed:**
+  - orchestrator: record the two exit-2 signatures of PR-0085 R1-m1 as an expected class.
+  - devops-engineer: PR-0085 R1-n1..n3, PR-0086 R1-m1/n1, PR-0087 R1-m1/n1.
+- **Reversibility:** High (review records).
