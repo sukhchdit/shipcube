@@ -219,3 +219,156 @@ Not conditions of this PR: PR040-SEC-11 and -12 (with the R1 fix commit or the s
 | security-analyst (self) | C2, C3; before G3, the T-79 and R-05 text still owed from D-SECPR040-01 §3.9 |
 
 | Verdict | **PASS_WITH_CONDITIONS.** Round 1 of part 040-B's first pull request, bound to `a4aadd2e` (delta `0f0d92a0..a4aadd2e`).<br>**Findings:** 0 Critical, 0 High, 0 Medium. New: PR040-SEC-10 LOW (= code review R1-m1: the read-only stretch of the lease misses the writer's remainder; margin negative from a statement timeout of 7 s; a duplicate e-mail and DOWNLOAD entry for the same caller); PR040-SEC-11, -12, -13 INFO.<br>**Closed:** PR040-SEC-01, -02, -07, -09; PR040-SEC-04 as ruled.<br>**Concurred:** D-TASK040-18 to D-TASK040-22; code review R1-m2 (this PR re-times).<br>**Binding:** main moved to `4ba683ad` (#80 to #84) during the round. The D-ORCH-158 rule is refined: the stacked blob only for this PR's delta files, or the explicit-base merge (`--merge-base=0f0d92a0`, clean today), with the raw-diff equality as proof. The literal rule would revert #81's `grants.manifest` block.<br>**Conditions:** C1 the architect's ruling on PR040-SEC-10; C2 a delta round on the fix head; C3 the merge-only round with the §6 checks and the refined rule; C4 lane B on the merged head, hosted CI, rename and merge-ref check; C5 merge order |
+
+# Round 2: delta round on the fix head (condition C2) and merge-only round for the stacked merge `0ccdd009` (condition C3)
+
+| Field | Value |
+|---|---|
+| PR | Not opened yet. Branch `feat/TASK-040-part-b-idempotency-production`, pushed at `9d1687b1` (D-TASK040-23 to -25). Commits since round 1: `0ccdd009` (stacked merge of `origin/main` `4ba683ad`, D-ORCH-166), `2c9cc41c` (code review R1-m2 re-time, R1-n2, R1-n5), `9d1687b1` (fix cycle 1: PR040-SEC-10 as ruled by D-ARCH-232 and ADR-0014 amendment 18; PR040-SEC-11 and -12 with code review R1-n3 and R1-n4) |
+| Head | 9d1687b124ccd137c95c706d3ab5717531070e78 |
+| What was reviewed | (1) The merge `0ccdd009` as a merge, with checks 1 to 5 of §6 (R2.3). (2) The delta `0ccdd009..9d1687b1` in full: 10 files, 251+/69-. The migration directory is renamed (`migration.sql` 100 %, `down.sql` 80 %: its first comment line). 9 of the 10 are security-owned; `tests/contract/x-idempotency.test.ts` is not, and I read it as a control. The range the checker will see, `4ba683ad..9d1687b1`, changes the same 15 paths as round 1 (the re-timed directory instead of the old one), 14 of them owned |
+| Base and main | The merge base is `4ba683ad`; it is also the `base.sha` the pull request event will carry. Since then main has moved in `docs/` and `.claude/` only. Tips when this round was written: local `main` `c123cf9a`, `origin/main` `88fd7360` |
+| Lane B | `20261121T1538Z_2c9cc41` on `2c9cc41c` (the merge and the re-time): FAIL on exactly the main-wide cases of D-ORCH-170 and on nothing else. Those cases are gitleaks-full (2 tests; 3 fingerprints beyond the 17-line baseline: the 2 main PR080-SEC-07 lines and the branch-only line of `0ccdd009`, which PR #85 adds to the baseline, D-DEVOPS-002) and `compose-stack.test.ts` (O-1, PR #86). Everything else passed: api 243, catalog 121, migrations 30 (up/down/up of the re-timed migration), RLS 162, integration 506, unit 8,552 (2 skipped). `run-live75` on `9d1687b1` was queued behind CHORE-VALKEY and had not run when this round was written |
+| Binding items read | D-ARCH-232 and ADR-0014 amendment 18; D-TASK040-23 to -25; D-SD-013; code review round 2 (D-CRPR040B1-01, `cd16eb96`, APPROVED_WITH_NITS, R2-n1, R2-n2); D-QG-010 part 1 (QG-040-C9); D-ORCH-166 to -171; D-DEVOPS-001, -002; PR080-SEC-07 routes (a) to (c) (`PR-0081-TASK-080-security-review.md` R3.2) |
+| Reviewer / date | security-analyst, 2026-11-21, round 2.<br>**Host rule as round 1:** no Docker, no Jest and no npm suites. No command ran in `../Shipqube-TASK-040B`: its commits were read from the shared object store and the lane B log from the queue directory.<br>**Method:** single-process Node 24.22.3 probes on a `git archive` extract of `9d1687b1`. As controls, `a4aadd2e`'s `execute.ts` and five mutants sit next to the head's file. The head's `tests/contract/x-idempotency.test.ts` ran in-process on the head's dereferenced contract (a stub of `@jest/globals`, the real `expect` 30). Plumbing gave the merge proofs, and a shared sparse clone the record simulation.<br>`.env*` was not opened. #82's path list names `.env.example`; for it only blob ids were compared, and the gitleaks emulation excluded it by pathspec (checked by names only) |
+
+## R2.1 Summary
+
+- **PR040-SEC-10 closed** as ruled by D-ARCH-232 (amendment 18): `lease = max(30 s, timeout + max(D + T, 3T) + F + 5 s)`. I re-ran probe P2 with every stretch counted from the write and every later transaction, the one that ends the stretch included, counted with its full T. The stretches come from the code paths of `run()`, not from the six rows. Result: no stretch below the 5 s margin in 479,604 production configurations or in 2,000,000 random inputs of the function's domain. The smallest margin is exactly 5.000 s, on the failed `call`. The control `a4aadd2e` fails 2,250,176 times (worst −114 s), and the probe detects all five mutants.
+- **PR040-SEC-11 closed:** pin (d) and both API rows. **PR040-SEC-12 closed:** pin (a) on the effective security. One residual of pin (d) becomes **PR040-SEC-14, INFO** (= code review R2-n2, extended): three weakenings of its predicate survive the planted negatives. None of the three shapes is in the contract today.
+- **PR040-SEC-13 stays open and goes to part 040-B's second pull request.** That routing is acceptable, due before G3 as before (R2.6).
+- **The stacked merge `0ccdd009` is pure.** Its tree equals the explicit-base merge-tree (`206bfdfb`), and the raw-diff equality holds (15/15). Every path of #81, #82 (rate limiting, 49/49), #83 and #84 is byte-identical to main at the head. So are #80's paths outside this pull request (40/52, its error rendering included). Condition C3 is discharged for this merge.
+- **Gitleaks:** the faithful emulation finds exactly 1 finding over the pull request's range (93,338 added lines): the PR080-SEC-07 line re-added by `0ccdd009`. Lane A's range scan reads the base `.gitleaks.toml`, never the baseline of #85. It will therefore report that line unless PR080-SEC-07 route (c) is applied first. C4 now names this.
+- **New:** PR040-SEC-14 INFO. No Critical, High, Medium or Low is open for this pull request.
+
+## R2.2 What I verified
+
+| # | Probe (session scratch `t040b1r2/probes/`) | Result |
+|---|---|---|
+| P2r2 | `p2r2-lease.mjs`: the real `idempotencyLeaseMs` of the head. The stretches are enumerated over `run()`'s eight route shapes (`load` or not, `call` or not, writing or read-only handler), each with its outcomes. W = the clock reading of a claim, takeover or renewal, followed by at most `timeout` of its transaction. Every later transaction counts in full as T = admission wait + `maxWait` + `timeout`, so does the one with the protecting statement (a renewal or a completion). D counts for `call`, F (1 s) before the completion of a stored 4xx. The thresholds are the probe's own constants (5 s, 30 s, 1 s, 20 s), not the module's | **Production domain** (`maxWait` 2,000 ms, a code constant; D 20,000; statement timeout every millisecond from 100 to 120,000; admission 1, 250 or 2,000 ms, or not passed): 479,604 configurations, **0 stretches below 5 s**, 0 below the floor. Smallest margins: failed `call` 5.000 s; `call` to the renewal 6.000 s; read-only handler, entry and completion 6.000 s; failed handler 15 s; `load` to the renewal 16 s; handler completing inside 26 s. **Function domain:** 2,000,000 xorshift draws (`maxWait` 1 to 120,000; admission 1 to `maxWait` or absent; timeout 100 to 120,000; D 1 to 120,000): 0 below 5 s, smallest 5.000 s. **Values:** 38,250 / 40,000 ms at 5 s (admission 250 ms / not passed), 42,250 / 46,000 at 7 s, 60,750 / 66,000 at 12 s, 492,750 / 498,000 at 120 s. The head is never shorter than `a4aadd2e` (production domain sampled every 7 ms: 0 cases) |
+| P2r2-c | Controls through the same probe | `a4aadd2e`'s `execute.ts`: 2,250,176 violations; read-only −114.000 s at 120 s; `call` to the renewal −2.499 s and failed `call` −3.499 s at a timeout of 7,499 ms. Mutants of the head: timeout term dropped 2,240,840 (−114 s); F dropped 110,692 (4.000 s on the failed `call`); `3 *` to `2 *` 1,801,004 (−118 s); the `a4aadd2e` expression 2,250,176; admission default `maxWait` to 0 525,596 (0 s on the read-only row at 8 s). All five are detected |
+| P5r2 | `p5r2-pins.mjs`: the head's dereferenced contract; my own walk, then the pull request's predicates (from a copy of the test file with an appended export), then the test file itself | 133 operations, 47 idempotent. Document-level `security` is `[{bearerAuth}]`. Schemes: `bearerAuth`, `refreshCookieWeb`, `refreshCookieAdmin`, `csrfToken`, `quoteToken`, and the signature schemes for Stripe, the mock gateway and carriers. My walk on the effective security gives (a) `{recordConsent}` and (b) `{emailShipmentDocuments}`. (d) The 2xx media types are 200 JSON ×20, 201 JSON ×14, 202 JSON ×4 and 204 without content ×9, and no other. No operation of the 133 has a `default` response. Twelve planted shapes through the pull request's predicates: 11 classify as they must (an alternative with a signature scheme, or an empty one, is named; an AND of bearer and signature, a quote token alone and bearer with scopes are not; a `2XX` key, a JSON type with a parameter, a 2xx `problem+json` and a 2xx `text/event-stream` are named; a 204 is not). The twelfth, a `default` response with `text/html`, is not named (= code review R2-n2). The head test file in-process: 23 passed, 0 failed |
+| P5r2-m | Mutants of the test file's predicates, each run against the whole file | Killed: pin (a) reads only the operation's `security`; `quoteToken` dropped from the identifying schemes; an absent `security` counted as identifying; a control that names every JSON type. **Survived:** pin (d) ignoring a `2XX` key, and pin (d) accepting every `…json` type (also `application/vnd.api+json`, which the store refuses at completion, round 1 P3). See PR040-SEC-14 |
+| M1 | Merge purity (plumbing) | `0ccdd009^{tree}` = `206bfdfb` = `git merge-tree --write-tree --merge-base=0f0d92a0 a4aadd2e 4ba683ad` (clean). A plain merge-tree gives the 14 conflicts of D-ORCH-166. `git diff --raw --no-renames 4ba683ad 0ccdd009` equals `git diff --raw --no-renames 0f0d92a0 a4aadd2e` (15 lines, old and new blobs and modes). None of the 15 delta paths changed on main between `0f0d92a0` and `4ba683ad` |
+| M2 | Main's controls at the head: every path of each main PR, blob at `9d1687b1` against `4ba683ad` | Only this PR's 15 paths differ (12 modified; added: `from-config.test.ts` and the two re-timed migration files). #81 61/61, **#82 49/49** (`rate-limit/*`, `pipeline.ts`, `capture.ts`, `authorise.ts`, `app.ts`, `start-api.ts`, `packages/config` `guards.ts` and `schema.ts`, `security-event.ts`, the lockfile), #83 32/32 and #84 7/7 are identical. #80: 40/52 identical, among them its error rendering (`errors/rendered-problem.ts`, `problem-handler.ts`, `classify.ts`), `grants.manifest`, the catalog tests and the classification registry. The other 12 are this PR's files; their blob at `4ba683ad` equals `0f0d92a0`'s, so the head carries #80's version plus this PR's delta and nothing else. #82's changes to `capture.ts` and `pipeline.ts` concern denials only (the T-39 mark, the budget), not `readOnlyHandler`, `afterCommit` or `afterFailure`, which the slot uses; `with-tenant-tx.ts`, `tx/`, `idempotency/` and `errors/` did not change on main after `0f0d92a0` |
+| M3 | Migration order | `20261121120000_idempotency_keys_completed_body` sorts after every directory on `origin/main` and on local `main` (the last one there is `20261121000000_pricing_config_versions`). The SQL is byte-identical to round 1's (P6 stands); `down.sql` changes only in its comment |
+| M4 | `gl-emu-noenv.mjs`: gitleaks v8.30.1 emulation, faithful mode (hunk fragments, `secretGroup`, entropy, rule allowlists with `regexTarget = "match"`, stopwords, global allowlist; runtime controls for a GitHub PAT, an AWS id and a generic key all fire). Run over the 7 commits of `4ba683ad..9d1687b1` with `--diff-merges=first-parent`, `.env*` excluded by pathspec | 93,338 added lines. Over-approximation: 373 candidates. **Faithful: 1 finding, `0ccdd009…:docs/sdlc/DECISIONS.md:generic-api-key:7697`.** That is the PR080-SEC-07 false positive (a quoted doc-comment phrase, no secret), and it is the same line lane B's real image counts. The 251 added lines of `2c9cc41c` and `9d1687b1` give 0 (one over-approximation candidate in `9d1687b1`, `IDENTIFYING_SCHEMES`, falls to the 3.5 entropy threshold) |
+| M5 | C5 at the head | No production composition passes a store to `executeSlot` or calls `idempotencyStoreFrom`, and no route outside tests declares `required` or `optional` (`pipeline.ts` spreads only what `createApp` gives). Main is docs-only after `4ba683ad` |
+| S | Record simulation (R2.7) | As expected in every scenario |
+
+**Modelling assumption, no finding.** The writer's remainder is bounded by the interactive-transaction `timeout`. Two things are not counted as separate terms: the COMMIT round trip after the callback returns, and timer scheduling delay. Both sit inside the 5 s margin, which amendment 18 keeps for skew and jitter. QG-010 notes that the read-only row also over-counts F (no FAILED entry outside write mode). Both points only make the probe stricter.
+
+## R2.3 The stacked merge `0ccdd009`: checks 1 to 5 of §6
+
+1. **#80's paths that main changed after the squash:** the same 5 as round 1 (`grants.manifest`, `pipeline-guards.test.ts`, `grants-manifest.test.ts`, `c01-c12.int.test.ts`, `registry.ts`). None is a delta path (M1). The merge took main's blob for the 2 of them that conflicted (D-ORCH-166).
+2. **The merge tree** is the explicit-base merge-tree, and the raw-diff equality holds (M1). The refined D-ORCH-158 rule was applied as round 1 asked.
+3. **The re-timed directory sorts last** (M3).
+4. **Gitleaks:** one finding in the range, the PR080-SEC-07 line of `0ccdd009` (M4). The rest of the 274 over-approximation candidates of the merge's first-parent diff (main's text since `f65d7955`, #81 to #84 included) fall to entropy, the allowlists or the stopwords. Lane B: #85 adds the fingerprint to the gitleaks-full baseline (count 22). **Lane A is a different case.** Its PR range scan reads the base `.gitleaks.toml` and never the baseline, and the merge cannot leave the branch's ancestry. So lane A will report it, as D-DEVOPS-002 notes. PR080-SEC-07 route (c) applies: a D-SEC-PR45-01 commit-bound `.gitleaks.toml` entry for `0ccdd009` (one commit, `docs/sdlc/DECISIONS.md`, `generic-api-key`, an anchored line with a constrained value class) in its own pull request merged first, or a supersede of this branch (D-SECPR040-02 route) with supersede rounds. This is in C4 below. It is not a finding of this pull request.
+5. **Head row:** this round names `9d1687b1`, the last commit that changes an owned path. The merge itself changes no owned path beyond the stacked blobs (the equality). Round 1's row stays, and the checker skips it because `execute.ts` changed after `a4aadd2e`.
+
+**C3 is discharged for `0ccdd009`.** A new merge of main is needed if main changes code before this pull request merges, or if GitHub cannot build the merge ref. That merge needs its own merge-only round: these five checks on the new merge, and a Head row naming it.
+
+## R2.4 The delta
+
+### PR040-SEC-10 (LOW): closed
+
+- `execute.ts:121-123` is the fix-cycle line of D-ARCH-232 verbatim: `transaction.timeout + Math.max(callDeadlineMs + oneTransaction, 3 * oneTransaction) + FAILED_ENTRY_WAIT_MS`. The floor, `LEASE_SKEW_MARGIN_MS` and the `admissionWaitMs` default are unchanged. The JSDoc (`97-115`) states the six stretches of amendment 18, each from the clock reading of the write.
+- My own path enumeration (P2r2) finds no stretch outside the six rows. QG-010 found the same independently. Every stretch keeps 5 s over the whole configuration range. The read-only row, the one with an unstoppable effect (a second e-mail and DOWNLOAD entry of `emailShipmentDocuments`), keeps at least 6 s. The values match D-ARCH-232: 38.25 s at the defaults, 40 s as this pull request composes it, 492.75 s at a statement timeout of 120 s.
+- **Test strength.** `idempotency-lease.test.ts` has the 5 to 120 s table at both admission waits, the fast-check property over the configuration bounds (2,000 runs) and the pins 38250, 60750, 546000, 96004, 30000 and 40000. The four mutants of the ruling fail it (D-TASK040-23..25; code review round 2). They also fail my probe, which shares no stretch formula with the test.
+- **Two points, neither new.** (1) The admission-default mutant shows what an understated `admissionWaitMs` does: 0 s of margin. Part 040-B's second pull request must pass the value the runner validated, from the same resolved admission options (round 1 §3.8, code review C8). (2) The lease test types the six rows by hand, so a new phase in the slot does not fail it. For TASK-187's re-authentication transaction, that is QG-040-C9; I concur and add nothing.
+- **Availability cost, accepted:** a crashed request blocks its own key's retry for up to 8.3 minutes at the configured maximum (498 s as composed). Only the same caller's key is affected; the retry gets 409 with `Retry-After: 1`. No finding.
+
+### PR040-SEC-11 (INFO): closed; residual PR040-SEC-14
+
+- **Pin (d)** (`x-idempotency.test.ts`, `nonJsonSuccessMediaTypes` and its two tests): no idempotent operation has a 2xx other than `application/json` or no content. The planted `text/csv` 200 is named; it is not named on a not-applicable operation or on a 4xx. My walk agrees (P5r2).
+- **API rows** (`idempotency.api.test.ts`):
+  - (1) A writing route with a `text/html` 201 answers 500 `problem+json`. It writes one FAILED entry (500) and no row, releases the key, and the retry runs again.
+  - (2) A VIEW route with a `text/html` 200 answers once, in the order VIEW entry, completion refused, release. It logs one WARN `api.idempotency_completion_failed` `{error: RangeError, status: 200}` and leaves no row, and the retry runs the route again. Row (2) pins the residual of round 1 as it is, so a later fail-closed design must change it on purpose. That is what I asked for.
+  - The capture double now treats VIEW like DOWNLOAD, as the real capture does for every non-write mode.
+  - Code review R2-n1 (pin the rollback in row (1) by event order): concurred, test-only.
+- **Residual:** P5r2 shows three weakenings of pin (d) that no planted negative catches: a `default` response (code review R2-n2), a `2XX` key, and a `+json` type the store refuses. **PR040-SEC-14** (R2.5).
+
+### PR040-SEC-12 (INFO): closed
+
+Pin (a) reads the effective `security`: the operation's own, else the document's, with an absent one counting as no requirement. A key is network-scoped when the list is empty or has an alternative with neither `bearerAuth` nor `quoteToken`. Those are exactly the schemes that give `scope.ts` an organisation, a guest-token hash or an actor. The set is still `{recordConsent}`, and the planted negatives include a signature webhook made `optional` and an operation without `security` under a document-level `[]` or no document security. My six extra shapes classify correctly, and three mutants of the predicate die (P5r2). R1-n3 (c), the keyword-only `example`/`examples` skip, is in the same commit and has its planted case.
+
+### R1-m2 and the NITs (`2c9cc41c`)
+
+- The re-time: the directory sorts last (M3), and the three references follow (`down.sql:1`, `tests/memory-keys.ts:60`, `idempotency-keys.int.test.ts:235`).
+- R1-n5: the PostgreSQL case now requires a `DbError` with SQLSTATE 23514 instead of any rejection. That is stronger, and the constraint name stays pinned by the raw-SQL case.
+- R1-n2: a JSDoc name.
+
+None of these has a security effect.
+
+## R2.5 Findings (new in this round)
+
+| ID | Severity | CWE | OWASP 2021 | File:line (`9d1687b1`) | Owner | Due |
+|---|---|---|---|---|---|---|
+| PR040-SEC-14 (= code review R2-n2, extended) | INFO | CWE-1023 | A04 | `tests/contract/x-idempotency.test.ts:146-150` (`nonJsonSuccessMediaTypes`), `:243-249` (the pin (d) planted test) | senior-developer | any later commit to the file; at the latest part 040-B's second pull request. Not a merge condition |
+
+### PR040-SEC-14 (INFO): pin (d) misses three shapes of a non-storable 2xx
+
+- **Description.** Pin (d) is PR040-SEC-11's guard against a future idempotent operation whose 2xx the store will not complete. On a read-only route that would silently lose idempotency, as API row (2) shows. The predicate looks only at status keys matching `^2(?:\d\d|XX)$` and only flags media types other than `application/json`. P5r2 finds three weakenings that the planted negatives do not catch:
+  - (i) a `default` response is never read (code review R2-n2);
+  - (ii) a mutant that ignores the `2XX` key survives;
+  - (iii) a mutant that accepts every `…json` type survives, although the store refuses `application/vnd.api+json` at completion.
+- **Impact.** None today: the contract has no `default` response, no `2XX` key and only `application/json` 2xx bodies on idempotent operations (P5r2). It weakens a regression guard for a future operation.
+- **Fix.**
+  - Treat a `default` response like a 2xx in `nonJsonSuccessMediaTypes`. Today that flags nothing.
+  - Add planted negatives that must be named: a `2XX` with `text/html`, a `200` with `application/vnd.api+json` and a `default` with `text/html`.
+  - Optionally, test the media type with the store's own `STORED_CONTENT_TYPE` instead of a string compare. A 2xx is then named exactly when the store would refuse it.
+- **Verification.** The two surviving mutants of P5r2 fail the suite, and the planted cases are named.
+
+## R2.6 PR040-SEC-13 routed to the second pull request: acceptable
+
+The routing (D-ORCH-167, D-TASK040-25, card line D-SD-013) is acceptable, with the due date unchanged: before G3.
+
+- **It is inventory text.** The stale `schema.ts` description and `keys.ts` register row change no behaviour. `materialOf`'s 32-byte check, which round 1 concurred with, does not depend on them.
+- **Nothing reads the key yet.** No production composition wires the store before the second pull request (M5), so until then the register understates nothing that runs. The second pull request makes `IDEMPOTENCY_BODY_KEY` operational (the wiring and the purge), so it is the natural place for the text.
+- **The files are held by TASK-041 part 041-B.** The change should land after 041-B merges, to avoid a conflict there.
+- **The due date does not move with the pull request.** If the second pull request is not merged by the G3 check, the text change goes in on its own before G3. The text is round 1 §4 (the R1-n1 wording, with the blast radius of ADR-0018 amendment 9). The second pull request's security round checks it.
+
+## R2.7 Record simulation
+
+A shared sparse clone with plumbing commits (`record-sim-r2.sh`). Main's `tools/ci/check-security-owned-paths.mjs` was run with `--base 4ba683ad --head <head> --pr 99`, the way `ci.yml` passes the event's base and head. The work tree was the simulated merge ref: main's tip `c123cf9a` plus the record under the name `PR-0099-…`, merged with the head.
+
+| Scenario | Result |
+|---|---|
+| S1: round 1 + this round on main, head `9d1687b1` | **pass**, 14 owned paths, satisfied by `9d1687b1`. Round 1's row gets the expected note (owned paths changed after `a4aadd2e`) |
+| S2: round 1 only (control) | missing |
+| S3: an owned path (`execute.ts`) changed after `9d1687b1` | missing |
+| S4: the last Verdict row FAIL | missing ("verdict FAIL is not one of …") |
+| S5: the `PR-pending-…` name only | missing ("no record named … PR-0099-*") |
+| S6: this round's Head row names a main commit | missing |
+| S7: head `0ccdd009` (the pure merge, before the fix commits) | pass, satisfied by `a4aadd2e`: a pure stacked merge keeps round 1's binding, as round 1 S1 predicted. The fix commits are what void it (S2) |
+
+The candidate has 2 `Head` rows (one per round) and 2 `Verdict` rows, and its last line is this round's Verdict row.
+
+## R2.8 Status at `9d1687b1`
+
+| ID | Status |
+|---|---|
+| PR040-SEC-01, -02, -07, -09 | Closed (round 1). The delta touches `store.ts` in one comment line only; `body-cipher.ts` and `from-config.ts` are not in it |
+| PR040-SEC-03, -04, -05, -06, -08 | Closed (earlier rounds) |
+| PR040-SEC-10 (LOW) | **Closed** (R2.4) |
+| PR040-SEC-11 (INFO) | **Closed** (R2.4); residual PR040-SEC-14 |
+| PR040-SEC-12 (INFO) | **Closed** (R2.4) |
+| PR040-SEC-13 (INFO) | Open. Routed to part 040-B's second pull request, accepted (R2.6). Due before G3 |
+| PR040-SEC-14 (INFO) | New, open (R2.5) |
+| Second pull request | Still owed there: P-1 to P-5 with the P-3 reading under the ledger claim; the purge with or before the wiring; the Pino-backed `IdempotencyLog` with class-only fields; proofs (a) to (g); `admissionWaitMs` from the resolved admission options (§3.8); PR040-SEC-13; PR040-SEC-14 if no earlier commit takes it |
+
+## R2.9 Conditions (merge of this pull request), updated
+
+- **C1 · closed.** D-ARCH-232 (amendment 18), verified by D-QG-010.
+- **C2 · closed** by this round.
+- **C3 · discharged for `0ccdd009`** (R2.3). A new merge of main needs a new merge-only round on that merge.
+- **C4 · orchestrator, open, now four items.**
+  - (a) Lane B on PostgreSQL 18 at `9d1687b1` (`run-live75`). Until #85 and #86 are on main, a FAIL on exactly the D-ORCH-170 cases reads as PASS for this pull request: gitleaks-full with the 3 PR080-SEC-07 fingerprints, the `0ccdd009` one included, and `compose-stack.test.ts`.
+  - (b) **Lane A gitleaks:** PR080-SEC-07 route (c) for `0ccdd009` (R2.3 item 4), owner orchestrator with devops-engineer, done before the hosted CI run counts. Either the commit-bound `.gitleaks.toml` entry merged to main in its own pull request, with its security record, or a supersede of this branch with supersede rounds.
+  - (c) Hosted CI with the `security-integration` and `migration-lint` extras.
+  - (d) This record renamed to `PR-<NNNN>-TASK-040B1-security-review.md`, and the merge-ref check (D-ORCH-136/138).
+- **C5 · holds** at `9d1687b1` (M5). It stays a merge-order condition for the second pull request.
+
+Not conditions of this pull request: PR040-SEC-13 (before G3, second pull request), PR040-SEC-14 (INFO), QG-040-C9 (before TASK-187), and the second pull request's items above.
+
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 of part 040-B's first pull request: the delta `0ccdd009..9d1687b1` and the merge-only round for `0ccdd009`, bound to `9d1687b1`.<br>**Findings:** 0 Critical, 0 High, 0 Medium, 0 Low open. New: PR040-SEC-14 INFO (= code review R2-n2 extended; pin (d) misses a `default` response, a `2XX` key and a refused `+json` type).<br>**Closed:** PR040-SEC-10 LOW (amendment 18 formula; P2 re-run from the write with full T: 0 of 479,604 production and 2,000,000 random configurations below 5 s, minimum 5.000 s; the control and five mutants detected); PR040-SEC-11 and -12 INFO.<br>**Routing accepted:** PR040-SEC-13 to the second pull request, due before G3.<br>**Merge:** `0ccdd009` is pure (tree `206bfdfb`, raw-diff equality 15/15). Every control of #80 to #84 is kept: #82 49/49 paths and #80's error rendering identical to main. Gitleaks: exactly the PR080-SEC-07 line of `0ccdd009`.<br>**Conditions:** C1 and C2 closed, C3 discharged for this merge. Open: C4 (lane B at `9d1687b1`; lane A gitleaks route (c) for `0ccdd009`; hosted CI; rename and merge-ref check). C5 holds |

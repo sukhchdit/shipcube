@@ -10990,3 +10990,51 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **D-QG-010:** ADR-0014 amendment 18 verified (no superseding ADR); QG-041B-C7 closed (a, c with follow-up); new QG-041B-C8 (before TASK-065) and QG-040-C9 (before TASK-187) dispatched to principal-architect together with the api/README §7 text for 041-B as a held patch (`../.orch/held/TASK-041B-api-readme-s7.patch`, applied by the 041-B rider commit after its lane B).
 - **040-B PR1** `9d1687b1`: code r2 AWN (D-CRPR040B1-01); security delta C2 running; lane B queued (`run-live75`).
 - **Reversibility:** High.
+
+### D-SECPR040B1-02 · 2026-11-21 · security-analyst · TASK-040 part 040-B first pull request, security round 2 (delta `0ccdd009..9d1687b1` = C2, and merge-only round for the stacked merge `0ccdd009` = C3) = PASS_WITH_CONDITIONS at `9d1687b1` (appended as round 2 to `docs/05-quality/security/PR-pending-TASK-040B1-security-review.md` on main)
+- **Trigger:** condition C2 of D-SECPR040B1-01 and the dispatch of orchestrator session C (D-ORCH-171): the security delta round on `9d1687b1`. It also covers the merge-only checks of C3 for `0ccdd009`. Read before finalising: D-ARCH-232, D-TASK040-23 to -25, D-SD-013, D-CRPR040B1-01 (code review round 2, APPROVED_WITH_NITS), D-QG-010, D-DEVOPS-001/-002, D-ORCH-166 to -171.
+- **Decision:** no Critical, High, Medium or Low is open for this pull request.
+  1. **Closed: PR040-SEC-10 (LOW).** The code is D-ARCH-232's line, `timeout + max(D + T, 3T) + F + 5 s`, with a 30 s floor. Probe P2 was re-run with every stretch counted from the clock reading of the write and every later transaction counted with its full T, the ending one included. The stretches were enumerated from `run()`'s eight route shapes and their outcomes, not copied from the six rows.
+     - Result: 0 stretches below 5 s over 479,604 production configurations (statement timeout every millisecond from 100 ms to 120 s, at 4 admission waits) and over 2,000,000 random inputs of the function's domain. The smallest margin is 5.000 s, on the failed `call`; the read-only row keeps at least 6 s.
+     - Controls: `a4aadd2e` fails 2,250,176 times (worst −114 s). Five mutants are detected: the ruling's four, plus an admission default of 0.
+  2. **Closed: PR040-SEC-11 and -12 (INFO).**
+     - Pin (d) and API rows (1) and (2). Row (2) pins the read-only residual on purpose.
+     - Pin (a) reads the effective security. It still gives `{recordConsent}`, as does my own walk.
+     - Six extra planted shapes classify correctly. The head test file runs in-process (23/23), and three predicate mutants are killed.
+  3. **New: PR040-SEC-14 (INFO, CWE-1023; = code review R2-n2, extended).** Pin (d) misses three shapes:
+     - a `default` response (the predicate never reads it);
+     - a `2XX` key (its mutant survives);
+     - a `+json` type that the store refuses (`application/vnd.api+json`; the "every …json" mutant survives).
+     None of them is in the contract today. Fix: treat `default` like a 2xx and plant the three shapes, or test the type with the store's `STORED_CONTENT_TYPE`. Owner: senior-developer, in any later commit to the file, at the latest part 040-B's second pull request. Not a merge condition.
+  4. **PR040-SEC-13 routed to the second pull request: accepted.** It is inventory text only, and no production composition wires the store before that pull request. The files are held by 041-B. The due date stays before G3: if the second pull request is not merged by the G3 check, the text goes in on its own first.
+  5. **The stacked merge `0ccdd009` is pure.**
+     - Its tree `206bfdfb` is `merge-tree --merge-base=0f0d92a0 a4aadd2e 4ba683ad`, and the raw-diff equality holds (15/15).
+     - At `9d1687b1` only this pull request's 15 paths differ from `4ba683ad`. #81 (61/61), #82 (49/49: rate limiting, pipeline, capture, authorise, config guards), #83 (32/32) and #84 (7/7) are byte-identical. So are #80's other paths (40/52, its error rendering included); the remaining 12 carry #80's blob plus this pull request's delta only.
+     - The re-timed migration sorts last on main.
+     - **C3 is discharged for `0ccdd009`.** A new merge of main needs its own merge-only round.
+  6. **Gitleaks.** The faithful v8.30.1 emulation over the 7 commits of `4ba683ad..9d1687b1` (93,338 added lines, first-parent, `.env*` excluded by pathspec) finds exactly 1: `0ccdd009…:docs/sdlc/DECISIONS.md:generic-api-key:7697`. It is the PR080-SEC-07 false positive, and lane B's real image counts the same line. #85 baselines it for gitleaks-full. **Lane A's range scan never reads the baseline.** PR080-SEC-07 route (c) therefore applies before hosted CI counts: a D-SEC-PR45-01 commit-bound `.gitleaks.toml` entry for `0ccdd009` in its own pull request, or a supersede with supersede rounds. D-DEVOPS-002 left it open; it is now in C4 (b).
+- **Method:**
+  - Single-process Node 24 probes on a `git archive` extract of `9d1687b1`, with controls placed next to the head's `execute.ts`: `a4aadd2e`'s file and five mutants.
+  - The contract test file ran in-process: a stub of `@jest/globals` and the real `expect` 30.
+  - Plumbing gave the merge proofs.
+  - No Docker, Jest or npm suite was run; nothing ran in `../Shipqube-TASK-040B`, and `.env*` was not opened.
+  - Self-scans of the round text: over-approximating and faithful gitleaks both 0; the host-fragment count is 0 for every needle.
+- **Binding:** the round's `Head` row names `9d1687b124ccd137c95c706d3ab5717531070e78`. Main's checker in the merge-ref form ran with `--base 4ba683ad` against main `c123cf9a`, over 7 scenarios, all as expected:
+  - S1 passes: 14 owned paths, satisfied by `9d1687b1`.
+  - These are missing: round 1 only, an owned change after the head, a FAIL verdict, the `PR-pending` name, and a Head row naming a main commit.
+  - The pure merge `0ccdd009` as the head still passes through round 1's `a4aadd2e`.
+- **Conditions (merge of this pull request):**
+  - C1 is closed (D-ARCH-232, D-QG-010), C2 is closed, and C3 is discharged for `0ccdd009`.
+  - **C4 (orchestrator), open:**
+    - (a) lane B on PostgreSQL 18 at `9d1687b1` (`run-live75`). A FAIL on exactly the D-ORCH-170 cases reads as PASS until #85 and #86 are on main;
+    - (b) lane A gitleaks: PR080-SEC-07 route (c) for `0ccdd009`, with devops-engineer;
+    - (c) hosted CI with `security-integration` and `migration-lint`;
+    - (d) the rename and the merge-ref check.
+  - C5 holds at `9d1687b1`.
+- **Routed:**
+  - senior-developer: PR040-SEC-14; in the second pull request, PR040-SEC-13 and `admissionWaitMs` from the resolved admission options.
+  - orchestrator: C4 (a) to (d).
+  - devops-engineer, through the orchestrator: C4 (b).
+  - security-analyst: a merge-only round if main is merged again; the second pull request's round; the T-79/R-05 text before G3.
+  - Concurred: code review R2-n1 and R2-n2, and QG-040-C9 (nothing to add).
+- **Reversibility:** High (a review record).
