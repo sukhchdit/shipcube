@@ -9941,3 +9941,19 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   4. Rename the record once the PR exists.
   5. C5 / part 045-C carried as before.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-167 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-041 041-B merged with main and pushed at `aade2672`
+- **Merge:** under the corrected D-ORCH-158 rule. 17 conflicts: 16 resolved to the `12b8a10a` blobs, `pipeline-guards.test.ts` to main (#82 union); no hand union.
+- **Proof:**
+  - the explicit-base merge-tree equals the resolved tree (`13c4925f`);
+  - `git diff --raw 3d54cef8 13c4925f` = `git diff --raw be843ae1 12b8a10a` byte for byte (26 paths);
+  - part A on main equals `22f69a82` except the #84 bumps.
+- **Host checks:** units 1,146, api files 54/54.
+- **Next for 041-B:**
+  - fix cycle 3: C-4 release contract and tests H7–H10 (D-ARCH-230);
+  - code review round 4 and a security delta round (also QG-041B-C4);
+  - D-PM for QG-041B-C3 (running);
+  - gatekeeper closing entry for C1/C2;
+  - lane B on the final head, including H6 and gitleaks;
+  - open the PR.
+- **Reversibility:** High.
