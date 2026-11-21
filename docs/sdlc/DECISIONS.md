@@ -8421,3 +8421,45 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **qa-lead.** SEC-TC-79 (O1-O7) and SEC-TC-80 into `integration.required_cases` after merge.
   - **principal-architect and quality-gatekeeper.** This entry is the security part of QG-051-C4 and the security-analyst concurrence that D-ARCH-216 asked for.
 - **Reversibility:** High (a review record).
+
+### D-SECPR045-02 · 2026-11-21 · security-analyst · TASK-045 security round 2 (delta for fix cycle 1, `b380f429..3168c194`: the fail-closed cursor boundary, column-safe filter values, the full binding, bounded cursor keys, the decode expiry cap, the audit cap in the contract checker) = PASS_WITH_CONDITIONS at head `3168c194` (appended as round 2 to `docs/05-quality/security/PR-pending-TASK-045-security-review.md` on main)
+
+- **Decision:** nothing Critical, High or Medium is open at `3168c194`.
+  - Closed: C1 (PR045-SEC-02), C2 (PR045-SEC-01, for the classes it found) and C3 (PR045-SEC-03). PR045-SEC-04 and PR045-SEC-05 are closed in code, and so is the contract half of PR045-SEC-07.
+  - New: one LOW latent finding and one INFO, both residuals of round-1 classes, both reached only once a list route or keys-path consumer exists.
+  - The merge condition is lane B green on `3168c194` (C4).
+- **Method.** Single-process Node 24 probes on a `git archive 3168c194` extract. No Docker, nothing run in the TASK-045 worktree.
+  - **End to end:** the head's module through main's generated Prisma 7.10 client, `PrismaPg` and PGlite 0.4.3 (PostgreSQL 17.5), under the int test's own RLS setup: `CREATE SCHEMA platform`, the released helpers migration and the `platform_app` policy, with reads as `SET LOCAL ROLE platform_app` and `app.org_id`. The same file ran on round 1's head as the positive control.
+  - **Other probes:** a codec, binding and slot matrix; a contract checker run on the real `openapi.yaml`; a `smallint` probe; 21 mutants of the fix against the PR's unit suites, all killed (control green before and after); a gitleaks v8.30.1 emulation, 0 findings in 742 added lines, control reproduced.
+  - **Record binding:** main's real checker in merge-ref form, 12 of 12 scenarios as expected.
+- **Closures (probed):**
+  - **PR045-SEC-02.** Under RLS, a boundary moved to another organisation, a deleted boundary, a foreign boundary id and an id that never existed each answer 400 `INVALID_CURSOR`, decided on the page query's own result. With forged and expired cursors, that is one byte-identical error over six causes, so foreign rows have no existence oracle. Moved back, the walk continues. On round 1's head, all of these were 200 with an empty page.
+  - **PR045-SEC-01.** 41 filter values, 0 answering 5xx (round 1's head: 7). U+0000, out-of-`int4` values, years 0000 and 10000 including through an offset, date-only values, sub-millisecond values and malformed date-times are 400 `VALIDATION_ERROR` with the pointer and no echo. The controls answer 200.
+  - **PR045-SEC-03.** 23 of 23 binding variants as specified: actor scope, credential, path parameters, `q` and other route keys are now bound, the form is canonical, and JSON metacharacters cannot inject into the binding.
+  - **PR045-SEC-04.** The largest cursor is 448 characters. No free text, non-ASCII or unsafe number enters a cursor at encode or decode.
+  - **PR045-SEC-05.** The expiry cap follows the codec's own lifetime plus 60 s, under both keys.
+  - **PR045-SEC-07, contract half.** The 200 cap requires the `audit` tag AND an `/audit/` path. The real contract has 0 findings.
+  - **No new 500 or echo path** on request input.
+  - **The int-test RLS setup is sound.** The policy probe proves RLS before the moved-boundary case relies on it.
+- **Findings (new):**
+  - **PR045-SEC-08 (LOW latent, CWE-1284) = code review R2-m1.** An `integer` filter defaults to the `int4` range. On a `smallint` column (`Invitation.sendCount`), `32768`, `40000` and `-32769` answer 500 `DB_ERROR` (`22003`, `P2020`); with a declared range they are 400 (reproduced independently). Preferred fix: `min`/`max` required for `kind: 'integer'` at load (`INT4_RANGE` and a `SMALLINT_RANGE` spelled out by the declaration).
+  - **PR045-SEC-09 (INFO latent, CWE-1284/CWE-400) = code review R2-n2, widened.** A keys-path timestamp key outside the `TIMESTAMP_TEXT` grammar makes `pageOf` throw a plain `Error` (500) for every page that ends on that row. That covers year 10000 or later, `infinity`, BC dates, offsets with seconds under a non-UTC session `TimeZone`, and integer keys beyond `2^53`. The write path makes a year-10000 value reachable, because Joi's `date().iso()` accepts extended years for body fields. Consumer conditions: timestamp keys only from server-set or write-bounded columns; key text rendered explicitly in UTC or as epoch microseconds; integer keys within the safe integers.
+- **Ruling on R2-m1 (asked for by D-ORCH-150):** route it to part 045-C, the next pagination change. It has its own security round and merges before any list route is mounted (C5), so TASK-045 needs no new head and no second lane-B run. A fix in TASK-045 instead is also acceptable, with a delta round on that commit.
+- **Conditions:**
+  - **C4 (merge).** Lane B green on `3168c194`.
+    - Api: AT-US-037-01, -02, -03-1, -03-4, -05, -06, -07 and -10; the actor, `q` and no-`q` binding 400s; the deleted-boundary 400; the six PR045-SEC-01 400 rows with exact pointer and sub-code; the 200 controls.
+    - Int on PostgreSQL 18: the `beforeAll` setup applies; AT-US-037-01, -02, -05 and -10 and the status-change boundary; the policy probe; the deleted and RLS-moved boundary 400s with the continuation after the move back; the `int4` and year controls.
+    - The generated suites and the validate api tests.
+  - **C5.** Part 045-C, unchanged.
+- **Routing:**
+  - **senior-developer (part 045-C):** PR045-SEC-08 (F6).
+  - **orchestrator:**
+    - the PR045-SEC-05 rotation-runbook line onto the part 045-C card (F2'; it has no holder yet; devops writes the runbook entry);
+    - the PR045-SEC-09 conditions as one more line on TASK-073's AUDIT LIST ON THE KEYS PATH rider, next to R2-n2 (F7).
+  - **Unchanged:** PR045-SEC-06 on the TASK-073 card (`41bcb54a`); the PR045-SEC-07 module half on TASK-096 (D-ORCH-150); F5 (NUL refusal for every request string) with principal-architect before G3.
+  - **SEC-TC-82/83 proposals stand.** SEC-TC-82 also lists the deleted, foreign and RLS-moved boundaries and the new binding members. SEC-TC-83 gains the `smallint` case after F6.
+- **Record name and binding:**
+  - The orchestrator renames the record to `PR-<NNNN>-TASK-045-security-review.md` once the PR exists.
+  - Round 2's Head row binds `3168c194`. Round 1's `b380f429` row no longer satisfies the checker.
+  - These void the binding: a later push to an owned path, or a main merge that also changes an owned path the PR changes. The stacked-build rule of D-ORCH-150 applies: a main merge with identical trees gets a merge-only round.
+- **Reversibility:** High (a review record).
