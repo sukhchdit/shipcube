@@ -1,2 +1,3 @@
 - [P4 concurrency and positional test IDs](project_p4_concurrency_and_positional_ids.md) — other agents edit shared docs mid-session; regenerate gherkin-test-map after story edits; one Edit per file per batch
 - [Suite activation required cases](project_suite_activation_required_cases.md) — runner + SEC-TC on main before activating; park missing IDs; two evidence runs per activation PR
+- [Stack suites share one client address](project_stack_suites_one_client_address.md) — TEST-STRATEGY §10.4: shared failed-auth budget and in-flight room; e2e 429s are test defects first

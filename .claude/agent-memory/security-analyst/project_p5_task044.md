@@ -1,6 +1,6 @@
 ---
 name: project-p5-task044
-description: TASK-044 (SSE convention) r1 @dc64193f PASS_W_COND (d04731f7); r2 delta @3b56ab54 PASS_W_COND (ef446899, unpushed): C1/C2 closed, new INFO 08/09 to 044-B; QG-044-C3 concurrence given with G1 conditions for the 044-B round; C3 lane B + C4 PR #80 merge-only owed
+description: TASK-044 (SSE convention) r1 @dc64193f PASS_W_COND (d04731f7); r2 delta @3b56ab54 PASS_W_COND (ef446899); r3 merge-only @33262314 PASS_W_COND (b6987f8a): C4 discharged, C3 lane B on 33262314 + C5 lane A owed, new G1 item 6; INFO 08/09 + G1 to 044-B
 metadata:
   type: project
 ---
@@ -15,6 +15,8 @@ metadata:
 
 **Kit (session scratch `t044sec-r2/`, rebuilt from scratch; r1 kit lost with its session):** `x/` + `xo/` extracts with node_modules junctions (`MSYS_NO_PATHCONV=1 cmd /c mklink /J`); probes `r2-regex.mjs <head> <old>`, `r2-wire.mjs <root>` (sseStream + recording sink), `r2-app.mjs <root> <label>` (real createApp, installProcessErrorHandlers with recording exit, stdout/console.error capture), `r2-reader.mjs`, `r2-mutants.mjs` (15 mutants, cwd=extract), `r2-secrets.mjs` (gitleaks not installed: pattern+entropy scan), `r2-binding.sh <repo> <sim> <record>` (sparse clone: sparse-checkout patterns need MSYS_NO_PATHCONV=1 or they become `C:/Program Files/Git/...`). Jest unit subset runs fine on an extract: `node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit --coverage=false <paths>`.
 
-**How to apply:** a push after `3b56ab54` touching owned paths voids round 2; the 044-B round must check G1 and do the threat-model cells; orchestrator renames the record once the PR exists.
+**Round 3 (merge-only)**, 2026-11-21, head `33262314` (merge `c33e5e92` of `cbd590db` test-only + main `4ba683ad` #80-#84, then R1-m4 `appError` deletion), static only per dispatch (git plumbing, no node/npm). D-SECPR044-03, commit `b6987f8a` on main (unpushed). Proof kit: `merge-tree --write-tree <branch parent> <main parent>` == merge `^{tree}`; `diff --raw main-parent head` == `diff --raw base branch-parent` except the shared path. Facts: union problem-handler takes `code` from #80 `renderProblem` (same codeOf); pre-rendered path only `!res.headersSent`; RenderedProblemError classifies `unexpected`. Idempotency 5 layers for SSE GET (contract not-applicable, slot pass-through, mount refusal on safe method, execute.ts:338 stream refusal, settleClaim skips streams). #82 counts stream opens at step 0 + step-5 class; `streamSlotRule`/`acquire` still unconsumed (TTL from caller, fail-open). 041-B hold (`aade2672`) released at authn outcome, so streams hold no unit. New G1 item 6: retire `privateRefusals` wrapper (code review R2-m1), prove SEC-TC-29 via declaresPrivateResponse. Commit trick when DECISIONS.md has foreign uncommitted edits: `hash-object -w` (HEAD blob + my entry) -> `update-index --cacheinfo` -> verify staged set -> plain `git commit` (a pathspec commit would take the working tree and sweep in others' edits).
+
+**How to apply:** a push after `33262314` touching owned paths voids round 3 (docs-only main merges keep it); the 044-B round must check G1 and do the threat-model cells; orchestrator renames the record once the PR exists.
 
 Related: [[project-p5-pr44-r2]], [[project-p5-task041]], [[project-p5-task040]], [[project-security-review-conventions]]

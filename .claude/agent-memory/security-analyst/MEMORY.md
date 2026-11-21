@@ -72,8 +72,8 @@
 - [P5 TASK-293 lexfu](project_p5_task293.md) — r1 @85afc70 + r2 @c618d8a PASS_W_COND (b0f5396); SEC-01/02 closed; R3-M1 mark-drop regression; INFO 03/04 open
 - [T-39 denial budget ruling](project_t39_denial_budget_ruling.md) — D-SECT39-01 (f3c581f/631cbc4): closed details set, key grammar, carry claim; card lines + api-platform-core lock pending fold
 - [P5 TASK-075 carrier contract](project_p5_task075.md) — r1-r4 final @28044845 PASS_W_F-U (96672d8e); 01-14 closed; INFO 15 + routed items to TASK-113/132/128
-- [P5 TASK-041 rate limiting](project_p5_task041.md) — r1 @e6f484a, r2 @3a6b4c8b, r3 merge-only @0614a90f PASS_W_F-U (ca85cc9d, rename!); 09 ruled D-ARCH-182; 041-B round owed
-- [P5 TASK-041 part 041-B](project_p5_task041b.md) — r1 @83a85739 + r2 @12b8a10a PASS_W_COND (17085083); SEC-10/02b closed; 15 INFO, 16 LOW no-outcome leak; C2-C4; 16 conflicts
+- [P5 TASK-041 rate limiting](project_p5_task041.md) — r1-r3, r4 merge-only @22f69a82 PASS_W_F-U (934bb0f1); merged as 61c53b5e; erl 8.7.4 ipKeyGenerator same; 041-B owed
+- [P5 TASK-041 part 041-B](project_p5_task041b.md) — r1-r3 PASS_W_COND, r3 @214ec79b (4d649af3): QG-041B-C4 done, SEC-11 LOW, 16 rows 5a/5b LOW, 17 INFO race; C2/C4 open
 - [P5 TASK-076 pricing+lint](project_p5_task076.md) — r1 @e01979b (2b8f51e) + r2 @82b5023 (c6bbed87) PASS_W_F-U; 01-05/08 closed; 07 INFO (shared subpath, declare) open; TS6 TypeFlags
 - [P5 TASK-039 jobs/schedulers](project_p5_task039.md) — r1 @64eefab, r2 @766ae52, r3 @f08948e PASS_W_F-U (16274d79); PR64-SEC-11 closed (lane B); D-TASK039-01 conds (i)-(iv)
 - [P5 audit effect waiver](project_p5_audit_effect_waiver.md) — D-SECAUDIT-02 to 2026-12-18 (f2fd4eeb, PR pending, 67c4c04 unpushed); Prisma pins effect 3.20.0; picomatch GHSA withdrawn
@@ -82,11 +82,13 @@
 - [P5 TASK-295 effect override](project_p5_task295.md) — PR #79 r1 @5edc54f5 (89d0b769) + MO r2 @a1b0ba76 (2b5ab645) PASS_W_F-U; LOW 01 premise test; index race
 - [P5 TASK-043 outbox](project_p5_task043.md) — r1 @da996002 (feb00326) + r2 @93f9faa0 (86ec0678) PASS_W_F-U; 01/03/04 closed; 08 INFO + R3-m2 due TASK-049; C4-1/C4-3 open
 - [P5 TASK-040 idempotency 040-A](project_p5_task040.md) — r1 @3dc1e225, r2 @e96bd979, r3 supersede @2abd665f v2 (c481471c) PASS_W_F-U; LOWs due 040-B PR1
-- [P5 TASK-080 margin + pricing config](project_p5_task080.md) — r2 @3d3a7775 PASS_W_COND (f44c4aed); 01-05 closed; INFO 06 import=require/computed import(); C2, C4 open
+- [P5 TASK-080 margin + pricing config](project_p5_task080.md) — r3 merge-only @2805c809 PASS_W_F-U (934bb0f1), merged 339b29d6; 06 open; LOW 07 D-ORCH-147 gitleaks text (+2 baseline)
 
 - [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit
 - [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb + r2 delta/supersede @39cac6e5 PASS_W_COND (a385cc9c); 01/02a/03 closed; INFO 06 TASK-298; O7 in SEC-TC-79
 - [P5 TASK-045 cursors/keyset](project_p5_task045.md) — r1 @b380f429, r2 @3168c194, r3 delta @c02dbf27 PASS_W_COND (5e8ceb01); C4 discharged; 08 smallint + C5 ride 045-C; sim --head = PR head
 - [P5 TASK-042 i18n](project_p5_task042.md) — r1 @b8ba7788 PASS_W_COND (35f8ef0a); MED 01 i18next repo advisory -> bump >=27.1.3 (C1, delta round); INFO 02-05
-- [P5 TASK-044 SSE convention](project_p5_task044.md) — r1 @dc64193f + r2 @3b56ab54 PASS_W_COND (ef446899); 01-03/06 closed; INFO 08/09 to 044-B; QG-044-C3 given (G1 conds)
-- [P5 TASK-040B1 040-B PR1](project_p5_task040b1.md) — r1 @a4aadd2e PASS_W_COND (6b2c6a7f); SEC-10 LOW lease gap (R1-m1), 11-13 INFO; D-ORCH-158 rule refined: explicit merge base
+- [P5 TASK-044 SSE convention](project_p5_task044.md) — r1, r2 @3b56ab54, r3 merge-only @33262314 PASS_W_COND (b6987f8a); C4 done; G1 1-6 + INFO 08/09 to 044-B; partial-stage commit trick
+- [P5 TASK-040B1 040-B PR1](project_p5_task040b1.md) — r1 @a4aadd2e + r2 @9d1687b1 PASS_W_COND (5e13110a); 10-12 closed, 13 to PR 2, 14 INFO; lane A gitleaks route (c) for 0ccdd009
+- [P5 post-merge #80-#84](project_p5_postmerge_80_84.md) — D-SECPOST-01 (88fd7360) PASS_W_COND; unions + #84 28 bumps ok; LOW POST-SEC-03 repo-advisory gate; O-1 #49 Valkey 9.1; C1 lane B main
+- [P5 TASK-034 rehearsal tooling](project_p5_task034.md) — r1 @3ee36f01 PASS_W_COND (6feeb139); MED 01 superuser restore runs migration CHECK/generated code; LOW 02-05; C1-C3

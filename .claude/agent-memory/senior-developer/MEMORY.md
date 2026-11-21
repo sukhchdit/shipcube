@@ -72,3 +72,7 @@
 - [PR #80 unions](feedback_pr80_unions.md) — shared origin/main moves mid-merge (check parent SHA), coordinator takeover, merge subject vs commitlint
 - [TASK-040B1 stacked merge](feedback_task040b1_stacked_merge.md) — three-blob conflict classification + raw-diff proof; DbError hides constraint names
 - [TASK-041B stacked merge](feedback_task041b_stacked_merge.md) — explicit-base merge-tree after squash, merge --no-commit vs moving main, empty git add pathspec trap
+- [TASK-041B fc3](feedback_task041b_fc3.md) — scripted mutant runner w/ restore, per-wrapper throttle Map, counting ledger seam proves guard path
+- [TASK-045 merge + TASK-298 solo](feedback_task045_merge_task298.md) — no Agent tool in subagents, bootstrap FK beyond ruling count, merge -F for commitlint, queue competition
+- [TASK-040B fc1](feedback_task040b_fc1.md) — small fold via replaceOnce + brief sync, lockfile check w/o npm, bg lane B survives, stray run dir move
+- [TASK-034 fc3](feedback_task034_fc3.md) — local main ahead of origin, never-pushed branch tracking main, package copies break scanners, gitleaks base

@@ -18,7 +18,7 @@ D-PM-089 decided rulings §7 items 1 to 7 of `docs/03-architecture/rulings/wave-
 - Before adopting proposed Gherkin, read the test as built in the task worktree (`../Shipqube-TASK-044/tests/api/event-stream.api.test.ts`). Test titles there carry the AT ID, not the scenario title, so a retitle renames no test.
 - "May a split story be partial at R0?" turns on whether the completer waits for M1 work. If it does not, hold it to the tag and say whether the Wave 2 exit is held (only when Waves 0 to 2 need it, as for US-038).
 - DECISIONS.md is appended by other agents while I work: re-read the tail before appending and after.
-- Held for others, all in the entry: US-042, US-135 and US-045 story text; map rows (AT-US-042-06 title, AT-US-042-07 suite `api`, new AT-US-135-13); traceability rows of REQ-API-017/018; four fold lines (TASK-044, TASK-141, TASK-108, wave texts).
+- Landed by D-PM-091 except the appended scenario AT-US-135-13 (see [[dpm091-held-story-landing]]). Held at the time, all in the entry: US-042, US-135 and US-045 story text; map rows (AT-US-042-06 title, AT-US-042-07 suite `api`, new AT-US-135-13); traceability rows of REQ-API-017/018; four fold lines (TASK-044, TASK-141, TASK-108, wave texts).
 - Comes back to me if: security-analyst refuses D-ARCH-219 (QG-044-C3, the cap changes); part 044-B is the last item holding the tag; QG-044-C7 rules `carrier_error` without an id (REQ-CARR-009 and US-135 notes say "each event").
 - Rows that move together for streams: REQ-API-017 + REQ-API-018 + REQ-SEC-015 + REQ-PLAT-022 note + US-042 / US-135 / US-045 notes + A-119 + PRD §7 paragraph.
 

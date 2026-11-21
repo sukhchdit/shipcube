@@ -41,4 +41,7 @@ Findings:
   - The `canonicalize` package (RFC 8785) throws on lone surrogates, so wrap the differential.
 - **Kit** (session-scoped): `t080r2/probes/` holds `mknm.mjs`, `matrix.mjs`, `tscprobe.mjs`, `patch-sec06.mjs`, `sqlprobe.mjs`, `mig-mutants.mjs`, `hooks.mjs`, `p-money-cj.mjs`, `record-sim.mjs`, `commit.mjs` and `gl-nodigit.mjs`.
 
-Related: [[project-p5-task076]], [[project-p5-task079]], [[project-security-review-conventions]]
+**Round 3 (merge-only, 2026-11-21) at union `2805c809` (a5935281 + main 763800f3, PR #80): PASS_W_F-U, D-SECPR080-03, main `934bb0f1` (not pushed).** #81 was squash-merged by the user as `339b29d6` during the round (D-ORCH-162: merges with CI billing-blocked; merge-only rounds close as post-merge reviews). Squash tree == `merge-tree --merge-base=763800f3 3308474b 2805c809`. C2 met (lane B 3d3a777, D-ORCH-149), C4 closed. 06 still open.
+- **New PR080-SEC-07 LOW (CWE-693, A05):** main's D-ORCH-147 triage bullet (`DECISIONS.md:7697`) quotes the TASK-051 doc-comment phrase that real gitleaks flagged. Every union merge of a branch based before `d7585e78` re-adds it in its first-parent diff (2805c809, 22f69a82, TASK-044 `c33e5e92`). Main ancestry emulation = 17 baseline + `d7585e78…:DECISIONS.md:7697` + `ed156913…:.claude/agent-memory/security-analyst/project_p5_task051.md:23` (MY memory note; reworded in aad3e90d). Predicted: lane B gitleaks-full red on every head containing d7585e78. Routes: (a) orchestrator rewords the bullet; (b) devops baseline +2, `BASELINE_COUNT` 19, sec-static pin; (c) commit-bound entry or supersede for pushed union merges. Never write that phrase in memory or records.
+
+Related: [[project-p5-task076]], [[project-p5-task079]], [[project-p5-task041]], [[project-security-review-conventions]]
