@@ -1520,24 +1520,26 @@ ADR-0004, REQ-PLAT-016/017, DR-A25, EC-A39. DDL in §6.1.
 
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
-| STD | | | | INT |
+| STD | | | the full standard set. `created_at` is the insert time on the database clock (`clock_timestamp()`), which the writer sets together with `updated_at`; the column default, the transaction start, is not used for this table (2026-11-20, ADR-0004 amendment 2 item 13) | INT |
 | `type` | `text` | N | dotted lower-case catalogue name; `CHECK (type ~ '^[a-z_]+\.[a-z_]+$')` | INT |
-| `aggregate_type` | `text` | N | | INT |
-| `aggregate_id` | `uuid` | N | | INT |
-| `org_id` | `uuid` | Y | **authoritative** tenant context of every job derived from the event; read by `platform.job_context('outbox_event', id)` (§4.5), never copied into the BullMQ payload (amended 2026-11-12, SEC-P3-12); this table is on the non-RLS allow-list | INT |
-| `actor_id` | `uuid` | N | initiating actor, returned by `job_context` | INT |
+| `aggregate_type` | `text` | N | taken from the event catalogue, never from the caller; `CHECK (aggregate_type ~ '^[a-z][a-z_]{0,62}$')` | INT |
+| `aggregate_id` | `uuid` | N | the aggregate the event is about, and the unit of the order rule (§6.1) | INT |
+| `org_id` | `uuid` | Y | **authoritative** tenant context of every job derived from the event; read by `platform.job_context('outbox_event', id)` (§4.5), never copied into the BullMQ payload (amended 2026-11-12, SEC-P3-12); this table is on the non-RLS allow-list. *2026-11-20 (PR043-SEC-05; ADR-0004 amendment 4 item 25; D-ARCH-197): the runtime role cannot update it (column-level `UPDATE`), and from TASK-047 it cannot state it at insert either: `DEFAULT platform.app_org_id()` and no `INSERT` privilege on the column, so the database derives it from the context of the transaction* | INT |
+| `actor_id` | `uuid` | N | initiating actor, returned by `job_context`. *2026-11-20 (D-ARCH-197):* `ck_outbox_events__actor CHECK (actor_id = created_by)` binds it to the actor of the writing transaction, which the standard-columns guard asserts for `created_by` | INT |
 | `payload` | `jsonb` | N | IDs, codes, recipient locale (REQ-I18N-008); never PER values (schema-validated per type). One-time e-mail tokens travel only as `token_enc` (base64 AES-256-GCM under `OUTBOX_PAYLOAD_KEY`) with the sibling field `token_enc_key_id`; AAD = (`outbox_events`, `payload.token_enc`, `id`, `token_enc_key_id`) (amended 2026-11-12, SEC-P3-08 item 1; §12 `token_enc`) | INT (`token_enc` registered SEC) |
-| `correlation_id` | `text` | N | | INT |
+| `correlation_id` | `text` | N | the `app.correlation_id` of the writing transaction; the relay copies it into the job unchanged (D-062). `CHECK (correlation_id ~ '^[A-Za-z0-9-]{8,64}$')`: the ADR-0016 §15 grammar, as on `audit_entries`, so every row can be relayed (2026-11-20, ADR-0004 amendment 2 item 16) | INT |
 | `trace_context` | `text` | Y | W3C `traceparent` | INT |
 | `published_at` | `timestamptz` | Y | | INT |
-| `attempts` | `integer` | N | `DEFAULT 0` | INT |
-| `last_error` | `text` | Y | ≤ 500, no payload echo | INT |
+| `attempts` | `integer` | N | `DEFAULT 0`, `CHECK (attempts >= 0)`; +1 for every enqueue attempt of the relay, accepted or failed | INT |
+| `last_error` | `text` | Y | ≤ 500; the error class name of the last failed attempt, never a message or a payload; NULL once published | INT |
 
-AP-PLAT-01 relay batch: `ix_outbox_events__unpublished ON (created_at, id) WHERE published_at IS NULL`; AP-PLAT-02 purge: `ix_outbox_events__published_at ON (published_at) WHERE published_at IS NOT NULL`. Per-aggregate order (REQ-PLAT-017) holds because the relay publishes in `(created_at, id)` order and a single relay instance holds the batch lock (`FOR UPDATE SKIP LOCKED` lets a second instance take the next batch; BullMQ `jobId = event id` dedupes a crash replay).
+AP-PLAT-01 relay batch: `ix_outbox_events__unpublished ON (created_at, id) WHERE published_at IS NULL`; AP-PLAT-02 purge: `ix_outbox_events__published_at ON (published_at) WHERE published_at IS NOT NULL`; `ix_outbox_events__aggregate ON (aggregate_type, aggregate_id, created_at)` (ADR-0004 item 1: the events of one aggregate in order, for support and replay).
+
+*Corrected 2026-11-20 (TASK-043 code review M1; ADR-0004 amendment 2 items 13 to 15; D-ARCH-185).* This paragraph said that per-aggregate order "holds because the relay publishes in `(created_at, id)` order and a single relay instance holds the batch lock (`FOR UPDATE SKIP LOCKED` lets a second instance take the next batch …)". Both halves were wrong. With `created_at` at its default, the transaction start, two transactions on one aggregate sort in the order in which they began, not in the order in which they committed. And a second relay that takes the next batch can enqueue a later event of an aggregate before an earlier one. Per-aggregate order (REQ-PLAT-017) holds under the four conditions of §6.1 "Order": the writer sets `created_at` to the insert time; the publishing transaction holds the row lock of the aggregate when it publishes; one relay tick runs at a time; and only a holder of the relay lock writes an unpublished row (*restated the same day in §6.1: or the consumer of the row's own event*). The order is that of the enqueue. BullMQ `jobId = outbox_event.<event id>` dedupes a crash replay.
 
 #### `processed_events` · SYSTEM · SD: no · insert-only · hard-delete allow-listed (> 30 d)
 
-Columns: STD; `consumer text N`; `event_id uuid N`; `processed_at timestamptz N DEFAULT now()`. `ux_processed_events__consumer_event ON (consumer, event_id)` (AP-PLAT-03, consumer dedupe inside the consumer's business transaction); `ix_processed_events__processed_at` for purge.
+Columns: STD; `consumer text N`; `event_id uuid N`; `processed_at timestamptz N DEFAULT now()`. `ux_processed_events__consumer_event ON (consumer, event_id)` (AP-PLAT-03, consumer dedupe inside the consumer's business transaction); `ix_processed_events__processed_at` for purge. `consumer` is the handler name of ADR-0004 amendment 2 item 12, with `CHECK (consumer ~ '^[a-z][a-z0-9_.-]{0,62}$')`. *2026-11-20 (D-TASK043-04; D-ARCH-186): `platform_app` holds `SELECT, INSERT, DELETE` and no `UPDATE` (§4.4). A claim is written once.* *2026-11-20 (PR043-SEC-06; ADR-0004 amendment 4 item 26; D-ARCH-198): the horizon becomes 45 days, as for `job_executions`, when the purge moves behind definer functions; a claim is then also kept for as long as its event row exists.*
 
 #### `job_executions` · SYSTEM · SD: no · insert-only · purged 30 d after completion once its purge ships (added 2026-11-20)
 
@@ -1560,18 +1562,18 @@ ADR-0013 §4, REQ-PLAT-014, US-010; TASK-039 (D-TASK039-03; code review R1-m1, R
 - **Use.** A processor claims `(queue, job id)` in the transaction of its effect (`INSERT … ON CONFLICT DO NOTHING`; Prisma `createMany` with `skipDuplicates`). The effect runs only when the claim inserted the row, and claim and effect commit together. A second delivery of the job finds the committed key and runs nothing. Outbox consumers additionally use `processed_events` (ADR-0004).
 - **Unique per queue** (code review R1-m1; amends the "`job_key UNIQUE`" of ADR-0013 §4). BullMQ scopes job ids per queue, and one payload kind can be a job of two queues: `shipment.<id>` on `documents` and on `tracking-poll`. A key unique across queues would make the second queue's job a duplicate and skip its effect without a trace. The first TASK-039 head had `ux_job_executions__job_key ON (job_key)`; its fix cycle replaces it before the migration merges.
 - **Grants.** `SELECT, INSERT` for `platform_app`. A row is written once and never updated. `DELETE` arrives with the purge, when the table joins the hard-delete allow-list (§4.4).
-- **Retention: 30 days after `completed_at`** (D-TASK039-03 left it open). The row has to outlive every way the same job id can be delivered again on its queue: a BullMQ retry or stall (minutes), an operator's retry of a failed job (7 days), a new enqueue after a dead letter (14 days) and a replayed outbox event (30 days after publishing; ADR-0004 item 6). Completion is never earlier than publishing, so an event that can still be replayed still has its row. It is the horizon of `processed_events`.
+- **Retention: 30 days after `completed_at`** (D-TASK039-03 left it open). The row has to outlive every way the same job id can be delivered again on its queue: a BullMQ retry or stall (minutes), an operator's retry of a failed job (7 days), a new enqueue after a dead letter (14 days) and a replayed outbox event (30 days after publishing; ADR-0004 item 6). Completion is never earlier than publishing, so an event that can still be replayed still has its row. It is the horizon of `processed_events`. *Amended 2026-11-20 (PR043-SEC-06; ADR-0004 amendment 4 item 26; D-ARCH-198): 45 days for both ledgers, from the task that moves the purge behind definer functions. "Still has its row" was true at the moment of a replay, not for the life of the replayed delivery: an event replayed on day 29.9 is delivered after day 30. The rule: an event row lives 30 days after its last publication, a replay republishes only events created less than 14 days ago, and a claim lives 45 days.*
 - **A job id is one-shot on its queue for 30 days after it completed.** BullMQ ignores an add of the same id while the job is retained (24 hours completed, 7 days failed). After that an add creates a job, and the ledger skips its effect. A producer that needs the effect again uses a new `<step>` or occurrence (ADR-0013 amendment 3 item 11) and never waits for the purge.
 - **Purge.** The daily housekeeping job of TASK-043 deletes rows completed more than 30 days ago in batches of 5,000, with the outbox purge. Until it ships there is no purge, and no row either: the accessor is bound by TASK-047, which depends on TASK-043.
 
-#### `idempotency_keys` · SYSTEM · SD: no · mutable · hard-delete allow-listed (expired, and 5xx/429 outcomes)
+#### `idempotency_keys` · SYSTEM · SD: no · mutable · hard-delete allow-listed (expired rows and released claims)
 
-REQ-API-009/010/011, DR-A20, EC-A27..A30. Protocol in §6.2.
+REQ-API-009/010/011, DR-A20, EC-A27..A30. Protocol in §6.2. *Heading corrected 2026-11-20 (QG-040-C1 (d); D-ARCH-200): it named "5xx/429 outcomes" as the only deletes besides expiry. A claim is released, and its row deleted, after a 5xx, a 429, any other failure that is not a stored 4xx, a completion or a fail-closed audit entry that could not be written and, from TASK-187, a refused re-authentication proof.*
 
 | Column | Type | Null | Default / constraint | Class |
 |---|---|---|---|---|
 | STD | | | | INT |
-| `scope_hash` | `bytea` | N | SHA-256 of `org_id or guest token hash ‖ actor_id ‖ method ‖ path ‖ key`; `UNIQUE` | INT |
+| `scope_hash` | `bytea` | N | SHA-256 of the JCS of `[version, owner kind, owner, actor scope, actor, method, path, key]`; the owner is the organisation, else the guest-token hash, else the actor (a signed-in caller without an organisation), else the HMAC of the client network (*as built, 2026-11-20, ADR-0014 amendment 5; was "SHA-256 of `org_id or guest token hash ‖ actor_id ‖ method ‖ path ‖ key`"*); the only scope column; `UNIQUE` | INT |
 | `scope_org_id` | `uuid` | Y | informational | INT |
 | `actor_id` | `uuid` | Y | | INT |
 | `method` | `text` | N | | INT |
@@ -1579,9 +1581,9 @@ REQ-API-009/010/011, DR-A20, EC-A27..A30. Protocol in §6.2.
 | `idem_key` | `text` | N | `CHECK (idem_key ~ '^[\x21-\x7E]{1,255}$')` | INT |
 | `fingerprint` | `bytea` | N | SHA-256 of method, path, canonical query and body (32 bytes) | INT |
 | `status` | `text` | N | `CHECK (status IN ('IN_PROGRESS','COMPLETED'))` | INT |
-| `lease_until` | `timestamptz` | N | in-progress lease (30 s) for crash recovery | INT |
-| `response_status` | `smallint` | Y | 2xx/4xx only | INT |
-| `response_headers` | `jsonb` | Y | allow-listed headers (ETag, Location) | INT |
+| `lease_until` | `timestamptz` | N | in-progress lease for crash recovery: at least 30 s, sized to the longest stretch of the request and renewed before `call` and before the handler transaction (*2026-11-20, ADR-0014 amendment 10; was "(30 s)"*) | INT |
+| `response_status` | `smallint` | Y | 2xx, or 4xx other than 429 (*2026-11-20: `ck_idempotency_keys__response_status`; set exactly when `status = 'COMPLETED'`, `ck_idempotency_keys__completed`*) | INT |
+| `response_headers` | `jsonb` | Y | allow-listed headers: ETag, Location and Content-Type (*Content-Type added 2026-11-20, ADR-0014 amendment 6: a stored problem document is replayed as `application/problem+json`*) | INT |
 | `response_body` | `bytea` | Y | AES-256-GCM (96-bit nonce ‖ ct ‖ 128-bit tag) of the UTF-8 JSON body under `IDEMPOTENCY_BODY_KEY`; AAD = (`idempotency_keys`, `response_body`, `scope_hash` (hex), `response_body_key_id`); may contain personal data of the caller's own resource; kept 24 h only; routes on the ADR-0014 one-time-secret list (`createQuote`, `createQuoteShare`, …) are `not-applicable` and never stored | PER (encrypted) |
 | `response_body_key_id` | `text` | Y | `<purpose>-v<n>`; `ck_idempotency_keys__body_key CHECK ((response_body IS NULL) = (response_body_key_id IS NULL))` | INT |
 | `expires_at` | `timestamptz` | N | created + 24 h | INT |
@@ -1589,6 +1591,21 @@ REQ-API-009/010/011, DR-A20, EC-A27..A30. Protocol in §6.2.
 AP-PLAT-04 claim/lookup: `ux_idempotency_keys__scope_hash`; AP-PLAT-05 purge: `ix_idempotency_keys__expires_at`. This is the one SYSTEM table allowed a `PER` column (explicit allow-list entry), justified by the 24 h hard-delete, by encryption at rest and by `response_body` only ever echoing the caller's own data.
 
 Amended 2026-11-12 (SEC-P3-08 item 1, SEC-P3-10): `response_body` changed from clear `jsonb` to `bytea` ciphertext, and `response_body_key_id` was added. The AAD uses `scope_hash`, so a stored body cannot be replayed under another key scope. The one-time-secret routes are never stored.
+
+Amended 2026-11-20 (TASK-040 as built and its code review round 1; ADR-0014 amendments 5 to 8; D-ARCH-192, D-ARCH-194, D-ARCH-195):
+- **Scope.** `scope_hash` is the only scope column. `scope_org_id` and `actor_id` are informational, and the guest-token hash and the client-network HMAC are inputs of the hash that no column holds. ADR-0014 amendment 1 named two more columns; it is corrected.
+- **Stored responses.** A 4xx other than 429 is stored whether a handler returned it or a service threw it. The body of a failure is the problem document as the first request received it.
+- **Checks added by the migration (D-TASK040-09, accepted in review):** `ck_idempotency_keys__method` (`POST`, `PUT`, `PATCH`, `DELETE`), `__response_status`, `__completed` and `__body_key_id` (the `<purpose>-v<n>` form).
+- **Purge.** The worker schedule `idempotency-purge` deletes expired rows every hour (§6.2 step 5). The owning module's code is `apps/*/src/platform/idempotency/**`: the store in the API, the purge in the worker.
+
+Amended 2026-11-20 (verification D-QG-003, code review rounds 2 and 3, security record D-SECPR040-01; ADR-0014 amendments 10 to 15; D-ARCH-200, D-ARCH-201, D-ARCH-204):
+- **Lease and clock (as built, D-TASK040-06).** `lease_until` and `expires_at` are written and compared with the application clock of the instance (§7.6), not with `now()` of the database. Every write of the row is conditional on its `version`, which keeps it correct under skew. The lease is at least 30 s; ADR-0014 amendment 10 has the sizing rule and the renewals.
+- **No scope, no row (as built, D-TASK040-11).** An anonymous caller whose client address is unknown gets no `scope_hash` and no row: an `optional` operation runs without idempotency and a `required` one answers 503.
+- **Stored form from part 040-B (PR040-SEC-02).** `response_body` is the ciphertext of one envelope, `{v, status, headers, body}`, written by every completion, with or without a body, under the same AAD. A replay reads the status, the headers and the body from the envelope only. `response_status` and `response_headers` stay as clear copies that must equal it, and a check `(status = 'COMPLETED') = (response_body IS NOT NULL)` joins the others. A replayed `Content-Type` is `application/json` or `application/problem+json`. ~~Part 040-A stores the three parts separately;~~ *(corrected 2026-11-20, observation of D-QG-004: part 040-A at `e96bd979` seals `{origin, body}` when there is a body and keeps the status and the headers in the clear columns;)* no row exists in any environment before part 040-B, so nothing is migrated.
+- **What a body can hold (PR040-SEC-03, accepted).** Besides personal data of the caller's own resource: the client secret of a gateway intent, in the stored responses of `checkoutOrder`, `confirmPayment` and `createPaymentMethodSetup`. It is encrypted, bound to the scope, and deleted at most 25 h after the request.
+- **Keys (PR040-SEC-01).** The body key and the key of the client-network HMAC are both derived from the `IDEMPOTENCY_BODY_KEY` material (ADR-0018 amendment 9; §10.4).
+- **`idem_key`** stays in clear for now (PR040-SEC-06). Nothing reads it; it goes, or becomes a hash, with the contract step that drops the clear response columns.
+- **Purge.** Each batch also takes the ledger claim on `job_executions`, as the batches of `outbox-purge` do (ADR-0014 amendment 12).
 
 #### `feature_flags` · GLOBAL (runtime write under `featureflag:manage`) · SD: yes · mutable
 
@@ -2854,12 +2871,15 @@ Grant matrix (rendered from `prisma/sql/grants.manifest.json` into each migratio
 | `feature_flags`, `feature_flag_overrides` | `SELECT, INSERT, UPDATE` |
 | `number_sequences` | `SELECT`, `UPDATE (next_value, updated_at, updated_by, version)` |
 | `coupons` | `SELECT`, `UPDATE (redeemed_count, updated_at, updated_by, version)` |
-| SYSTEM hard-delete allow-list: `idempotency_keys`, `outbox_events`, `processed_events`, `login_attempt_counters` | `SELECT, INSERT, UPDATE, DELETE` (DELETE used only by housekeeping with the retention predicates of §10.5) |
+| SYSTEM hard-delete allow-list: `idempotency_keys`, `outbox_events`, ~~`processed_events`~~, `login_attempt_counters` | `SELECT, INSERT, UPDATE, DELETE` (DELETE used only by housekeeping with the retention predicates of §10.5; *noted 2026-11-20, D-ARCH-192:* on `idempotency_keys` also by the API store, which deletes a claim after a 5xx or 429 and an expired key before it is claimed again, §6.2 steps 2 and 4) |
+| `processed_events` *(row split out 2026-11-20, D-TASK043-04; D-ARCH-186)* | `SELECT, INSERT, DELETE`, no `UPDATE`: the table is insert-only. A consumer claims with `INSERT … ON CONFLICT DO NOTHING` and never changes the row. `DELETE` is used only by the `outbox-purge` job with the predicate of §10.5. `prisma/sql/grants.manifest` carries the line; a `platform_app` `UPDATE` probe → `42501` |
 | SYSTEM global index tables: `tracking_index`, `gateway_refs`, `tracking_poll_schedule` | `SELECT, INSERT, UPDATE` |
 | Other SYSTEM: `audit_stream_heads`, `audit_partitions`, `audit_chain_verifications`, `gateway_webhook_events`, ~~`reference_dataset_versions`~~, `data_migration_runs` | `SELECT, INSERT, UPDATE` |
 | `reference_dataset_versions` *(row split out 2026-11-13, PR13-SEC-04; D-ARCH-075)* | **`SELECT` only.** The seed CLI writes it as `platform_migrator` (owner); no runtime role writes it — the US-073 reconciler derives the last audited digest from `audit_entries` (§3.5). `prisma/sql/grants.manifest` carries one line; C5 asserts it; a `platform_app` `INSERT`/`UPDATE` probe → `42501`. A future runtime writer takes the §4.5 definer-function form, never a table grant or RLS on this SYSTEM table |
 | `operator_staff_grants` *(added 2026-11-19, D-ARCH-165)* | **`SELECT` only.** The provisioning lane writes it as `platform_migrator` (owner); no runtime role writes it (§3.2). `prisma/sql/grants.manifest` carries one line |
-| `job_executions` *(added 2026-11-20, D-ARCH-171)* | `SELECT, INSERT`: an insert-only ledger. `DELETE` arrives with its purge (TASK-043), when the table joins the hard-delete allow-list with the predicate of §10.5 |
+| `job_executions` *(added 2026-11-20, D-ARCH-171)* | `SELECT, INSERT`: an insert-only ledger. `DELETE` arrives with its purge (TASK-043), when the table joins the hard-delete allow-list with the predicate of §10.5. *2026-11-20 (D-ARCH-186): the TASK-043 migration grants it with the `outbox-purge` job, so from that migration on the grant is `SELECT, INSERT, DELETE`; there is still no `UPDATE`* |
+| `outbox_events`, `UPDATE` *(2026-11-20, PR043-SEC-05; ADR-0004 amendment 4 item 25; D-ARCH-197; this row overrides the allow-list row above for this table)* | Column-level: `UPDATE (published_at, attempts, last_error, updated_at, updated_by, version)`, the columns of the relay's two marks; TASK-078 adds `payload` for the `token_enc` overwrite. `SELECT` and `DELETE` stay table-level. `INSERT` is table-level until TASK-047 and then column-level without `org_id`. A `platform_app` `UPDATE` of `org_id` → `42501` |
+| Purge of `outbox_events`, `processed_events` and `job_executions` *(planned 2026-11-20, PR043-SEC-06; ADR-0004 amendment 4 item 26; D-ARCH-198; a late task before G3)* | `EXECUTE` on `platform.purge_outbox_events`, `platform.purge_processed_events` and `platform.purge_job_executions` (definer functions of §4.5, the horizon in each body). `platform_app` then holds no `DELETE` on the three tables; `platform_definer` holds `SELECT, DELETE` on them. Until that task the `DELETE` grants above stand and the horizon is the purge's own predicate (risks.md R-ARCH-38) |
 | `audit_entries` (parent only; never partitions) | `SELECT, INSERT` |
 | `audit_pii_vault`, `data_subjects` | `SELECT, INSERT` (`platform_erasure`: `SELECT, DELETE` on the vault, `UPDATE (erased_at, updated_at, updated_by, version)` on subjects) |
 | Functions | `EXECUTE` on `platform.app_org_id`, `app_actor_id`, `app_guest_token_hash`, `app_is_operator`, `ensure_audit_partitions` and exactly the §4.5 list (2026-11-12: including `job_context`, `sessions_for_user`, `mfa_enrolment_overdue_candidates`). *2026-11-13 (D-TASK016-01 decision 3, PR #11 security review §5 ruling 1, D-ARCH-071):* **`platform_definer` holds `EXECUTE` on `platform.app_actor_id()`** — the body of `app_is_operator()` calls it while running as the definer and `PUBLIC` holds no `EXECUTE` on the helpers; granted by the migrator in the `app_is_operator` migration **before** `SET ROLE platform_definer` (template `prisma/sql/function-templates/app-is-operator.sql`); C11's helper expectation for `app_actor_id` gains `platform_definer` when TASK-037 applies the template; no other helper is granted to the definer |
@@ -2889,7 +2909,7 @@ Every path that must read rows before a tenant/actor context exists, or must dis
 | `org_ids_page(p_after uuid, p_limit int)` | `setof uuid` | `organisations` | resumable backfills that iterate organisations (§8.5) |
 | `purge_expired_tokens(p_before timestamptz, p_limit int)` | `integer` (rows deleted) | `email_verification_tokens`, `password_reset_tokens`, `refresh_tokens`, `mfa_challenges`, `reauth_proofs`, `mfa_enrolment_codes` (2026-11-12, SEC-P3-14) (definer-purge policy) | housekeeping (§10.5) |
 | `sessions_for_user(p_user_id uuid)` (listed 2026-11-12; ratified in §12 OI-25) | `setof uuid` (session IDs with `status = 'ACTIVE'`) | `sessions` | synchronous Redis revocation of another user's sessions (membership removal, user status change) |
-| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid)`; one row or none | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes` | every worker processor, before `withTenantTx` (ADR-0013 amendment, payload v2) |
+| `job_context(p_kind text, p_id uuid)` (**new 2026-11-12, SEC-P3-12**) | `(org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)`; one row or none (*`org_deleted` added 2026-11-20, D-ARCH-180*) | `outbox_events`, `saga_executions`, `shipments`, `orders`, `pickups`, `documents`, `payments`, `tracking_poll_schedule` (joined to `shipments`), `notification_log`, `quotes`; `organisations` for `org_deleted` | every worker processor, before `withTenantTx` (ADR-0013 amendments 1 and 4, payload v2) |
 | `mfa_enrolment_overdue_candidates(p_now timestamptz, p_limit int)` (**new 2026-11-12, SEC-P3-14**) | `setof uuid` (user IDs) | `organisations`, `memberships`, `users`, `mfa_totp` | `housekeeping` 24 h staff enrolment deadline (AP-ID-19) |
 
 Example (the others follow the same shape):
@@ -2929,61 +2949,91 @@ The worker resolves the tenant context of every job from PostgreSQL, never from 
 
 A guest quote (`quotes.org_id IS NULL`) returns `org_id = NULL`. Every processor whose queue requires a tenant treats a NULL `org_id` as non-retryable `MISSING_TENANT_CONTEXT` (ADR-0013 §2), and M1 has no worker job that writes guest-quote rows. The function never returns `guest_token_hash`, because a UUIDv7 ID is not a secret (P1) and returning the hash would turn any quote ID into guest access.
 
+*Amended 2026-11-20 (D-ARCH-180; ADR-0013 amendment 4): ownership, not liveness.* The function filters `deleted_at` on neither the row the job names nor that row's organisation, and it returns a fourth column, `org_deleted`.
+
+| The row | `org_id` | `org_deleted` | The job (ADR-0013 amendment 4) |
+|---|---|---|---|
+| does not exist (never did, forged id, purged) | no row is returned | | refused, `JOB_CONTEXT_NOT_FOUND` |
+| has no organisation | NULL | NULL | refused with `MISSING_TENANT_CONTEXT` on a queue that requires a tenant; runs without an organisation on `outbox-relay` and `notifications` |
+| belongs to a live organisation (the row itself may be a soft-deleted quote) | the organisation | false | runs |
+| belongs to a soft-deleted organisation | the organisation | true | runs, in that organisation's own tenant scope |
+
+- `org_deleted` is also true when `org_id` names no `organisations` row. The foreign keys of the TENANT tables rule that out, but `outbox_events.org_id` has no foreign key (§6.1), so the function does not rely on one.
+- A deleted organisation is not refused, because work in flight settles what already exists: a saga ends booked or compensated, money is captured or refunded, a pickup is cancelled with the carrier, a draft expires. The tenant policies of §4.3 compare `org_id` only, so the deleted organisation's own context reads and writes its rows as before. No job runs in a wider scope for this reason (§4.1: there is no cross-tenant scope for workers).
+- The runner passes the value to the processor as `orgDeleted`. Work for a deleted organisation is stopped where it starts: a candidate function that starts new business for a tenant selects live organisations only; one that settles, cancels, expires, backfills, retains or erases does not filter (`payment_sweeper_candidates`, `saga_due_candidates`, `void_retry_candidates`, `draft_expiry_candidates`, `org_ids_page`).
+
 ```sql
 SET ROLE platform_definer;   -- preferred form (ADR-0005 am. 10 item 9, PR7-SEC-09; block rewritten 2026-11-12, PR7-SEC-12 (e), D-ARCH-065):
                              -- the function is created already owned by platform_definer (CREATE on schema platform, am. 8 b), so
                              -- no OWNER TO is needed and the owner itself grants EXECUTE. Linter rule 15 accepts this form or
                              -- "grants before OWNER TO" (the auth_lookup_user_by_email example above), never OWNER TO before GRANT.
+                             -- Body rewritten 2026-11-20 (D-ARCH-180): the per-kind lookups select INTO variables instead of
+                             -- RETURN QUERY, so that one final query can add org_deleted. The lookups themselves are unchanged.
 CREATE FUNCTION platform.job_context(p_kind text, p_id uuid)
-RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid)
+RETURNS TABLE (org_id uuid, actor_type text, actor_id uuid, org_deleted boolean)
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp AS $$                 -- amended 2026-11-12 (SEC-P3-27): was pg_catalog, public
 #variable_conflict use_column
 DECLARE
   c_system    constant uuid := '00000000-0000-7000-8000-000000000001';
   c_anonymous constant uuid := '00000000-0000-7000-8000-000000000002';
+  v_org   uuid;
+  v_type  text;
+  v_actor uuid;
 BEGIN
   CASE p_kind
     WHEN 'outbox_event' THEN
-      RETURN QUERY SELECT e.org_id,
-                          CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
-                          e.actor_id
-                     FROM public.outbox_events e WHERE e.id = p_id;
+      SELECT e.org_id,
+             CASE e.actor_id WHEN c_system THEN 'SYSTEM_JOB' WHEN c_anonymous THEN 'ANONYMOUS' ELSE 'USER' END,
+             e.actor_id
+        INTO v_org, v_type, v_actor
+        FROM public.outbox_events e WHERE e.id = p_id;
     WHEN 'saga' THEN
-      RETURN QUERY SELECT s.org_id,
-                          CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          s.created_by
-                     FROM public.saga_executions s WHERE s.id = p_id;
+      SELECT s.org_id, CASE s.created_by WHEN c_system THEN 'SYSTEM_JOB' ELSE 'USER' END, s.created_by
+        INTO v_org, v_type, v_actor
+        FROM public.saga_executions s WHERE s.id = p_id;
     WHEN 'notification' THEN
-      RETURN QUERY SELECT n.org_id,
-                          CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
-                          COALESCE(n.recipient_user_id, c_system)
-                     FROM public.notification_log n WHERE n.id = p_id;
-    WHEN 'shipment'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.shipments x WHERE x.id = p_id;
-    WHEN 'order'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.orders    x WHERE x.id = p_id;
-    WHEN 'pickup'        THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.pickups   x WHERE x.id = p_id;
-    WHEN 'document'      THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.documents x WHERE x.id = p_id;
-    WHEN 'payment'       THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.payments  x WHERE x.id = p_id;
-    WHEN 'quote'         THEN RETURN QUERY SELECT x.org_id, 'SYSTEM_JOB'::text, c_system FROM public.quotes    x WHERE x.id = p_id;
+      SELECT n.org_id,
+             CASE WHEN n.recipient_user_id IS NULL THEN 'SYSTEM_JOB' ELSE 'USER' END,
+             COALESCE(n.recipient_user_id, c_system)
+        INTO v_org, v_type, v_actor
+        FROM public.notification_log n WHERE n.id = p_id;
+    WHEN 'shipment'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.shipments x WHERE x.id = p_id;
+    WHEN 'order'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.orders    x WHERE x.id = p_id;
+    WHEN 'pickup'        THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.pickups   x WHERE x.id = p_id;
+    WHEN 'document'      THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.documents x WHERE x.id = p_id;
+    WHEN 'payment'       THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.payments  x WHERE x.id = p_id;
+    WHEN 'quote'         THEN SELECT x.org_id, 'SYSTEM_JOB', c_system INTO v_org, v_type, v_actor FROM public.quotes    x WHERE x.id = p_id;
     WHEN 'tracking_poll' THEN
-      RETURN QUERY SELECT s.org_id, 'SYSTEM_JOB'::text, c_system
-                     FROM public.tracking_poll_schedule t
-                     JOIN public.shipments s ON s.id = t.shipment_id
-                    WHERE t.id = p_id;
+      SELECT s.org_id, 'SYSTEM_JOB', c_system
+        INTO v_org, v_type, v_actor
+        FROM public.tracking_poll_schedule t
+        JOIN public.shipments s ON s.id = t.shipment_id
+       WHERE t.id = p_id;
     ELSE
       RAISE EXCEPTION USING ERRCODE = '22023',               -- invalid_parameter_value
                             MESSAGE = pg_catalog.format('JOB_CONTEXT_UNKNOWN_KIND: %s', p_kind);
   END CASE;
+  IF NOT FOUND THEN
+    RETURN;                                                  -- the identifiers name nothing: JOB_CONTEXT_NOT_FOUND
+  END IF;
+  RETURN QUERY
+    SELECT v_org, v_type, v_actor,
+           CASE WHEN v_org IS NULL THEN NULL                 -- the row has no organisation
+                ELSE NOT EXISTS (SELECT 1 FROM public.organisations o
+                                  WHERE o.id = v_org AND o.deleted_at IS NULL)
+           END;
 END $$;
 REVOKE ALL ON FUNCTION platform.job_context(text, uuid) FROM PUBLIC;      -- redundant with the definer's global default privileges (am. 9), explicit
 GRANT EXECUTE ON FUNCTION platform.job_context(text, uuid) TO platform_app;
 RESET ROLE;
 ```
 
-- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`.
-- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job.
-- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50).
-- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3.
+- **Rules.** An unknown kind raises, and the processor sends the job to the DLQ as non-retryable `PAYLOAD_INVALID`. No row means an empty result, which the processor treats as non-retryable `JOB_CONTEXT_NOT_FOUND`. *2026-11-20 (D-ARCH-180):* a soft-deleted row and a row of a soft-deleted organisation are rows, so neither ends there.
+- **Cost.** Every lookup is a primary-key probe (`tracking_poll` probes two primary keys), so a call adds about 0.1 ms per job. *2026-11-20:* `org_deleted` adds one primary-key probe of `organisations` when the row has an organisation.
+- **Tests.** The C11 test plus a dedicated integration test: for each kind, the function returns the context of the row's own organisation. A job edited in Redis to name org B's row runs in org B's context, never in the context of the job's original org. A payload that carries `org_id` or `actor_id` goes to the DLQ with `job_context_mismatch` (SEC-TC-20, SEC-TC-50). *2026-11-20 (D-ARCH-180):* the cases of ADR-0013 amendment 4 item 23 for `org_deleted` and for a job of a soft-deleted organisation. The body above was run on PGlite with stub tables, without roles or row-level security (15 cases: live, deleted and missing organisation, no organisation, soft-deleted quote, unknown id, unknown kind, a hit and a miss in one statement).
+- **Policies.** The definer-read policies on the listed TENANT/USER_OWNED tables are those of §4.3. `organisations` already carries one (§4.3), so `org_deleted` needs no new policy.
+- **Return type.** The fourth column is part of the function from its first migration (TASK-047). `CREATE OR REPLACE` cannot change the return type of a function, so adding it later would have needed a second allow-listed function or a drop under the expand and contract rule.
 
 `mfa_enrolment_overdue_candidates(p_now, p_limit)` (SEC-P3-14) follows the candidate-function shape:
 
@@ -3007,7 +3057,7 @@ These functions return data that grants or reveals more than an ID lookup. In ad
 | Function | Why sensitive | Only caller |
 |---|---|---|
 | `auth_lookup_credential` | returns the password hash of any user ID | `apps/api/src/modules/identity/repository` |
-| `job_context` | maps any aggregate ID to its organisation and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
+| `job_context` | maps any aggregate ID to its organisation, says whether that organisation is deleted (2026-11-20, D-ARCH-180), and opens that tenant context | `apps/worker/src/platform/jobs` (the job runner, before `withTenantTx`) |
 | `sessions_for_user` | enumerates another user's session IDs | `apps/api/src/modules/identity/repository` (revocation service) |
 | `purge_expired_tokens` | deletes rows across users | `apps/worker` `housekeeping` processor |
 
@@ -3851,44 +3901,91 @@ Amended 2026-11-17 (A29; D-ARCH-149; ADR-0007 amendment 13 item 5), all three ow
 ```sql
 CREATE TABLE public.outbox_events (
   id             uuid PRIMARY KEY DEFAULT uuidv7(),
-  created_at     timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  created_at     timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),   -- the writer sets both to the insert time: "Order" below
   created_by     uuid NOT NULL, updated_by uuid NOT NULL, version integer NOT NULL DEFAULT 1 CHECK (version >= 1),
   type           text NOT NULL CONSTRAINT ck_outbox_events__type CHECK (type ~ '^[a-z_]+\.[a-z_]+$'),
-  aggregate_type text NOT NULL,
+  aggregate_type text NOT NULL CONSTRAINT ck_outbox_events__aggregate_type CHECK (aggregate_type ~ '^[a-z][a-z_]{0,62}$'),
   aggregate_id   uuid NOT NULL,
-  org_id         uuid,
-  actor_id       uuid NOT NULL,
+  org_id         uuid,   -- from TASK-047: DEFAULT platform.app_org_id(), and no INSERT privilege on the column for platform_app
+  actor_id       uuid NOT NULL CONSTRAINT ck_outbox_events__actor CHECK (actor_id = created_by),
   payload        jsonb NOT NULL,
-  correlation_id text NOT NULL,
+  correlation_id text NOT NULL CONSTRAINT ck_outbox_events__correlation_id CHECK (correlation_id ~ '^[A-Za-z0-9-]{8,64}$'),
   trace_context  text,
   published_at   timestamptz,
-  attempts       integer NOT NULL DEFAULT 0,
+  attempts       integer NOT NULL DEFAULT 0 CONSTRAINT ck_outbox_events__attempts CHECK (attempts >= 0),
   last_error     text CONSTRAINT ck_outbox_events__last_error CHECK (char_length(last_error) <= 500)
 );
 CREATE INDEX ix_outbox_events__unpublished ON public.outbox_events (created_at, id) WHERE published_at IS NULL;
 CREATE INDEX ix_outbox_events__published_at ON public.outbox_events (published_at) WHERE published_at IS NOT NULL;
+CREATE INDEX ix_outbox_events__aggregate ON public.outbox_events (aggregate_type, aggregate_id, created_at);
 ALTER TABLE public.outbox_events SET (autovacuum_vacuum_scale_factor = 0.02, autovacuum_analyze_scale_factor = 0.02);
 ```
 
-Relay (worker `outbox-relay`, every 500 ms, batches of 100):
+*Amended 2026-11-20 (TASK-043 as built and its code review round 1; ADR-0004 amendment 2; D-ARCH-183, D-ARCH-185, D-ARCH-187): the three row checks and the aggregate index above, and the writer statement, the tick, the order rule and the advisory-lock keys below.*
+
+Writer (`outbox.publish(db, event)`; one statement inside the business transaction):
 
 ```sql
-BEGIN;
-SELECT id, type, aggregate_type, aggregate_id, org_id, actor_id, payload, correlation_id, trace_context
+INSERT INTO public.outbox_events (type, aggregate_type, aggregate_id, org_id, actor_id, payload, correlation_id, trace_context,
+                                  created_at, updated_at, created_by, updated_by)
+SELECT $type, $aggregate_type, $aggregate_id, platform.app_org_id(), ctx.actor, $payload,
+       pg_catalog.current_setting('app.correlation_id', true), $traceparent, ctx.at, ctx.at, ctx.actor, ctx.actor
+  FROM (SELECT COALESCE(platform.app_actor_id(), $anonymous) AS actor, pg_catalog.clock_timestamp() AS at) AS ctx
+RETURNING id;
+```
+
+The caller supplies the type, the aggregate id, the payload and optionally a `traceparent`. The organisation, the actor and the correlation id come from the context of the transaction, and the aggregate type from the catalogue. `ctx.at` is read once, so `created_at = updated_at`. *2026-11-20 (PR043-SEC-05; ADR-0004 amendment 4 item 25; D-ARCH-197): the database binds what this statement derives. `platform_app` holds `UPDATE` on six columns only (`published_at`, `attempts`, `last_error`, `updated_at`, `updated_by`, `version`), and `actor_id` must equal `created_by`. From TASK-047 the statement no longer names `org_id`: the column default supplies it and the role has no `INSERT` privilege on it.*
+
+Relay tick (in every worker; `OUTBOX_RELAY_POLL_INTERVAL_MS` = 500, batches of `OUTBOX_RELAY_BATCH_SIZE` = 100; one SYSTEM-scope transaction; bounds in ADR-0004 amendment 2 item 10):
+
+```sql
+BEGIN;   -- the context statement of §4.1 comes first
+SELECT pg_catalog.pg_try_advisory_xact_lock(478216878200::bigint) AS locked;   -- false: another relay is in its tick; end here
+SELECT id, correlation_id, trace_context, aggregate_type, aggregate_id,
+       EXTRACT(EPOCH FROM (pg_catalog.clock_timestamp() - created_at))::float8 AS age_seconds
   FROM public.outbox_events
  WHERE published_at IS NULL
  ORDER BY created_at, id
  LIMIT 100
  FOR UPDATE SKIP LOCKED;
--- enqueue each to BullMQ with jobId = id (dedupes a replay after a crash, EC-A39)
-UPDATE public.outbox_events SET published_at = now(), attempts = attempts + 1, updated_at = now(), updated_by = $system, version = version + 1
- WHERE id = ANY($published_ids);
+-- one enqueue per row, in this order, on outbox-relay with jobId = outbox_event.<id> (dedupes a replay after a crash, EC-A39);
+-- a row whose enqueue failed holds back the later rows of its aggregate; a transport failure ends the loop over the rows
+UPDATE public.outbox_events SET published_at = now(), attempts = attempts + 1, last_error = NULL,
+       updated_at = now(), updated_by = $system, version = version + 1
+ WHERE id = ANY($published_ids) AND published_at IS NULL;
+UPDATE public.outbox_events SET attempts = attempts + 1, last_error = $error_class,
+       updated_at = now(), updated_by = $system, version = version + 1
+ WHERE id = ANY($failed_ids) AND published_at IS NULL;
 COMMIT;
 ```
 
+**Order (ADR-0004 amendment 2 items 13 to 15).** Events of one aggregate are enqueued in the order in which their transactions changed it, under four conditions:
+
+| Condition | Held by |
+|---|---|
+| `created_at` is the insert time, not the transaction start | the writer statement above |
+| The transaction holds the row lock of the aggregate when it publishes: it publishes after its write of the aggregate row, or after `SELECT … FOR UPDATE` on it | the caller. This is a convention the writer cannot check (risks.md R-ARCH-37) |
+| One relay tick at a time | the advisory lock of the tick |
+| An unpublished row is locked only by a transaction that holds the relay lock, or by the consumer of that row's own event, whose job the queue has already accepted (*restated 2026-11-20, ADR-0004 amendment 3 item 21, QG-043-C3, D-ARCH-190; this row said that the `token_enc` overwrite carries `published_at IS NOT NULL`*) | the purge below carries `published_at IS NOT NULL`; the 24 h `token_enc` housekeeping and an outbox replay (RB-06) take the relay lock first; the `token_enc` overwrite after sending is the one consumer write: by id, without a `published_at` predicate, with a row-count check; no foreign key references `outbox_events`, because a referential check would lock the row |
+
+The order is that of the enqueue. BullMQ does not keep it through processing, so a handler reads the current state of the aggregate and never derives state from the order of events.
+
+**Advisory-lock keys.** *Corrected 2026-11-20 (QG-043-C1 (c); D-ARCH-188): the first sentence said "every advisory lock is a transaction-level one", and the table had four rows. Two session-level locks exist outside the runtime role.* Every advisory lock that the runtime role `platform_app` takes is a transaction-level one (`pg_advisory_xact_lock`, `pg_try_advisory_xact_lock`); the `TenantDb` guard refuses the session forms. The provisioning lanes take two session-level locks, each on a connection of its own that ends with the lane. The single-`bigint` keys in use:
+
+| Key | Level | Held by |
+|---|---|---|
+| `hashtext('audit:partitions')::bigint` (`-1615848645`) | transaction | `platform.ensure_audit_partitions` (§5.3) |
+| `hashtext('audit:anchors')::bigint` (`-1802342845`) | transaction | the anchor writer (§5.5) |
+| `4821950023` | transaction | the reference seed, as `platform_migrator` (`prisma/seed/framework/runner.ts`) |
+| `478216878200` | transaction | the outbox relay tick; the 24 h `token_enc` housekeeping; an outbox replay (RB-06) |
+| `7336135535684573681` (the first 8 bytes of SHA-256 of `platform:bootstrap-lane`, as a signed `bigint`) | **session** (`pg_advisory_lock`) | the bootstrap lane (`tools/db/bootstrap.ts`), on its privileged connection; it serialises concurrent runners and is released when that connection closes |
+| `72707369` | **session** | Prisma Migrate, inside its schema engine, on the migrator's connection during `migrate deploy` and `migrate dev`. It is not our code; the constant was found in the engine binaries of the locked Prisma version |
+
+A `hashtext` key lies in the `int4` range; the two values were computed on PostgreSQL 17.5. A fixed key of ours is above 2^31 and is added to this table by the change that introduces it. Prisma's key is the one fixed key inside the `int4` range. No two keys of the table are equal. A lock per row, such as the per-order lock of threat-model R-19, uses the two-key form `(int4, int4)`, which is a key space of its own.
+
 Purge (housekeeping, daily): `DELETE FROM public.outbox_events WHERE id IN (SELECT id FROM public.outbox_events WHERE published_at < now() - interval '30 days' ORDER BY published_at LIMIT 5000)` repeated until 0 rows. *Corrected 2026-11-19 (D-ARCH-167): 30 days, as ADR-0004 item 6 decides; this section and §10.5 said 7 days and no decision recorded that. The horizon is not shorter than the life of a dead-letter record (14 days, ADR-0013 amendment 3), so a redriven `outbox_event` job still finds its row.* Consumers record `processed_events (consumer, event_id)` in their own business transaction with `INSERT … ON CONFLICT DO NOTHING`; a conflict means the event was already handled (REQ-PLAT-017).
 
-**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. Rows are purged 30 days after publish *(corrected 2026-11-19, D-ARCH-167; was 7)*, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
+**Amendment (2026-11-12, SEC-P3-12; ADR-0013 amendment).** The relay reads the columns above, but the BullMQ job it enqueues carries only `{v: 2, kind: 'outbox_event', id: <outbox_events.id>, correlation_id, trace_context}`. It carries no `org_id`, no `actor_id` and no `payload`. The consumer calls `platform.job_context('outbox_event', id)` (§4.5), which reads `org_id`/`actor_id` from this SYSTEM row, the authoritative source. It then opens `withTenantTx` with them and reads the event `payload` from the row inside that transaction. The relay's `SELECT` list therefore needs only `id, correlation_id, trace_context`. *(2026-11-20, ADR-0004 amendment 2 item 8: and the aggregate's type and id, by which the relay holds back the later events of an aggregate whose enqueue failed.)* Rows are purged 30 days after publish *(corrected 2026-11-19, D-ARCH-167; was 7)*, so a job delivered later than that ends as `JOB_CONTEXT_NOT_FOUND` (non-retryable). This cannot happen in practice, because BullMQ retries finish within minutes.
 
 ### 6.2 Idempotency keys (REQ-API-009..011, DR-A20)
 
@@ -3923,9 +4020,14 @@ Protocol:
    `INSERT INTO idempotency_keys (…, status, lease_until, expires_at) VALUES (…, 'IN_PROGRESS', now() + interval '30 seconds', now() + interval '24 hours') ON CONFLICT (scope_hash) DO NOTHING RETURNING id;` *(Amended 2026-11-13, D-ARCH-091: a raw statement on this table stamps the standard columns as in §7.6 item 4 — `created_by`/`updated_by` = the context actor and `version = 1` on insert; `updated_by`, `updated_at` and `version = version + 1` on every update below — or the database guard rejects it.)*
 2. **No row returned** ⇒ `SELECT status, fingerprint, lease_until, response_* FROM idempotency_keys WHERE scope_hash = $1`:
    expired (`expires_at < now()`) ⇒ delete it and retry the claim (key is new after 24 h); different fingerprint ⇒ 422 `IDEMPOTENCY_KEY_REUSED`; `COMPLETED` ⇒ replay stored status/headers/body with `Idempotent-Replayed: true` (no business action, audit entry or outbox event); `IN_PROGRESS` with a live lease ⇒ 409 `IDEMPOTENCY_IN_PROGRESS` + `Retry-After: 1`; `IN_PROGRESS` with an expired lease (crashed worker) ⇒ take over with `UPDATE … SET lease_until = now() + 30 s, updated_by = $actor, updated_at = now(), version = version + 1 WHERE scope_hash = $1 AND lease_until < now()`.
+   *Steps 1 and 2 as built (amended 2026-11-20, QG-040-C1 (d); ADR-0014 amendments 10 and 11; D-ARCH-200):*
+   - *The statements go through the store's delegate, not raw SQL. The two times come from the application clock of the instance: `lease_until` = clock + lease and `expires_at` = clock + 24 h, where steps 1 and 2 show `now()`. Expiry and lease are compared with the same clock.*
+   - *The lease is the one the tx slot sized for the request, at least 30 s. The request renews it before `call` (when a `load` ran) and before the handler transaction (when a `load` or a `call` ran), each time in a transaction of its own. A renewal that finds the row taken over answers 409 `IDEMPOTENCY_IN_PROGRESS` and ends the request.*
+   - *The takeover is conditional on `id`, `version` and `status = 'IN_PROGRESS'`, not on `lease_until < now()` in the statement: the row was read in the same transaction, and a concurrent takeover has changed the version.*
+   - *An anonymous caller without a client address has no scope, so step 1 is not reached: an `optional` operation runs without a row and a `required` one answers 503.*
 3. **Complete inside the business transaction**: `UPDATE idempotency_keys SET status = 'COMPLETED', response_status = $s, response_headers = $h, response_body = $b, updated_by = $actor, updated_at = now(), version = version + 1, … WHERE id = $claim_id;` — atomic with the change, its audit entry and its outbox event.
-4. **5xx or 429** ⇒ `DELETE FROM idempotency_keys WHERE id = $claim_id` so the retry re-executes (EC-A30). 4xx outcomes produced inside the business transaction are recorded in a separate short transaction after rollback.
-5. **Purge**: `DELETE … WHERE expires_at < now()` in batches of 5,000 (housekeeping).
+4. **5xx or 429** ⇒ `DELETE FROM idempotency_keys WHERE id = $claim_id` so the retry re-executes (EC-A30). 4xx outcomes produced inside the business transaction are recorded in a separate short transaction after rollback. *Amended 2026-11-20 (ADR-0014 amendments 6 and 7; D-ARCH-193, D-ARCH-195):* a 4xx other than 429 is recorded whether the handler returned it or a phase threw it, in `load`, in `call` or in the handler transaction. The recorded body is the problem document as sent. The order after the rollback is the `FAILED` entry, then this completion. A refused re-authentication check (401 `REAUTH_REQUIRED`), which runs between the claim and `load`, deletes the claim like a 5xx. As built (D-TASK040-06), the takeover, the completion and the delete are conditional on `id`, `version` and `status = 'IN_PROGRESS'`, so a request whose lease was taken over can neither complete nor delete the row.
+5. **Purge**: `DELETE … WHERE expires_at < now()` in batches of 5,000 (housekeeping). *Amended 2026-11-20 (ADR-0014 amendment 8, ADR-0013 amendment 6; D-ARCH-192):* the worker schedule `idempotency-purge` runs every hour on the `housekeeping` queue (part 040-B of TASK-040). Its statement is `DELETE FROM public.idempotency_keys WHERE id IN (SELECT id FROM public.idempotency_keys WHERE expires_at < pg_catalog.now() ORDER BY expires_at LIMIT 5000)`, repeated until fewer than 5,000 rows go, each batch in its own transaction. A stored body is deleted at most one hour after it expires, plus the run time of the purge. `expires_at` comes from the application clock and the purge reads the database clock; the difference is the skew between the two. *Completed 2026-11-20 (ADR-0014 amendment 12; D-ARCH-201):* each batch runs through `idempotentProcessor` and takes its ledger claim on `job_executions` in the same transaction, keyed by the occurrence id and the batch number. The `DELETE` is the only statement of the purge on this table, and it deletes by `expires_at` alone, `IN_PROGRESS` rows included.
 
 ### 6.3 Saga tables (ADR-0014, DR-B03/B04, REQ-BOOK-020..024, REQ-PAY-018)
 
@@ -4237,6 +4339,8 @@ Repositories receive only `tx` (never the root client, ESLint rule); the API's r
 
 *Amended 2026-11-14 (ADR-0007 amendment 11 items 1–2; D-ARCH-120, D-ARCH-121; PR #42 security review PR42-SEC-01 MEDIUM and PR42-SEC-08 INFO; owner TASK-284 `admitcls`, before TASK-052 merges).* The single `anonymous` key let 15 slow unauthenticated requests per process refuse every sign-in and guest request of that process. Organisation-less transactions are therefore admitted by **class**: `auth` (routes whose `rateLimit` class is `auth` or `email-send`), `guest:<hash>` (a guest token hash in the context; one key per guest session, at most `min(2, ceiling − auth reserve)` permits each) and `public` (everything else), under one **anonymous ceiling** `DB_ANON_MAX_CONCURRENT_TX` (default = the tenant cap, validated ≤ it — the anonymous world still counts as one tenant) with **reserves** `DB_ANON_AUTH_RESERVE` (default `max(1, floor(ceiling / 2))`) and `DB_ANON_GUEST_RESERVE` (default 1 when the ceiling ≥ 4, else 0; `auth + guest ≤ ceiling − 1`): a class is admitted while `inflight(class) < ceiling − Σ other classes max(inflight, reserve)`, so each class always obtains its reserve and any class may use spare permits. The pipeline `tx` slot derives the class from the route descriptor into `TenantContext.admissionClass`; the worker has no anonymous classes. **Bounds, always enforced:** `DB_TENANT_MAX_CONCURRENT_TX ≤ max(2, floor(DB_POOL_MAX / 2))` (a cap equal to the pool turns the control off), `DB_AUDIT_LOCK_TIMEOUT_MS ≤ min(2000, DB_TX_STATEMENT_TIMEOUT_MS − 1)`, and `DB_POOL_MAX ≥ 4` when `APP_ENV` is neither `local` nor `test`; the owned runtime (`resolveAdmissionOptions`) repeats the half-pool rule against the pool size it is given. Gauge kinds: `tenant | operator | anon_auth | anon_guest | anon_public`.
 
+*Amended 2026-11-20 (TASK-043 security review PR043-SEC-07, INFO; ADR-0004 amendment 4 item 27; D-ARCH-199; owner TASK-047, which builds the worker's runner).* "The worker has no anonymous classes" left out the worker's own organisation-less work: the relay tick, the purge batches and the `queue-retention` sweep run as the SYSTEM actor without an organisation, and today they take the `anonymous` key. Guest jobs will take it too once TASK-047 resolves their context. In the worker an organisation-less transaction therefore has one of two keys: **`system`** when its actor is the reserved SYSTEM actor, and `anonymous` otherwise. Each has the ordinary per-key cap. Guest work can then not delay the relay, and the relay cannot delay guest work. The gauge kinds gain `system`. The API is unchanged: it runs no SYSTEM transaction without an organisation.
+
 ---
 
 ## 8. Migration strategy, backup/restore rehearsal and zero-downtime probe
@@ -4530,12 +4634,12 @@ This amendment follows the ADR-0018 amendment 1 key register. That register's co
 | `audit_entries.ip_hash` | HMAC-SHA256 · `AUDIT_INDEX_KEY` | `ip_hash_key_id` | — (IP filter queries both ids for 90 d, per the register) |
 | `tracking_index.customer_ref_postcode_hmac` | HMAC-SHA256 · `TRACKING_INDEX_KEY` | `customer_ref_postcode_hmac_key_id` | — |
 | `outbox_events.payload.token_enc` | AES-256-GCM · `OUTBOX_PAYLOAD_KEY` | JSON sibling `payload.token_enc_key_id` | `outbox_events.id` (column name `payload.token_enc`) |
-| `idempotency_keys.response_body` | AES-256-GCM · `IDEMPOTENCY_BODY_KEY` | `response_body_key_id` | `idempotency_keys.scope_hash` (hex) |
+| `idempotency_keys.response_body` | AES-256-GCM · `IDEMPOTENCY_BODY_KEY` (*2026-11-20, ADR-0018 amendment 9: a key derived from that material by HKDF-SHA256 with the label `platform-idempotency-body-v1`; from part 040-B the plaintext is the envelope of status, headers and body*) | `response_body_key_id` | `idempotency_keys.scope_hash` (hex) |
 | `shipment_party_identifiers.value_ciphertext` | AES-256-GCM · shipment-identifier key (**register entry to add**; KMS envelope at M5) | `value_ciphertext_key_id` (renamed from `key_id`) | `shipment_party_identifiers.id` |
 | `carrier_accounts.credentials_ciphertext` (M3 seam) | AES-256-GCM · per-tenant KMS data key (ADR-0011) | `credentials_ciphertext_key_id` | `carrier_accounts.id` |
 | `user_credentials` | bcrypt pre-hash pepper `PASSWORD_PEPPER` | `pepper_key_id` **reserved**: added by the SEC-P3-16 backlog item, not now | — |
 
-Not in the table: token hashes (`token_hash`, `share_token_hash`, `guest_token_hash`, `scope_hash`, `fingerprint`, `dedupe_key`). They are unkeyed SHA-256 values of 256-bit random tokens or of content; no key is involved, so they carry no `key_id`. Verification: SEC-TC-49 (a vault ciphertext swapped between two rows fails authentication; a read with the retired key works while new writes use the current key; the catalog check C10 is extended to assert that each column in the table above has its sibling).
+Not in the table: token hashes (`token_hash`, `share_token_hash`, `guest_token_hash`, `scope_hash`, `fingerprint`, `dedupe_key`). They are unkeyed SHA-256 values of 256-bit random tokens or of content; no key is involved, so they carry no `key_id`. *Amended 2026-11-20 (D-SECPR040-01 §3.1 item 6; ADR-0014 amendments 5 and 15; D-ARCH-204):* `idempotency_keys.scope_hash` is an unkeyed SHA-256 too, but one of its inputs can be keyed. For an organisation, an actor or a guest owner the inputs are identifiers that the row stores anyway, or values that are already hashes. For an anonymous caller the owner input is an HMAC-SHA-256 of the client network under a key derived from the `IDEMPOTENCY_BODY_KEY` material (label `platform-idempotency-scope-network-v1`). It has no `key_id` sibling: after a rotation an old row no longer matches and expires within 24 h. Verification: SEC-TC-49 (a vault ciphertext swapped between two rows fails authentication; a read with the retired key works while new writes use the current key; the catalog check C10 is extended to assert that each column in the table above has its sibling).
 
 ### 10.5 Retention (recorded, not enforced in this run)
 
@@ -4545,8 +4649,8 @@ Retention periods are data in the compliance packs (`RETENTION` section, NFR-PRI
 |---|---|---|
 | Verification/reset tokens, MFA challenges, re-auth proofs | delete 7 days after expiry | same |
 | Refresh tokens | delete 7 days after expiry/revocation | same |
-| Idempotency keys | delete after 24 h | same |
-| Outbox events / processed events | delete 30 / 30 days after publish/processing (*corrected 2026-11-19, D-ARCH-167: the outbox figure was 7, against ADR-0004 item 6*) | same |
+| Idempotency keys | replayable for 24 h; deleted by the hourly `idempotency-purge`, at most one hour after expiry (*2026-11-20, ADR-0014 amendment 8, D-ARCH-192; was "delete after 24 h"*); no row exists before part 040-B of TASK-040 wires the store | same |
+| Outbox events / processed events | delete 30 / 30 days after publish/processing (*corrected 2026-11-19, D-ARCH-167: the outbox figure was 7, against ADR-0004 item 6*; *amended 2026-11-20, PR043-SEC-06, D-ARCH-198: processed events and job executions are kept 45 days once the purge is behind definer functions; an outbox replay covers only events created less than 14 days ago*) | same |
 | Job executions (idempotency ledger; added 2026-11-20, D-ARCH-171) | delete 30 days after completion, by the housekeeping purge of TASK-043; no row exists before TASK-047 binds the accessor | same |
 | BullMQ jobs in Valkey (not PostgreSQL; added 2026-11-19, ADR-0013 amendment 3, D-ARCH-159) | per queue: completed jobs 24 h / newest 10,000; failed jobs 7 days / newest 1,000; dead-letter records 14 days / newest 2,000 (BullMQ, the consumer and the hourly `queue-retention` sweep of TASK-039) | same |
 | Login attempt counters | delete 30 days after last failure | same |
@@ -4614,7 +4718,7 @@ This section records the architect's decisions on the open items raised in §10.
 | OI-02 — owner of the SECURITY DEFINER functions | **Ratified with one change:** the §4.5 functions are owned by a dedicated `NOLOGIN` role **`platform_definer`** (no table ownership, no DDL), which holds only the narrow policies drafted in §4.4 as `TO platform_migrator` (SELECT on the tables the functions read; DELETE with the expiry predicate on token tables). `platform_migrator` keeps no runtime policies. | A definer function runs with its owner's privileges; a defect in one must not run as the schema owner. ADR-0005 amendment 6 records this. Grant: `platform_app` EXECUTE on the functions only. |
 | OI-05 — `entry_hash` uniqueness | **Ratified:** `UNIQUE (entry_hash, occurred_at)` per partition plus `stream_seq bigint` (dense per stream); the verifier checks global uniqueness and gap-free `stream_seq`. | PostgreSQL cannot enforce a global unique on a partitioned table without the partition key; the chain itself is the global guarantee (ADR-0007 amendment 6). |
 | OI-07 — checkpoint size | **Ratified:** the nightly `CHAIN_CHECKPOINT` value holds the SHA-256 digest of the ordered `(stream_id, head_hash, stream_seq)` list plus the count; the full list lives in `audit_checkpoint_heads(checkpoint_entry_id, stream_id, head_hash, stream_seq)`; the external anchor signs the digest. | Keeps the entry small above 10 000 streams without losing verifiability. |
-| OI-08 — `audit_entries` exempt from standard columns | **Ratified:** append-only tables (`audit_entries*`, `audit_pii_vault`, `audit_checkpoint_heads`, `outbox_events`, `processed_events`) are exempt from `updated_at/updated_by/version`; `id`, `created_at`-equivalents remain. | A row that can never be updated has no version. product-manager to add the exemption to NFR-DATA-003 (D-ARCH-006 list). |
+| OI-08 — `audit_entries` exempt from standard columns | **Ratified:** append-only tables (`audit_entries*`, `audit_pii_vault`, `audit_checkpoint_heads`, `outbox_events`, `processed_events`) are exempt from `updated_at/updated_by/version`; `id`, `created_at`-equivalents remain. *Corrected 2026-11-20 (D-ARCH-186): `outbox_events` and `processed_events` carry the full standard columns, as §3.5 lists them and as `job_executions` does. A table that the runtime role writes is under the standard-columns guard (§7.6, C15). The exemption stands for the audit tables.* | A row that can never be updated has no version. product-manager to add the exemption to NFR-DATA-003 (D-ARCH-006 list). |
 | OI-15 — vault deletions by `platform_erasure` | **Ratified:** a separate `platform_erasure` role (used only by the M4/M5 erasure job task) holds DELETE on `audit_pii_vault` and on erasure-scoped document rows; `platform_app` never holds DELETE there. | Least privilege; ADR-0007 §erasure updated by reference. |
 | Token purges via `purge_expired_tokens()` | **Ratified** (owned by `platform_definer`, scheduled by `housekeeping`). | Token tables are USER_OWNED; the API never needs a DELETE grant on them. |
 | OI-19 — `quote_claim_state(id, guest_token_hash)` | **Ratified**, including the retained `claimed_from_token_hash` column. | Prevents probing claim state of arbitrary quote IDs (threat-model T-79 family). |
@@ -4638,7 +4742,7 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A3 | SEC-P3-03 | Statement-text event trigger withdrawn; **`platform.audit_ddl_guard()`** on `ddl_command_end` (`pg_event_trigger_ddl_commands()`) and `sql_drop` (`pg_event_trigger_dropped_objects()`) matches by object identity, raises `audit objects are immutable (SEC-P3-03)` unless `current_user = 'platform_audit_owner'`; must not be `SECURITY DEFINER`. Row and statement triggers kept; `audit_anchors` and `audit_checkpoint_heads` TRUNCATE triggers added | §5.2, §4.6 C14 |
 | A4 | SEC-P3-03 | §5.5 becomes **"Hourly checkpoint and signed anchor"**: hourly `CHAIN_CHECKPOINT`, delta `audit_checkpoint_heads` (+ `head_occurred_at`), new table **`audit_anchors`** (dense `anchor_seq`, `prev_anchor_hash` chain, `anchor_hash`, algorithm `ECDSA_P256_SHA256`, `key_id`, DER `signature`) written in the same transaction; signing key `AUDIT_ANCHOR_SIGNING_KEY_REF` (worker only), verification keys `AUDIT_ANCHOR_PUBLIC_KEYS`; `AUDIT_CHECKPOINT_KEY` (HMAC) dropped; mandatory sink `AUDIT_ANCHOR_SINK` | §1.6, §1.7, §2.3, §3.4, §4.4, §5.5, §10.1 |
 | A5 | SEC-P3-03 | Verifier: every hourly run checks anchor-log integrity (`ANCHOR_MISSING`, security event `audit_anchor_missing`), signatures (`CHECKPOINT_SIGNATURE_INVALID`) and the anchored heads of the latest anchor (`CHECKPOINT_HEAD_MISMATCH`, `audit_chain_broken`); nightly checks all anchors since the previous nightly run; the "only if configured" wording is removed; new `failure_kind` values and `anchor_seq_from/_to` | §1.7, §3.4, §5.6 |
-| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
+| A6 | SEC-P3-12 | New allow-listed definer function **`platform.job_context(p_kind, p_id) → (org_id, actor_type, actor_id)`** (*a fourth column, `org_deleted`, from 2026-11-20: A34*) (owner `platform_definer`, STABLE; kinds `outbox_event`, `saga`, `shipment`, `order`, `pickup`, `document`, `payment`, `tracking_poll`, `notification`, `quote`; unknown kind raises; no row = non-retryable); payload v2 carries IDs only; sensitive-definer list added | §1.7, §4.1, §4.3, §4.5, §4.6 C11, §6.1, §6.3, §3.5 `outbox_events` |
 | A7 | SEC-P3-01 C1/C2, SEC-P3-11 | `sessions.authenticated_at` (the `auth_time` source, never changed by refresh); web absolute cap 30 days (admin 12 h) with a DB backstop CHECK; `refresh_tokens.expires_at = LEAST(now() + 30 min (admin) / 30 d (web), absolute)` | §3.1 `sessions`, `refresh_tokens` |
 | A8 | SEC-P3-14 (also §9.3 staff seed row) | `users.status_reason` (CHECK incl. `MFA_ENROLMENT_OVERDUE`) and `users.first_signed_in_at`; housekeeping suspends OPERATOR members without active TOTP 24 h after first sign-in via the new candidate function `mfa_enrolment_overdue_candidates`; new table **`mfa_enrolment_codes`** (chosen over a purpose value on an existing token table; reasons in §3.1); `password_reset_tokens.purpose` (`RESET`, `SET_PASSWORD` 24 h); seeded staff outside local have no `user_credentials` row | §1.5, §1.7, §2.1, §3.1, §4.3, §4.5 |
 | A9 | SEC-P3-08 item 1 | `<col>_key_id` sibling for every ciphertext and HMAC lookup column (renames `key_id` → `secret_ciphertext_key_id`, `ciphertext_key_id`, `value_ciphertext_key_id`; adds `code_hmac_key_id`, `ip_prefix_hmac_key_id`, `identifier_hmac_key_id`, `value_hmac_key_id`, `ip_hash_key_id`, `customer_ref_postcode_hmac_key_id`, `response_body_key_id`, `payload.token_enc_key_id`, M3 `credentials_ciphertext_key_id`; `pepper_key_id` reserved for SEC-P3-16); AES-256-GCM 96-bit nonce, 128-bit tag, AAD = JCS([table, column, row id or token, key_id]); `idempotency_keys.response_body` becomes ciphertext; `mfa_recovery_codes` aligned to ADR-0006 HMAC | §3.1, §3.4, §3.5, §3.8, §3.11, §3.16, §5.1, §5.4, §5.6, §5.7, §6.2, §10.4 |
@@ -4665,6 +4769,12 @@ Source: `docs/05-quality/security/P3-architecture-security-review.md`; ADR-0005 
 | A31 | PR #65 / TASK-037 code review round 1 (R1-m1 (b), R1-n1, security flag S1; `rulings/wave-1-pr65-r1-rulings.md`; ADR-0005 amendment 13; D-ARCH-154..157) | **§4.7 (new), §1.1 P12, §4.6 C16:** a reference between two organisation-keyed tables is a composite foreign key through `org_id` (rule T1; T2 where `org_id` is nullable); first instances `membership_roles → memberships` and `memberships → invitations`, each with `ux_<parent>__org_id_id`; new assertion triggers on RLS tables are `AFTER ROW`. **§3.2 `memberships`, §1.7, §4.3:** `trg_memberships__lifecycle_guard` (member = actor and `ACTIVE` at insert; `user_id` and `org_id` immutable; `REMOVED` terminal); "`created_by` = the inviter" at acceptance withdrawn (D-ARCH-157). **§3.2 `invitations`:** rows only in `BUSINESS_CUSTOMER` organisations. **§9.1, §9.3:** a seed transaction that inserts a user or a membership runs with that user as actor. Open: guest-side binding of GUEST_CAPABLE rows (risks.md R-ARCH-34). |
 | A32 | The two dispatch gates of D-SD-002 (R-ARCH-34 and PR293-SEC-03 before TASK-051; PR65-SEC-02 (b) before TASK-089), PR65-SEC-04 (a) and (b), the outbox horizon (`rulings/wave-1-r-arch-34-operator-rulings.md`; ADR-0005 amendment 14; D-ARCH-162..167) | **§4.7, §3.10, §4.3, §1.1 P12:** on a GUEST_CAPABLE table a reference is a pair of composite keys, one per owner column, with no single-column key (T2-G; T2-O for `quotes.requote_of_quote_id`); the claim is one statement; every unique key of a TENANT or GUEST_CAPABLE table holds an owner column, and a uniqueness rule is one index per owner column; a refused reference has one answer. **§4.6 C16:** arm (a) knows guest-bound keys, arm (b) and P9-CK are written down, (b) covers GUEST_CAPABLE tables and exclusion constraints (TASK-051). **§3.2, §1.5, §4.4, §9.1, §9.3:** new GLOBAL table `operator_staff_grants`, written by the provisioning lane as the migrator; lifecycle-guard rule 5 (an operator membership needs a grant) and rule 6 (`INVITED` not reachable by UPDATE), both in a later migration that replaces the function; the PARTNER backstop is deferred to M3; no users transition guard. **§3.5, §6.1, §10.1, §10.5:** the outbox purge horizon is 30 days, as ADR-0004 decides (the 7 days here were never decided). |
 | A33 | TASK-039 code review R1-m1, R1-m7 and R1-n8 (D-TASK039-03); the §8.3 wording routed by D-ORCH-139 (D-ARCH-171, D-ARCH-172) | **§3.5 (new entry), §1.5, §4.4, §10.1, §10.5:** `job_executions`, the idempotency ledger of job effects: SYSTEM, insert-only, unique on `(queue, job_key)`, purged 30 days after completion by the housekeeping job of TASK-043. **§8.3:** rule 10 call sites with their stated limits, the lone carriage return (rule L) and lexer parity are written down as TASK-293 shipped them; rule 14 is to refuse `CREATE CAST` and `CREATE AGGREGATE` (TASK-034). |
+| A34 | TASK-047 dispatch gate (D-SD-003 item 6, D-SD-004 item 8, D-PM-072; ADR-0013 amendment 4; D-ARCH-180) | **§4.5 `job_context`:** the function resolves ownership, not liveness. It filters `deleted_at` on neither the row nor its organisation and returns a fourth column `org_deleted` (true for a soft-deleted or missing organisation, NULL without an organisation). A job of a soft-deleted organisation runs in that organisation's own tenant scope; no refusal reason is added and no job runs in a wider scope. The body selects into variables and ends in one query (run on PGlite with stub tables). Candidate functions that settle, cancel, expire or backfill do not filter on the organisation's `deleted_at`. |
+| A35 | TASK-043 code review round 1 (M1, m4, m7; D-TASK043-04, -06 and -07; ADR-0004 amendment 2; ADR-0013 amendment 5; D-ARCH-183..187) | **§3.5, §6.1 `outbox_events`:** the sentence that said per-aggregate order "holds" is corrected. Order holds when `created_at` is the insert time (`clock_timestamp()`, set by the writer), the publishing transaction holds the row lock of the aggregate, one relay tick runs at a time under a transaction-level advisory lock, and only a holder of that lock writes an unpublished row. §6.1 shows the writer statement and the tick as built and lists the advisory-lock keys. The row checks on `aggregate_type`, `correlation_id` (the ADR-0016 §15 grammar) and `attempts`, and `ix_outbox_events__aggregate`, are written down. **§3.5, §4.4 `processed_events`:** `SELECT, INSERT, DELETE` and no `UPDATE`; `job_executions` gains `DELETE` with the TASK-043 migration. **OI-08:** both outbox tables carry the full standard columns. |
+| A36 | Conditions of the verification D-QG-002 (QG-043-C1 (c), QG-043-C3; ADR-0004 amendment 3; D-ARCH-188, D-ARCH-190) | **§6.1 advisory-lock keys:** the sentence "every advisory lock is a transaction-level one" is narrowed to the runtime role, and the table gains the two session-level locks of the provisioning lanes (the bootstrap lane and Prisma Migrate) and the computed key values. **§6.1 order, fourth condition (and its copy in §3.5):** an unpublished row is locked only by a holder of the relay lock or by the consumer of the row's own event. The `token_enc` overwrite after sending therefore carries no `published_at` predicate; it is by id, with a row-count check. An outbox replay takes the relay lock. No foreign key references `outbox_events`. |
+| A37 | TASK-040 code review round 1 (M2, m2, m7, n5; D-TASK040-03, -05, -06, -09, -10; ADR-0014 amendments 5 to 8; ADR-0013 amendment 6; D-ARCH-192..195) | **§3.5, §6.2 `idempotency_keys`:** `scope_hash` is the only scope column and its input is written as built. A 4xx other than 429 is stored whether returned or thrown, as the problem document that was sent; `Content-Type` joins the stored headers. A refused re-authentication check deletes the claim. The four checks the migration added are listed. **§6.2 step 5, §4.4, §10.5:** expired rows are deleted every hour by the worker schedule `idempotency-purge`, at most one hour after expiry; the API store also deletes (a released claim, an expired key before its next claim). | §3.5, §4.4, §6.2, §10.5 |
+| A38 | TASK-043 security review round 1 (PR043-SEC-04 to PR043-SEC-07; D-SECPR043-01; ADR-0004 amendment 4; D-ARCH-196..199) | **§3.5, §4.4, §6.1 `outbox_events`:** `UPDATE` is column-level (the six columns of the relay's marks; `payload` joins with TASK-078); `ck_outbox_events__actor` binds `actor_id` to `created_by`; from TASK-047 the database derives `org_id` (`DEFAULT platform.app_org_id()`, no `INSERT` privilege on the column). **§3.5, §4.4, §10.5 ledgers:** `processed_events` and `job_executions` keep a row 45 days and the purge moves behind three definer functions, in a late task before G3; until then the `DELETE` grants stand (risks.md R-ARCH-38). **§7.7:** in the worker an organisation-less SYSTEM transaction takes the admission key `system`, not `anonymous`. |
+| A39 | Verification D-QG-003 (QG-040-C1), TASK-040 code review rounds 2 and 3, security record D-SECPR040-01 (PR040-SEC-01 to -06); ADR-0014 amendments 10 to 15; ADR-0018 amendment 9; D-ARCH-200, D-ARCH-201, D-ARCH-204 | **§3.5, §6.2 `idempotency_keys`:** the heading names expired rows and released claims; the lease is at least 30 s, sized and renewed; the lease and the expiry use the application clock and every write is conditional on the version; an anonymous caller without a client address has no row; from part 040-B the status, the headers and the body are one sealed envelope and a completed row always has a body; a stored body may hold the client secret of a gateway intent; each purge batch takes the ledger claim. **§10.4:** the body key and the client-network HMAC key are derived from one material; `scope_hash` is unkeyed with one keyed input. | §3.5, §6.2, §10.4 |
 | A15 | SEC-P3-33 items 1 and 10 | **Item 1.** The ECDSA P-256 rationale is rewritten: KMS has supported Ed25519 since 2025-11-07, so the reason is not availability but FIPS 186-5 approval and support in every target verifier; malleability is harmless under byte-for-byte sink comparison; the `algorithm` CHECK is extensible (ADR-0007 amendment 8, D-ARCH-029). **Item 10.** C13 distinguishes the environments for `platform_audit_owner` and `platform_schema_owner`: no `pg_auth_members` row locally; on RDS exactly one row for the master with `admin_option = true`, `set_option = false`, `inherit_option = false`, treated as break-glass (platform.md §4.3). SPK-08 verifies RDS parity | §4.4, §4.6 C13, §5.5 |
 
 Open points raised by these amendments, all non-blocking. Each is owned by principal-architect unless stated otherwise:

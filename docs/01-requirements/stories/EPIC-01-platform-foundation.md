@@ -368,7 +368,7 @@ Feature: Named queues with retries and dead-letter queue
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-009
 - **Linked REQs:** REQ-PLAT-014, REQ-PLAT-015
 - **As an** operator **I want** duplicate job deliveries to have no second effect and scheduled jobs to fire once per interval across workers **so that** retries and scale-out are safe.
-- **Notes:** Payload always carries `org_id`, `actor_id`, `correlation_id`, idempotency key. Scheduled jobs needed by audit chain verification (REQ-AUDIT-013), partition pre-creation (REQ-AUDIT-017) and outbox relay fallback.
+- **Notes:** Every payload is payload v2 (ADR-0013 amendment 1): identifiers only, `{ v: 2, kind, id, correlation_id, trace_context }`, where `kind` and `id` name the authoritative row. A payload never carries `org_id`, `actor_id` or business data; the worker resolves the tenant context from PostgreSQL (`platform.job_context(kind, id)`, REQ-RLS-008, US-078). There is no separate idempotency-key field: the idempotency key of a job is its deterministic job ID, `<kind>.<id>` or `<kind>.<id>.<step>`, with completion recorded in `job_executions`. An enqueue with the ID of a retained job is ignored (completed jobs are retained 24 h, failed jobs 7 days), so a recurring key carries its occurrence as `<step>` (ADR-0013 amendment 3 items 7, 8 and 11). Scenario 3 is the producer's refusal before anything is written to the queue (not the HTTP `VALIDATION_ERROR` response); a missing `correlation_id` is the example, and a `kind` its queue does not accept or a malformed `id` is refused the same way. Scenario 4 is the refusal at dequeue, non-retryable with reason `PAYLOAD_INVALID`, of a job from which the worker can take no tenant context: it does not name its row, or it brings an `org_id` or `actor_id` of its own, which also raises the security event `job_context_mismatch` (REQ-SEC-012). Identifiers that resolve to no row or to no organisation are covered by US-078 (EC-A38). In scenario 7, "a job for org A" is a job whose `kind` and `id` name a row of org A. Scheduled jobs are needed by audit chain verification (REQ-AUDIT-013) and partition pre-creation (REQ-AUDIT-017). The outbox relay is not one of them: it is a loop in every worker, watched by two gauges and their alarms (ADR-0004 amendment 2 items 8 to 11, D-ARCH-183); the earlier words "and outbox relay fallback" are withdrawn (D-PM-079). Wording amended by D-PM-072 (2026-11-19) after PR #64 security review PR64-SEC-10: these notes and the Given-steps of scenarios 3 and 4 previously described payload v1 (`org_id`, `actor_id` and an idempotency key in the payload), which was never implemented.
 
 #### Acceptance criteria
 ```gherkin
@@ -384,12 +384,12 @@ Feature: Idempotent job processing and scheduled jobs
     Then the queue holds one job
 
   Scenario: Payload without required context is rejected
-    Given a job payload missing org_id
+    Given a job payload missing correlation_id
     When it is enqueued
     Then enqueue fails with a validation error and nothing is queued
 
   Scenario: Job without tenant context is dead-lettered at the worker
-    Given a delivered job whose payload lacks actor_id
+    Given a delivered job whose payload lacks kind or id, or carries org_id or actor_id
     Then it is moved to the dead-letter queue without retries
 
   Scenario: Scheduled job fires once with three workers
@@ -410,8 +410,8 @@ Feature: Idempotent job processing and scheduled jobs
 ### US-011 — Transactional outbox and at-least-once relay
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-009, EPIC-03
 - **Linked REQs:** REQ-PLAT-016, REQ-PLAT-017
-- **As a** developer **I want** domain events written atomically with state changes and relayed at least once in order **so that** consumers never miss or invent events.
-- **Notes:** Event row: UUIDv7 event ID, type, aggregate type/ID, org_id, payload, correlation ID, created_at, published_at. Relay latency recorded as a metric.
+- **As a** developer **I want** domain events written atomically with state changes and published to the event queue at least once, in creation order per aggregate, **so that** consumers never miss or invent events.
+- **Notes:** Event row: UUIDv7 event ID, type, aggregate type/ID, org_id, payload, correlation ID, created_at, published_at. There is one event queue, `outbox-relay`; its consumer dispatches each event by type to the handlers registered for it (ADR-0004 amendment 2 item 12, D-ARCH-184). Order (D-PM-079; ADR-0004 amendment 2 items 14 and 15): the guarantee is about the publish step and ends at the enqueue. Events of one aggregate are enqueued in the order of their insert times, which is the order of the business changes when the publisher holds the row lock of the aggregate; handlers may run at the same time or in reverse, so a handler is idempotent, reads the current state of the aggregate and never derives state from the order of events. The I-want line read "relayed at least once in order" until REQUIREMENTS.md 1.15. Relay latency is recorded as a metric, measured from the event's insert to the accepted enqueue, an upper bound of commit-to-enqueue latency; the step of the last scenario (AT-US-011-06) says so and read "commit-to-enqueue latency" before. A duplicate is discarded at two places: the deterministic job ID absorbs a second enqueue while the first job is retained, and the consumer claims (consumer, event ID) in `processed_events` in the transaction of its effect. Delivery split (D-PM-079; QG-043-C7 (c) of D-QG-002): TASK-043 does not complete this story alone. It proves AT-US-011-01, -02, -03, -05 and -06 and the relay half of AT-US-011-04 (a crash after the enqueue and before the mark: the event is enqueued again and no second job results). The consumer half of AT-US-011-04, "the consumer processes E1 once because it discards the duplicate by event ID", needs the consumer of the queue and is proven by the task that builds the dispatcher (TASK-047, as D-ARCH-184 proposes), which completes the story. Both tasks are Wave 1, so the story is complete at `v0.1.0-m0`. Priority, milestone, DC tag, scenario titles and count (6) are unchanged.
 
 #### Acceptance criteria
 Permission path: not applicable — internal pipeline with no principal; a second negative scenario is included.
@@ -443,7 +443,7 @@ Feature: Transactional outbox and at-least-once relay
     Then events remain unpublished and are retried, and none is lost
 
   Scenario: Relay latency metric
-    Then commit-to-enqueue latency is recorded as a metric
+    Then the latency from the event's insert to its accepted enqueue is recorded as a metric (an upper bound of commit-to-enqueue latency)
 ```
 
 ### US-012 — Liveness and readiness endpoints

@@ -6,7 +6,7 @@ Tasks: **24** (S 5 / M 19; opus 6 / sonnet 18; demo-critical 14) in **7** batche
 
 **Exit check:** Guest quote streams from 4 carriers (Mock + 3 fixture adapters) sorted with badges in the browser; contract suite green x4; lane B `wave` evidence; lane C `wave-end` if within the monthly cap (tier 2).
 
-**Stories completed in this wave (24):** US-054 (DC), US-056 (DC), US-057, US-058, US-059, US-109 (DC), US-119 (DC), US-127 (DC), US-128 (DC), US-129, US-130, US-131 (DC), US-132 (DC), US-133 (DC), US-134, US-135 (DC), US-142, US-147, US-148, US-149, US-158 (DC), US-159 (DC), US-160 (DC), US-161 (DC).
+**Stories completed in this wave (25):** US-040, US-054 (DC), US-056 (DC), US-057, US-058, US-059, US-109 (DC), US-119 (DC), US-127 (DC), US-128 (DC), US-129, US-130, US-131 (DC), US-132 (DC), US-133 (DC), US-134, US-135 (DC), US-142, US-147, US-148, US-149, US-158 (DC), US-159 (DC), US-160 (DC), US-161 (DC).
 
 ## Batches
 
@@ -340,7 +340,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-130 (M1 Must) Resilience: timeouts, retries, circuit breaker and bulkhead |
 | REQs | REQ-CARR-017 |
 | NFRs | NFR-RES-001, NFR-RES-002, NFR-RES-003, NFR-RES-007 |
-| Spikes / security / decisions | SEC-P3-02, SEC-COND-02, D-048, PR6-SEC-04, PR6-SEC-05, PR6-SEC-11, SEC-TC-67, D-ARCH-068, PR075-SEC-04, D-SECPR075-01, D-SD-003 |
+| Spikes / security / decisions | SEC-P3-02, SEC-COND-02, D-048, PR6-SEC-04, PR6-SEC-05, PR6-SEC-11, SEC-TC-67, D-ARCH-068, PR075-SEC-04, D-SECPR075-01, D-SD-003, PR039-SEC-03, PR079-SEC-04, D-SECPR079-01 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-075, TASK-113 |
@@ -361,6 +361,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - SEC-TC-67 (fast-check property): arbitrary strings incl. `..`, `../..`, `%2e%2e`, `/`, `,`, `&`, `?`, `#`, CR/LF and Unicode used as tracking number, dispatch number, city or postcode are either rejected with CarrierInputError and zero nock requests, or yield a URL whose origin and prefix equal the base with exactly the expected segment count and exactly one accountNumber parameter; a batch input containing `,` is rejected; a response containing an unrequested number is not returned
 - PR6-SEC-05 / PR6-SEC-11 (ADR-0010 am. 11 item 5, with TASK-131): the gateway consults the token negative cache and the carrier cool-down BEFORE any token or API request and fails fast (AUTH_FAILED for a negative-cached account, CARRIER_UNAVAILABLE for a cooled-down carrier), both counting toward the account breaker; a token-endpoint 403 under `account-negative-cache` opens only that account breaker
 - PR075-SEC-04 (b) (LOW, CWE-532; D-SECPR075-01): a failure that is not a CarrierError is converted to a CarrierError with a safe cause ({ name, code? } only), so no raw carrier text reaches the logs; a CarrierContractError is local and non-ambiguous ONLY when it is thrown before the adapter is reached (ruling 2), and nothing thrown after a successful createShipment carries that class, so a retry never books a second label
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
+- PR079-SEC-04 (INFO; D-SECPR079-01): a logger that throws in the finally of the call wrapper must not replace the outcome of the call (a booked shipment must not become EXCEPTION); the log failure is swallowed and counted; test: with a throwing logger the operation returns its result or its CarrierError unchanged
 - AT-US-130-01 … AT-US-130-12: all 12 scenarios of US-130, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -430,7 +432,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-131 **DC** (M1 Must) DHL Express (MyDHL) adapter |
 | REQs | REQ-CARR-012 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-03, PR6-SEC-04, PR6-SEC-06, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-03, PR6-SEC-04, PR6-SEC-06, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084, PR075-SEC-14, D-SECPR075-03, D-SD-004, PR079-SEC-04, D-SECPR079-01 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-128, TASK-132, TASK-009 |
@@ -450,6 +452,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README "Sensitive fields" table (path, class PER|SPER|SECRET|ACCOUNT_ID, handling) include `contactInformation.*` incl. `mobilePhone`, `postalAddress.addressLine1..3`, `registrationNumbers[]`, `shipmentNotification[].receiverId` (an e-mail address), `customerReferences[].value` (free text), `requestorName`, the Basic `Authorization` header and the account number; the redactor removes the whole `contactInformation`, address-line and `shipmentNotification` containers; DHL and FedEx paths are marked unverified until a person diffs the spec; AC-45 sentinels cover every table path incl. an IN_PAN sentinel and the Basic auth header
 - PR6-SEC-03/04/06 (ADR-0010 am. 11 items 6 and 8): every URL is built with `carrierPath`/`carrierUrl` from the static EGRESS base (no per-account free-form base URL); `requestorName` is a fixed non-personal value from BRAND_* and `reason` a fixed enum (fixture pickup-cancel-requestorname-not-personal); `trackingView = all-checkpoints` (never -with-remarks), no proof-of-delivery call, `epod-detail-esig` off; `trackingUrl`/`cancelPickupUrl` never dereferenced (negative fixture shipment-carrier-urls-not-followed with 169.254.169.254); the sandbox-never-emits-production unit test covers `/mydhlapi/test/` vs `/mydhlapi/`
 - PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides the DHL account-number keys as PII parts; a logging test proves a sentinel under each listed path never reaches a general log line
+- LABEL FIXTURES (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): the adapter returns raw { format, content } and never builds a LabelDocument itself; every real PDF and ZPL label fixture of this adapter passes createLabelDocument and the sniffers (a blank or BOM lead byte and a %PDF- marker past offset 0 included in the fixture review)
+- MERGE PREREQUISITE (PR075-SEC-02 (c); D-SECPR075-01 ruling 3; D-SD-004): packages/carriers/src/egress.ts and packages/carriers/src/adapters/*/egress.ts are security-owned (CODEOWNERS, TASK-015 part 015-C or a CODEOWNERS-only PR with a security record) before this task merges
+- MERGE PREREQUISITE PR079-SEC-01 (D-SECPR079-01): the transitive wire-boundary walk of TASK-097 is on main before the first adapters/dhl-express/wire* module merges
+- PR079-SEC-04 (INFO; D-SECPR079-01): a logger that throws in the finally of the call wrapper must not replace the outcome of the call (a booked shipment must not become EXCEPTION); the log failure is swallowed and counted; test: with a throwing logger the operation returns its result or its CarrierError unchanged
 - AT-US-131-01 … AT-US-131-09: all 9 scenarios of US-131, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -545,7 +551,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-132 **DC** (M1 Must) FedEx REST adapter |
 | REQs | REQ-CARR-013 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-04, PR6-SEC-05, PR6-SEC-07, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, PR6-SEC-02, PR6-SEC-04, PR6-SEC-05, PR6-SEC-07, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084, PR075-SEC-14, D-SECPR075-03, D-SD-004, PR079-SEC-04, D-SECPR079-01 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-131, TASK-132, TASK-009 |
@@ -564,6 +570,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README table include `contact.*` incl. `personName`, `phoneExtension`, `faxNumber`, notification `emailAddress`, `address.streetLines[]`, `shipper.tins[]`, `accountNumber.value`, and the token form fields `client_secret`, `child_key`, `child_secret`, `child_id` (shapes marked unverified until a person diffs the spec); the redactor removes the whole `contact` container; no SPOD documents are requested; AC-45 sentinels include `client_secret` and `child_secret` in the form body
 - PR6-SEC-04/06 (ADR-0010 am. 11 items 6 and 8): every URL is built with `carrierPath`/`carrierUrl` from the static EGRESS base; carrier-supplied label and tracking URLs are never dereferenced (negative fixture ship-label-url-only-not-followed with 169.254.169.254); the sandbox-never-emits-production unit test covers both API and ETD origins
 - PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides `accountNumber.value` and the token form fields as PII/SECRET parts; a logging test proves a sentinel under each listed path never reaches a general log line
+- LABEL FIXTURES (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): the adapter returns raw { format, content } and never builds a LabelDocument itself; every real PDF and ZPL label fixture of this adapter passes createLabelDocument and the sniffers (a blank or BOM lead byte and a %PDF- marker past offset 0 included in the fixture review)
+- PR079-SEC-04 (INFO; D-SECPR079-01): a logger that throws in the finally of the call wrapper must not replace the outcome of the call (a booked shipment must not become EXCEPTION); the log failure is swallowed and counted; test: with a throwing logger the operation returns its result or its CarrierError unchanged
 - AT-US-132-01 … AT-US-132-09: all 9 scenarios of US-132, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -577,7 +585,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-133 **DC** (M1 Must) UPS REST adapter |
 | REQs | REQ-CARR-014 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, R-ARCH-25, PR6-SEC-02, PR6-SEC-04, PR6-SEC-06, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084 |
+| Spikes / security / decisions | SPK-02, COND-SANDBOX-DEMO, R-ARCH-25, PR6-SEC-02, PR6-SEC-04, PR6-SEC-06, PR6-SEC-11, D-ARCH-067, D-ARCH-068, PR20-SEC-14, D-ORCH-025, D-ARCH-084, PR075-SEC-14, D-SECPR075-03, D-SD-004, PR079-SEC-04, D-SECPR079-01 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-101, TASK-124, TASK-131, TASK-132, TASK-009 |
@@ -598,6 +606,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR6-SEC-02 residual fields and container redaction (security review R2.4; ADR-0010 am. 11 item 8): `sensitive-fields.ts` and the README table include `AttentionName`, `Name`, `Phone.Number`, `PhoneNumber`, `FaxNumber`, `EMailAddress`, `AddressLine`, `TaxIdentificationNumber`, `ShipperNumber`, the `InternationalForms.Contacts` parties (`ForwardAgent`, `UltimateConsignee`, `IntermediateConsignee`, `Producer`) and `AlternateDeliveryAddress` with leaf-key matching on `Name`/`AttentionName`/`AddressLine`/`Phone`; the redactor removes the whole `Phone`, `FaxNumber` and `Contacts` party containers; `returnSignature` and `returnPOD` stay false; AC-45 sentinels cover every table path
 - PR6-SEC-04 (ADR-0010 am. 11 item 8): every URL is built with `carrierPath`/`carrierUrl`; the UPS identifier pattern for shipment ids is `^1Z[0-9A-Z]{16}$`; `transId` is the correlation UUID without hyphens (32 hex) and `transactionSrc` comes from BRAND_*; the void `trackingnumber` query value is set through URLSearchParams, never string-built
 - PR20-SEC-02 item 5 / PR20-SEC-14 (D-ORCH-025 (2); D-ARCH-084): this adapter typed sensitive-fields.ts is loaded by the shared logger as extra redaction parts (one source for the TASK-188 raw-payload redactor and for Pino) and decides `ShipperNumber` and the account fields as PII parts; a logging test proves a sentinel under each listed path never reaches a general log line
+- LABEL FIXTURES (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): the adapter returns raw { format, content } and never builds a LabelDocument itself; every real PDF and ZPL label fixture of this adapter passes createLabelDocument and the sniffers (a blank or BOM lead byte and a %PDF- marker past offset 0 included in the fixture review)
+- PR079-SEC-04 (INFO; D-SECPR079-01): a logger that throws in the finally of the call wrapper must not replace the outcome of the call (a booked shipment must not become EXCEPTION); the log failure is swallowed and counted; test: with a throwing logger the operation returns its result or its CarrierError unchanged
 - AT-US-133-01 … AT-US-133-08: all 8 scenarios of US-133, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -608,13 +618,13 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET |
-| REQs | REQ-CARR-009 |
+| Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET<br>US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-CARR-009, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-PERF-003 |
-| Spikes / security / decisions | SEC-P3-02, D-ARCH-018 |
+| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
-| Depends on | TASK-083, TASK-136, TASK-044 |
+| Depends on | TASK-083, TASK-136, TASK-044, TASK-041 |
 | Batch · locks | 4.5 · mod-quotes |
 | Branch | `feat/TASK-141-streaming-rate-results-fallback-get` |
 | Priority | Must · demo-critical |
@@ -625,7 +635,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-135 scenarios
 - SEC-TC-42: reopening the stream 10 times (incl. Last-Event-ID) causes 0 extra carrier calls; 3rd concurrent stream from one IP -> 429
+- [AT-US-040-15-1], [AT-US-040-15-2] and [AT-US-040-16] at the quote stream route (D-PM-078): the route-level tests of AT-US-135-11 and AT-US-135-12 also carry these IDs (the 3rd concurrent stream from one anonymous IP and the 6th for one authenticated user answer 429 RATE_LIMITED, the open streams are unaffected, and for an anonymous IP with 2 open streams closing one lets the next open succeed); completes US-040
 - AT-US-135-01 … AT-US-135-12: all 12 scenarios of US-135, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-040-01 … AT-US-040-17: US-040 completes here under the delivery split of D-PM-078: this task proves the scenarios that the card lines above assign to it and TASK-041, TASK-049, TASK-052, TASK-091 the rest, with the IDs in the test titles; the story is accepted when all 17 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.

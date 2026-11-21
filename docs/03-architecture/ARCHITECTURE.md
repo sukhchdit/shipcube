@@ -143,9 +143,10 @@ Each module folder: `routes.ts` (`defineRoute` declarations), `controller.ts`, `
 ```mermaid
 flowchart TB
   boot["Worker bootstrap<br/>config, Pino, OTel, Redis, Prisma"] --> sched["Job schedulers (upsertJobScheduler)"]
+  boot --> rloop["Outbox relay loop (no job)<br/>advisory lock, SKIP LOCKED batch → queue outbox-relay"]
   boot --> procs
   subgraph procs["Processors (one per queue)"]
-    relay["outbox-relay<br/>SKIP LOCKED batch → BullMQ"]
+    relay["outbox-relay<br/>dispatcher: event type → handlers,<br/>then their follow-up jobs"]
     booking["booking<br/>saga steps 2–3"]
     pay["payments<br/>webhook processing, capture, refund, sweeper"]
     docs["documents<br/>pdfkit render, store, hash"]
@@ -158,9 +159,12 @@ flowchart TB
   procs --> svc["Module services (shared code) via withTenantTx(job ctx)"]
   svc --> gw["CarrierGateway per account<br/>bulkhead → breaker → timeout → retry"]
   svc --> pg[(PostgreSQL)]
+  rloop --> pg
   procs --> dlq[(DLQ per queue)]
   boot --> health["/health/*, /metrics"]
 ```
+
+*Amended 2026-11-20 (ADR-0004 amendments 2 and 3; ADR-0013 amendment 5; QG-043-C1 (b)): the drawing showed `outbox-relay` as the processor that runs "SKIP LOCKED batch → BullMQ". The relay is an in-process loop in every worker, not a job. The processor of the queue `outbox-relay` is the dispatcher: it calls the handlers registered for the event's type and then enqueues their follow-up jobs.*
 
 ### 5.3 `apps/web`
 
@@ -308,7 +312,7 @@ sequenceDiagram
   Note over W: Sweeper every 5 min: authorisations > 30 min without BOOKED → cancel; CAPTURED without BOOKED > 10 min → repair or refund (REQ-PAY-018).
 ```
 
-*Amended 2026-11-13 (D-ARCH-106, ADR-0005 amendment 11, ADR-0003 amendment of the same date).* On the API side the first steps (payment record, then PaymentIntent) are the `load` -> `call` -> `handler` phases: the order, its price snapshots and the attempt count are read in a short read-only transaction, the gateway is called with the key `auth:<order_id>:<attempt>` while no transaction is open, and the payment row (with the gateway reference), the audit entry, the number allocation and `order.checkout_started` are written in one transaction afterwards. A crash or an admission rejection between the two leaves at most an unconfirmed PaymentIntent, which a retry with the same key returns. The worker steps keep the same discipline (ADR-0014): persist the client reference, call, record the outcome, each database part in its own `withTenantTx`.
+*Amended 2026-11-13 (D-ARCH-106, ADR-0005 amendment 11, ADR-0003 amendment of the same date).* On the API side the first steps (payment record, then PaymentIntent) are the `load` -> `call` -> `handler` phases: the order, its price snapshots and the attempt count are read in a short read-only transaction, the gateway is called with the key `auth:<order_id>:<attempt>` while no transaction is open, and the payment row (with the gateway reference), the audit entry, the number allocation and `order.checkout_started` are written in one transaction afterwards. A crash or an admission rejection between the two leaves at most an unconfirmed PaymentIntent, which a retry with the same key returns. The worker steps keep the same discipline (ADR-0014): persist the client reference, call, record the outcome, each database part in its own `withTenantTx`. *Amended 2026-11-20 (ADR-0003 amendment of that date, rules (i) to (k); ADR-0012 amendment 5; D-ARCH-202):* "at most an unconfirmed PaymentIntent" is now a rule, not an expectation: the `call` of the checkout creates the intent and never confirms it, so a lost race at the write leaves nothing that holds funds. (*Narrowed 2026-11-20, QG-040-C7, ADR-0012 amendment 6: this binds Stripe and every gateway that reaches a provider. The Mock gateway authorises in the request, as the contract says, and the M0 saga starts from that.*) The key is `auth:<order_id>:<order_version>:<attempt>`. Once TASK-096 has merged, the `If-Match` version is compared after the read and before the gateway call, and again by the conditional write.
 
 ### 7.3 Audit write inside a mutation (ADR-0007)
 

@@ -92,6 +92,12 @@ for (const t of order) {
   t.deps = t.d.map(k => { const d = byKey.get(k); if (!d) errors.push(`${t.k}: unknown dep ${k}`); return d; }).filter(Boolean);
   t.allStories = [...new Set([...t.us, ...t.part])];
   for (const s of t.allStories) if (!stories.has(s)) errors.push(`${t.id}: unknown story ${s}`);
+  // A task delivered in parts (D-SD-007): inPart maps a completed story to the part that completes it. The story stays an
+  // owner for validation; task-map.csv lists it as partial until that part merges, and the card names the part.
+  t.inPart = t.inPart || {};
+  for (const [s, p] of Object.entries(t.inPart)) if (!t.us.includes(s) || !/^\d{3}-[A-Z]$/.test(p)) errors.push(`${t.id}: inPart ${s} must be a completed story and name a part like 040-B`);
+  t.usCsv = t.us.filter(s => !t.inPart[s]);
+  t.partCsv = [...t.part, ...t.us.filter(s => t.inPart[s])];
   t.reqs = [...new Set(t.allStories.flatMap(s => stories.get(s)?.reqs || []))];
   t.nfrAll = [...new Set([...t.nfr, ...t.allStories.flatMap(s => stories.get(s)?.nfrs || [])])].sort();
   // A delivery-split exception names the tasks that carry the demo-critical part of the story (dcBy); the others are not demo-critical
@@ -190,7 +196,7 @@ if (!write) process.exit(0);
 // ---------- emit task-map.csv
 const q = v => `"${String(v).replace(/"/g, '""')}"`;
 const csv = ['task,story_ids,req_ids,nfr_ids,wave,specialist,complexity,model,depends_on,dc,batch,title,branch,refs,completes_stories,partial_stories,priority,cuttable'];
-for (const t of [...order].sort((a, b) => a.id.localeCompare(b.id))) csv.push([t.id, q(t.allStories.join(';')), q(t.reqs.join(';')), q(t.nfrAll.join(';')), t.w, t.sp, t.c, t.m, q(t.deps.map(d => d.id).join(';')), t.dc ? 'DC' : '', t.batchId, q(t.t), t.branch, q(t.x.join(';')), q(t.us.join(';')), q(t.part.join(';')), t.priority, t.cuttable ? 'yes' : 'no'].join(','));
+for (const t of [...order].sort((a, b) => a.id.localeCompare(b.id))) csv.push([t.id, q(t.allStories.join(';')), q(t.reqs.join(';')), q(t.nfrAll.join(';')), t.w, t.sp, t.c, t.m, q(t.deps.map(d => d.id).join(';')), t.dc ? 'DC' : '', t.batchId, q(t.t), t.branch, q(t.x.join(';')), q(t.usCsv.join(';')), q(t.partCsv.join(';')), t.priority, t.cuttable ? 'yes' : 'no'].join(','));
 fs.writeFileSync(path.join(OUT, 'task-map.csv'), csv.join('\n') + '\n');
 
 // ---------- emit WAVE files
@@ -225,7 +231,7 @@ for (const w of Object.keys(waves).map(Number)) {
   for (const t of wt) {
     L.push(`### ${t.id} — ${t.t}`, '');
     L.push('| Field | Value |', '|---|---|');
-    L.push(`| Stories (completes) | ${t.us.length ? t.us.map(storyCell).join('<br>') : '—'} |`);
+    L.push(`| Stories (completes) | ${t.us.length ? t.us.map(s => storyCell(s) + (t.inPart[s] ? ` — in part ${t.inPart[s]}; partial until that part merges` : '')).join('<br>') : '—'} |`);
     if (t.part.length) L.push(`| Stories (partial; completed by ${t.part.map(p => (owner.get(p) || []).map(o => o.id).join('/')).join(', ')}) | ${t.part.map(storyCell).join('<br>')} |`);
     L.push(`| REQs | ${t.reqs.join(', ') || '— (enabler; see refs)'} |`);
     L.push(`| NFRs | ${t.nfrAll.join(', ') || '—'} |`);

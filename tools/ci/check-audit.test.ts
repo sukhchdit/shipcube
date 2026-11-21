@@ -2,8 +2,8 @@
  * check-audit (TASK-007): US-048 / AT-US-048-06 (Critical/High fail in any closure), AT-US-048-07 (waiver with an
  * expiry; an expired waiver fails again), PR2-SEC-06 (watchlist), D-ARCH-003 rev 4 item 4 (a maintenance-excepted
  * package with a High/Critical advisory fails regardless). Fixtures are hand-written samples in the npm 11 audit
- * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs and the D-SECAUDIT-01 picomatch GHSA
- * the advisories are synthetic.
+ * report v2 and osv-scanner v2 JSON formats; apart from the three PR2-SEC-06 GHSAs and the D-SECAUDIT-01 (picomatch)
+ * GHSA the advisories are synthetic.
  */
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,6 +13,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { auditMarkdown, checkAudit, fromNpmAudit, fromOsv, loadWatchlist, mergeAdvisories } from './check-audit.mjs';
 import { loadMaintenance } from './check-dep-age.mjs';
+import { readLockfile, tuplesOf } from './dep-gates-lib.mjs';
 import type { Lockfile } from './dep-gates-lib.mjs';
 import { findRepoRoot, runNode } from '../test-support/process.js';
 
@@ -78,23 +79,35 @@ describe('gating', () => {
     ]);
   });
 
-  it('[D-SECAUDIT-01] the committed picomatch waiver passes the dev-only High until its due date, then fails it again', () => {
-    const picomatch = mergeAdvisories([
-      {
-        id: 'GHSA-fc5q-39xc-vjpf',
-        package: 'picomatch',
-        severity: 'high' as const,
-        title: 'picomatch vulnerable to ReDoS through single-branch repeated extglobs',
-        fixAvailable: true,
-        production: false,
-        sources: ['npm audit', 'osv-scanner'],
-      },
-    ]);
-    const open = checkAudit(picomatch, { ...committed, maintenance, now: new Date('2026-11-18T12:00:00Z') });
-    expect(open.findings).toEqual([]);
-    expect(open.notes.map((n) => n.message)).toContainEqual(expect.stringContaining('tracked by D-SECAUDIT-01, due 2027-02-12'));
-    const due = checkAudit(picomatch, { ...committed, maintenance, now: new Date('2027-02-12T00:00:00Z') });
-    expect(due.findings.map((f) => f.rule)).toEqual(['audit/waiver-expired']);
+  it.each([['D-SECAUDIT-01', 'GHSA-fc5q-39xc-vjpf', 'picomatch', '2026-11-18', '2027-02-12']])(
+    '[%s] the committed waiver passes the dev-only High %s %s until its due date, then fails it again',
+    (decision, id, pkg, granted, due) => {
+      const advisory = mergeAdvisories([
+        {
+          id,
+          package: pkg,
+          severity: 'high' as const,
+          title: 'ReDoS',
+          fixAvailable: true,
+          production: false,
+          sources: ['npm audit', 'osv-scanner'],
+        },
+      ]);
+      const open = checkAudit(advisory, { ...committed, maintenance, now: new Date(`${granted}T12:00:00Z`) });
+      expect(open.findings).toEqual([]);
+      expect(open.notes.map((n) => n.message)).toContainEqual(expect.stringContaining(`tracked by ${decision}, due ${due}`));
+      const expired = checkAudit(advisory, { ...committed, maintenance, now: new Date(`${due}T00:00:00Z`) });
+      expect(expired.findings.map((f) => f.rule)).toEqual(['audit/waiver-expired']);
+    },
+  );
+
+  it('[PR67-SEC-02] no committed waiver covers a package that has a production-closure tuple in the committed lockfile', () => {
+    // check-audit applies a waiver in any closure; every waiver so far is justified as dev-only, so this pins that claim
+    // to the lockfile: a dependency change that moves a waived package into the production closure fails here.
+    const tuples = [...tuplesOf(readLockfile(repoRoot)).values()];
+    const waived = new Set(committed.waivers.map((w) => w.package));
+    expect(tuples.filter((t) => waived.has(t.name) && t.production).map((t) => `${t.name}@${t.version}`)).toEqual([]);
+    expect(tuples.filter((t) => waived.has(t.name)).length).toBeGreaterThan(0);
   });
 
   it('[AT-US-048-06] a High vulnerability with a fix (production) and a Critical (dev) fail; moderates in production are highlighted', () => {

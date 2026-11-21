@@ -33,7 +33,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-152) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
 | REQs | REQ-QUOTE-016, REQ-BOOK-001 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | D-ARCH-162, D-SD-003 |
+| Spikes / security / decisions | D-ARCH-162, D-SD-003, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-091, TASK-052, TASK-059 |
@@ -49,6 +49,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-166 scenarios
 - US-171 API scenarios (claim is atomic; selected option preserved)
 - The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 (D-ARCH-162): a claim written as separate statements fails with 23503 by design
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: claimQuote, createShipment (optional) (D-SD-007)
 - AT-US-166-01 … AT-US-166-08: all 8 scenarios of US-166, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-171-01 … AT-US-171-06 that belong to its layer; US-171 closes in TASK-152
 
@@ -63,7 +64,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-220 **DC** (M1 Must) Document model and private encrypted storage |
 | REQs | REQ-DOC-001, REQ-DOC-005, REQ-DOC-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SPK-05, D-025, PR30-SEC-02, PR30-SEC-07, PR30-SEC-09, PR30-SEC-10, D-ARCH-097, D-SEC-TM-01 |
+| Spikes / security / decisions | SPK-05, D-025, PR30-SEC-02, PR30-SEC-07, PR30-SEC-09, PR30-SEC-10, D-ARCH-097, D-SEC-TM-01, D-ARCH-180 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-019, TASK-029, TASK-016 |
@@ -81,6 +82,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-220 scenarios (SHA-256 stored, SSE-S3, private bucket)
 - DOWNLOAD, KEY AND METADATA CONTRACT (ADR-0021 am. 3, D-ARCH-097; PR #30 security r2 PR30-SEC-02, -07, -09, -10, code review r1 n2 and r2 flag 1; DUE WITH THIS TASK, binding on TASK-155 and TASK-162): (1) the documents module owns ONE storage facade (modules/documents/storage-facade.ts) and it is the only code outside platform/storage that touches RuntimeServices.storage: putDocument and presignDownload(document, ttl) — presignDownload reads the bucket, key, versionId and responseContentType from the RLS-visible document row (the type stored at put time from the detected format, never request, carrier or user text), builds the disposition with attachmentDisposition (item 3) and NEVER sets allowInline; (2) allowInline: a repository test (modules/documents/storage-policy.test.ts) fails when allowInline appears in apps or packages source outside apps/api/src/platform/storage and its tests — allowInline: true with an active content type (text/html, image/svg+xml, application/xhtml+xml, any +xml type, application/xml, a script type) is the XSS-by-document path; there is no M1 caller, and an inline preview needs an ADR-0021 amendment, a facade method restricted to an allow-list of passive types (application/pdf, image/png, image/jpeg) and a security record; (3) attachmentDisposition(name) is one pure function exported by platform/storage that returns attachment; filename="<ASCII fallback>"; filename*=UTF-8 followed by two single quotes and the RFC 5987 percent-encoded name, where the name is composed only from server-held parts (document type, shipment reference, version, an extension from a closed set) and the fallback keeps only letters, digits, dot, underscore and hyphen; the port check is anchored on ASCII (no Unicode trim) and refuses an inline token anywhere after the type; unit cases: U+00A0 before attachment, attachment; x; inline, U+2028, a quote, a backslash, CR and LF, a 300-character name and an all-non-ASCII name; (4) ONE typed key builder (modules/documents/document-keys.ts) is the only code that constructs a key string — UUID-typed parts and closed enums, the organisation id taken from the tenant context and never from request input, the grammar of ADR-0021 Decision 2; the port additionally rejects a . segment, an empty segment and a trailing / (the store answers 400 to two of those), caps the total metadata bytes (names plus values) at 2048 with INVALID_ARGUMENT before any I/O instead of an S3 MetadataTooLarge reported as UNEXPECTED, and imports the bucket predicate from the single S3_BUCKET definition of packages/config; (5) result precision (PR30-SEC-10): get().contentLength is the number of bytes read, an SDK-detected checksum mismatch on the response is INTEGRITY_MISMATCH instead of UNEXPECTED, and put compares the echoed ChecksumSHA256 with the digest it sent when the response carries one (the contract suites on RustFS now and on real S3 before G4-production pin that it is carried)
 - SEC-TC-75 (proposed ID, D-SEC-TM-01; qa-lead adopts it through required_cases_pending with checkpoint G3): the storage-policy repository tests of items (1) to (4) above carry [SEC-TC-75]
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (documents; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-220-01 … AT-US-220-07: all 7 scenarios of US-220, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -122,7 +124,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-172 **DC** (M1 Must) Server-side draft shipment, resume and optimistic concurrency |
 | REQs | REQ-BOOK-002 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-146, TASK-096, TASK-100, TASK-084 |
@@ -136,6 +138,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-172 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createShipment, updateShipment (optional) (D-SD-007)
 - AT-US-172-01 … AT-US-172-07: all 7 scenarios of US-172, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -179,7 +182,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-233 **DC** (M1 Must) Pickup record and instructions |
 | REQs | REQ-PICK-001, REQ-PICK-012 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-148, TASK-032 |
@@ -193,6 +196,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-233 scenarios
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (pickups; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-233-01 … AT-US-233-08: all 8 scenarios of US-233, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -208,7 +212,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
 | REQs | REQ-BOOK-001 |
 | NFRs | NFR-A11Y-001 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-195, D-SD-007 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-146, TASK-072, TASK-144 |
@@ -221,6 +225,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-171 scenarios (S-A01, S-A02, S-B01 entry)
+- IDEMPOTENCY KEY LIFETIME IN THE CLIENT (ADR-0026 item 4 as amended; ADR-0014 amendment 6; D-ARCH-195): one key per submission; it is reused only for the automatic retry of that submission (network failure, 5xx, 429, 409 IDEMPOTENCY_IN_PROGRESS, after a token refresh, with a fresh re-authentication proof); any other answer ends the key and the draft drops it; test: after a 422 the next submit sends a new key; the helper built here is the one later wizard, checkout and account forms use (D-SD-007 names this the first frontend card that sends the header)
 - AT-US-171-01 … AT-US-171-06: all 6 scenarios of US-171, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -234,7 +239,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-192 **DC** (M1 Must) Order basket model: 1-10 shipments, one currency |
 | REQs | REQ-BOOK-013 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-149, TASK-126 |
@@ -247,6 +252,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-192 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createOrder (required), addOrderShipment (optional) (D-SD-007)
 - AT-US-192-01 … AT-US-192-05: all 5 scenarios of US-192, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -262,7 +268,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-160, TASK-160) | US-180 **DC** (M1 Must) Step 2: contents, customs applicability and document declaration<br>US-181 **DC** (M1 Must) Step 2: customs lines and reason for export |
 | REQs | REQ-BOOK-009, REQ-CUST-001, REQ-CUST-002, REQ-CUST-003, REQ-CUST-004 |
 | NFRs | — |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-191 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-130, TASK-122 |
@@ -276,6 +282,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - API scenarios of US-180 and US-181
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: replaceShipmentCustoms (optional) (D-SD-007)
 - Covers the scenarios of AT-US-180-01 … AT-US-180-08 that belong to its layer; US-180 closes in TASK-160
 - Covers the scenarios of AT-US-181-01 … AT-US-181-09 that belong to its layer; US-181 closes in TASK-160
 

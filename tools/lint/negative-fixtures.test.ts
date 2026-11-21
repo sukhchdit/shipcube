@@ -47,6 +47,7 @@ const API = 'apps/api/src/modules';
 const BOUNDARIES = 'boundaries/dependencies';
 const TENANT_TX_IO = 'platform/no-external-calls-in-tenant-tx';
 const OUTBOUND_HTTP = 'platform/outbound-http-via-client';
+const PRICING_PURITY = 'platform/pricing-purity';
 
 const LAYERING: readonly Violation[] = [
   // The three Examples rows of the US-001 outline "Each layering rule is enforced by a seeded negative fixture".
@@ -118,11 +119,12 @@ const LAYERING: readonly Violation[] = [
     'only through its public index.ts',
   ],
   ['package imports an app', 'layering/package-imports-app/packages/shared/src/bad-leak.ts', BOUNDARIES, 'packages may not import apps'],
+  // Two independent controls: the ADR-0003 allow-list and platform/pricing-purity (AT-US-138-02, TASK-076).
   [
-    'packages/pricing imports node:fs (I/O)',
+    '[AT-US-138-02] packages/pricing imports node:fs (I/O)',
     'layering/pricing-io/packages/pricing/src/bad-price.ts',
-    BOUNDARIES,
-    'packages/pricing has no I/O imports',
+    [BOUNDARIES, PRICING_PURITY],
+    '',
   ],
   [
     'apps/web imports apps/api',
@@ -282,6 +284,78 @@ const RULES: readonly Violation[] = [
   ['import-x/no-cycle: a <-> b (a)', 'rules/import-cycle/packages/shared/src/bad-a.ts', 'import-x/no-cycle', ''],
   ['import-x/no-cycle: a <-> b (b)', 'rules/import-cycle/packages/shared/src/bad-b.ts', 'import-x/no-cycle', ''],
   ['platform/money-arith: `+` on minor units', 'rules/money-arith/packages/pricing/src/bad-total.ts', 'platform/money-arith', ''],
+  [
+    '[R1-m2] platform/money-arith: `t += line.amount` (the right-hand side of a compound assignment)',
+    'rules/money-arith/packages/pricing/src/bad-compound.ts',
+    'platform/money-arith',
+    "'amount'",
+  ],
+  [
+    '[R1-m2] platform/money-arith (type-aware): `sum += value` over Minor values',
+    'typed/money-arith/packages/pricing/src/bad-minor-compound.ts',
+    'platform/money-arith',
+    "'value'",
+  ],
+  [
+    '[R2-M1] platform/money-arith (type-aware): a Minor-typed `+=` accumulator (`t += k`, `total += line.amount`)',
+    'typed/money-arith/packages/pricing/src/bad-minor-accumulator.ts',
+    ['platform/money-arith', 'platform/money-arith'],
+    'Arithmetic on the money minor-unit value',
+  ],
+  [
+    '[PR #2 m10] platform/money-arith (type-aware): `+` on two Minor-branded values whose names the heuristic misses',
+    'typed/money-arith/packages/pricing/src/bad-minor-brand.ts',
+    'platform/money-arith',
+    "'net'",
+  ],
+  ...(
+    [
+      ['Date.now()', 'bad-date-now', 'Date.now'],
+      ['new Date() without an argument', 'bad-new-date', 'new Date()'],
+      ['Math.random()', 'bad-math-random', 'Math.random'],
+      ['crypto.randomUUID()', 'bad-random-uuid', 'crypto.randomUUID'],
+      ['globalThis.crypto.getRandomValues()', 'bad-get-random-values', 'crypto.getRandomValues'],
+      ['process.env', 'bad-process-env', 'process.env'],
+      ['[R1-m1] a destructured process (const { env } = process)', 'bad-destructured-env', 'process'],
+      ['[R1-m1] an aliased Date (const Clock = Date; new Clock())', 'bad-aliased-date', 'Date'],
+      ['[R1-m1] process.hrtime.bigint()', 'bad-process-hrtime', 'process.hrtime'],
+      ['[R1-m1] process.argv (environment)', 'bad-process-argv', 'process.argv'],
+      ['[R1-m1] Date(x) still reads the clock', 'bad-date-call-with-argument', 'Date()'],
+      ['[R1-m1] new Date(...spread)', 'bad-new-date-spread', 'new Date()'],
+      ['[R1-m1] performance.timeOrigin', 'bad-performance-time-origin', 'performance.timeOrigin'],
+      ['[PR076-SEC-01] Math[`random`] through a template key', 'bad-math-template-key', 'Math.random'],
+      [
+        '[PR076-SEC-01] uuidv7 (clock and randomness) from the allow-listed @platform/shared root',
+        'bad-shared-uuidv7',
+        '@platform/shared uuidv7',
+      ],
+      [
+        '[PR076-SEC-01] a namespace import of @platform/shared (it carries uuidv7)',
+        'bad-shared-namespace',
+        '@platform/shared (whole module)',
+      ],
+      ['[R2-n2] a string-named import specifier { "uuidv7" as id }', 'bad-shared-string-name-import', '@platform/shared uuidv7'],
+      ['[R2-n2] a string-named re-export { "uuidv7" as id } from', 'bad-shared-string-name-export', '@platform/shared uuidv7'],
+      ['[R2-n1] navigator (locale and environment)', 'bad-navigator', 'navigator.language'],
+    ] as const
+  ).map(([title, name, what]): Violation => [
+    `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
+    `rules/pricing-purity/packages/pricing/src/${name}.ts`,
+    PRICING_PURITY,
+    `'${what}' is not allowed in packages/pricing`,
+  ]),
+  [
+    '[AT-US-138-02] [PR076-SEC-01] platform/pricing-purity: production code imports a module of its tests/ folder',
+    'rules/pricing-purity/packages/pricing/src/bad-tests-import.ts',
+    PRICING_PURITY,
+    'never imports a test module',
+  ],
+  [
+    '[AT-US-138-02] platform/pricing-purity, the boundaries allow-list and outbound-http-via-client: packages/pricing imports axios',
+    'rules/pricing-purity/packages/pricing/src/bad-axios.ts',
+    [BOUNDARIES, PRICING_PURITY, OUTBOUND_HTTP],
+    '',
+  ],
   ['platform/no-innerhtml: innerHTML assignment', 'rules/no-innerhtml/apps/web/app/bad-dom.ts', 'platform/no-innerhtml', ''],
   ['platform/no-innerhtml: dangerouslySetInnerHTML', 'rules/no-innerhtml/apps/web/app/components/bad-raw.tsx', 'platform/no-innerhtml', ''],
   ...['bad-to-fixed', 'bad-intl', 'bad-intl-call', 'bad-parse-float'].map((name): Violation => [
@@ -648,6 +722,18 @@ const RULES: readonly Violation[] = [
     'no-restricted-imports',
     'only apps/api/src/platform/storage imports the AWS SDK',
   ]),
+  ...(
+    [
+      ['a value import', 'bad-carriers-deep-value'],
+      ['an import type', 'bad-carriers-deep-type'],
+      ['an export type … from', 'bad-carriers-deep-reexport'],
+    ] as const
+  ).map(([title, name]): Violation => [
+    `[AT-US-121-05] no-restricted-imports: a deep @platform/carriers/* specifier (${title})`,
+    `rules/carriers-deep-import/${API}/quotes/service/${name}.ts`,
+    'no-restricted-imports',
+    'import @platform/carriers from its package root only',
+  ]),
   // Output folders are ignored only at the root and the workspace roots: a source folder named coverage/build/dist is linted.
   ...['packages/shared/src/coverage/bad-coverage.ts', `${API}/shipments/build/bad-build.ts`, 'packages/carriers/src/dist/bad-dist.ts'].map(
     (path): Violation => [`source folder is linted, not ignored: ${path}`, `rules/output-ignores/${path}`, 'no-console', ''],
@@ -672,6 +758,8 @@ const RESOLUTION: readonly Violation[] = [
   ],
 ];
 
+const TOKEN_LINT = 'platform/token-lint';
+
 const CSS: readonly Violation[] = [
   ['platform/hover-in-media: :hover outside any @media', 'css/bad-hover-outside-media.css', 'platform/hover-in-media', ':hover'],
   ['platform/hover-in-media: :hover inside @media (hover: none)', 'css/bad-hover-wrong-media.css', 'platform/hover-in-media', ':hover'],
@@ -690,6 +778,14 @@ const CSS: readonly Violation[] = [
     ['--report-invalid-scope-disables', '--report-needless-disables'],
     'color-no-invalid-hex',
   ],
+  // platform/token-lint (US-101, TASK-038): one fixture per refused shape.
+  ['[AT-US-101-02] a hex colour (#ff0000) fails with the literal named', 'css/bad-token-hex-colour.css', TOKEN_LINT, '#ff0000'],
+  ['[AT-US-101-02] rgb(0, 0, 0) fails', 'css/bad-token-rgb-colour.css', TOKEN_LINT, 'rgb('],
+  ['[AT-US-101-02] hsl() fails', 'css/bad-token-hsl-colour.css', TOKEN_LINT, 'hsl('],
+  ['[AT-US-101-02] a named colour in a colour property fails', 'css/bad-token-named-colour.css', TOKEN_LINT, 'rebeccapurple'],
+  ['[AT-US-101-03] margin: 13px (off the 4/8 grid) fails', 'css/bad-token-off-grid-px.css', TOKEN_LINT, '13px'],
+  ['[AT-US-101-03] an off-grid rem length (0.8125rem = 13px) fails', 'css/bad-token-off-grid-rem.css', TOKEN_LINT, '0.8125rem'],
+  ['[AT-US-101-05] var(--colour-nonexistent) fails as an unknown token', 'css/bad-token-unknown.css', TOKEN_LINT, '--colour-nonexistent'],
 ];
 
 const TENANT_CONTEXT = 'platform/tenant-context-sql';
@@ -1562,6 +1658,19 @@ describe('seeded negative fixtures: ESLint (US-001, ADR-0003)', () => {
       'layering/audit-writer-composition/apps/api/src/platform/tx/execute.ts',
     ],
     ['platform/money-arith: the money helpers', 'rules/money-arith/packages/shared/src/money/add.ts'],
+    [
+      '[PR #2 m10] platform/money-arith (type-aware): comparisons on Minor and arithmetic on plain numbers',
+      'typed/money-arith/packages/pricing/src/ok-minor-compare.ts',
+    ],
+    [
+      '[R2-M1] platform/money-arith (type-aware): `s += m.amount` onto a string builds text',
+      'typed/money-arith/packages/pricing/src/ok-string-building.ts',
+    ],
+    ['[AT-US-138-02] platform/pricing-purity: new Date(input) and date arithmetic', 'rules/pricing-purity/packages/pricing/src/ok-pure.ts'],
+    [
+      '[AT-US-121-05] a module service imports @platform/carriers from its package root',
+      `rules/carriers-deep-import/${API}/quotes/service/ok-carriers-root.ts`,
+    ],
     ['platform/no-innerhtml: the sanitising component', 'rules/no-innerhtml/packages/ui/src/sanitised-html/sanitised-html.tsx'],
     ['platform/no-tofixed-tolocalestring: the Intl helpers', 'rules/no-tofixed-tolocalestring/packages/shared/src/intl/number.ts'],
     [
@@ -1899,8 +2008,12 @@ describe('seeded negative fixtures: Stylelint (NFR-I18N-003, NFR-A11Y-006)', () 
     expectClean(report.stylelint, 'css/ok-logical-and-hover.css');
   });
 
+  it('[AT-US-101-01] allowed: token variables, on-grid lengths, keywords, component-local and Tailwind runtime variables', () => {
+    expectClean(report.stylelint, 'css/ok-tokens.css');
+  });
+
   exactOnly('every CSS fixture is listed in the case table', () => {
-    const listed = new Set([...CSS.map(([, file]) => file), 'css/ok-logical-and-hover.css']);
+    const listed = new Set([...CSS.map(([, file]) => file), 'css/ok-logical-and-hover.css', 'css/ok-tokens.css']);
     expect(Object.keys(report.stylelint).filter((file) => !listed.has(file))).toEqual([]);
   });
 });

@@ -9,6 +9,9 @@ fixture-relative paths) and asserts the exact rule that fires.
   the bcrypt confinement).
 - `ok-*` files, and files at an allow-listed path, must lint clean.
 - `resolution/` is linted with `import-x/no-unresolved` on, to prove workspace and NodeNext resolution through ESLint.
+- `typed/<rule>/` roots carry their own `tsconfig.json` and are the only roots linted with type information, for the
+  type-aware branch of that rule (`typed/money-arith`: the `Minor` brand, PR #2 m10, TASK-076). Every other root is
+  parsed without types, so the run stays fast.
 
 The tree is excluded from `npm run lint` (ESLint and Stylelint ignores), `tsc` and Jest discovery. Prettier does
 format and check it, like any other source file.

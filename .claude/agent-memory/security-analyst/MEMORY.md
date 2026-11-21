@@ -52,4 +52,34 @@
 - [P5 PR-0052/0053](project_p5_pr52_pr53.md) — #52 PASS_W_F-U, rule-12 91 blob 9945c349, LOW KEEP bypass; #53 PASS_W_COND C1 S3 magnitude pin; heartbeat facts
 - [P5 PR-0053 round 2](project_p5_pr53_r2.md) — @378af72 PASS_W_F-U; C1 closed; INFO 05 ./testing lint gap (+config/testing ships), 06 SKIPPED_EXPORTS unpinned; sec-integration after record
 - [P5 PR-0046 merge-only](project_p5_pr46_mo.md) — @0230e50 union #39/#48 PASS_W_F-U; INFO 17: event base.sha = MERGE BASE, not main tip; live-binding prediction; 24 h deadline
+- [P5 PR-0055 TASK-286 policy](project_p5_pr55_task286_policy.md) — R1 PASS_W_COND; R2 @72dcf5b PASS_W_F-U (fc31652), C1/C2 closed; LOW 11 stage-1 env deny-list; kit
+- [P5 PR-0059 TASK-286 workflow](project_p5_pr59_task286_workflow.md) — R1 @055083b PASS_W_F-U (2d6818b); LOW 01 checkout inputs; interim-rule ruling; base.sha fact
 - [P5 PR-0054 020-D lexer guard](project_p5_pr54_020d.md) — R1 @3efa2df PASS_W_COND; C1 five lexer-vs-PG differentials, C2 WITH HOLD/advisory; PG 18 + real Prisma probe kit
+- [P5 PR-0056 TASK-029 capture](project_p5_pr56_task029.md) — R4 @e81d0c9 PASS_W_F-U (99f3025): merge union ok, store SQL passes PR #54 guard; open 03 MED (TASK-041) + carded LOW/INFO
+- [P5 PR-0054 rounds 2-3](project_p5_pr54_r2.md) — R2 @a6fc0a3 PASS_W_COND (C3 dynamic SQL reaches COMMIT); R3 @07cf78a PASS_W_F-U (d4380fd), C3+08 closed
+- [P5 PR-0057 TASK-288 reader lock](project_p5_pr57_task288.md) — R1 PASS_W_COND; R2 @4f1fbd5 + R3 @a5f94b0 PASS_W_F-U (af219c6); SEC-05 closed; hang-mutant + push-protocol facts
+- [P5 PR-0060 TASK-289 rbacfu](project_p5_pr60_task289.md) — r1 @df31b32 + r2 @c912a0a PASS_W_F-U; merged 96c2c7a; LOW 01 (TASK-283 before 060); INFO 03-05, 06 fillPath wildcard (TASK-060)
+- [P5 PR-0061 TASK-028 redaction](project_p5_pr61_task028.md) — R1 @57faf1f (18cd325), R1b adds 09/10; R2 @d51b42b PASS_W_F-U (main dbd2bb7, r2 file): all closed/routed exc. 04; new LOW 11, INFO 12
+- [P5 PR-0063 TASK-036 errors](project_p5_pr63_task036.md) — R1 @fcdb7ac PASS_W_F-U, record on MAIN a70dc64 (merge-ref read); LOW 01 free-text 4xx detail; INFO 02-04
+- [P5 PR-0064 TASK-035 queues](project_p5_pr64_task035.md) — R1 PASS_W_COND; R2 @266abb6 PASS_W_F-U (0f393f3), C1 discharged; INFO 12 pending gauges, 13 TASK-043 factory cond
+- [P5 PR-0066 TASK-290 splitter](project_p5_pr66_task290.md) — r1 @9a14659 PASS_W_F-U on main 57140c7; 43-11/52-01 closed; LOW 01 tokenizer CR/é$a$/$é$; Prisma sqlparser deploy facts
+- [P5 PR-0067 picomatch waiver](project_p5_pr67_picomatch_waiver.md) — D-SECAUDIT-01 waiver to 2027-02-12 (a750c97); watch never clears High; DECISION_ID one segment; 02 LOW closure
+- [P5 PR-0062 TASK-287A policy](project_p5_pr62_task287a.md) — r1 @5d86412 PASS_W_F-U on main 8966dd0; LOW 01 action-step env/uses commit unpinned (287-C); INFO 02 (287-B), 03
+- [P5 PR-0065 TASK-037 orgs/RLS](project_p5_pr65_task037.md) — r1 @29be7be + r2 @d4de55d PASS_W_COND (fb766c1); 01 closed; LOW 02 operator self-join; SEC-TC-76..78
+- [P5 TASK-287B workflow](project_p5_task287b.md) — pre-push r1 @06f62ac PASS_W_F-U, record PR-pending on main d923f24 (rename!); INFO 01/02 to 287-C; sim kit
+- [P5 TASK-287C1 policy](project_p5_task287c1.md) — pre-push r1 @e8b9414 PASS_W_F-U (b6274a3); LOW 01 cache `!` exclusion ignored by actions/cache; real-glob kit
+- [P5 TASK-291 flake3](project_p5_task291.md) — pre-push r1 @f4f8a12 + r2 @12d7873 PASS_W_COND (0b89579); SEC-01 dup headers + SEC-03 closed; C1 lane B
+- [P5 TASK-293 lexfu](project_p5_task293.md) — r1 @85afc70 + r2 @c618d8a PASS_W_COND (b0f5396); SEC-01/02 closed; R3-M1 mark-drop regression; INFO 03/04 open
+- [T-39 denial budget ruling](project_t39_denial_budget_ruling.md) — D-SECT39-01 (f3c581f/631cbc4): closed details set, key grammar, carry claim; card lines + api-platform-core lock pending fold
+- [P5 TASK-075 carrier contract](project_p5_task075.md) — r1-r4 final @28044845 PASS_W_F-U (96672d8e); 01-14 closed; INFO 15 + routed items to TASK-113/132/128
+- [P5 TASK-041 rate limiting](project_p5_task041.md) — r1 @e6f484a + r2 @3a6b4c8b PASS_W_F-U (343f9dc3, rename!); 01/02a/05/08 closed; new LOW 09 authn-failed lock scope; 041-B round owed
+- [P5 TASK-076 pricing+lint](project_p5_task076.md) — r1 @e01979b (2b8f51e) + r2 @82b5023 (c6bbed87) PASS_W_F-U; 01-05/08 closed; 07 INFO (shared subpath, declare) open; TS6 TypeFlags
+- [P5 TASK-039 jobs/schedulers](project_p5_task039.md) — r1 @64eefab, r2 @766ae52, r3 @f08948e PASS_W_F-U (16274d79); PR64-SEC-11 closed (lane B); D-TASK039-01 conds (i)-(iv)
+- [P5 audit effect waiver](project_p5_audit_effect_waiver.md) — D-SECAUDIT-02 to 2026-12-18 (f2fd4eeb, PR pending, 67c4c04 unpushed); Prisma pins effect 3.20.0; picomatch GHSA withdrawn
+- [P5 TASK-079 Mock carrier](project_p5_task079.md) — r1 @7815e1c8 PASS_W_F-U (d6344f6a); LOW 01 barrel scan stops at mock entry, 02 latency vs deadline; INFO 03-05
+- [P5 TASK-038 tokens+token lint](project_p5_task038.md) — r1 @b7482fb8 PASS_W_F-U (23538dec); LOW 01 tools/ui unowned in stylelint gate, LOW 03 type confusion; port conds
+- [P5 TASK-295 effect override](project_p5_task295.md) — PR #79 r1 @5edc54f5 (89d0b769) + MO r2 @a1b0ba76 (2b5ab645) PASS_W_F-U; LOW 01 premise test; index race
+- [P5 TASK-043 outbox](project_p5_task043.md) — r1 @da996002 (feb00326) + r2 @93f9faa0 (86ec0678) PASS_W_F-U; 01/03/04 closed; 08 INFO + R3-m2 due TASK-049; C4-1/C4-3 open
+- [P5 TASK-040 idempotency 040-A](project_p5_task040.md) — r1 @3dc1e225, r2 @e96bd979, r3 supersede @2abd665f v2 (c481471c) PASS_W_F-U; LOWs due 040-B PR1
+
+- [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit

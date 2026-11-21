@@ -4,7 +4,7 @@ Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Pr
 
 Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 73.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** 111 of the 113 M0 Must stories complete and US-061 and US-062 partial (D-PM-068; the `v0.1.0-m0` dossier names their six open route-level scenarios); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
+**Exit check:** 110 of the 113 M0 Must stories complete and US-040, US-061 and US-062 partial (D-PM-068, D-PM-078; the `v0.1.0-m0` dossier names the six open route-level scenarios of US-061 and US-062 and the two stream scenarios of US-040, AT-US-040-15 and -16); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
 
 **Stories completed in this wave (22):** US-019, US-021, US-022, US-039, US-041, US-043, US-045, US-046, US-047, US-069, US-079, US-089, US-093, US-102, US-105, US-113, US-120, US-123, US-125, US-204, US-205, US-292.
 
@@ -14,7 +14,7 @@ Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batche
 
 | Batch | Tasks (parallel) | Locks held |
 |---|---|---|
-| 3.1 | TASK-095 Logout and immediate revocation incl. revoke_sessions_for_user with DB fallback<br>TASK-096 ETags and optimistic concurrency<br>TASK-097 Mock scenario directives and production exclusion<br>TASK-098 Light and dark themes with contrast verification | identity-session<br>api-etag<br>pkg-carriers-mock<br>ui-theme |
+| 3.1 | TASK-095 Logout and immediate revocation incl. revoke_sessions_for_user with DB fallback<br>TASK-096 ETags and optimistic concurrency<br>TASK-097 Mock scenario directives and production exclusion<br>TASK-098 Light and dark themes with contrast verification | identity-session<br>api-etag, api-tx-execute, api-routing<br>pkg-carriers-mock<br>ui-theme |
 | 3.2 | TASK-099 Password reset<br>TASK-100 Soft delete and optimistic locking<br>TASK-101 Shared adapter contract test suite<br>TASK-102 Offline handling and outcome toasts | identity-core<br>prisma-ext<br>pkg-carriers-contract<br>ui-feedback |
 | 3.3 | TASK-103 Progressive delay and account lockout<br>TASK-104 Permission-denied audit and cross-tenant 404<br>TASK-105 Saga compensation on permanent failure and saga fault-matrix generator<br>TASK-106 Accessibility gate | identity-core<br>api-authz<br>mod-orders-saga<br>e2e-a11y |
 | 3.4 | TASK-107 Unverified-account expiry<br>TASK-108 Input hardening<br>TASK-109 createShipment retry, definitive rejection and ambiguous outcome handling<br>TASK-110 Pseudo-locale overflow tests and logical CSS | identity-core<br>api-input<br>mod-orders-saga<br>i18n-pseudo |
@@ -64,20 +64,26 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-039 (M0 Must) ETags and optimistic concurrency |
 | REQs | REQ-API-012, REQ-API-013 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-193, D-QG-003, D-SD-007, D-ARCH-202, D-PM-083, D-QG-004, D-SD-010 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
-| Batch · locks | 3.1 · api-etag |
+| Batch · locks | 3.1 · api-etag, api-tx-execute, api-routing |
 | Branch | `feat/TASK-096-etags-optimistic-concurrency` |
 | Priority | Must |
 
 **Files / modules**
 - apps/api/src/platform/etag/**
 - packages/ui/src/components/ConflictDialog/**
+- apps/api/src/platform/tx/execute.ts (step 7b and the version comparison between load and call; D-ARCH-202)
+- apps/api/src/platform/routing/define-route.ts (refuses an If-Match route that declares call without a version source)
+- tests/generated/route-metadata.ts (the call table of ADR-0003 rule (l))
 
 **Acceptance tests to write**
 - All US-039 scenarios
+- ORDER AROUND THE IDEMPOTENCY CLAIM (ADR-0014 amendment 7; ADR-0016 item 7 as amended; D-ARCH-193): step 7b checks only that If-Match is present and well formed (428, 400) and never reads a row; the comparison with the row version is the conditional write inside the handler transaction; tests: a PATCH that committed, retried with the same Idempotency-Key and its original If-Match, answers the stored 200 with Idempotent-Replayed true and not 412; a new execution with a stale If-Match answers 412 and the same key replays that 412; part 040-B of TASK-040 is on main before this task is dispatched
+- VERSION CHECK BEFORE CALL (ADR-0003 amendment 2026-11-20 rules (i) and (l); ADR-0014 amendment 13; D-ARCH-202; D-PM-083; QG-040-C2): a route that requires If-Match and declares call declares where load returns the id and the version; the tx slot compares them with the expected value of step 7b after load and before call and answers 412 CONCURRENCY_CONFLICT with the current ETag; defineRoute refuses such a route without the declaration; the conditional write of the handler stays the deciding check; tests: a stale If-Match on an operation with a call phase answers 412 and the call was not made; a version that changes during call answers 412 from the conditional write, the call ran once and WARN api.call_without_commit is logged with the operation id and the correlation id and no value; the route-metadata test pins every operation that declares call with its class (read, inert, reachable) and fails on an unlisted one; this task declares the version source on every If-Match operation that is mounted when it merges; files gain apps/api/src/platform/tx/execute.ts, apps/api/src/platform/routing/define-route.ts and tests/generated/route-metadata.ts
+- RETROFIT (D-ARCH-202 sequencing; ADR-0003 amendment 2026-11-20 rules (i) and (l), owner lines; D-QG-004 QG-040-C8; D-SD-010): this task stays in batch 3.1, after the tasks that mount an If-Match or call operation before it, and retrofits those operations; IF-MATCH: updateMe (TASK-062, batch 1.7; no call: step 7b now answers 428 and 400, and the conditional write of its handler gets the expected version) and checkoutOrder (TASK-092, batch 2.5; If-Match with call: this task declares where load returns the order id and version, so a stale request is answered 412 before the intent is created); CALL TABLE rows: registerUser (TASK-049) and loginUser (TASK-052) class read, checkoutOrder class inert and confirmPayment class reachable (TASK-092, whose fault tests the rows cite; the Mock gateway authorises inside call as a simulated adapter, D-ARCH-205); tests: per retrofitted If-Match operation, a missing If-Match answers 428 and a stale one 412, and on checkoutOrder the Mock gateway records no call; any other operation with If-Match or call that is on main when this task merges is retrofitted the same way and named in the PR body; an operation of this list that is not on main when this task merges declares its own source and row (the IF-MATCH UNTIL TASK-096 and CALL CLASS lines of its card); the module files touched are route declarations only, and the orchestrator grants their module locks at dispatch; no tag is cut before this task merges (v0.1.0-m0 follows Wave 3)
 - AT-US-039-01 … AT-US-039-07: all 7 scenarios of US-039, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -92,7 +98,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-123 (M0 Must) Mock scenario directives and production exclusion |
 | REQs | REQ-CARR-005, REQ-CARR-006 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | SEC-P3-21 |
+| Spikes / security / decisions | SEC-P3-21, D-SECPR079-01, PR079-SEC-01, PR079-SEC-02, PR079-SEC-03, PR079-SEC-05, D-SD-006 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-079, TASK-014 |
@@ -106,6 +112,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-123 scenarios
+- PR079-SEC-01 (LOW, CWE-693; D-SECPR079-01): tools/lint/carrier-wire-boundary.test.ts replaces the one-level barrel scan with the transitive walk of the record, so a wire re-export (value or type) from adapters/mock/ is refused; owned file, security round; DUE before the first adapters/<carrier>/wire* module merges (TASK-135 carries the merge prerequisite)
+- PR079-SEC-02 (LOW, CWE-400; code review m3 of PR #77): the Mock latency wait is capped at ctx.deadlineAt through an injected nowMs seam and ends with TIMEOUT, and it can be cancelled; directives are honoured only for sandbox contexts, and the MOCK: customer-reference source is read only in local and test; test: a deadline 60 s in the past does not sleep
+- PR #77 code review m2 (tracking anchor): Mock tracking progresses relative to an injected Clock or a per-number anchor instead of the fixed 2026-01-05 past anchor, so no event predates the shipment; the README states the behaviour; the tracking-ingestion owner (TASK-172) is told so that no sanity check rejects every Mock event
+- PR079-SEC-05 (INFO; D-SECPR079-01): the Mock refuses ctx.environment equal to production, and a test pins the single composition-root reference to the Mock factory
+- PR079-SEC-03 / code review m1, Mock half (unless TASK-092 did it): maxCallRecords is validated as a positive safe integer, falling back to the default, so NaN or Infinity cannot make the ring unbounded
 - AT-US-123-01 … AT-US-123-11: all 11 scenarios of US-123, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -147,7 +158,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-021 (M0 Must) Password reset |
 | REQs | REQ-AUTH-011, REQ-AUTH-012 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-06, D-050 |
+| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-059, TASK-086 |
@@ -161,6 +172,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-021 API scenarios
 - SEC-TC-47 (reset part): a successful reset sets email_verified_at
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-021-01 … AT-US-021-07: all 7 scenarios of US-021, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -204,7 +216,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-125 (M0 Must) Shared adapter contract test suite |
 | REQs | REQ-CARR-011 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | T-QA-10 |
+| Spikes / security / decisions | T-QA-10, D-ARCH-168, PR075-SEC-14, D-SECPR075-03, D-SD-004 |
 | Specialist · model | test-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-097, TASK-075 |
@@ -217,6 +229,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-125 scenarios (Mock passes the full suite)
+- RATE RESPONSE RULES (ADR-0010 amendment 12 item 1; D-ARCH-168): per adapter, noServiceReason is set only when quotes is empty, and it is never AUTH_FAILED, RATE_LIMITED, TIMEOUT, CARRIER_UNAVAILABLE, CARRIER_BUSY, CAPABILITY_NOT_SUPPORTED or CARRIER_UNKNOWN_ERROR (a failed call throws)
+- LABEL CONTRACT CASE (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): an adapter returns raw { format, content } and the guard builds the LabelDocument; a case where createShipment returns a bad label ends with the label dropped (carrier.label.refused, recoverLabel path), never thrown; the real PDF and ZPL fixtures of every adapter pass createLabelDocument and the sniffers
 - AT-US-125-01 … AT-US-125-05: all 5 scenarios of US-125, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -537,7 +551,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-047 (M0 Must) SSRF-safe outbound client and security events |
 | REQs | REQ-SEC-010, REQ-SEC-012 |
 | NFRs | NFR-RES-001, NFR-SEC-010 |
-| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076, PR075-SEC-02, PR075-SEC-09, D-SECPR075-01, D-SD-003 |
+| Spikes / security / decisions | SEC-P3-30, PR6-SEC-01, PR6-SEC-03, PR6-SEC-07, PR6-SEC-12, SEC-TC-66, D-ARCH-068, T-83, D-ARCH-074, D-SEC-PR20-01, PR20-SEC-10, PR20-SEC-14, PR20-SEC-15, D-ORCH-025, D-ARCH-084, D-ARCH-112, PR44-SEC-12, PR44-SEC-14, D-SEC-PR44-02, D-ORCH-076, PR075-SEC-02, PR075-SEC-09, D-SECPR075-01, D-SD-003, PR075-SEC-15, D-SECPR075-03 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-010, TASK-029 |
@@ -565,6 +579,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR44-SEC-14 FETCH ALIAS FORMS (D-TASK020-84; the lint half of SEC-14 landed in 020-D): outbound-http-via-client reports the X09/X10 alias forms (const f = fetch; f(url); const { fetch: g } = globalThis; g(url); globalThis.fetch through an alias or a computed key) with one negative fixture each, and the SSRF rule covers the same forms in the same change
 - PR075-SEC-02 (b) TIER BY THE MOST SPECIFIC ENTRY (LOW, CWE-183; D-SECPR075-01 ruling 1): egressAllowed decides the tier by the most specific matching entry across all tiers of the origin (an exact path beats a prefix, a longer prefix beats a shorter one) and refuses when that tier differs from ctx.environment; SEC-TC-66 gains three rows: production to .../mydhlapi/test/rates blocked, sandbox to .../mydhlapi/rates blocked, an exact path shared by both tiers allowed for both
 - PR075-SEC-09 (INFO; D-SECPR075-01; shared with TASK-128): before G4 a production-tier carrier call is refused at the client even when a carrier_accounts row says production under APP_ENV=production, so sandbox only holds for the rows as well as for configuration
+- PR075-SEC-15 (INFO, CWE-400; D-SECPR075-03): this task sets the ADR-0016 section 13 response-size cap value, which also bounds carrier label payloads; the value is chosen with the measured cost of the label sniffers in mind (the ^XA scan takes about 700 ms on an adversarial 20 MB payload); a test shows a response over the cap is refused before any label check runs
 - AT-US-047-01 … AT-US-047-08: all 8 scenarios of US-047, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

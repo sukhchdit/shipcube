@@ -119,7 +119,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-278 **DC** (M1 Must) Create notification jobs only from outbox events, idempotently |
 | REQs | REQ-NOTIF-014 |
 | NFRs | NFR-RES-004 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-180, D-ARCH-183, D-ARCH-184, D-QG-002, R-ARCH-37, SEC-P3-08, D-SD-006, D-ARCH-189, D-ARCH-190, D-SECPR043-01, D-SD-007 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-074, TASK-043, TASK-047 |
@@ -135,6 +135,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-278 scenarios
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (notification_log, the notification row table of data-model 4.2; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- HANDLER RULES (ADR-0004 amendment 2 items 12 and 15; R-ARCH-37; D-ARCH-184): a handler registers by type, claims processed_events (consumer, event_id) in the transaction of its effect, does database work only and names its follow-up job by a row it wrote; it reads the current state of the aggregate and never derives state from the order of events; test: two events of one aggregate delivered in reverse end in the same state (the published_at predicate of the token_enc overwrite is withdrawn by D-ARCH-190: see TOKEN OVERWRITE); the handler is written as apply and followUps (ADR-0004 amendment 3 item 20); followUps never misses a row that still needs its job
+- TOKEN OVERWRITE (ADR-0004 amendment 3 item 21; D-ARCH-190; QG-043-C3): after the send is recorded the consumer removes token_enc with one UPDATE by event id through a port under apps/*/src/platform/outbox, without a published_at predicate, and fails the job unless exactly one row was updated; the overwrite is a step of its own, so a retry never sends twice; tests: the token is removed (a) while an open relay tick still holds the event row and (b) after a relay tick that rolled back, the relay then publishes the row once and two events of the aggregate keep their order in the queue; an overwrite that updates no row fails the job; no column of this task is a foreign key onto outbox_events
+- TOKEN_ENC HOUSEKEEPING OWNER (ADR-0004 amendment 1, SEC-P3-08; D-ARCH-183; D-QG-002 QG-043-C6; owner assigned by D-SD-006): this task builds the 24 h housekeeping that removes payload.token_enc and token_enc_key_id from outbox events older than 24 h; it takes pg_advisory_xact_lock(478216878200) in the transaction of its statement (ADR-0004 amendment 2 item 14); it is a scheduled job under the D-SECPR039-01 conditions (age predicate in its own SQL, batches, idempotentProcessor keyed by the occurrence id, a closed SCHEDULE_NAMES entry of at most 47 characters); tests: a row 23 h old keeps its token, a row 25 h old loses it and nothing else of the payload changes, and the statement waits for a held relay lock
+- SECURITY CONDITIONS T078-1 TO T078-5 (D-SECPR043-01; QG-043-C3 confirmed): T078-1 the statement is SET payload = payload - token_enc together with version = version + 1 and the standard columns the guard requires (updated_at, updated_by), WHERE id = the event id; every SET expression is relative to the row, and the id is the only predicate (no published_at, no version equal to the read value, no test that the payload still holds token_enc); T078-2 its own short transaction that holds no other row lock while it waits, its wait bounded by lock_timeout, the job retry repeats it, and the 24 h housekeeping is the accepted backstop only after the retries are exhausted; T078-3 one port under apps/*/src/platform/outbox/** that takes only the event id (callers never pass SQL, columns or a payload), and this task migration adds payload to the column-level UPDATE grant of PR043-SEC-05; T078-4 the overwrite logs the event id and the row count only, never the token, the ciphertext or the payload, token_enc stays in the redaction set and becomes SEC in the classification registry; T078-5 tests besides those above: a retry after a committed overwrite counts one row and succeeds, and an overwrite after the 24 h housekeeping already removed the field counts one row
 - AT-US-278-01 … AT-US-278-07: all 7 scenarios of US-278, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -150,7 +155,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-122 **DC** (M0 Must) Deterministic Mock carrier |
 | REQs | REQ-CARR-004 |
 | NFRs | NFR-QUAL-005 |
-| Spikes / security / decisions | D-062, D-ARCH-084, D-SD-003 |
+| Spikes / security / decisions | D-062, D-ARCH-084, D-SD-003, PR075-SEC-14, D-SECPR075-03, D-SD-004, PR076-SEC-06, D-SECPR076-01 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-075 |
@@ -166,6 +171,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - AT-US-008-03 Mock-carrier hop (D-062): every Mock adapter operation emits exactly one outbound carrier-call log line through the TASK-010 `outboundCallFields` allow-list with correlation_id = CarrierContext.correlationId and no request or response body, and the call record it returns carries that correlation ID so the saga carrier_call audit entry can cite it — this lands the PR #20 code review §5 rule "carrier adapters must use outboundCallFields" on the first adapter, which DHL, FedEx and UPS copy
 - D-ARCH-106 (ADR-0005 am. 11 item 21): the Mock latency scenario is the instrument of the runtime twin of the T-83 lint: the API test lanes run with DB_TX_IDLE_IN_TRANSACTION_TIMEOUT_MS=1000, so a route that keeps a transaction open across a carrier call fails a test
 - AT-US-121-02 ON THE REAL MOCK (TASK-075 code review R1-n9): capabilityIssues runs on the real Mock declaration under the same AT id; TASK-075 proved the validator on a fake
+- LABEL FIXTURES (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): the adapter returns raw { format, content } and never builds a LabelDocument itself; every real PDF and ZPL label fixture of this adapter passes createLabelDocument and the sniffers (a blank or BOM lead byte and a %PDF- marker past offset 0 included in the fixture review)
+- PR076-SEC-06 (INFO, CWE-693; D-SECPR076-01): if this task adds the first subpath export to @platform/carriers (a ./testing entry for the Mock adapter is the likely one), it also adds the any-spelling control: a repository test that pins the carriers exports map to its entries and refuses app and package imports of the subpath outside tests, or a boundaries dependency.source arm (that one edits eslint.config.mjs and needs the lint lock from the orchestrator); if not, the line moves to the first task that adds one
 - AT-US-122-01 … AT-US-122-06: all 6 scenarios of US-122, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -179,7 +186,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-140 **DC** (M0 Must) Default margin pricing as itemised lines |
 | REQs | REQ-PRICE-003 |
 | NFRs | NFR-DATA-001 |
-| Spikes / security / decisions | D-010, D-TASK075-02, D-TASK075-10, D-SD-003 |
+| Spikes / security / decisions | D-010, D-TASK075-02, D-TASK075-10, D-SD-003, D-ARCH-168 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-076, TASK-075 |
@@ -195,7 +202,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-140 scenarios (15 % default margin, itemised USD)
 - CARRIER MONEY IS ADR-0009 MONEY (TASK-075 code review R1-m6; D-TASK075-10): CarrierMoney in packages/carriers/src/canonical/types.ts becomes the Money shape of ADR-0009 section 3 from @platform/shared (amount as branded minor units, ISO 4217 currency), so the pricing boundary needs no field mapping; a shared carrier decimal string to minor units helper without parseFloat
-- CANONICAL VOCABULARIES TO packages/shared (D-TASK075-02, accepted for TASK-075 with the planned move; first consumer is this task): CARRIER_ERROR_CODES, TRACKING_STATUSES, DOCUMENT_FORMATS and the surcharge codes move from packages/carriers to packages/shared, with a parity test against the OpenAPI enums in packages/shared/src/api/types.gen.ts
+- CANONICAL VOCABULARIES TO packages/shared (D-TASK075-02, accepted for TASK-075 with the planned move; first consumer is this task): CARRIER_ERROR_CODES, TRACKING_STATUSES, DOCUMENT_FORMATS and the surcharge codes move from packages/carriers to packages/shared, with a parity test against the OpenAPI enums in packages/shared/src/api/types.gen.ts (ADR-0010 amendment 12 item 2; D-ARCH-168): packages/carriers re-exports each moved list so no adapter import changes; the request and response types of the port stay in packages/carriers; the moved lists go to the browser-safe side of packages/shared
 - AT-US-140-01 … AT-US-140-05: all 5 scenarios of US-140, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -272,7 +279,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-126 **DC** (M0 Must) Rate-shopping fan-out with deadlines and partial results |
 | REQs | REQ-CARR-008 |
 | NFRs | NFR-PERF-002, NFR-PERF-003, NFR-RES-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-SD-006 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-079, TASK-080 |
@@ -286,6 +293,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-126 scenarios (hung carrier -> named partial at 4 s; overall 5 s; AbortSignal cancels within 1 s)
 - D-ARCH-106: no tenant transaction is open while carriers are called; the caller persists each result in its own short tenant transaction as it arrives
+- PR #77 code review n9: the DR-B34 eligibility compares package dimensions orientation-free, with the same rule as the Mock limitViolation (best as a shared helper in packages/carriers/src/capabilities.ts), so a 100 x 1200 x 800 box that the Mock would quote is not excluded
 - AT-US-126-01 … AT-US-126-08: all 8 scenarios of US-126, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -299,7 +307,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-197 **DC** (M0 Must) Shipment state machine core<br>US-198 **DC** (M0 Must) Transition history and same-transaction audit |
 | REQs | REQ-BOOK-018, REQ-BOOK-019 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-030 |
+| Spikes / security / decisions | D-030, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-029, TASK-032, TASK-043 |
@@ -313,6 +321,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-197 and US-198 scenarios (transition table DR-B01)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (shipments; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-197-01 … AT-US-197-06: all 6 scenarios of US-197, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-198-01 … AT-US-198-05: all 5 scenarios of US-198, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -329,7 +339,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-199 **DC** (M0 Must) Payment gateway interface and deterministic Mock gateway<br>US-200 **DC** (M0 Must) Payment record with status history |
 | REQs | REQ-PAY-001, REQ-PAY-002, REQ-PAY-003 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-011, PR40-SEC-05, D-ARCH-115 |
+| Spikes / security / decisions | D-011, PR40-SEC-05, D-ARCH-115, D-ARCH-180, D-ARCH-202, D-ARCH-205, D-QG-004, D-SD-010, D-SECPR040-04, D-PM-086 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-032, TASK-029 |
@@ -345,6 +355,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-199 and US-200 scenarios
 - D-ARCH-106 (ADR-0005 am. 11 item 20): the binding names under which module code receives the payment gateway (paymentGateway, gateway) are added to the names option of the T-83 lint with one fixture; every gateway call runs in a call phase or in the worker, never inside a tenant transaction
 - PR40-SEC-05 / PR #40 code review R1-m4 (a) (D-ARCH-115): the D-QA-003 money-path scope of tools/ci/coverage-gate.mjs and TEST-STRATEGY 8 is the folder apps/api/src/modules/payments/service/**, while this task lists apps/api/src/modules/payments/service.ts, a file the scope does not match; before merging, place the money-moving service code under apps/api/src/modules/payments/service/** (preferred) or ask qa-lead to re-point the scope with a D-QA decision, so the scope activates with this task; the PR body quotes the merged lines and branches of the scope, and in the first activation checkpoint after it merges qa-lead adds coverage gate: apps/api/src/modules/payments/service lines and branches to unit.required_cases (manifest-only PR with a security record)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (payments; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- SIMULATED GATEWAY (ADR-0012 amendment 6; ADR-0003 amendment 2026-11-20 rule (j) as corrected; D-ARCH-205; QG-040-C7): the interface of ADR-0012 section 1 keeps one authorise; capabilities().simulated is true for the Mock gateway and false for every other adapter; the Mock answers mock_ok and the other outcome tokens synchronously, as US-199 says; the gateway contract suite gains one assertion that runs for every adapter with simulated false: authorise never returns AUTHORISED and creates its intent unconfirmed (first run on the Stripe fixtures of TASK-167); configuration keeps refusing the Mock gateway in production; DISPATCH (D-SD-010): QG-040-C7 is answered by D-ARCH-205, the concurrence of security-analyst on its item (c) is D-SECPR040-04 (conditions C-1 and C-2 below), and the confirmation of product-manager on its item (d) is D-PM-086 (US-199 and AT-US-202-01 read as written) (INTENT IN TWO STEPS of D-ARCH-202 is withdrawn and not folded)
+- SIMULATED GATEWAY SECURITY CONDITIONS (D-SECPR040-04 C-1 and C-2; SEC-TC-24; T-71): C-1 simulated is a constant of the adapter class, never configuration or request input; the composition refuses any payment adapter whose capabilities().simulated is true when APP_ENV=production, so the refusal keys on the capability and not only on the provider name; SEC-TC-24 gains that case: an adapter declaring simulated: true in a production composition ends the start; C-2 the suite assertion runs for every adapter registered with simulated: false, and a planted adapter returning AUTHORISED from authorise makes the suite fail (a negative control)
 - AT-US-199-01 … AT-US-199-07: all 7 scenarios of US-199, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-200-01 … AT-US-200-05: all 5 scenarios of US-200, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -393,7 +406,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-154 **DC** (M0 Must) Quote entity with 24 h expiry<br>US-173 **DC** (M0 Must) Shipment direction, content type and package type |
 | REQs | REQ-QUOTE-001, REQ-BOOK-027, REQ-BOOK-028 |
 | NFRs | NFR-DATA-002 |
-| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003 |
+| Spikes / security / decisions | D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-168, D-SD-004, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-083, TASK-051, TASK-029, TASK-070 |
@@ -408,6 +421,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-154 and US-173 scenarios
 - QUOTE TABLES AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10; rulings/wave-1-r-arch-34-operator-rulings.md section 2.8): ux_quotes__org_id_id and ux_quotes__guest_token_hash_id; quote_packages and quote_options reference quotes through the owner-bound pair with no single-column key; ux_quote_packages__org_quote_seq (partial on org_id IS NOT NULL) and ux_quote_packages__guest_quote_seq replace ux_quote_packages__quote_seq and ix_quote_packages__org_quote; requote_of_quote_id has the composite key through org_id, ck_quotes__requote_org_only and the entry fk_quotes__requote_of_quote_id in TENANT_REFERENCE_EXCEPTIONS; every read and write of a child carries the owner predicate next to quote_id; C16 is the gate
+- CANONICAL LISTS (ADR-0010 amendment 12 item 2; D-ARCH-168; data-model 1.7): a canonical list that packages/carriers already holds is moved to packages/shared and re-exported, never written a second time
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (quotes; also the soft-deleted quote: the row resolves, and the processor reads it in the tenant transaction, finds it deleted and completes without effect; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - AT-US-154-01 … AT-US-154-09: all 9 scenarios of US-154, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-173-01 … AT-US-173-07: all 7 scenarios of US-173, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -424,7 +440,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-201 **DC** (M0 Must) Order number allocation |
 | REQs | REQ-BOOK-026 |
 | NFRs | NFR-SCALE-002 |
-| Spikes / security / decisions | D-032 |
+| Spikes / security / decisions | D-032, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-023, TASK-032 |
@@ -438,6 +454,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-201 scenarios (no gaps under 2 replicas, format per D-032)
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (orders; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-201-01 … AT-US-201-08: all 8 scenarios of US-201, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -488,7 +505,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-095 **DC** (M0 Must) Monthly partitions, indexes and partition-creation job |
 | REQs | REQ-AUDIT-016, REQ-AUDIT-017 |
 | NFRs | NFR-AUDIT-002 |
-| Spikes / security / decisions | D-ARCH-093, PR24-SEC-10, D-ARCH-099 |
+| Spikes / security / decisions | D-ARCH-093, PR24-SEC-10, D-ARCH-099, D-SECPR039-01, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-039, TASK-021 |
@@ -504,6 +521,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - US-095 job scenarios (current + 3 months always exist; failure raises health degradation)
 - SQUAT RUNBOOK (data-model §5.2 amendment of 2026-11-13; PR #24 code review R2-n1; D-ARCH-093): docs/07-ops/runbooks/audit-partition-squat.md says what the audit_partition_squatted event and the audit_partitions readiness unavailable mean (kind, reason, partition_name), carries the per-kind removal table — droppable by the migrator: type, enum, range/multirange, domain, composite type, sequence, procedure, aggregate; refused by the sql_drop branch and needing a superuser to suspend platform_audit_ddl_guard_drop, DROP, and ENABLE ALWAYS again in ONE transaction: table, view, materialised view, index, function — the post-checks (evtenabled A on both event triggers, ensure_audit_partitions(3) ok, readiness back to ok), the operator-log and second-reviewer requirement, and the rule that prisma/bootstrap/90-audit-ddl-guard.sql is never edited for a runbook change; rehearsed on a local database for one droppable kind and one table squat (the rehearsal transcript goes into the PR report)
 - CIC LEFTOVER SECTION OF THE RUNBOOK (PR24-SEC-10 LOW, PR #24 security r2; data-model §5.2 amendment of 2026-11-13, second block; D-ARCH-099): the runbook covers a refused CREATE INDEX CONCURRENTLY under an audit name — the guard refuses it with 42501, but the build phases are already committed and leave an INVALID (indisvalid false) migrator-owned index under the audit name, after which every other DDL by the migrator is refused by the end-of-command invariant and DROP INDEX is refused by sql_drop even for a superuser; detection: readiness audit_partitions unavailable with kind i, plus the audit_partition_squatted event; recovery with exactly ONE leftover: as the migrator ALTER INDEX the leftover RENAME TO a non-audit name, then DROP INDEX the renamed index; recovery with TWO OR MORE leftovers (renaming either is refused while the other remains; DROP INDEX a, b and DROP TABLE of the carrying table are refused) or whenever the rename is refused: cluster-superuser break-glass in ONE transaction — BEGIN; SET LOCAL event_triggers = off; DROP INDEX each leftover; COMMIT — never ALTER ROLE or ALTER DATABASE ... SET event_triggers; afterwards evtenabled = A on both event triggers, ensure_audit_partitions(3) succeeds and readiness is back to ok; the runbook also corrects the R2-n1 break-glass: with only the sql_drop trigger disabled, dropping ONE of several squats is still refused by the end-of-command invariant, so every squat is dropped in the same DROP command or the SET LOCAL form is used; prevention: DATABASE_MIGRATOR_URL exists only in the migrate/seed job environment (PR13-SEC-08) and a direct session with that credential is an operator-log event; at M5 whether the RDS master can set event_triggers is COND-G4-PROD M5 check (d), and until it is known the runbook states that the two-leftover recovery on RDS is unproven; rehearsed on a local database with one leftover and with two (transcript in the PR report)
+- SCHEDULE CONDITIONS (D-SECPR039-01 ruling on D-TASK039-01, conditions (i) to (iv)): for every schedule this task adds, (i) parameters come from code or configuration, never from the job; (ii) a destructive or non-idempotent handler applies its own policy predicate (purges by age), and if it writes it runs through idempotentProcessor keyed by the occurrence id; (iii) SCHEDULE_NAMES stays closed, with the one-queue check and the processor refusal kept, and a name of at most 47 characters; (iv) a run-now action goes through the scheduler, never as a hand-made repeat: job
 - AT-US-095-01 … AT-US-095-06: all 6 scenarios of US-095, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -515,9 +533,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Field | Value |
 |---|---|
 | Stories (completes) | US-155 **DC** (M0 Must) Guest quoting with access token and rate limits |
-| REQs | REQ-QUOTE-002 |
+| Stories (partial; completed by TASK-141) | US-040 (M0 Must) Redis-backed rate limiting and headers |
+| REQs | REQ-QUOTE-002, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-SEC-005 |
-| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134 |
+| Spikes / security / decisions | SEC-P3-10, SEC-P3-15, D-ARCH-012, D-ARCH-109, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-04, PR48-SEC-06, D-SEC-PR48-01, D-ARCH-134, D-ARCH-175, D-SD-004, D-PM-078, D-SD-005 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-041, TASK-044 |
@@ -537,7 +556,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the quote-token authenticator learns that X-Quote-Token is present only through presentedKinds(req.headers, route.auth) on getQuote and streamQuoteResults (when session is also present the bearer authenticator decides and the token header is never read, spy), builds the guest principal permissions with readonlySet holding exactly the quote read permissions the route needs, calls markCredentialsRead(res) together with its decision, and answers a missing or malformed token with 404 NOT_FOUND (A-078) whose private, no-store comes from the descriptor test ([session, quote-token] has no anonymous member), not from the authenticator; COMPANION CASE (ADR-0008 am. 6 item 1 (b)): on claimQuote, saveQuote and createShipment, whose auth set is exactly [session], x-quote-token is declared in schema.headers as the contract declares the QuoteToken header parameter there (route-metadata companion parity, 020-C), and the handler compares the SHA-256 of the presented value with the stored guest_token hash in constant time, never stores or logs the raw value and never treats it as authentication; on every other route schema.headers may not name it (defineRoute refuses it at module load); api tests: a bearer plus a token on getQuote ignores the token, a token alone yields a guest principal whose permissions view throws on mutation, a malformed token is 404 private, no-store, and claimQuote with a wrong token is 404 while the quote stays unclaimed
 - PR48-SEC-04 deny-404 (LOW; D-SEC-PR48-01 (4); D-ARCH-134; DUE before this task merges): the RBAC matrix generator gains the outcome deny-404 (REFUSALS[deny-404] = { status: 404, code: NOT_FOUND }, symbol 404, private, no-store); for a route whose auth set is exactly [session, quote-token] rule 1 gives deny-404 when no usable credential is presented (none, a refresh cookie, an expired bearer) and rule 2 gives a guest principal for a well-formed unknown token (the handler answers 404) and deny-404 for a malformed one — ADR-0008 am. 5 item 1 and A-078; the committed matrix is regenerated (the 8 cells of getQuote and streamQuoteResults change from 401), the D-ARCH-107 test title no longer calls 401 the expected answer, the US-155 wrong-token and missing-token api tests and the matrix agree, and the security record of this PR covers tests/generated/rbac (owned path)
 - RBAC MATRIX SEAM RETIREMENT, quote-token kind (PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task deletes the quote-token branch of resolvePrincipal in tests/generated/rbac/matrix-app.ts and presents a real X-Quote-Token (a guest quote minted by the test) through the real authenticate slot; regenerated matrix, drift test green, the still-stubbed-kinds tripwire of TASK-052 passes
+- GUEST TOKEN COST (ADR-0016 amendment 12 item 4; D-ARCH-175): the guest authenticator does no I/O; it derives the token hash, and the quote row is matched by the handler query after the step-5 class limit; a refusal the authenticator raises itself is counted by the wrapper of TASK-041; test: a forged X-Quote-Token causes no database call before the public class limit has been consumed
+- [AT-US-040-04] and [AT-US-040-03-5] at POST /quotes (D-PM-078): a verified signed-in user is limited by the quote-create class (the 31st quote in a minute and the 301st in an hour answer 429 RATE_LIMITED with Retry-After although the user is far below 600 authenticated requests a minute; the 1001st in an hour by the users of one organisation answers 429 and a user of another organisation is not affected), and a guest POST /quotes is counted only against the guest per-IP class (20/min, 100/h)
 - AT-US-155-01 … AT-US-155-11: all 11 scenarios of US-155, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- Covers the scenarios of AT-US-040-01 … AT-US-040-17 that belong to its layer; US-040 closes in TASK-141
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
@@ -550,7 +572,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-202 **DC** (M0 Must) Mock booking saga end to end (API, queue, worker)<br>US-008 (M0 Must) Correlation ID and structured, redacted logging<br>US-010 **DC** (M0 Must) Idempotent job processing and scheduled jobs |
 | REQs | REQ-BOOK-020, REQ-PLAT-011, REQ-PLAT-012, REQ-PLAT-014, REQ-PLAT-015 |
 | NFRs | NFR-OBS-003, NFR-PERF-004, NFR-RES-005 |
-| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003 |
+| Spikes / security / decisions | D-031, D-062, D-ARCH-084, D-SD-003, PR039-SEC-03, D-SD-004, D-ARCH-180, D-ARCH-184, D-ARCH-185, R-ARCH-37, PR079-SEC-03, D-SECPR079-01, D-SD-006, D-ARCH-191, D-ARCH-202, D-ARCH-205, D-QG-004, D-PM-086, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-084, TASK-085, TASK-088, TASK-079, TASK-047, TASK-040, TASK-043 |
@@ -567,6 +589,15 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-202 scenarios (DRAFT -> ... -> LABEL_READY; Mock carrier called exactly once)
 - AT-US-008-03 END TO END (D-062; this task COMPLETES US-008): one integration test titled with AT-US-008-03 POSTs the M0 booking with X-Correlation-Id: demo-booking-0001, runs the saga through the worker on the Mock carrier and asserts that exactly that value appears in the api log lines, every audit entry of the booking (STATE_TRANSITION entries and the carrier_call entry), the outbox row, the BullMQ payload v2, the worker log lines and the Mock carrier call record; US-008 reads Implemented only when TASK-010, TASK-029, TASK-035, TASK-043, TASK-079 and this task are merged
 - AT-US-010-01 (US-010 delivery split, D-SD-003; this task COMPLETES US-010): given the M0 mock-booking job for shipment S1, delivering the same job twice leaves exactly one Mock carrier shipment for S1 and exactly one audit entry for the booking transition; AT-US-010-02 to -06 are proven by TASK-039 and AT-US-010-07 by TASK-047
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (saga_executions; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- CANDIDATE FUNCTION saga_due_candidates (when this task builds it; otherwise TASK-094): the function does not filter on organisations.deleted_at (D-ARCH-180; ADR-0013 amendment 4 item 21): it settles, cancels, expires or retries existing work, which a soft-deleted organisation still owns
+- EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
+- CALL RECORD CHANNEL (PR #77 code review m1; PR079-SEC-03; D-SECPR079-01; with principal-architect before dispatch): callRecords() of the Mock is diagnostic and test evidence on the raw adapter only (the guarded registry facade has none) and a per-process ring ordered by completion; principal-architect decides the channel the saga uses to cite carrier calls (for example an injected onCall(record) sink port, like the logger) before this task and before DHL, FedEx and UPS copy the pattern; the saga matches records by the ctx.correlationId it created; if the channel changes the Mock adapter, this task asks the orchestrator for the pkg-carriers-mock lock and also validates maxCallRecords as a positive safe integer
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder, confirmPayment (required) (D-SD-007)
+- CHECKOUT CALL, MOCK (ADR-0012 amendment 6; ADR-0003 amendment 2026-11-20 rule (k); D-ARCH-205): the call phase of checkoutOrder asks the Mock gateway with the key auth:<order_id>:<order_version>:<attempt>; on AUTHORISED the handler writes the payment as AUTHORISED, moves the shipments to PAID and publishes payment.authorised in its one transaction, and no step confirms afterwards (AT-US-202-01); mock_3ds answers REQUIRES_ACTION and confirmPayment derives the outcome; fault test: the handler transaction fails after call, no payment row exists, the retry with the same Idempotency-Key gets the same Mock result and the saga starts once; the rows of checkoutOrder and confirmPayment in the call table are added by TASK-096
+- IF-MATCH UNTIL TASK-096 (ADR-0003 amendment 2026-11-20 rule (i), owner line; D-ARCH-202 sequencing; D-SD-010): step 7b is a pass-through until TASK-096 merges, so checkoutOrder enforces no If-Match until then and no stale-on-arrival check runs before call; load returns the order id and version (the source TASK-096 declares) and the handler writes through the conditional write of ADR-0014 amendment 7; no test asserts that If-Match is ignored or that 428 is absent; TASK-096 retrofits the check before call and its tests (RETROFIT on TASK-096); if TASK-096 is on main when this task is dispatched, this task declares the version source and writes the 428 and 412 tests itself
+- AT-US-202-01 STATUS LITERAL (D-PM-086): the checkout step of AT-US-202-01 expects 201 with the created payment, as the contract answers checkoutOrder, not 202; the story file edit is held and lands on main before this task is dispatched; the test asserts 201
 - AT-US-202-01 … AT-US-202-07: all 7 scenarios of US-202, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-008-01 … AT-US-008-06: all 6 scenarios of US-008, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-010-01 … AT-US-010-07: all 7 scenarios of US-010, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
@@ -611,7 +642,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-156 **DC** (M0 Must) Quote input validation and package limits |
 | REQs | REQ-QUOTE-003, REQ-QUOTE-004 |
 | NFRs | NFR-SEC-009 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-170, D-SD-004 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-091, TASK-070 |
@@ -625,6 +656,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-156 scenarios
+- BILLABLE-WEIGHT RULE BY ORIGIN (ADR-0009 amendment 2 item 4; D-ARCH-170; TASK-076 code review R1-m5): the rule passed to the billable-weight helper is chosen by countries.unit_system of the quote origin country (IMPERIAL for a US origin, METRIC otherwise), never by the unit of entry; test: the package of AT-US-139-04 entered in inches and in centimetres bills the same weight for the same origin, 12,701 g for a US origin and 13,000 g for a metric origin with the default rules
 - AT-US-156-01 … AT-US-156-12: all 12 scenarios of US-156, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -638,7 +670,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-203 **DC** (M0 Must) Saga idempotent replay and one carrier shipment |
 | REQs | REQ-BOOK-021 |
 | NFRs | NFR-RES-005, NFR-SCALE-002 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR039-SEC-03, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-092 |
@@ -651,6 +683,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-203 scenarios (same Idempotency-Key -> same order, no second booking; worker crash mid-step)
+- ABORT-SIGNAL DISCIPLINE (PR039-SEC-03 (b), INFO; D-SECPR039-01): processors of this task pass the per-job AbortSignal to every awaited call that accepts one (database, carrier, HTTP), check it before each non-transactional side effect, and call throwIfAborted after the effect, so no work overlaps a retry after the per-job deadline
 - AT-US-203-01 … AT-US-203-07: all 7 scenarios of US-203, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

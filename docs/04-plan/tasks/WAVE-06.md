@@ -32,7 +32,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-208 **DC** (M1 Must) Checkout gate: verified email, unexpired quotes, complete steps |
 | REQs | REQ-BOOK-016, REQ-PAY-007 |
 | NFRs | — |
-| Spikes / security / decisions | D-009 |
+| Spikes / security / decisions | D-009, D-ARCH-191 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-153, TASK-059, TASK-149, TASK-154, TASK-151 |
@@ -45,6 +45,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-208 scenarios
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder (required) (D-SD-007)
 - AT-US-208-01 … AT-US-208-09: all 9 scenarios of US-208, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -58,7 +59,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-210 **DC** (M1 Must) Stripe adapter: test keys only, fixture-backed |
 | REQs | REQ-PAY-004, REQ-PAY-017 |
 | NFRs | NFR-SEC-010, NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-21, SEC-P3-08, COND-SANDBOX-DEMO |
+| Spikes / security / decisions | SEC-P3-21, SEC-P3-08, COND-SANDBOX-DEMO, D-ARCH-202, D-ARCH-205, R-ARCH-39, D-QG-004, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-085, TASK-113 |
@@ -73,6 +74,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-210 scenarios
 - SEC-TC-60: livemode:true fixture rejected and audited; unknown event stored not processed; non-allow-listed host blocked
+- CHECKOUT CALL, STRIPE (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendments 5 and 6; D-ARCH-202, D-ARCH-205; R-ARCH-39): with the Stripe adapter the call phase of checkoutOrder creates the PaymentIntent unconfirmed and never returns AUTHORISED; the browser confirms with the client secret of the committed response; the key is auth:<order_id>:<order_version>:<attempt> and replaces auth:<order_id>:<attempt> in the D-ARCH-106 line; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; TASK-167 runs the suite assertion of the SIMULATED GATEWAY line on the Stripe fixtures
+- DISPATCH GATE: STRIPE REPEATED 500 (D-ARCH-202 open item; D-QG-004 QG-040-C8; D-SD-010): Stripe replays the saved answer of an idempotency key, a 500 included, for at least 24 h, so a derived key that never changes would repeat a gateway 500 (the attempt number is read in load and nothing is written when call fails); principal-architect rules how the key or the attempt moves after a gateway 5xx before this task is dispatched, and the ruling is folded here with its test
 - AT-US-210-01 … AT-US-210-06: all 6 scenarios of US-210, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -139,7 +142,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-209 **DC** (M1 Must) Server-computed amount and authorise-then-capture |
 | REQs | REQ-PAY-006, REQ-PAY-008 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-011 |
+| Spikes / security / decisions | D-011, D-ARCH-191, D-ARCH-202, D-ARCH-205, R-ARCH-39, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-166, TASK-085 |
@@ -152,7 +155,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-209 scenarios
-- D-ARCH-106 (ADR-0003 am. 2026-11-13): checkoutOrder is load (order, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<attempt>, never random) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response only; ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
+- D-ARCH-106 (ADR-0003 am. 2026-11-13; key replaced by D-ARCH-202 and D-ARCH-205, see CHECKOUT CALL, STRIPE): checkoutOrder is load (order with its version, price snapshots, attempt count) then call (gateway authorise with the idempotency key auth:<order_id>:<order_version>:<attempt>, never random; with the Stripe adapter it creates the intent unconfirmed) then handler (payment row with the gateway reference, audit, number allocation, outbox order.checkout_started); the client secret goes into the response and, encrypted, into the stored response of the idempotency key, nowhere else (ADR-0014 amendment 15); ARCHITECTURE 7.2 is read in that order; confirmPayment has the same shape (load, call to retrieve, derive the state and void when required, handler); a fault test shows that a handler failure after call and the retry give one gateway effect
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: checkoutOrder (required) (D-SD-007)
+- CHECKOUT CALL, STRIPE (ADR-0003 amendment 2026-11-20 rules (j) and (k); ADR-0012 amendments 5 and 6; D-ARCH-202, D-ARCH-205; R-ARCH-39): with the Stripe adapter the call phase of checkoutOrder creates the PaymentIntent unconfirmed and never returns AUTHORISED; the browser confirms with the client secret of the committed response; the key is auth:<order_id>:<order_version>:<attempt> and replaces auth:<order_id>:<attempt> in the D-ARCH-106 line; fault test: the handler transaction fails after call, the gateway fake shows an unconfirmed intent and no hold, and the retry with the same key finds the same intent; a checkout of the same order after its version changed uses a new gateway key; TASK-167 runs the suite assertion of the SIMULATED GATEWAY line on the Stripe fixtures
 - AT-US-209-01 … AT-US-209-08: all 8 scenarios of US-209, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -166,7 +171,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-213 **DC** (M1 Must) Webhook verification, deduplication and replay |
 | REQs | REQ-PAY-011, REQ-PAY-012 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134 |
+| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-167, TASK-040 |
@@ -183,6 +188,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR32-SEC-14 / D-ARCH-110 (ADR-0008 am. 5 items 1 and 5): the Stripe and Mock-gateway signature authenticators read their signature header only on routes whose auth set contains signature (an Authorization header or a cookie on a webhook route is ignored) and build the provider principal only after the signature over the raw body verified: credential signature, authenticated false, no actor, a read-only permission view holding exactly the signature-only permission of the route; the permission gate change itself is TASK-020 part 020-B, this task adds api tests through the real authorise: a valid signature 200, an invalid signature or a stale timestamp 401 before the body is parsed, a session bearer on the webhook route 401 (credential outside the set), and a route whose principal lacks its permission 403
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the Stripe and Mock-gateway signature authenticators read Stripe-Signature or X-Mock-Signature themselves (signature is not a presentable kind) and only on routes whose auth set is [signature]; they never read authorization, cookie or x-quote-token (presentedKinds(req.headers, route.auth) is empty on a [signature] route and the authenticator does not consult those headers); the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, stale timestamp, missing header alike) and private, no-store on every 401 comes from the descriptor test ([signature] has no anonymous member); stripe-signature and x-mock-signature are in CREDENTIAL_HEADER_NAMES, so no webhook route can declare them in schema.headers (020-C PR38-SEC-03) and the handler reads the verified event from the body only; api tests: markCredentialsRead called once per request, a valid signature plus a bearer is 200 with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
+- SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
 - AT-US-213-01 … AT-US-213-11: all 11 scenarios of US-213, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -198,7 +204,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-242 **DC** (M1 Must) Store events once, order them, and drive shipment state forward |
 | REQs | REQ-TRACK-002, REQ-TRACK-005 |
 | NFRs | NFR-RES-005 |
-| Spikes / security / decisions | D-ORCH-039 |
+| Spikes / security / decisions | D-ORCH-039, D-ARCH-180 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-168, TASK-084 |
@@ -213,6 +219,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-242 scenarios
 - SEC-TC-22 (D-ORCH-039; threat model T-72, AC-36; ADR-0010 am. 9; named on this sheet because the manifest parks it in required_cases_pending with this task as owner, checkpoint G3): an integration test whose title carries [SEC-TC-22]: an event that reaches the store without a confirming track() result (the shape a carrier push has) is stored as a hint, does not advance the shipment to PICKED_UP or to a terminal state, and cancellation and refund of that shipment still succeed; conditional (security-test-cases.md rule 4): the push route belongs to US-252 (TASK-261, Should), so while it is absent the same test also asserts that no mounted route accepts a carrier push and that no code path advances state from an unconfirmed event, and TASK-261 adds the signed-push half; after this task merges qa-lead moves the ID back to integration.required_cases at the next activation checkpoint
+- JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (tracking_poll_schedule, joined to shipments, if this task creates it (otherwise TASK-204 carries the line); live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest; for the SYSTEM table tracking_poll_schedule the SELECT grant to platform_definer); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
 - AT-US-242-01 … AT-US-242-09: all 9 scenarios of US-242, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -254,7 +261,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-212 **DC** (M1 Must) 3-D Secure, declines and attempt limit |
 | REQs | REQ-PAY-009, REQ-PAY-010 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-COND-06, SEC-P3-28 |
+| Spikes / security / decisions | SEC-COND-06, SEC-P3-28, D-ARCH-191, D-ARCH-202, D-SD-010 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-170, TASK-167 |
@@ -269,6 +276,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-212 scenarios
 - SEC-TC-37 (amended, gateway part): Mock CVC fail/unavailable -> FAILED/AUTHENTICATION_FAILED, authorisation voided, no saga
+- PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: confirmPayment (required) (D-SD-007)
+- CALL CLASS (ADR-0003 amendment 2026-11-20 rules (j) to (l); D-ARCH-202): the operation gets its row in the call table of the route-metadata test (read, inert or reachable); an inert or reachable operation has a fault test (the handler transaction fails after call, the provider fake shows no hold, charge, booking or message that no row names, the next request converges); an effect that is right only if the state change commits is an outbox event and a worker step; on this card: confirmPayment keeps class reachable (its row comes from TASK-092 through TASK-096); the void of an authorisation when the cvc_check rule requires it runs in call on the intent that the committed payment row names, and the fault test covers it: the handler transaction fails after the void, the next request derives the same state from the gateway
 - AT-US-212-01 … AT-US-212-07: all 7 scenarios of US-212, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -309,7 +318,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-247 **DC** (M1 Must) Public tracking lookup by tracking or order number |
 | REQs | REQ-TRACK-008, REQ-TRACK-012 |
 | NFRs | NFR-PERF-005 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | PR075-SEC-12, D-SECPR075-02, D-SD-004 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-041 |
@@ -322,6 +331,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-247 scenarios
+- PR075-SEC-12 SENTINEL (INFO, CWE-359; D-SECPR075-02): a sentinel test plants a carrier free-text description (TrackingEvent.carrierDescription) and shows that it never appears in a public tracking response, whose description is the localised canonical text only
 - AT-US-247-01 … AT-US-247-09: all 9 scenarios of US-247, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

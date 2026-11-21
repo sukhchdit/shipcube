@@ -23,7 +23,8 @@ import { loadRuntimeConfigOrExit, type Config, type RuntimeConfig, type Secret }
 import { createWorkerHealthServer, type MetricsSource } from './platform/health/server.js';
 import { jobLogContext } from './platform/logging/job-context.js';
 import { queueConnectionOptions } from './platform/queues/connection.js';
-import { createWorkerQueues, type ProcessorRegistry, type WorkerQueues } from './platform/queues/runtime.js';
+import { PRODUCTION_RETENTION } from './platform/queues/retention.js';
+import { createWorkerQueues, type ProcessorRegistry, type WorkerQueues, type WorkerQueuesOptions } from './platform/queues/runtime.js';
 import { PROCESSORS } from './processors.js';
 
 /** The signals that start graceful shutdown (each handled once). */
@@ -74,16 +75,25 @@ export interface StartWorkerDependencies {
 
 /**
  * BullMQ queues over the worker's own connections (ACL user `worker`, key prefix `bull:`): the blocking profile for the
- * consumers' `Worker`s, the fail-fast profile for every `Queue` (metrics, dead-letter writes; PR64-SEC-03).
+ * consumers' `Worker`s, the fail-fast profile for every `Queue` (metrics, dead-letter writes; PR64-SEC-03; R2-n2 pins it).
  */
-export function createProductionQueues({ config, log, processors }: WorkerQueuesInput): WorkerQueues {
+export function productionQueuesOptions({ config, log, processors }: WorkerQueuesInput): WorkerQueuesOptions {
   const url = config.REDIS_URL.reveal();
-  return createWorkerQueues({
+  return {
     connection: queueConnectionOptions(url, 'worker-consumers', 'worker'),
     queueConnection: queueConnectionOptions(url, 'worker-queues', 'queue'),
     log,
     processors,
-  });
+    // The scheduled jobs (housekeeping: the hourly queue-retention sweep) and the three ADR-0013 am. 3 bounds, passed
+    // explicitly so the composition is pinned (start-worker.test.ts); the tests pass small bounds instead.
+    schedules: {},
+    retention: PRODUCTION_RETENTION,
+  };
+}
+
+/** The production queues: `productionQueuesOptions` built into the worker queue runtime. */
+export function createProductionQueues(input: WorkerQueuesInput): WorkerQueues {
+  return createWorkerQueues(productionQueuesOptions(input));
 }
 
 /** The production process: what main.ts runs with. */

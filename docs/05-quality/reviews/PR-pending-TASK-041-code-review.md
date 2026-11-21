@@ -112,3 +112,106 @@ The MINOR findings may be fixed in this task (preferred for m2, m3 and m6, which
 - **S2.** `TRUST_PROXY_HOPS` defaults to 1 (config). Where the API port is reachable without passing the edge (`compose.debug.yaml` publishes `127.0.0.1:3000`, so local only; `npm run dev:api`; a misconfigured target group), a client-supplied `X-Forwarded-For` becomes `req.ip`. That rotates every per-IP limit key and the audit IP. This is pre-existing config, but TASK-041 makes it load-bearing. Confirm the deployment topology, or default to 0 outside Compose.
 - **S3 (R1-n2).** Full IPv4 addresses are held in Valkey rate-limit keys for up to an hour (personal data under GDPR / DPDP; ephemeral). Confirm that this is acceptable, or key the IP rules by a keyed hash.
 - **S4 (R1-m4).** No breaker: a Valkey brownout adds up to 750 ms per request (availability).
+
+---
+
+# Round 2: part 041-A at `3a6b4c8b` (2026-11-20)
+
+| Field | Value |
+|---|---|
+| Head | `3a6b4c8b` on `feat/TASK-041-valkey-backed-rate-limiting-per` (`ba4d0aaa` merge of main `6ab40f28` + fix commit `3a6b4c8b`); read from the main checkout's object store; the evidence worktree stays at `e6f484a` and was not touched |
+| Scope | Part 041-A only: the change list A1-A8 of `rulings/wave-1-task-041-rulings.md` (D-ARCH-173..179, ADR-0016 am. 12), my round-1 m1/m2/m3/m5/m6/m8 and NITs, and QG-041-C1 of D-QG-001, which I check here. Part 041-B (B1-B5, including R1-m4) is not in this PR |
+| Also read | D-QG-001, D-API-003, D-ARCH-181, D-ORCH-140 |
+
+```
+VERDICT: APPROVED_WITH_NITS (part 041-A; merge conditions R2-C1..R2-C5 below)
+SUMMARY: A1-A8 are implemented as ruled, and each has the tests the rulings name. QG-041-C1 is MET at this head: the
+         README §7 text matches rulings §5.1 verbatim, rate-limit-redis is gone from package.json and the parsed
+         lockfile, and TRUST_PROXY_HOPS defaults to 0 with the staging/production guard and tests. Round-1 m1, m2, m3,
+         m5, m6 and m8 are closed; m4 is routed to 041-B by D-ARCH-177; m7 is still open with product-manager and the
+         orchestrator. No new BLOCKER, MAJOR or MINOR; two NITs.
+```
+
+## R2.1 What I verified myself
+
+| Check | How | Result |
+|---|---|---|
+| Merge `ba4d0aaa` is pure | `git merge-tree --write-tree e6f484a 6ab40f28`, then `git diff --stat <tree> ba4d0aaa` | Empty diff: a pure union. The fix commit `3a6b4c8b` touches 29 files (+473/-86) |
+| Main drift since the merge (main is now `06263078`) | `comm -12` of `6ab40f28..HEAD` against the branch's own files (`6ab40f28..3a6b4c8b`) | No overlap. The newer main commits are docs only (D-ARCH-181, D-ORCH-140, review records) |
+| Lockfile (A5) | Parsed `packages` maps of `ba4d0aaa` and `3a6b4c8b` | Removed: `node_modules/rate-limit-redis` only. Changed: the `apps/api` entry only (the dependency dropped). Nothing added. `git grep rate-limit-redis` outside docs and the lockfile: no hit |
+| README §7 (A7, QG-041-C1) | Each `>` paragraph of rulings §5.1 checked with `grep -F` against `git show 3a6b4c8b:docs/03-architecture/api/README.md` | All five replacement texts (two paragraphs, Headers, Store outage, IP) are present verbatim; the old library sentence and the old outage and IP paragraphs are gone |
+| Format | `prettier --check` on the changed `.ts`/`.md`/`.json` files, in a `git archive` copy of `3a6b4c8b` | Clean |
+| Lint | `eslint --max-warnings 0` on the 25 changed `.ts` files in the copy, with the copy's own `@platform/*` packages linked in place of the worktree's | Clean |
+| Types | Strict `tsc --noEmit` scratch project over every `.ts` file the branch changes since `29fe2a1` (1,376 files checked, 47 of them from the copy's `packages/config/src`) | Clean |
+| Probe: fallback cost (R1-m5) | tsx on the copy: fill each store to 50,000 entries, then time 20,000 new keys | Window store 0.015 ms and denial store 0.015 ms per new key at the cap (round 1: about 0.9 ms). The most recent key is still counted |
+| Not run (host rule) | Jest, npm, Docker | I rely on lane B for every suite, including the first run of `rate-limit.int.test.ts` with its new 5 s bound |
+
+The copy, all its junctions and the probe were removed afterwards; the worktree `../Shipqube-TASK-041` still shows a clean `git status`.
+
+## R2.2 Change list A1-A8 against the code
+
+| Item | Code | Tests | Status |
+|---|---|---|---|
+| A1: credentialed rule only for non-OPTIONS requests under `/api/v1` | `limits.ts` `underPrefix` (exact, case-sensitive) plus the `req.method !== 'OPTIONS'` check; `createApp` passes `API_PREFIX` | A3 rows below | Met |
+| A2: reworded texts | `limits.ts` header, `policy.ts` ceiling comment and keys comment, `store.ts` header; the test title as dictated | n/a | Met, verbatim |
+| A3: tests and counter label | Counter label `step0-credentialed` | `limits.api.test.ts`: `/api/docs/`, `OPTIONS /api/v1/...` and `/nope` with a junk bearer refused at the 4th request, counted as `unauthenticated`; extra rows `/api/v10` and `/API/v1`; `/api/v1/mine` stays under the ceiling; the ceiling test asserts `{ 'step0-credentialed': 1 }` | Met (two rows beyond what was asked) |
+| A4: `rate_limit_auth` once per key and window | `RateDecision.first` = `count === limit + 1`, taken from the store's count with nothing new stored; emitted for `SECURITY_RATE_LIMIT_CLASSES` | 13 logins give three 429s, one event and a counter of 3; the next window emits again (2 events, counter 4); an `email-send` row | Met |
+| A5: remove `rate-limit-redis` | `apps/api/package.json` and the lockfile (parsed, §R2.1) | n/a | Met |
+| A6: `TRUST_PROXY_HOPS` default 0 plus guard | `schema.ts` (default 0 and the dictated description); `trustProxyGuard` (`api` service, `isHardenedAppEnv`: `missing` when unset, `forbidden-in-environment` / `trustProxy.hops` for 0); registered in `GUARDS` (count pinned to 16); hardened test env sets 2; `compose.env` keeps 1 | `trust-proxy.test.ts`: default 0, the two guard rows for staging and production, 1/2/5 accepted, local and test accept unset and 0, the worker is exempt, 6 is invalid | Met. The `.env.example` line is the user's (R2-C1) |
+| A7: README §7 | Verbatim (§R2.1) | n/a | Met |
+| A8: O(1) eviction (PR041-SEC-01, R1-m5) | `bounded-map.ts`: sweeps at most 8 entries from the head per new key, evicts the oldest at the bound, updates in place; used for windows, slots and the denial windows and carries | Per-insert inspection ≤ `SWEEP_PER_INSERT` over 20,000 keys; the size bound; window, slot and denial stores past a cap of 50 or 100 | Met; probe confirms |
+| A8: live refusal without `rateLimit` (PR041-SEC-08) | `RateLimitMissingError` in `assertBootable` | `pipeline-audit-privacy.test.ts` (live throws; test mode and no mode do not); live fixtures in two other suites now pass `rateLimit` | Met |
+| A8: matrix seam listed (R1-m6) | `matrix-app.ts` header names the absence of `rateLimit` as the fourth seam, with its guard and retirement | n/a | Met |
+| A8: outage wiring and field allow-list pinned (R1-m3) | `security-event.test.ts` pins `['store','scope']` and level `error` | startApi with Valkey failing: the 403/429 shape holds, the audit append count is N+1, and exactly one line each for scopes `authz-denial` and `rate-limit`, at level error, with `store: 'valkey'`, no host text and no dropped attributes. Deleting the budget's reporter wiring in `app.ts` now fails this test | Met |
+
+## R2.3 Round-1 findings
+
+| ID | Status at `3a6b4c8b` |
+|---|---|
+| R1-m1 step-0 ceiling chosen by header presence | **Closed** for 041-A by A1/A3 (option (a)). Option (b), the failed-authentication budget, is part 041-B (B1), due before TASK-052 is dispatched (D-ARCH-175) |
+| R1-m2 missing `email-send` event | **Closed** (A4, with the once-per-window rule) |
+| R1-m3 outage wiring unpinned | **Closed** (A8 row above) |
+| R1-m4 no breaker | **Routed** to 041-B (B3; D-ARCH-177: required, not merge-blocking for 041-A) |
+| R1-m5 O(n) eviction | **Closed** (A8; probe 0.9 ms → 0.015 ms) |
+| R1-m6 matrix seam not listed | **Closed** |
+| R1-m7 ATs credited on helper tests; card says "completes US-040" | **Open.** The card on main still reads "Stories (completes) US-040", and AT-US-040-04/-13/-15/-16 are still tagged on helper-level tests. Owner: orchestrator / product-manager (R2-C3) |
+| R1-m8 ADR-0016 §8 contradiction | **Closed**: ADR-0016 am. 12 (D-ARCH-173), verified by D-QG-001; brief §3.2 / CLAUDE.md §2 standing recorded by D-ARCH-181, with the user's acceptance in D-ORCH-140; `rate-limit-redis` removed |
+| R1-n1 stale comment | Closed (reworded; see R2-n1 for its new wording) |
+| R1-n2 "coarse prefixes" overclaim | Closed (A2) |
+| R1-n3 `.then(answer, next)` | Closed: `.then(...).catch(next)` in both slots |
+| R1-n4 header overwrite across stages | Closed by documentation (README §7 and the `limits.ts` header, as ruled in A8) |
+| R1-n5 int-test bound | Closed: `LOAD_TIMEOUT_MS = 5_000` in every store and budget of the suite |
+| R1-n6 `AT-US-040-03-5` tag | Open (NIT; trace pooling does not need it) |
+| R1-n7 step-0 counter label, export owner | Closed (`step0-credentialed`; TASK-214 named in `counter.ts` and `kit.ts`) |
+| R1-n8 capture test still on global `fetch` | Open, optional (the task now holds `api-audit-mw`; the ratchet allows leaving it) |
+
+## R2.4 New findings
+
+| ID | Severity | file:line | Issue | Fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `docs/03-architecture/api/README.md` §13 (`rate_limit_auth` row, l. 479; `rate_limit_store_unavailable` row); `packages/shared/src/logging/security-event.ts:51` | D-API-003 gave wording for this head, and none of it has landed. (i) The runtime row should say "*acknowledged D-API-003*". (ii) "ADR-0016 item 8" should become "ADR-0016 amendment 12 item 8", with the fallback-set wording. (iii) The `rate_limit_auth` Emitted-when cell should add "logged once per key and window, at the first refusal (a counter counts every refusal; §7)". As it stands, the row describes per-refusal emission, which A4 changed. The code comment still says "api-designer to acknowledge". | Apply the three cell edits and the comment in this PR, or leave them to api-designer's next README fold, which D-API-003 allows for (i) and (ii). |
+| R2-n2 | NIT | `apps/api/src/platform/rate-limit/limits.ts` `ipLimiter(kit, apiPrefix = '/api/v1')` | The default duplicates `API_PREFIX`. A test composition that calls `ipLimiter(kit)` directly would silently keep a stale prefix if the version prefix ever changed. | Drop the default and make the parameter required, since `createApp` always passes it. |
+
+## R2.5 Merge conditions (part 041-A)
+
+Closed since round 1:
+- **C1.** ADR part: D-QG-001. QG-041-C1: checked here, MET. QG-041-C3: D-ARCH-181.
+- **C2.** D-API-003 accepts the §13 row and the §7 text.
+- **C3 (decisions half).** D-ORCH-140 records D-TASK041-01..13 as accepted.
+- **C4.** The locks `api-audit-mw` and `api-platform-core` are folded into the card.
+
+Open:
+- **R2-C1 (user; was C5).** Add the 18 placeholder lines and `TRUST_PROXY_HOPS=0` (A6) to `.env.example` on the branch, so the parity tests are green.
+- **R2-C2 (product-manager; QG-041-C2, first half).** A D-PM entry on the step order as ruled, on the reading of AT-US-040-10 and on the title of AT-US-040-06, before 041-A merges.
+- **R2-C3 (orchestrator / product-manager; R1-m7).** Mark US-040 as partial on the card and in task-map, with owners named for -04, -13, -14, -15/-16 and the per-account and failed-tracking rules. Alternatively, retitle the helper tests so their AT IDs do not credit route behaviour.
+- **R2-C4 (security-analyst; QG-041-C4, first half).** A delta round on `3a6b4c8b`, with concurrence or findings on amendment 12 items 2, 3, 5, 6 and 9.
+- **R2-C5 (lane B).** A PASS on the pushed head (`3a6b4c8b` or its successor). It includes the first run of `rate-limit.int.test.ts`, `trust-proxy.test.ts` and the new startApi outage case.
+
+Part 041-B (B1-B5, closing R1-m4 and PR041-SEC-02 (b)) gets its own review before TASK-052 is dispatched.
+
+## R2.6 GOOD (round 2)
+
+- `first` is derived from the count the store already returns, so once-per-window logging needed no new key and holds per instance during an outage.
+- `BoundedMap` is small and generic, and is reused by all four fallback maps. Its O(1) claim is tested by counting predicate calls rather than by timing.
+- The outage test reads startApi's real log lines and pins both scopes, the level, the fields and the absence of the host name, which closes the mount-only wiring gap.
+- The A3 rows go beyond what was asked: `/api/v10` and `/API/v1` pin the exact, case-sensitive prefix.

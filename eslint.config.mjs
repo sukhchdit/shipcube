@@ -70,10 +70,26 @@ const AUTHZ_MATRIX_MESSAGE =
   'the RBAC matrix generator (@platform/authz/matrix, packages/authz/src/generator) is the US-071 test oracle: only tests import it; production code that reused it would make the matrix confirm itself (PR48-SEC-03).';
 const AUTHZ_MATRIX_IMPORT_PATTERN = { regex: '^@platform/authz/matrix(?:/.*)?$', message: AUTHZ_MATRIX_MESSAGE };
 /**
+ * `@platform/carriers` is consumed through its package root only (ADR-0003; US-121 AT-US-121-05; TASK-075 code review
+ * m2): a deep specifier (`@platform/carriers/<anything>`) would reach adapter internals around the CarrierAdapter
+ * contract and the capability guard. The core rule also refuses the `import type` and `export type … from` forms.
+ */
+const CARRIERS_DEEP_IMPORT_PATTERN = {
+  regex: '^@platform/carriers/.+$',
+  message:
+    'import @platform/carriers from its package root only: deep imports reach adapter internals around the CarrierAdapter contract and the capability guard (ADR-0003, AT-US-121-05).',
+};
+/**
  * Every `no-restricted-imports` pattern of the repository. Flat config replaces (does not merge) rule options, so a
  * file-scoped block re-declares the rule from this list minus its own exception, never `'off'`.
  */
-const RESTRICTED_IMPORT_PATTERNS = [BCRYPT_IMPORT_PATTERN, SUPERTEST_IMPORT_PATTERN, S3_SDK_IMPORT_PATTERN, AUTHZ_MATRIX_IMPORT_PATTERN];
+const RESTRICTED_IMPORT_PATTERNS = [
+  BCRYPT_IMPORT_PATTERN,
+  SUPERTEST_IMPORT_PATTERN,
+  S3_SDK_IMPORT_PATTERN,
+  AUTHZ_MATRIX_IMPORT_PATTERN,
+  CARRIERS_DEEP_IMPORT_PATTERN,
+];
 /**
  * Built-in loaders outside every import control (PR44-SEC-14, TASK-020 part 020-D): from `node:module` only
  * `createRequire` (itself confined by platform/static-module-specifier) and the two read-only lookups `builtinModules`
@@ -1021,6 +1037,14 @@ export default defineConfig([
     ignores: TEST_FILES,
     plugins: { platform },
     rules: { 'platform/no-catch-message-interpolation': 'error' },
+  },
+  {
+    // AT-US-138-02 (REQ-PRICE-001, ADR-0015 §6; TASK-076): the pricing engine reads no clock, randomness or environment
+    // and imports no I/O module. The boundaries allow-list (@platform/shared only) is the second control for imports.
+    files: [`packages/pricing/src/**/*.${LINTED}`],
+    ignores: TEST_FILES,
+    plugins: { platform },
+    rules: { 'platform/pricing-purity': 'error' },
   },
   { files: MONEY_HELPERS, rules: { 'platform/money-arith': 'off' } },
   { files: FORMAT_HELPERS, rules: { 'platform/no-tofixed-tolocalestring': 'off' } },

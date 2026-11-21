@@ -240,6 +240,8 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
     default_locale: INT,
     personal_owner_user_id: INT,
   }),
+  // TASK-039: the job idempotency ledger; identifiers and bookkeeping only (the job id names no person).
+  job_executions: table({ ...STD, job_key: INT, queue: INT, status: INT, result: INT, completed_at: INT }),
   // PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): INT except the PUB description and category.
   permissions: table({ ...STD, key: INT, description: PUB, category: PUB, operator_only: INT }),
   reference_dataset_versions: table({
