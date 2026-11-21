@@ -1,0 +1,5 @@
+{
+  "$comment": "Pricing module (data-model §3.9; D-010, REQ-PRICE-003/020; TASK-080): pricing_config_versions, the versioned GLOBAL configuration that quotes and bookings record. GLOBAL: no org_id and no RLS. Grants (prisma/sql/grants.manifest; data-model §4.4): SELECT only for platform_app; the reference seed as platform_migrator, the owner, is the single writer (insert-only dataset, §9.1), like reference_dataset_versions. runtimeReadOnly makes validateGrants refuse any write line for it and keeps it out of the C15 standard-columns guard scope (no stdColumns flag: no runtime writer). The rule tables (margin_rules, surcharge_rules, cover_terms, discounts) join this manifest with US-152.",
+  "module": "pricing",
+  "tables": [{ "name": "pricing_config_versions", "class": "GLOBAL", "runtimeReadOnly": true }]
+}

@@ -244,6 +244,17 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
   job_executions: table({ ...STD, job_key: INT, queue: INT, status: INT, result: INT, completed_at: INT }),
   // PR8-SEC-10 (ADR-0008 am. 3 item 6, D-ARCH-069): INT except the PUB description and category.
   permissions: table({ ...STD, key: INT, description: PUB, category: PUB, operator_only: INT }),
+  // TASK-080 (data-model §3.9): GLOBAL pricing configuration; version keys, instants, a content hash and operator notes
+  // about the configuration (never about a person).
+  pricing_config_versions: table({
+    ...STD,
+    version_key: INT,
+    effective_from: INT,
+    published_at: INT,
+    content_sha256: INT,
+    source: INT,
+    notes: INT,
+  }),
   reference_dataset_versions: table({
     ...STD,
     dataset: INT,

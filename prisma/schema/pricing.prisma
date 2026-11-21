@@ -1,0 +1,31 @@
+// Pricing module (data-model.md §3.9; D-010, REQ-PRICE-003, REQ-PRICE-020, ADR-0015 §4; US-140, TASK-080). GLOBAL
+// configuration, versioned: no org_id, no RLS. Read-only at runtime (tools/db/table-classes/pricing.json
+// runtimeReadOnly): platform_app holds SELECT only; the reference seed as platform_migrator, the owner, is the single
+// writer until the M2 pricing admin (data-model §9.1, §9.2).
+//
+// Not expressible in Prisma and kept in the migration SQL (20261121000000_pricing_config_versions): the CHECK
+// constraints (`ck_pricing_config_versions__version`, `__version_key`, `__content_sha256` = 32 bytes, `__source`,
+// `__notes`), the partial descending AP-PRICE-01 index `ix_pricing_config_versions__effective` and the raise-only
+// trigger `trg_pricing_config_versions__immutable_when_published`.
+
+/// One pricing configuration version (D-010): a published, immutable set of rules that quotes and booked shipments
+/// record (REQ-PRICE-020). `contentSha256` is the SHA-256 of the canonical JSON of the configuration. The rule tables
+/// (`margin_rules`, ...) reference it from US-152 on; until then the rules are configuration as code
+/// (`packages/pricing/src/config/sample.ts`).
+model PricingConfigVersion {
+  id            String    @id(map: "pk_pricing_config_versions") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy     String    @map("created_by") @db.Uuid
+  updatedBy     String    @map("updated_by") @db.Uuid
+  version       Int       @default(1)
+  versionKey    String    @map("version_key")
+  effectiveFrom DateTime  @map("effective_from") @db.Timestamptz(6)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(6)
+  contentSha256 Bytes     @map("content_sha256")
+  source        String
+  notes         String?
+
+  @@unique([versionKey], map: "ux_pricing_config_versions__version_key")
+  @@map("pricing_config_versions")
+}
