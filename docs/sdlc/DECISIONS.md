@@ -9480,3 +9480,49 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Not verified:** the reply order of a real Valkey client; a real authenticator; what the Compose `edge`, the ALB or CloudFront do with a burst, a disconnect or a slow body; the 400 µs figure; the cause of the H2 failure under QG-M2.
 - **No evidence note:** as for D-QG-001 to D-QG-007, this entry is the record. The next entry of this series is D-QG-009.
 - **Reversibility:** High (a verification record).
+
+### D-SECPR044-02 · 2026-11-21 · security-analyst · TASK-044 part 044-A security round 2 (delta for fix cycle 1, `dc64193f..3b56ab54`: the privacy guard on the wire value, the linear e-mail pattern, the outcome guard, the `error` event without an id, the reader bounds) = PASS_WITH_CONDITIONS at head `3b56ab54` (appended as round 2 to `docs/05-quality/security/PR-pending-TASK-044-security-review.md` on main); QG-044-C3 concurrence given
+
+- **Decision:** nothing Critical, High or Medium is open at `3b56ab54`.
+  - Closed: C1 (PR044-SEC-01 MEDIUM and PR044-SEC-02), C2 (PR044-SEC-03), PR044-SEC-06 (F3) and code review R1-n2. D-ARCH-220 holds in code.
+  - New: two INFO residuals of round-1 classes, PR044-SEC-08 and PR044-SEC-09, both owned by part 044-B.
+  - Merge conditions: C3, lane B green on `3b56ab54` (the 12 tests of `tests/api/event-stream.api.test.ts`); C4, the merge-only round with PR #80.
+- **Method.** Single-process Node 24 probes on `git archive` extracts of `3b56ab54` and of `dc64193f` (control).
+  - The real `createApp` with the default pipeline, Express `env=production`, `console.error` captured and the real process error handlers with a recording `exit`; 10 stream scenarios over raw `node:http`.
+  - The head's `sseStream` with a recording sink: 45 data shapes as live and `complete` data, 22 outcome and producer-defect cases.
+  - Round 1's regex equivalence and timing probes, re-run against the module's own export; the reader bounds; 15 security mutants against the PR's unit suites, all killed; the 7 touched unit suites (163 tests) pass.
+  - A secret-shape scan of the 796 added lines (0 hits, controls fire; gitleaks is not installed on this host); unions with main, PR #80, part 040-B PR 1 and TASK-042, all clean; main's real record checker in merge-ref form, 12 of 12 scenarios as expected.
+  - Not used: Docker, the api suite, lint, typecheck, any command in the TASK-044 worktree.
+- **Closures (probed):**
+  - **PR044-SEC-01.** `/[^\s@]@[^\s@]+\.[^\s@]/` in the module and in the api helper; 0 differences from the former pattern over 2,396,745 exhaustive and 300,000 random strings. Round 1's 64 KiB payload takes 0.10 ms (round 1: 6.2 s). The worst 1 MiB input of seven families takes 4.6 ms. The scan runs after the 64 KiB cap.
+  - **PR044-SEC-02.** The guard scans `JSON.parse` of the capped wire text. `toJSON` shapes, getters, an own `__proto__` key, e-mail and phone keys (reported as `<parent>/*`, no key text) and the 18 added or party keys are refused. Contract keys pass. The two api rows end with `error` on the real app and write no address; on `dc64193f` both addresses are written.
+  - **PR044-SEC-03.** On the real app: no unhandled rejection, no exit request, no `console.error`, no ERROR line. Six malformed or failing outcomes end with the id-less `error` frame and a clean end. On `dc64193f`: 4 unhandled rejections, an exit request and 4 resets at 20 s.
+  - **PR044-SEC-06.** One event's data is capped at 1 MiB. One line in 32,768 one-character chunks takes 7 ms (round 1: 11.1 s). `retry` is clamped to 1,000 to 60,000 ms (400 digits give 60,000). A throw cancels the body.
+  - **R1-n2.** A code outside the catalogue, `constructor` included, is sent as `INTERNAL_ERROR`.
+  - **D-ARCH-220.** A stream that ended with `error` after event 1, reopened from the resume point 1, delivers 2, 3 and `complete`. Round 1's head loses result 2.
+- **New findings:**
+  - **PR044-SEC-08 (INFO, CWE-532/CWE-359).** (a) A refusal's pointer carries ancestor key text that no value pattern recognises, such as a name used as a key (`/Ravi Example/email`). It reaches the route's log through `onFailure`. (b) A party key holding an array of strings passes. (c) The module comment's look-alike example (Cyrillic `е` in `email`) is in fact refused. Fix: mask pointer segments outside `^[a-z][a-z0-9_]*$` and array indexes; refuse party keys holding a string or an array; correct the comment.
+  - **PR044-SEC-09 (INFO, CWE-755).** The replay loop runs outside the guards. A replay array whose element accessor throws rejects the hook after the headers. The heartbeat and the 30 s cap stay armed, so `onFailure` hears `max_duration` 30 s after the stream ended. Fix: wrap the loop and `fail` with `producer_failed`.
+- **QG-044-C3 (D-QG-007): concurrence given.**
+  - **D-ARCH-218.** Two slot constants and no handler value read. Stricter than round 1's allow-list; SEC-TC-29 holds either way.
+  - **D-ARCH-219.** The reading of round 1's drain condition is accepted. Its purpose is met: at the drain a stream ends with a frame within 1 s; a composition without the drain signal keeps 20 s; the frameless cut at 31 s happens only to a stream that ignored its cap, and is logged at ERROR.
+  - **D-ARCH-221.** Round 1's optional remediation of PR044-SEC-04. PR44-SEC-13 stays closed by construction. The access line with `aborted: true` is enough, and round 1's proposed second info line is withdrawn.
+  - **D-ARCH-223.** The 1 MiB unsent-bytes bound closes the T-47 slow-reader case together with the stream caps.
+  - **Conditions G1 for the security round of part 044-B:**
+    1. proofs (a) to (i) and the QG-044-C4 `deadline` proof, with `api.stream_cut` carrying no value or cause text;
+    2. proofs (e) and (f);
+    3. proof (g) under `env=production`, including a hook that rejects after the headers;
+    4. the T-47 slot TTL at least 31 s plus margin, released on `close` before the drain closes the Valkey client;
+    5. the T-47 and AC-46 threat-model cells, mine at the latest in that round.
+- **Routing:**
+  - F1 (PR044-SEC-04) moves to part 044-B under D-ARCH-221 (B5, proof (g)), before TASK-141 is dispatched.
+  - F5 is superseded by D-ARCH-218.
+  - F2 and F4 are on the TASK-141 and TASK-173 cards (D-SD-012).
+  - New: F6 (PR044-SEC-08) and F7 (PR044-SEC-09), owned by the part 044-B developer, due before TASK-141 merges.
+  - C4: whichever of PR #80 (`0f0d92a0`, with `a4aadd2e` stacked on it) and this PR merges second does the union, the R1-m4 `appError` edit and lint, and gets a security merge-only round. The unions keep `next(new AppError(code))`, so PR44-SEC-13 holds on them.
+  - SEC-TC-84 stands.
+- **Record name and binding:**
+  - The orchestrator renames the record to `PR-<NNNN>-TASK-044-security-review.md` once the PR exists.
+  - The fix-cycle push voided round 1's binding, as planned (simulation C4).
+  - Round 2 binds `3b56ab54`. An owned edit after it, or a main merge that carries PR #80's `problem-handler.ts`, needs a new round.
+- **Reversibility:** High (a review record).

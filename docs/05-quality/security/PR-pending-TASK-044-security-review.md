@@ -250,3 +250,209 @@ Main's real checker (`tools/ci/check-security-owned-paths.mjs` from main `74536b
 ## 9. Verdict
 
 | Verdict | PASS_WITH_CONDITIONS. No Critical or High finding. MEDIUM PR044-SEC-01 (C1); LOW PR044-SEC-02 (C1, = R1-m2), PR044-SEC-03 (C2, = R1-m1), PR044-SEC-04 (F1, = R1-m5), PR044-SEC-05 (F2); INFO PR044-SEC-06 (F3), PR044-SEC-07 (F4). PR44-SEC-13 closed at `dc64193f`. Conditions C1 to C3 in §6; a security delta round on the fix head checks C1 and C2 |
+
+---
+
+# Round 2: delta review of fix cycle 1 (part 044-A)
+
+| Field | Value |
+|---|---|
+| PR | Not opened yet. Branch `feat/TASK-044-server-sent-events-convention`, one fix commit `3b56ab54` on round 1's head `dc64193f` (`fix(api): task-044 fix cycle 1, sse privacy guard, outcome guard, error without id`; D-TASK044-14..18 in its body; D-ORCH-153). Not pushed. Since D-ARCH-217 this branch is part 044-A of TASK-044 |
+| Head | 3b56ab54e06038d6e9d722755371322a3bb5b782 |
+| Delta | `dc64193f..3b56ab54`: 12 files, +796 / -155. Owned: `apps/api/src/platform/sse/{event-stream,frame,privacy}{,.test}.ts`. Not owned: `packages/ui/src/sse/fetch-sse-parser{,.test}.ts`, `packages/ui/src/index.ts` (two constants exported), `tests/api/event-stream.api.test.ts`, `tests/api/helpers/expect-event-stream{,.test}.ts`. `problem-handler.ts` is unchanged (blob `b1850807` at both heads). No dependency, lockfile, configuration key or migration. `execute.ts`, `define-route.ts`, `route-state.ts`, `app.ts` and `start-api.ts` are untouched, as D-ARCH-217 requires of part 044-A |
+| Merge base with main | Still `530629f4`. `530629f4..190b3954` (main's tip when this round was committed; the probes and simulations ran at `a3c0b1af`, and `a3c0b1af..190b3954` is the plan fold D-SD-012, D-QG-008 and agent memory) changes nothing outside `docs/` and `.claude/agent-memory/`; `git merge-tree --write-tree 190b3954 3b56ab54` is clean. Main's checker (`--base 530629f4 --head 3b56ab54 --pr 9999`, no record) counts the same 11 owned paths as round 1 (`missing`); main's classifier gives `security_paths=true` (10 paths) |
+| Lane A evidence | None: the branch is not pushed |
+| Lane B evidence | None yet. The orchestrator has queued lane B on `3b56ab54` (C3; R2.7) |
+| Binding items checked | Round 1 (§1 to §9 above); D-TASK044-14..18 (commit body); D-SD-012 (the TASK-044, TASK-141 and TASK-173 lines); D-ARCH-217 to D-ARCH-224 and `docs/03-architecture/rulings/wave-1-task-044-rulings.md` (§1 to §5, proofs (a) to (i)); the ADR-0003 amendment of 2026-11-21 (rules (m) to (q)); D-QG-007 (QG-044-C1 to QG-044-C7; ADR-0016 amendment 14 item 2 VERIFIED); D-ORCH-153; the heading of D-PM-089. Code review round 2 of this head was not on main when this round was written |
+| Reviewer / date | security-analyst, 2026-11-21, round 2 (delta), pre-push. Host rules: foreground commands only, each at most 8 minutes, no Docker, nothing run in the TASK-044 worktree (git reads through the shared object store from the main checkout; every probe ran on `git archive` extracts of `3b56ab54` and, as the positive control, `dc64193f`, in the session scratchpad, with a `node_modules` junction to the main checkout) |
+
+## R2.1 Summary
+
+Both conditions this fix cycle owned are met, and each closure was probed, not read:
+
+- **PR044-SEC-01 (MEDIUM) is closed.** The guard's e-mail pattern is now `/[^\s@]@[^\s@]+\.[^\s@]/`, in the module and in the api helper. Round 1's equivalence probe, re-run against the module's own export, finds 0 differences over 2,396,745 exhaustive strings and 300,000 random ones. The round-1 payload (`{ note: 65,500 x 'a' }`) now takes 0.10 ms (round 1: 6.2 s). The worst 1 MiB input of seven adversarial families takes 4.6 ms. The scan also runs only after the 64 KiB cap.
+- **PR044-SEC-02 (LOW) is closed.** The guard scans `JSON.parse` of the serialised, capped wire text, so `toJSON` results and getters are checked as sent. Keys are value-checked and reported as `<parent>/*`. The key list is complete. Over 45 shapes, each sent as a live event and as `complete` data (90 runs), no sentinel of a refused shape reaches the wire, and no refusal names an e-mail address or a phone number. Both api rows exist, and on the real app both end with `error`, with no address on the wire.
+- **PR044-SEC-03 (LOW) is closed.** There is one guarded continuation, an outcome shape check, and `send()` never throws. On the real `createApp`, with the real process error handlers installed and a recording `exit`, all 10 scenarios end with a clean end of the response: 6 malformed or failing outcomes (each with an id-less `error` frame), the 2 C1 rows, a code outside the catalogue and the resume. The probe saw no unhandled rejection, no exit request, no `console.error` call and no ERROR line. Round 1's head, run as the control, gives 4 unhandled rejections, an exit request, 4 resets at 20 s, and both C1 shapes on the wire.
+- **PR044-SEC-06 (INFO) is closed.** The reader caps one event's data, scans each chunk once, clamps `retry` to 1,000 to 60,000 ms, and cancels the body on a throw.
+- **D-ARCH-220 holds.** The `error` frame carries no id. Over real HTTP, a stream that ends with `error` after event 1, reopened from the reader's resume point 1, delivers 2, 3 and `complete`. On round 1's head the same probe loses result 2. **R1-n2 holds:** a code outside the catalogue is sent as `INTERNAL_ERROR` (`Object.hasOwn`, so `constructor` does not pass).
+- **Mutants:** all 15 security mutants of the fix, run against the PR's own unit suites, are killed. On the extract, the 7 touched suites pass (163 tests).
+
+Two new INFO findings, both residuals of round-1 classes, neither reachable by a client today:
+
+- **PR044-SEC-08 (INFO, CWE-532).** A refusal's pointer still carries ancestor key text that the value patterns cannot recognise, such as a name used as a key. A party key that holds an array of strings passes.
+- **PR044-SEC-09 (INFO, CWE-755).** The replay loop runs outside the guards. A replay array whose element accessor throws makes the hook reject after the headers, and 30 s later the route hears `max_duration` for a stream that has already ended.
+
+**QG-044-C3: concurrence given** with D-ARCH-218, D-ARCH-219 (including the reading of round 1's drain condition and the cut without a frame at 31 s), D-ARCH-221 and D-ARCH-223, with conditions for the security round of part 044-B (R2.5).
+
+Verdict: **PASS_WITH_CONDITIONS.** No Critical, High or Medium finding is open at `3b56ab54`. The merge conditions are lane B green on `3b56ab54` (C3) and the merge-only round with PR #80 (C4).
+
+## R2.2 Method and evidence
+
+| Probe | What | Result |
+|---|---|---|
+| R1, regex | The pattern text in `privacy.ts` and `expect-event-stream.ts`. Round 1's P3: the module's `containsEmailAddress` against round 1's pattern, exhaustively over `a`, `b`, `.`, `@`, space, tab, NBSP and U+2028 up to length 7, then over 300,000 random strings of up to 40 code units from 19 symbols (CR, LF, U+FEFF, full-width `＠`, `+`, `é` added). Round 1's D1/D2 timing table on `isPersonalValue` and `personalDataPointer`, best of 3, with 1 KiB to 1 MiB inputs | Same pattern text in both files. Exhaustive: 2,396,745 strings, 6,669 positives, 0 differences. Random: 300,000 strings, 15,990 positives, 0 differences. Timing: table under R2.3 |
+| R2, wire | The head's `sseStream` with a recording sink: 45 data shapes, each with a random sentinel, as a live event and as `complete` data; 22 outcome and producer-defect cases; a throwing `onFailure`; replay holding `null`; a throwing replay iterator; the D-ARCH-220 frames. `process.on('unhandledRejection')` and `('uncaughtException')` recorded | R2.3 and R2.4; 0 unhandled rejections, 0 uncaught exceptions |
+| R3, real app | `createApp` with `defaultPipelineSlots` and the default platform logger on stdout (captured). Express `env=production`, `console.error` captured, and the real `installProcessErrorHandlers` with a recording `exit`. A fixture `streamQuoteResults` route on the PR's `eventStream` runs 10 scenarios over raw `node:http`. Run on `3b56ab54` and on `dc64193f` (control) | R2.3 |
+| R4, reader | The head's `createSseParser` and `readEventStream`. Round 1's P4 event (100,000 `data:` lines of 1,000 characters), 1,100,000 empty `data:` lines, one line in 32,768, 262,144 and 1,000,000 one-character chunks, 12 `retry` values, a throwing handler and a parser refusal over a `ReadableStream` with a recording `cancel`, and resume points | R2.3 |
+| R5, residuals | `personalDataPointer` on name-like ancestor keys, party keys holding arrays, and look-alike keys; a real-app scenario whose replay array has a throwing element accessor, observed for 32 s | R2.4 |
+| Mutants | 15 security mutants of the fix (listed in R2.3), each run against the touched unit suite of the head | 15 of 15 killed; files restored byte for byte (checked against the commit) |
+| Unit suites | `jest --selectProjects unit` on the extract, run on the 4 sse suites, the reader, `problem-handler.test.ts` and `expect-event-stream.test.ts` | 7 suites, 163 tests, all pass |
+| Secrets | `gitleaks` is not installed on this host. Instead, a scan of the 796 added lines (`git diff -U0 dc64193f 3b56ab54`) for the gitleaks default families that can match TypeScript (AWS, private key, JWT, GitHub, Slack, Stripe, generic assignment, credentials in a URL), plus Shannon entropy above 4.3 on quoted tokens of 20 characters or more. Positive controls (an AWS key shape, a password assignment) fire | 0 hits. The canaries in the tests are plain words and `example.org` addresses |
+| Unions | `git merge-tree --write-tree` of the head with main `a3c0b1af`, PR #80 `0f0d92a0`, TASK-040 part 040-B PR 1 `a4aadd2e` (stacked on `0f0d92a0`) and TASK-042 `b8ba7788`, the branches that touch a path of this PR | R2.8 |
+| Record binding | Main's real checker in a sparse shared clone, merge-ref form | R2.9 |
+
+Not run: Docker, the api suite (lane B), lint and typecheck (D-ORCH-153 reports 242 unit tests passing and 6 of 6 developer mutants killed; the code review twin runs lint and typecheck).
+
+## R2.3 Closure of round 1's findings and conditions
+
+| Item | Status at `3b56ab54` | Evidence |
+|---|---|---|
+| PR044-SEC-01 (MEDIUM) | **Closed** | `privacy.ts:67` and `expect-event-stream.ts:32` hold `/[^\s@]@[^\s@]+\.[^\s@]/`. Same language (R1). `frameOf` serialises with the cap, then scans `JSON.parse(json)` (`event-stream.ts:190-198`). A 66,000-character string is refused by the cap and never scanned. Unit pins: the fast-check oracle against the former pattern, and the 64 KiB / 4 KiB work ratio below 32 for four families, which kills mutant M1 |
+| PR044-SEC-02 (LOW) | **Closed** (residual: PR044-SEC-08) | Wire value: `toJSON` returning `{email}`, a nested `toJSON` returning an address string, a class instance with `toJSON` returning `{contact_email}`, and a getter returning an address on its first call are all refused. A getter that returns an address only on a second call sends its first value, because the guard and the wire see one serialisation. An own enumerable `__proto__` key is walked (`/__proto__/email`). Keys: an e-mail or a phone number as a key, at the root or nested in arrays, is reported as `/*` or `/a/b/0/*`, and neither the refusal message nor its pointer contains the sentinel. Key list: `address`, `address1`, `address3`, `Address_2`, `street_line`, `streetLines`, `surname`, `username`, `mail`, `tel`, `ip`, `ip_address`, `receiver_name` and `personName` are refused, and so are `recipient`, `receiver`, `sender` and `contact` when they hold a string. `recipient` holding an object is walked field by field. `carrier_name`, `service_name` and `origin_time_zone` pass. The documented residuals pass as stated: a national phone number, a `00` prefix, the full-width `＠`, a name in free text. The module comment's example of a look-alike key, Cyrillic `е` in `email`, is in fact refused: the normaliser drops non-ASCII letters, leaving `mail` (R2.4). Api rows: `toJson` and `emailKey` in `event-stream.api.test.ts`. On the real app (R3) both end with `error` `INTERNAL_ERROR` and no `example.org` on the wire. On `dc64193f` both addresses are written |
+| PR044-SEC-03 (LOW) | **Closed** (residual: PR044-SEC-09) | `settle` wraps `end`, `outcomeOf` checks the shape and `send` catches. R2 cases, each ending with the `error` frame, `INTERNAL_ERROR`, no id: `undefined`, `null`, `{}`, `42` and `"complete"` give `producer_failed` with `SseOutcomeError`. A throwing getter in `complete` data and a revoked Proxy as data give `event_refused`. A revoked Proxy outcome, a throwing `event` accessor and a throwing `data` accessor give `producer_failed`. So do a synchronous throw, a rejection and a thenable that throws. `send()` with a throwing `event` accessor, `send(null)` and a terminal name sent live give `event_refused`. A producer that resolves after the slot signal aborted writes nothing. A throwing `onFailure` leaves no trace. 0 unhandled rejections. Real app (R3, head): 6 malformed or failing outcomes end with `end` in 13 to 58 ms. The process handlers request no exit, write no fatal line, make no `console.error` call and write no ERROR line. Control `dc64193f`: `undefined`, `null`, the throwing getter and the throwing `onFailure` case each leave an unhandled rejection; 4 `process.unhandled_rejection` fatal lines; exit requested with 1; each stream is reset at 20 s |
+| PR044-SEC-04 (LOW) | **Open, re-routed** | Unchanged in part 044-A by design. D-ARCH-221 / ADR-0003 rule (p) assigns it to part 044-B (B5, proof (g)), before TASK-141 is dispatched. R5 shows the current path at this head: a hook that rejects after the headers gives one `http.request_failed` ERROR line and one `console.error` call (no personal data) |
+| PR044-SEC-05 (LOW) | **Open** (F2) | No change expected here. The plan fold D-SD-012 (`2f6a89d5`, QG-044-C1 (c)) put STREAM SLOT ACQUIRE AND RELEASE on the TASK-141 and TASK-173 cards: acquire before `execute`, release on close, TTL as the backstop, one per-user counter for both operations. D-ARCH-219 adds the 31 s slot TTL line |
+| PR044-SEC-06 (INFO) | **Closed** | (a) round 1's 100,000-line event is refused after 1,047 lines (1 MiB); cap 10 accepts 10 characters and refuses 11; 1,100,000 empty `data:` lines are refused. (b) one line in 32,768 one-character chunks: 7 ms (round 1: 11.1 s); 262,144: 27 ms; 1,000,000: 116 ms; a pending line above the cap across chunks is refused. (c) `0`, `1` and `999` give 1,000; `1000` and `5000` pass; `60001` and 400 digits give 60,000; `-5`, `1e3`, a doubled leading space and a trailing space are ignored. (d) a throwing handler and a parser refusal each cancel the body with the error and release the lock |
+| PR044-SEC-07 (INFO) | **Open** (F4) | Items 4 and 5 (= R1-n3, R1-n4) are now guidance in the module comment (`event-stream.ts:26-28`). D-SD-012 (QG-044-C1 (c)) put items 1, 2 and 4 on the TASK-141 card (REPLAY AND RESUME CONDITIONS) and the no-resume rule on TASK-173 (REPLAY CONDITIONS); item 3 (a bounded replay read) is TASK-141 card line 14 (D-QG-007 observation 3); QG-044-C7 gives the per-quote sequence of item 2 a place in the data model |
+| R1-n2 | **Closed** | `errorCodeOf`: syntax plus `isErrorCode` (`Object.hasOwn` on the merged catalogue). `NOT_FOUND` is kept; `BOGUS_CODE`, `constructor`, `not_found` and an object with a `toString` are sent as `INTERNAL_ERROR`. On `dc64193f`, `BOGUS_CODE` is sent as is |
+| D-ARCH-220 (A1) | **Holds** | Frame: `event: error\ndata: {...}` with no `id:` line; `complete` keeps the last id plus one. Real app: after event 1 then `error`, the reopened stream with `Last-Event-ID: 1` delivers ids 2, 3 and `complete` 4. On `dc64193f` the `error` frame has id 2, and the reopened stream delivers 3 and `complete`, so result 2 is lost. Reader: after `id: 1` and an id-less `error`, `lastEventId` is `1`; a block lost mid-stream does not move it (R1-m3). A resume at the maximum still ends with an id-less `error` and `event_refused` (PR044-SEC-07 item 4, the route's to handle) |
+| D-ARCH-222 (A2) | Wording only | Module comment item 7 and the AT-US-042-06 fixture now say "subscription". No security effect |
+| C1 | **Met** | PR044-SEC-01 and -02 above, with the unit pins and both api rows |
+| C2 | **Met** | PR044-SEC-03 above, with the unit cases (`event-stream.test.ts`, "a malformed outcome ends the stream instead of rejecting unobserved", 8 rows). The developer notes that an `unhandledRejection` spy sees nothing inside Jest (D-TASK044-18). The settled-hook assertion plus R2 and R3 here cover the process-level proof |
+| C3 | **Open** | Lane B on `3b56ab54` (R2.7) |
+| F1 | Re-routed | To part 044-B by D-ARCH-221 (accepted in R2.5) |
+| F3 | **Met** | PR044-SEC-06 closed in this PR |
+| F5 | Superseded | By D-ARCH-218 (accepted in R2.5) |
+
+Timing of the head's guard (R1, best of 3, one call, ms):
+
+| Family | 1 KiB | 4 KiB | 16 KiB | 64 KiB | 128 KiB | 1 MiB |
+|---|---|---|---|---|---|---|
+| no `@` | 0.00 | 0.00 | 0.01 | 0.05 | 0.10 | 0.90 |
+| `a@` + run, no dot | 0.00 | 0.01 | 0.04 | 0.19 | 0.40 | 2.33 |
+| `a@` repeated | 0.00 | 0.02 | 0.06 | 0.21 | 0.39 | 3.55 |
+| `a@` + run + trailing dot | 0.00 | 0.01 | 0.04 | 0.14 | 0.28 | 2.72 |
+| `+1` + spaces (phone pattern) | 0.01 | 0.02 | 0.09 | 0.23 | 0.43 | 3.97 |
+| `+1 ` repeated | 0.00 | 0.02 | 0.06 | 0.26 | 0.50 | 4.60 |
+
+`personalDataPointer({ note: 65,500 x 'a' })` 0.10 ms. A 65,000-character key: 0.20 ms. 8,000 keys: 6.2 ms. Control, the round-1 module, at 16 KiB: 245 ms.
+
+Mutants (each run against the touched suite; all killed): M1 quadratic pattern restored; M2 guard scans the live object; M3 keys not value-checked; M3b a key finding names the key; M4 `.then(end, …)` restored; M4b no outcome shape check; M5 `error` framed with an id; M6 code kept without the catalogue check; M7 `send()` unguarded; M8 reader without the data cap; M9 reader without the `retry` clamp; M10 reader without the cancel on throw; M11 reader applies `id:` at once (R1-m3); M12 helper accepts an `error` with an id; M13 helper misses an e-mail key.
+
+## R2.4 New findings
+
+| ID | Title | Severity | CWE | OWASP | Where | Owner and due |
+|---|---|---|---|---|---|---|
+| PR044-SEC-08 | Guard residuals: name-like key text in the refusal pointer; party keys holding arrays; the look-alike example | INFO | CWE-532, CWE-359 | A09 | `privacy.ts:94-113`; `event-stream.ts:100-108` | part 044-B (holds `api-sse`); before TASK-141 merges (F6) |
+| PR044-SEC-09 | Replay iteration runs outside the guards | INFO | CWE-755 | A04 | `event-stream.ts:276` | part 044-B (B4 rewrites the replay start); before TASK-141 merges (F7) |
+
+### PR044-SEC-08 (INFO, CWE-532 and CWE-359, A09): guard residuals
+
+**What (R5).**
+- (a) Only keys that the value patterns recognise are masked (`/*`). Ancestor keys go into the pointer as text. `{ "Ravi Example": { "email": "x" } }` is refused with the pointer `/Ravi Example/email`, and at the depth stop with `/Ravi Example/k/k/…`. The pointer is in `SsePrivacyError.message`, which reaches the route's `onFailure` and so its log line. The platform logger redacts e-mail addresses in message text but not names.
+- (b) A party key is refused only when it holds a string. `{ "recipient": ["Ravi Example"] }` passes and is sent.
+- (c) The module comment names "a Cyrillic `е` in `email`" as a residual, but the head refuses it: `normalise` drops non-ASCII letters, giving `mail`. Other look-alikes still pass, for example `emaіl` (Ukrainian `і`) and `ﬁrst_name` (ligature). The residual stands; the example is wrong in the guard's favour.
+
+**Exploitability and impact.** No event field is client-controlled. A producer would have to deviate from the closed `Sse*` schemas, and the api tests validate every recorded event. Item (a) needs personal data used as a key with a second finding under it, and it reaches a server log, not the client. INFO.
+
+**Remediation (code-level).**
+- (a) Build the pointer from masked segments. A segment that is not an array index and does not match the contract key syntax `^[a-z][a-z0-9_]*$` is written as `*`. Contract keys stay readable for the operator, and nothing else reaches the message.
+- (b) Refuse a party key that holds a string or an array: `PARTY_KEYS.has(normalise(key)) && (typeof value === 'string' || Array.isArray(value))`. An object is still searched field by field.
+- (c) Correct the example in the comment.
+
+**Verification.** Unit rows: `{ "Ravi Example": { email: "x" } }` gives `/*/email`; `{ recipient: ["Ravi Example"] }` is refused; the contract example payloads still pass.
+
+### PR044-SEC-09 (INFO, CWE-755, A04): replay iteration runs outside the guards
+
+**What (R2, R5).** `for (const event of options.replay ?? []) send(event)` runs in the Promise executor. `send` catches what one event throws, but not what the iteration throws: an iterator that throws, or an array element accessor that throws. On the real app at this head, with a replay array whose element 1 has a throwing accessor:
+- the hook rejects, and the slot destroys the response (client: reset);
+- per round 1's path, one `http.request_failed` ERROR line and one `console.error` call;
+- the heartbeat interval and the 30 s cap timer stay armed, so 30 s later the route's `onFailure` hears `max_duration` for a stream that ended 30 s earlier.
+
+The module comment says that no step throws into the slot. That holds for plain arrays, which is what a route passes (its replay read comes from Prisma), but not for every value of the declared type `readonly SseEvent[]`.
+
+**Exploitability and impact.** No client path reaches it; a producer defect does. The effect is one misleading log line and 30 s of timers. INFO.
+
+**Remediation (code-level).** Wrap the loop: `try { for (const event of options.replay ?? []) send(event); } catch (error) { fail({ reason: 'producer_failed', cause: error }); }`. Part 044-B rewrites this start anyway (B4: "a stream that starts with `ending` aborted writes its replay first").
+
+**Verification.** A unit row: a replay whose second element throws on access gives frames `[event 1, error INTERNAL_ERROR]`, `onFailure` hears `producer_failed` once, and after advancing the fake timers past 30 s nothing more is heard.
+
+## R2.5 QG-044-C3: concurrence with D-ARCH-218, D-ARCH-219, D-ARCH-221 and D-ARCH-223
+
+Read: the four entries, the rulings file §3 to §5 with proofs (a) to (i), ADR-0003 rules (m) to (q), and D-QG-007 (its reading of round 1's drain condition, observations 2 to 4, QG-044-C4). Nothing of part 044-B exists yet. This is a design concurrence, and the security round of part 044-B checks the code against it.
+
+| Decision | Security position |
+|---|---|
+| D-ARCH-218 (rule (o)): two slot constants, chosen by the kind of result; no handler value is read | **Concur.** It is stricter than round 1's allow-list: no parser, and no handler text reaches the header. Both values contain `no-store`, so SEC-TC-29 holds whichever constant the result kind selects. The handler controls the result kind, and both choices are safe. A response that is not private is left alone. No stream operation of the contract is anonymous (D-QG-007 checked both), so only a test fixture is a public stream, and there `SSE_HEADERS` carries the stream constant. The token-set fallback of the alternatives is not needed |
+| D-ARCH-219 (rules (m), (n)): a 31 s stream deadline only with the drain signal; the drain ends streams with `error` within 1 s | **Concur with the reading.** Round 1's condition had a purpose. A stream must not hold a stopping process up to the forced close; a normal stop must end streams with a terminal frame, not a reset; and the error-rate signal behind ROLLBACK_TRIGGERS must not track normal traffic. The design meets all three. After the drain starts, a stream holds the process for at most 1 s plus the cut, and it ends with the frame. A composition without the drain signal keeps 20 s. The 31 s deadline applies only where the drain ends streams. The cut at 31 s without a frame happens only to a stream that ignored its own 30 s cap, which is a defect logged once at ERROR (`api.stream_cut`, `deadline`). The literal "below 25 s" would cost a contract change and give a worse stop |
+| D-ARCH-221 (rule (p)): no ERROR line for a client that goes away; `api.stream_cut` once per cut; after the headers the problem handler logs, destroys and returns | **Concur.** This is round 1's optional remediation of PR044-SEC-04. PR44-SEC-13 stays closed by construction: no path reaches `console.error`. The access line (`aborted: true`, route template, status, duration, correlation ID) is enough for detection; I withdraw the second info line round 1 proposed. A client can no longer inflate the ERROR rate by opening and dropping streams. A disconnect during a `call` (the scope note) changes only logging. A client that leaves before the response learns nothing, so dropping the ERROR line adds no oracle. The failed-authentication budget (D-TASK041-12) is unaffected |
+| D-ARCH-223 (rule (q)): no backpressure; cut above 1 MiB of unsent bytes, WARN `buffer_limit` | **Concur.** It bounds the T-47 slow-reader case. Per stream, memory stays at most 1 MiB plus one frame (at most 192 KiB in UTF-8) plus socket buffers, for at most 31 s. With the stream caps (2 per IP, 5 per user; PR044-SEC-05), that is a few MiB per principal. A client that never reads and receives only heartbeats is ended by the deadline. D-QG-007 observation 3 stands: a replay counted in full must stay below the bound with room for a live event (TASK-141 card line 14), or every open is cut. TASK-142's "reopen once, then poll" bounds that loop |
+
+Conditions for the security round of part 044-B (they become C-items of that round, not of this PR):
+1. Proofs (a) to (i) and the `deadline` proof of QG-044-C4, each with its log assertion. `api.stream_cut` carries only the operation id, the route template, the correlation ID and the reason: no value, no cause text.
+2. Proof (f): a slot without the drain signal never gives a stream more than the call deadline. Proof (e): `startApi` aborts the signal it handed to `createApp` before `server.close()`.
+3. Proof (g) under `env=production` with a `console.error` spy, including a hook that rejects after the headers (PR044-SEC-09's shape is a good fixture).
+4. The stream slot of T-47 (TASK-041 `streamSlotRule`, consumed by TASK-141 and TASK-173): TTL at least 31 s plus margin, and released on `res.once('close')`. Also, release must run before the drain closes the Valkey client. Otherwise a stream ended by the drain keeps its user's slot until the TTL expires, and the resume on another replica is refused with 429. That is an availability edge for the user's own slot, checked at TASK-141.
+5. The threat model's T-47 mitigation cell and AC-46 cell follow ADR-0016 amendment 14 item 5 (D-ARCH-224 O-4; QG-044-C3 last bullet): mine, at the latest in that round.
+
+## R2.6 Conditions, follow-ups and routing
+
+| ID | Condition or follow-up | Owner | Due |
+|---|---|---|---|
+| C1, C2 | Met (R2.3) | - | - |
+| C3 | Lane B green on `3b56ab54` (R2.7) | orchestrator (lane B) | Before merge |
+| C4 | Whichever of PR #80 (`0f0d92a0`, with part 040-B PR 1 `a4aadd2e` stacked on it) and this PR merges second: the union, the R1-m4 edit (delete the unused `appError` of `problem-handler.ts`), lint on the union, and a security merge-only round (R2.8; simulation C6 in R2.9) | the second merger's developer; security-analyst | Before that merge |
+| F1 | PR044-SEC-04 | part 044-B (D-ARCH-221, B5, proof (g)) | Before TASK-141 is dispatched |
+| F2, F4 | Unchanged (round 1 §6); on the TASK-141 and TASK-173 cards since D-SD-012 | TASK-141, TASK-173 | As round 1 |
+| F6 | PR044-SEC-08 (a) to (c) | part 044-B developer | Before TASK-141 merges |
+| F7 | PR044-SEC-09 | part 044-B developer | Before TASK-141 merges |
+| G1 | The five conditions of R2.5 for the security round of part 044-B | part 044-B developer; security-analyst | That round |
+
+SEC-TC-84 (round 1 §6) stands. Its unit pins and api rows exist at this head.
+
+## R2.7 Lane B cases for C3
+
+`tests/api/event-stream.api.test.ts` on `3b56ab54`, 12 tests, no database:
+- round 1's 9: AT-US-042-01 to -08 (AT-04 and AT-05 in one test, about 30 s), the resume test and the malformed `Last-Event-ID` 400. The `error` rows now expect no id;
+- the two C1 rows: "a "complete" whose data has a toJSON returning an e-mail address" and "a live event with an e-mail address as a key". Each ends with `error` `INTERNAL_ERROR` after the two replayed events, with no `example.org` on the wire, and `onFailure` hears `event_refused` once;
+- the D-ARCH-220 resume test (event 1, then `error` without an id, then a reopen from 1 delivers 2, 3 and `complete` 4).
+
+Each must be in the JUnit by title. AT-US-042-01 and -05 stay proven in a test composition only until part 044-B (the header comment says so; D-QG-007 G3 list).
+
+## R2.8 Unions and the merge-only round
+
+| Union with | Tree | Result |
+|---|---|---|
+| main `a3c0b1af` | `f009f660` | Clean |
+| PR #80, TASK-040 v2 `0f0d92a0` | `d00a9a7e` | Clean. `problem-handler.ts` keeps `next(new AppError(code))` after the headers (PR44-SEC-13 holds); `appError` is declared and no longer used (R1-m4) |
+| TASK-040 part 040-B PR 1 `a4aadd2e` (stacked on `0f0d92a0`) | `0b3b8f37` | Clean; the same two observations |
+| TASK-042 `b8ba7788` | `5e1bf6a8` | Clean (`packages/ui/src/index.ts`, unowned) |
+
+Both PR #80 and this PR change the owned `problem-handler.ts`. Whichever merges second brings an owned change in through main, and that voids this binding (R2.9 C6). Hence C4.
+
+## R2.9 Record binding
+
+Main's real checker (`tools/ci/check-security-owned-paths.mjs` at `a3c0b1af`) in a sparse shared clone, merge-ref form: the record committed on main's tip, `git merge-tree` with the head, then `commit-tree` with both parents, `--pr 9999`. Record content: this file with round 2 appended, under the name `PR-9999-TASK-044-security-review.md`.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 the record on main merged with the head (`--base` = merge base `530629f4`) | pass | pass, 11 owned, satisfied by `3b56ab54` (the note on round 1's `dc64193f`, with 6 owned paths changed after it, is expected) |
+| S1b the same with `--base` = the main commit that carries the record | pass | pass, satisfied by `3b56ab54` |
+| S2 a docs-only lane-B evidence commit after the head | pass | pass |
+| S3 an unowned edit after the head (`packages/ui/src/sse/fetch-sse-parser.ts`) | pass | pass |
+| S4 the branch merges a docs-only main | pass | pass |
+| C1 no record | missing | missing |
+| C2 the record only under this `PR-pending` name | missing | missing: the orchestrator renames it once the PR exists |
+| C3 a later FAIL verdict row | missing | missing (verdict FAIL) |
+| C4 round 1 alone (the record before this section) | missing | missing: `dc64193f` has 6 owned changes after it |
+| C5 an owned edit after the head (`sse/privacy.ts`) | missing | missing: "names 3b56ab5, but …privacy.ts changed after it" |
+| C6 the branch merges a main that also changed `problem-handler.ts` (PR #80 squash-merged first; `--base` = the new merge base) | missing | missing: "names 3b56ab5, but …problem-handler.ts changed after it" (C4 of R2.6) |
+| C7 round 2's Head row naming a main commit (round 1's `dc64193f` row stays) | missing | missing |
+
+12 of 12 as expected (main tip `a3c0b1af`). The combined record has two `Head` rows (`dc64193f`, `3b56ab54`) and two `Verdict` rows; the last one is this round's.
+
+## R2.10 Verdict
+
+| Field | Value |
+|---|---|
+| Verdict | PASS_WITH_CONDITIONS. No Critical, High or Medium finding open at `3b56ab54`. Closed: PR044-SEC-01 (MEDIUM), PR044-SEC-02, PR044-SEC-03, PR044-SEC-06; R1-n2; conditions C1 and C2 met; D-ARCH-220 holds. Open: LOW PR044-SEC-04 (F1, part 044-B), LOW PR044-SEC-05 (F2), INFO PR044-SEC-07 (F4), new INFO PR044-SEC-08 (F6) and PR044-SEC-09 (F7). Merge conditions: C3 lane B green on `3b56ab54`; C4 the merge-only round with PR #80. QG-044-C3: concurrence given with D-ARCH-218, -219, -221 and -223 (R2.5), with conditions G1 for the security round of part 044-B |
