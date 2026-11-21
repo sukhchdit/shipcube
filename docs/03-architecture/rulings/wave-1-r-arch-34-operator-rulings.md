@@ -1,6 +1,6 @@
 # Wave-1: rulings on guest-row binding (R-ARCH-34), operator memberships (PR65-SEC-02 (b)) and four smaller items (2026-11-19)
 
-Owner principal-architect. Decisions D-ARCH-162 to D-ARCH-167. These are the two dispatch gates of D-SD-002: TASK-051 `guestclaim` and TASK-089 `seeddemo`. *Amended 2026-11-21 after the TASK-051 code review, round 1, and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-214): section 8, with dated notes in sections 2.3 to 2.7, 3.3, 3.4 and 6.*
+Owner principal-architect. Decisions D-ARCH-162 to D-ARCH-167. These are the two dispatch gates of D-SD-002: TASK-051 `guestclaim` and TASK-089 `seeddemo`. *Amended 2026-11-21 after the TASK-051 code review, round 1, and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-214): section 8, with dated notes in sections 2.3 to 2.7, 3.3, 3.4 and 6.* *Amended again 2026-11-21 after the gatekeeper check D-QG-005 (D-ARCH-215, D-ARCH-216): section 8.12, the reworded TASK-087 line and five added lines in section 8.9.*
 
 **Inputs.** D-SD-002. `docs/05-quality/security/PR-0065-TASK-037-security-review.md` (PR65-SEC-02, PR65-SEC-04). `docs/05-quality/security/PR-0072-TASK-293-security-review.md` (PR293-SEC-03). risks.md R-ARCH-33, R-ARCH-34. data-model §3.2, §3.10, §4.3, §4.5, §4.6, §4.7, §6.1, §9, §10. ADR-0004, ADR-0005 (amendments 12 and 13), ADR-0013 (amendment 3). The merged code at `29fe2a1`: migration `20261117000000_organisations_identity`, `prisma/tests/catalog/tenant-keys.ts` and `c16-tenant-keys.int.test.ts`, `apps/api/src/platform/db/map-db-error.ts`, `prisma/tests/organisations/cases.ts`, `prisma/seed/**`, `tools/db/lint-migrations.ts`. The cards of TASK-051, TASK-057, TASK-087 and TASK-089. US-080, US-167, REQ-QUOTE-015 to -017.
 
@@ -135,7 +135,7 @@ UPDATE public.quotes
 - Read: non-primary indexes with `indisunique OR indisexclusion`. This closes PR293-SEC-03 (c).
 - Finding: no owner column among the key columns. The owner column is `org_id`, or `guest_token_hash` where the table has that column. *Amended 2026-11-21 (D-ARCH-208; section 8.2):* an owner column counts only when it separates owners (rules B1 and B2).
 - Exceptions: `TENANT_UNIQUE_EXCEPTIONS`, as today. Each entry is live and holds no owner column. *2026-11-21:* no owner key column at all. An index whose owner column does not count cannot be an exception.
-- Planted probes on the guest-capable parent: `UNIQUE (code)` and `EXCLUDE USING btree (code WITH =)` are reported; `UNIQUE (org_id, code)`, `UNIQUE (guest_token_hash, code)` and `EXCLUDE USING btree (org_id WITH =, code WITH =)` are not. *2026-11-21:* five more probes in section 8.2.
+- Planted probes on the guest-capable parent: `UNIQUE (code)` and `EXCLUDE USING btree (code WITH =)` are reported; `UNIQUE (org_id, code)`, `UNIQUE (guest_token_hash, code)` and `EXCLUDE USING btree (org_id WITH =, code WITH =)` are not. *2026-11-21:* six more probes in section 8.2 (five, and the TENANT exclusion probe that D-ARCH-214 added; the count is corrected after D-QG-005).
 
 The two limits stated in the header of `tenant-keys.ts` (sibling by containment; exclusion constraints out of scope) are replaced by the two that remain: predicates are not compared, and USER_OWNED tables are out of scope. *2026-11-21:* the exclusion-operator shape of R1-M1 is enforced and is not a third limit (section 8.2).
 
@@ -472,7 +472,7 @@ A non-primary unique index or exclusion constraint in which no owner column coun
 - **Exceptions stay literal.** An entry of `TENANT_UNIQUE_EXCEPTIONS` is live only for an index with no owner column among its key columns at all. An index that holds an owner column which does not count is always a finding and cannot be excepted.
 - **Fail closed, stated.** `UNIQUE NULLS NOT DISTINCT (org_id, guest_token_hash, …)` is reported, although under the owner CHECK it does separate owners (Q2e). It is the alternative D-ARCH-163 rejected, U2 asks for two indexes, and the rule stays one fact per column.
 - **TENANT tables.** `org_id` is `NOT NULL` there, so `NULLS NOT DISTINCT` stays legal for an index that leads with it. It then concerns the other, nullable key columns only.
-- **U2 as amended (section 2.4).** The two indexes of a uniqueness rule are `NULLS DISTINCT`, the default. One index over both owner columns is not an alternative: under `NULLS DISTINCT` it enforces nothing (Q2f), and under `NULLS NOT DISTINCT` it is reported.
+- **U2 as amended (section 2.4).** The two indexes of a uniqueness rule are `NULLS DISTINCT`, the default. One index over both owner columns is not an alternative: under `NULLS DISTINCT` it enforces nothing (Q2f), and under `NULLS NOT DISTINCT` it is reported. *2026-11-21 (QG-051-C1 (b); D-ARCH-215):* under `NULLS DISTINCT` C16 (b) passes it (rule B1; Q2g). Section 8.12 says what catches it.
 
 **Why the exclusion half is enforced.**
 
@@ -637,6 +637,8 @@ US-080 is marked complete on TASK-051 in the task map. Whether it stays open unt
 
 Written without apostrophes, for `plan-data.mjs`.
 
+*2026-11-21, after D-QG-005 (D-ARCH-215, D-ARCH-216; section 8.12):* the TASK-087 line on unique keys is reworded, and five lines are added at the end of the table. The table now has 21 lines: TASK-051 (7), TASK-087 (2), TASK-091 (3), TASK-146 (3), TASK-234 (1), TASK-237 (2), TASK-154 (1) and the C16 follow-up (2).
+
 | Task | Line |
 |---|---|
 | TASK-051 `guestclaim` (fix cycle) | "C16 (a) BOTH OWNER COLUMNS (D-TASK051-03; D-ARCH-207; rulings/wave-1-r-arch-34-operator-rulings.md section 8.1; data-model 4.6 C16 as amended 2026-11-21): a foreign key of a table with guest_token_hash that holds both owner columns is reported and is the sibling of no key; the planted probe c16_g_both (org_id, guest_token_hash, parent_id) -> c16_gparent (org_id, guest_token_hash, id) joins PLANTED_GUEST_REFERENCE_FINDINGS" |
@@ -646,7 +648,7 @@ Written without apostrophes, for `plan-data.mjs`.
 | TASK-051 | "ONE ANSWER, BOTH SQLSTATES (R1-m4; D-ARCH-212; ADR-0005 amendment 15 item 37; rulings section 8.6): the deep-equal test of map-db-error.test.ts runs for 23503 and for 23001, each under P2010 and under P2003 (Prisma 7.10.1 reports both SQLSTATEs of a model operation as P2003), and asserts that under one Prisma code the two mappings differ in sqlState only; refused-reference-answer.test.ts looks for P2003, 23503 and 23001 with a positive and a negative control for each; no product code changes" |
 | TASK-051 | "AT-US-080-06 DATABASE HALF (D-TASK051-06; D-ARCH-210): 42501 is acknowledged as the answer of the class block on the gc_ probe tables; the expectation does not change" |
 | TASK-051 | "OPERATOR RULE ON UPDATE (PR051-SEC-03; D-ARCH-214; ADR-0005 amendment 15 item 39; rulings section 3.4 as amended 2026-11-21): the CREATE OR REPLACE of platform.memberships_lifecycle_guard in the operator staff grants migration gains the UPDATE clause exactly as given there (a membership of an OPERATOR organisation that becomes ACTIVE needs a staff grant) and the amended comment above the function; down.sql is unchanged; case O7: a SUSPENDED operator membership whose grant the migrator has deleted is refused ACTIVE with P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: an operator membership needs a staff grant and its member still sees one organisation with the OPERATOR scope, the same update succeeds once the grant is back, and SUSPENDED to ACTIVE in a BUSINESS_CUSTOMER organisation needs no grant; mutant by hand: with the UPDATE clause removed O7 becomes ok" |
-| TASK-087 `quote` | Add: "UNIQUE KEYS ARE NULLS DISTINCT (D-ARCH-208; ADR-0005 amendment 15 item 38; data-model 4.7 U2 as amended 2026-11-21): the two indexes of a uniqueness rule are created with the default NULLS DISTINCT, never NULLS NOT DISTINCT and never as one index over both owner columns (C16 (b) reports both); the entry fk_quotes__requote_of_quote_id of TENANT_REFERENCE_EXCEPTIONS names its CHECK ck_quotes__requote_org_only, which C16 verifies (D-ARCH-209)" |
+| TASK-087 `quote` | Add: "UNIQUE KEYS ARE NULLS DISTINCT (D-ARCH-208, D-ARCH-215; ADR-0005 amendment 15 item 38; data-model 4.7 U2 as amended 2026-11-21): a uniqueness rule that holds for guest rows and for organisation rows is two indexes, one per owner column, each created with the default NULLS DISTINCT; never NULLS NOT DISTINCT, which C16 (b) reports on a nullable owner column; and never one index over both owner columns: C16 (b) reports that index only under NULLS NOT DISTINCT, and under the default NULLS DISTINCT it passes C16 (b) and enforces nothing, because the owner CHECK leaves one owner column NULL on every row; that shape is caught by the review of the migration against data-model 3.10 and by the duplicate cases, which this task runs on the real quote_packages table as platform_app: a second package with a seq the same quote already holds is refused with 23505 ux_quote_packages__guest_quote_seq for a guest row (case G6 of rulings section 2.7) and with 23505 ux_quote_packages__org_quote_seq for an organisation row (case T5), and a free seq is accepted for both (cases G5 and T4); the entry fk_quotes__requote_of_quote_id of TENANT_REFERENCE_EXCEPTIONS names its CHECK ck_quotes__requote_org_only, which C16 verifies (D-ARCH-209)" *Reworded 2026-11-21 (QG-051-C1 (b); D-ARCH-215). The earlier text ended with the claim that C16 (b) reports both shapes, which is false for one index over both owner columns under `NULLS DISTINCT`.* |
 | TASK-091 `guestquote` | Add: "DISPATCH GATE (D-ARCH-213; rulings section 8.8): principal-architect rules the pipeline seam that puts a guest token hash into the transaction context for createQuote by an anonymous caller and for the claim operations (a note on the route descriptor of ADR-0003, with security-analyst) before this task is dispatched" |
 | TASK-091 | Add: "GUEST BINDING, ROUTE SIDE (D-TASK051-07; D-ARCH-213; SEC-TC-81; ADR-0005 amendment 10 items 8 and 11; data-model 4.3): the transaction context carries a non-empty guestTokenHash only on getQuote and streamQuoteResults for a guest principal (the hash the quote-token authenticator derived), on createQuote for an anonymous caller (the hash of the token minted for this request) and on the claim operations of TASK-146; a session caller on getQuote or streamQuoteResults binds the empty string; the hash is derived server-side by guestTokenHash and no handler, service or repository supplies it; api test over the mounted route table: on every operation other than getQuote, streamQuoteResults, createQuote, claimQuote, saveQuote and createShipment a request that presents a well-formed X-Quote-Token is given a recorded context whose guestTokenHash is the empty string" |
 | TASK-091 | Add: "US-080 HTTP HALVES (D-ARCH-213; the database halves are on TASK-051): [AT-US-080-01] getQuote with the guest token returns the quote; [AT-US-080-02] the token of another guest, a guessed token, a bearer of another organisation and the quote id alone answer 404 NOT_FOUND" |
@@ -655,6 +657,11 @@ Written without apostrophes, for `plan-data.mjs`.
 | TASK-146 | Add: "US-080 HTTP HALVES (D-ARCH-213; D-ARCH-210): [AT-US-080-04] after claimQuote the organisation reads the quote and its children and getQuote with the token answers 404; [AT-US-080-05] a claim by a second account answers 409 QUOTE_ALREADY_CLAIMED; [AT-US-080-06] claimQuote without a bearer answers 401 AUTH_REQUIRED and the transaction runner records no transaction; database backstop on the real tables: the claim statement in a context with the guest hash and no organisation is refused by the standard-columns guard (P0001 STD_COLUMNS_VIOLATION, a BEFORE trigger) before WITH CHECK, where the TASK-051 probe tables answer 42501; [AT-US-080-07] the claim writes one UPDATE audit entry of the quote with old org_id null and new org_id set, in the claim transaction" |
 | TASK-234 save | Add: "saveQuote claims a guest quote through the claim repository of TASK-146 (the one statement) in the claim context of D-ARCH-213; it writes no claim statement of its own" |
 | TASK-237 share | In the D-ARCH-162 line, replace the last clause by: "the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23001 fk_quote_shares__guest_token_hash_quote_id on PostgreSQL 18 (D-ARCH-211)" |
+| TASK-087 `quote` *(added 2026-11-21, D-ARCH-215, D-ARCH-216)* | Add: "C16 (c) AND (d) (D-QG-005 conditions QG-051-C1 (a) and QG-051-C6; D-ARCH-215, D-ARCH-216; data-model 4.6 C16 as amended 2026-11-21; rulings section 8.12): arms (c) and (d) of C16 are merged before this task opens its PR; every relation of the quote models states onDelete: Restrict and onUpdate: Restrict, because Prisma defaults an optional relation, which both relations of an owner-bound pair are, to SetNull on delete and Cascade on update; no constraint of this migration is NOT ENFORCED and none is left NOT VALID" |
+| TASK-237 share *(added 2026-11-21, D-ARCH-215)* | Add: "DUPLICATE CASE ON THE REAL TABLE (QG-051-C1 (b); D-ARCH-215; rulings section 8.12): on quote_shares as platform_app a second active share of the same quote is refused with 23505 on the index of its owner, ux_quote_shares__guest_quote_active for a guest row and ux_quote_shares__org_quote_active for an organisation row, and the first active share is accepted (cases S3 and S4 of rulings section 2.7); every relation this task adds states onDelete: Restrict and onUpdate: Restrict" |
+| TASK-154 `customsapi` *(added 2026-11-21, D-ARCH-215)* | Add: "CUSTOMS CURRENCY KEY (D-QG-005 condition QG-051-C1 (a); D-ARCH-215; ADR-0005 amendment 15 item 37 as clarified 2026-11-21; data-model 3.11 note of 2026-11-21): fk_customs_items__declaration_currency is FOREIGN KEY (org_id, declaration_id, currency) REFERENCES customs_declarations (org_id, id, currency) ON DELETE RESTRICT ON UPDATE RESTRICT on the target index ux_customs_declarations__org_id_id_currency (org_id, id, currency), which replaces UNIQUE (id, currency); there is no ON UPDATE CASCADE, and every relation of customs.prisma states onDelete: Restrict and onUpdate: Restrict; every unique index of customs_declarations and customs_items leads with org_id; a change of the declaration currency is ONE statement that updates the declaration and every line of it, soft-deleted lines included, one update as a data-modifying CTE of the other, each row with its version step and actor; integration cases on PostgreSQL 18: the declaration first is refused with 23001 and a line first with 23503, both on fk_customs_items__declaration_currency, the one statement succeeds, and a line of another organisation that names the declaration is refused with 23503 on the same constraint; C16 is the gate" |
+| The C16 follow-up *(added 2026-11-21, D-ARCH-216)*: the fix cycle of TASK-051 if senior-developer folds it there, otherwise a late task on `prisma/tests/catalog/tenant-keys.ts` and `c16-tenant-keys.int.test.ts`; merged before TASK-087 opens its PR | "C16 (c) CONSTRAINT STATE (D-QG-005 condition QG-051-C6; D-ARCH-216; data-model 4.6 C16 as amended 2026-11-21; rulings section 8.12): TENANT_REFERENCES_SQL returns per foreign key the fact enforced = conenforced AND convalidated; the pure function reports a key that is not enforced whatever its columns, never counts it as org-bound, guest-bound or a sibling, and reports an exception entry that names it; a second assertion of the suite finds no constraint of a non-system schema (the scope of P9-CK) with conenforced or convalidated false, with no exception map; planted and reported, each rolled back: an org-bound key declared NOT ENFORCED, an org-bound key altered to NOT ENFORCED with ALTER CONSTRAINT, an org-bound key left NOT VALID, a guest-bound key declared NOT ENFORCED whose org-bound sibling is then reported as alone, an owner CHECK declared NOT ENFORCED and a CHECK left NOT VALID; fixtures in tenant-keys.test.ts drive the function; pg_constraint.conenforced exists from PostgreSQL 18 on, so the query fails on a PGlite 17 replay and is not adapted for it" |
+| The C16 follow-up *(added 2026-11-21, D-ARCH-215)* | "C16 (d) REFERENTIAL ACTIONS (D-QG-005 condition QG-051-C1 (a); D-ARCH-215; ADR-0005 amendment 15 item 37 as clarified 2026-11-21; data-model 4.6 C16): no foreign key of a non-system schema has confdeltype or confupdtype other than r (RESTRICT), with no exception map; planted and reported, each rolled back: a key with ON UPDATE CASCADE, a key with ON DELETE SET NULL and a key that states no action (NO ACTION on both); not reported: the 13 keys of the merged migrations" |
 
 ### 8.10 Verification and open items
 
@@ -663,6 +670,8 @@ Written without apostrophes, for `plan-data.mjs`.
 3. **Owed by principal-architect:** the pipeline seam of section 8.8, before TASK-091 is dispatched.
 4. **product-manager and senior-developer:** whether US-080 stays open until TASK-146 (section 8.8).
 5. **Observed, not changed.** data-model §3.12 and §6.3 give `ux_saga_steps__saga_step_shipment ON (saga_id, step, shipment_id) NULLS NOT DISTINCT` on a TENANT table: it has no owner column, so C16 (b) will report it when the saga tables are created. With `org_id` leading it passes, `NULLS NOT DISTINCT` included (rule B1: `org_id` is `NOT NULL`). The creating task meets the gate; the sketch is corrected then.
+6. **After the gatekeeper check** *(added 2026-11-21).* D-QG-005 verified amendment 15 as PASS_WITH_CONDITIONS. QG-051-C1 and QG-051-C6 are answered in section 8.12 (D-ARCH-215, D-ARCH-216). QG-051-C5 is item 3 above and is still owed by principal-architect. QG-051-C2 to QG-051-C4 belong to senior-developer, product-manager (answered by D-PM-087) and the fix cycle of TASK-051.
+7. **Other sketches of §3 drawn before §4.7.** The customs key is corrected at its row now, because it contradicted item 37 as well. The unique indexes of the customs tables and the saga index of item 5 have no owner column as drawn and meet the gate at their creating task.
 
 ### 8.11 The operator rule also applies when a membership becomes ACTIVE by UPDATE (security round 1, PR051-SEC-03; D-ARCH-214; ADR-0005 amendment 15 item 39)
 
@@ -693,3 +702,98 @@ Added the same day, after the security record landed (D-SECPR051-01).
 | S3f | Insert into the operator organisation without a grant; with one; into a customer organisation without one | `P0001`; ok; ok | the same |
 
 - **Not run here:** the real schema with RLS, the migration linter on the amended file, PostgreSQL 18. On an UPDATE the organisation of the row is the organisation of the context, so the fail-closed half of the clause is as unreachable as it is on INSERT (code review R1-n6). Lane B at the fix head is the evidence.
+
+### 8.12 After the gatekeeper check: conditions QG-051-C1 and QG-051-C6 (D-QG-005; D-ARCH-215, D-ARCH-216)
+
+Added 2026-11-21, after D-QG-005 (PASS_WITH_CONDITIONS for ADR-0005 amendment 15).
+
+**Edited (docs only).** ADR-0005: a note at item 37, pointers at items 28 and 29, the verification line of amendment 15. data-model §3.11 (`customs_declarations`, `customs_items`), §4.6 (C16 arms (c) and (d)), §4.7 and amendment row A42. risks.md (R-ARCH-34; version 1.29). This file: sections 2.6, 8.2, 8.9, 8.10 and this section. DECISIONS.md. Not edited: `plan-data.mjs`, the cards, the story files, `api/**`, the gherkin map, any code.
+
+**Run here.** Two psql scripts against a throwaway container of the local `postgres:18` image (PostgreSQL 18.6; no published port; removed afterwards). Reduced schema: an owner role and a runtime role, tables with row security enabled and forced, a tenant policy on `org_id`, and a reduced standard-columns guard that has the owner exemption and the version rule of the real one. Nothing ran in a worktree and nothing was written to the repository.
+
+**Not run here.** The real schema and migrations, Prisma (its default referential actions are quoted from its documentation), Jest, lane B. Lane B of the implementing tasks is the evidence for the real tables.
+
+#### QG-051-C1 (a): every foreign key has `RESTRICT` on both actions (D-ARCH-215)
+
+**Finding of the check.** Item 37 says that every foreign key of the Platform is `ON DELETE RESTRICT ON UPDATE RESTRICT`. That holds for the 13 keys of the merged migrations, on main and at `203d02eb`. Data-model §3.11 draws `fk_customs_items__declaration_currency FOREIGN KEY (declaration_id, currency) REFERENCES customs_declarations (id, currency) ON UPDATE CASCADE`.
+
+**Ruling.** The sentence stands as a rule for every key, and the customs key is corrected. The sentence is not narrowed to the merged keys or to owner-bound keys.
+
+- **Why it is not narrowed.** PostgreSQL runs an action that writes (`CASCADE`, `SET NULL`, `SET DEFAULT`) as the owner of the referencing table, with row security off. For a runtime-writable table of `public` that owner is `platform_migrator`, the one role the standard-columns guard exempts. The rows change with no version step, no actor and no audit entry, and the session could not have made the same change itself (K4, K5). A key with such an action is a second writer of the table that none of the controls sees.
+- **The customs key as drawn** also has no `org_id`. A line of organisation B can name A's declaration, learns its currency from the answer, and is rewritten when A changes the currency (K1 to K3). It would fail C16 (a) at TASK-154, and its target `UNIQUE (id, currency)` would fail C16 (b).
+- **The customs key as ruled** (data-model §3.11, note of 2026-11-21): `(org_id, declaration_id, currency) → customs_declarations (org_id, id, currency)`, `RESTRICT` on both actions, on `ux_customs_declarations__org_id_id_currency`. A change of the declaration currency is one statement that updates the declaration and all its lines, soft-deleted lines included, each row with its version step and actor (K8). Separate statements are refused (K6, K7). This is the mechanism of the claim (section 8.5). The rule the key serves is unchanged: a line carries the currency of its declaration (`CUSTOMS_CURRENCY_MIXED`).
+- **Mechanism.** Until now nothing checked the sentence. The 13 merged relations state `onDelete: Restrict, onUpdate: Restrict` by convention. Prisma defaults to `Cascade` on update and, for an optional relation, to `SetNull` on delete, and both relations of an owner-bound pair (T2-G) are optional. SQL defaults to `NO ACTION` (N6). C16 gains arm (d): no foreign key of a non-system schema has another action than `RESTRICT`, with no exception map.
+- **A later key that needs another action** needs a new amendment of ADR-0005. It states what the action writes, as which role, and what replaces the version step and the audit entry.
+
+**Alternatives rejected.**
+
+- **Narrow the sentence to owner-bound keys and keep `ON UPDATE CASCADE` on an org-bound customs key.** The cascade then stays inside one organisation, and the service needs no statement of its own. It still writes lines past the guard and the audit trail (K4), and a change of the declaration currency alone would re-denominate live lines without a trace on the lines.
+- **A dated note at the row that only records the exception.** The key would stay a C16 (a) finding.
+- **`NO ACTION`.** Rejected in section 8.5 for the claim keys; the same reasons hold.
+
+#### QG-051-C1 (b): one index over both owner columns (D-ARCH-215)
+
+The TASK-087 line of section 8.9 ended "(C16 (b) reports both)". That is true of `NULLS NOT DISTINCT` and false of one index over both owner columns. Under the default `NULLS DISTINCT` rule B1 passes that index, because both owner columns are key columns and the index is `NULLS DISTINCT` (Q2g). It enforces nothing (Q2f), because the owner CHECK leaves one owner column NULL on every row.
+
+- **C16 is not extended.** The index refuses nothing, so it tells nothing: it is an integrity gap and not a channel between owners, and C16 is the isolation gate (section 2.4, "Why U2 is not a catalog finding"). The target key of the planted probe `c16_g_both` is such an index and is stated as no arm (b) finding (section 8.1), and the fix cycle of TASK-051 builds on that.
+- **What catches it.** The review of the migration against data-model §3.10 (U2 is a design rule checked in review), and a duplicate case per uniqueness rule on the real table: G5, G6, T4 and T5 on `quote_packages` (TASK-087), S3 and S4 on `quote_shares` (TASK-237). TASK-051 runs these cases on its probe tables only, and no card asked for them on the real tables. Two lines of section 8.9 now do.
+- **Revisit** when a GUEST_CAPABLE table outside the quote family is designed. "A unique index holds at most one owner column" is one catalog fact and is then worth its place.
+
+#### QG-051-C6: a constraint counts only while the database enforces it (D-ARCH-216)
+
+**Fact (PostgreSQL 18.6; N1 to N4).** `FOREIGN KEY … NOT ENFORCED` and `CHECK … NOT ENFORCED` are accepted, and so is `ALTER TABLE … ALTER CONSTRAINT … NOT ENFORCED` on an existing foreign key. Such a constraint has `conenforced` false and `convalidated` false, and it checks nothing: an org-bound key declared so accepts a row of B that names A's parent, and an owner CHECK declared so accepts a row with no owner. `NOT VALID` leaves `conenforced` true and `convalidated` false: new rows are checked, and the rows that were there before are not. Unique and exclusion constraints cannot be `NOT ENFORCED`, so arm (b) has no such twin.
+
+**Ruling: the catalog reads the fact, for the keys and for every constraint.**
+
+- **Arm (a).** `TENANT_REFERENCES_SQL` returns `enforced` (`conenforced AND convalidated`) per foreign key. A key that is not enforced is reported whatever its columns. It is never org-bound, guest-bound or a sibling, so its partner is reported as alone, and an exception entry that names it is a finding (section 8.3).
+- **Arm (c), every constraint.** No constraint of a non-system schema has `conenforced` or `convalidated` false, with no exception map. The scope is wider than the keys because T2-G rests on the owner CHECK and the enum rules rest on theirs. On main and at `203d02eb` no test reads `conenforced`, and `convalidated` is read for the audit action CHECK only.
+- **`NOT VALID` at the head is a finding too.** Rule 6 of the migration linter (data-model §8.3) asks for `NOT VALID` on an existing table, and the expand procedure of §4.7 validates in the same change. A constraint that has to stay `NOT VALID` across a release is ruled first.
+- **The migration linter gets no new rule.** A token rule is lexical, and `ALTER CONSTRAINT` or dynamic SQL reach the same state. The catalog reads what the database does, and a change under `prisma/**` has to pass the catalog suite.
+- **No committed object is affected.** No file under `prisma/migrations` or `prisma/bootstrap` holds `NOT ENFORCED` or `NOT VALID`, on main or at `203d02eb` (text search). The sketches did not run against the migrated schema here.
+- **PGlite.** `pg_constraint.conenforced` exists from PostgreSQL 18 on. A replay of the suite query on PGlite 17 fails with an unknown column. That is expected, and the query is not adapted for it.
+- **Owner and date.** The C16 follow-up of section 8.9, with arm (d): the fix cycle of TASK-051 if senior-developer folds it there, otherwise a late task on the same two files. Merged before TASK-087 opens its PR. TASK-087 depends on TASK-051 already.
+- **Open.** The condition names security-analyst as co-owner. It has not seen this ruling: it concurs or objects in the delta round of TASK-051 or on the follow-up, and says whether the planted probes join SEC-TC-76. The gatekeeper decides whether QG-051-C6 is closed.
+
+**Sketches, as run on 18.6.** The developer may shape them differently; the rules above and the planted probes of section 8.9 bind.
+
+```sql
+-- arm (c): 0 rows
+SELECT n.nspname::text AS schema, c.conrelid::regclass::text AS "table", c.conname::text AS conname, c.contype::text AS contype,
+       c.conenforced, c.convalidated
+  FROM pg_catalog.pg_constraint c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.connamespace
+ WHERE n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'
+   AND NOT (c.conenforced AND c.convalidated);
+
+-- arm (d): 0 rows
+SELECT n.nspname::text AS schema, c.conrelid::regclass::text AS "table", c.conname::text AS conname,
+       c.confdeltype::text AS on_delete, c.confupdtype::text AS on_update
+  FROM pg_catalog.pg_constraint c
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.connamespace
+ WHERE c.contype = 'f' AND n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'
+   AND NOT (c.confdeltype = 'r' AND c.confupdtype = 'r');
+
+-- arm (a): one more column of TENANT_REFERENCES_SQL
+--   (c.conenforced AND c.convalidated) AS enforced
+```
+
+**Probe results (PostgreSQL 18.6; reduced schema; the cases of K as the runtime role with the organisation in the context, each in a rolled-back transaction).**
+
+| Row | Case | Result |
+|---|---|---|
+| K1 | The key as drawn, `(declaration_id, currency) → (id, currency) ON UPDATE CASCADE`: a line of organisation B names A's declaration in its currency | accepted |
+| K2 | The same with a currency that declaration does not have | `23503` on the key: the answer tells B whether A's declaration has that currency |
+| K3 | A then changes the currency of its declaration | B's line is rewritten. The guard fires on the line with `current_user` = the table owner; `version` and `updated_by` do not move |
+| K4 | An org-bound key with `ON UPDATE CASCADE`: A changes the currency of its declaration | the line follows; the guard fires with `current_user` = the table owner and exempts it; `version` stays 1 and `updated_by` stays as seeded |
+| K5 | The same change of the line by the session, without a version step | `P0001 STD_COLUMNS_VIOLATION` |
+| K6 | An org-bound key, `RESTRICT` on both actions: the declaration alone; the delete of a declaration that has a line | `23001` on the key, both |
+| K7 | The line first | `23503` on the key |
+| K8 | One statement: both updates, one as a data-modifying CTE of the other, each row with its version step | ok: declaration and line carry the new currency, `version` 2 and the actor; both guards saw the runtime role |
+| K9 | The org-bound key: a line of B names A's declaration | `23503` on the key, the answer of an unknown id |
+| N1 | A key declared `NOT ENFORCED`; a key altered with `ALTER CONSTRAINT … NOT ENFORCED` | both: `conenforced` false, `convalidated` false, the definition ends ` NOT ENFORCED`, and a row of B that names A's parent is accepted |
+| N2 | The same key added `NOT VALID` over a row that breaks it | `conenforced` true, `convalidated` false; a new row is refused with `23503`, the old row stays |
+| N3 | An owner CHECK declared `NOT ENFORCED`; a CHECK added `NOT VALID` | false and false, and a row with no owner is accepted; true and false |
+| N4 | `UNIQUE … NOT ENFORCED`; `EXCLUDE … NOT ENFORCED`; `ALTER CONSTRAINT … NOT ENFORCED` on a CHECK; `VALIDATE CONSTRAINT` on a `NOT ENFORCED` key | `0A000`; `0A000`; `42809` (a CHECK takes the clause only when it is created); `55000` |
+| N5 | The arm (c) sketch over the probe schema: 58 constraints (7 foreign keys, 3 CHECK, 37 NOT NULL, 10 primary keys, 1 unique) | the five planted constraints of N1 to N3 and nothing else. PostgreSQL 18 lists NOT NULL constraints in `pg_constraint`; all of them pass |
+| N6 | The arm (d) sketch over the 7 foreign keys; then a key that states no action | the two keys with `ON UPDATE CASCADE` (`a`/`c` as drawn, `r`/`c`); `a`/`a` |
+| N7 | `pg_get_constraintdef` of the T2-O CHECK | `CHECK (((requote_of_quote_id IS NULL) OR (org_id IS NOT NULL)))`, validated and enforced. It is the 17.5 text of section 8.3, so the pinned text holds on 18.6 |

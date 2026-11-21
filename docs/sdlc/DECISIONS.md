@@ -8080,3 +8080,60 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - D-PM-087 (US-080 delivery split, QG-051-C3), committed by the orchestrator as `6e523316` because the product-manager session had no shell. Its story-note text is held in `../.orch/held/D-PM-087-stories.note.md` (tooling input).
   - lane B `20261121T0429Z_3d3a777` (TASK-080) is VOID: a Testcontainers port-binding timeout in one file under host load. All other suites passed, including C9 and pricing-sample. It is being re-run and does not count as a fix cycle.
 - **Reversibility:** High.
+
+### D-ARCH-215 · 2026-11-21 · principal-architect · Condition QG-051-C1 of D-QG-005: item 37 of ADR-0005 amendment 15 stands as a rule for every foreign key (`RESTRICT` on both actions) and the customs key of data-model §3.11 is corrected; the TASK-087 line on unique keys is reworded
+- **Trigger:** D-QG-005 (PASS_WITH_CONDITIONS), condition QG-051-C1 (a) and (b), due before TASK-051 merges. Documents only.
+- **(a) Decision:** the sentence "Every foreign key of the Platform is `ON DELETE RESTRICT ON UPDATE RESTRICT`" is not narrowed. It is a rule for every key, merged or designed, and item 37 says so in a dated note. The one key that was drawn otherwise is corrected at its row.
+  - `fk_customs_items__declaration_currency` becomes `(org_id, declaration_id, currency) → customs_declarations (org_id, id, currency)` with `RESTRICT` on both actions, on `ux_customs_declarations__org_id_id_currency`. It was `(declaration_id, currency) → (id, currency) ON UPDATE CASCADE`.
+  - A change of the declaration currency is one statement over the declaration and all its lines, as the claim is.
+  - Catalog assertion C16 gains arm (d): no foreign key of a non-system schema has another action than `RESTRICT`. There is no exception map. A key that needs another action needs a new amendment.
+- **Why the rule and not the narrowing:**
+  - PostgreSQL runs a writing action (`CASCADE`, `SET NULL`, `SET DEFAULT`) as the owner of the referencing table, with row security off. That owner is the role the standard-columns guard exempts. The rows change with no version step, no actor and no audit entry.
+  - As drawn the key has no `org_id`. A line of organisation B names A's declaration, learns its currency from the answer, and is rewritten when A changes the currency. The key fails C16 (a) and its target fails C16 (b).
+  - Nothing checked the sentence. Prisma defaults to `Cascade` on update and, for an optional relation, to `SetNull` on delete, and both relations of an owner-bound pair are optional. TASK-087 writes the first such pair.
+- **(b) Decision:** the TASK-087 line of rulings §8.9 is reworded. One index over both owner columns passes C16 (b) under the default `NULLS DISTINCT` and enforces nothing. C16 is not extended, because that index refuses nothing: it is an integrity gap and not a channel between owners. It is caught by the review against data-model §3.10 and by a duplicate case per uniqueness rule on the real table: G5, G6, T4 and T5 on `quote_packages` (TASK-087), S3 and S4 on `quote_shares` (TASK-237). Until now those cases ran on the probe tables of TASK-051 only.
+- **Checked (PostgreSQL 18.6; a throwaway container of the local `postgres:18` image, no published port, removed; reduced schema; rulings file §8.12 rows K1 to K9):**
+  - the key as drawn accepts B's line on A's declaration, answers `23503` for a currency the declaration does not have, and A's change of currency rewrites B's line;
+  - with an org-bound `ON UPDATE CASCADE` key the line is written with `current_user` = the table owner, the guard exempts it, and `version` and `updated_by` do not move; the same change by the session without a version step is `P0001`;
+  - with `RESTRICT` on both actions the declaration alone is `23001`, a line first is `23503`, and one statement succeeds with both rows at `version` 2;
+  - a key that states no action is `NO ACTION` on both.
+- **Not verified:** the real schema; Prisma's defaults (quoted from its documentation, not run); arm (d) against the migrated schema. The 13 merged keys were read as text: all `RESTRICT` on both actions, on main and at `203d02eb`.
+- **Considered and not chosen:**
+  - narrowing the sentence to owner-bound keys and keeping `ON UPDATE CASCADE` on an org-bound customs key. Its merit: the cascade stays in one organisation and the service needs no statement of its own. It still writes lines past the guard and the audit trail;
+  - a note at the row that only records the exception. The key stays a C16 (a) finding;
+  - a C16 rule "a unique index holds at most one owner column". The shape is not an isolation finding, and the target key of the planted probe `c16_g_both` is such an index. Revisit with the next GUEST_CAPABLE table family.
+- **Also done (observations of D-QG-005):** a dated pointer at item 29 to items 36 and 39; "six more probes" in rulings §2.6; the verification line of amendment 15 records D-QG-005.
+- **Gatekeeper:** decides whether QG-051-C1 is closed. No rule of an Accepted ADR changes: item 37 gains a clarifying note and C16 gains the mechanism for it.
+- **Applied in:** ADR-0005 (note at item 37; pointers at items 28 and 29; verification line). data-model §3.11, §4.6 C16 (d), §4.7, A42. risks.md R-ARCH-34 (version 1.29). Rulings file §2.6, §8.2, §8.9, §8.10 and §8.12.
+- **Card lines (rulings §8.9, now 21 lines):** TASK-087 (the reworded line and one new line), TASK-237 (duplicate case), TASK-154 (customs key), the C16 follow-up (arm (d)).
+- **Routed:** senior-developer (the fold of QG-051-C2 copies §8.9 as it stands now, and decides where the C16 follow-up lands).
+- **Reversibility:** High (text; no table of §3.11 exists yet).
+
+### D-ARCH-216 · 2026-11-21 · principal-architect · Condition QG-051-C6 of D-QG-005, ruled early: a constraint counts only while the database enforces it. C16 (a) reads `conenforced` and `convalidated`, and arm (c) asserts both for every constraint; the migration linter gets no rule
+- **Trigger:** D-QG-005 condition QG-051-C6, due before TASK-087 is dispatched. It does not hold TASK-051. Ruled now because the fold of QG-051-C2 is about to copy the card lines.
+- **Decision:**
+  1. **Arm (a).** A foreign key counts as org-bound, as guest-bound or as a sibling only when `conenforced` and `convalidated` are both true. Any other key is reported whatever its columns and cannot be a listed exception.
+  2. **Arm (c).** No constraint of a non-system schema has `conenforced` or `convalidated` false. There is no exception map. A constraint left `NOT VALID` at the head of the migrations is a finding as well.
+  3. **No new rule of the migration linter.**
+- **Why:**
+  - PostgreSQL 18 accepts `NOT ENFORCED` on a foreign key and on a CHECK, at creation and, for a foreign key, by `ALTER CONSTRAINT`. Such a constraint checks nothing, and `TENANT_REFERENCES_SQL` reads neither column.
+  - The scope is every constraint because T2-G rests on the owner CHECK and the enum rules rest on theirs. No test on main reads `conenforced`.
+  - A token rule in the linter is lexical, and `ALTER CONSTRAINT` or dynamic SQL reach the same state. The catalog reads what the database does.
+- **Checked (PostgreSQL 18.6, the same container; rulings file §8.12 rows N1 to N7):**
+  - a key declared or altered `NOT ENFORCED` has both columns false and accepts a row of B that names A's parent;
+  - a `NOT VALID` key has `conenforced` true and `convalidated` false, refuses new rows and keeps the old row that breaks it;
+  - an owner CHECK declared `NOT ENFORCED` accepts a row with no owner;
+  - unique and exclusion constraints refuse the clause (`0A000`), so arm (b) has no such twin;
+  - the arm (c) sketch over 58 constraints returns the five planted ones only, with the 37 NOT NULL constraints that PostgreSQL 18 lists in `pg_constraint` passing;
+  - the T2-O CHECK prints on 18.6 as it does on 17.5, so the pinned text of rulings §8.3 holds.
+- **Not verified:** the sketches against the migrated schema. No file under `prisma/migrations` or `prisma/bootstrap` holds `NOT ENFORCED` or `NOT VALID`, on main or at `203d02eb` (text search).
+- **Owner and date:** the C16 follow-up of rulings §8.9 carries arms (c) and (d), merged before TASK-087 opens its PR.
+- **Not decided by me:**
+  - where the follow-up lands, the fix cycle of TASK-051 or a late task (senior-developer);
+  - whether the planted probes join SEC-TC-76 (security-analyst);
+  - whether QG-051-C6 is closed (quality-gatekeeper). The condition names security-analyst as co-owner. It has not seen this ruling, so its concurrence is routed and not obtained.
+- **Still owed by me:** QG-051-C5, the pipeline seam of D-ARCH-213, before TASK-091 is dispatched.
+- **Applied in:** data-model §4.6 C16 (a) and (c), §4.7, A42. ADR-0005 (pointer at item 28). risks.md R-ARCH-34. Rulings file §8.9 and §8.12.
+- **Card lines (rulings §8.9):** the C16 follow-up (arm (c)); TASK-087 (arms (c) and (d) merged before its PR; every relation states both actions; no constraint `NOT ENFORCED` or left `NOT VALID`).
+- **Routed:** security-analyst (concurrence; SEC-TC-76); senior-developer (the fold); quality-gatekeeper (closure of QG-051-C6).
+- **Reversibility:** High (two catalog assertions that are not built yet).
