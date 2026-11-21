@@ -8059,3 +8059,24 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Validation:** `gen.mjs` after the fold reports 0 errors with the exception listed. `ac-trace.json` at G3 shows AT-US-080-01 to -07 passing. At acceptance (P6) product-manager checks per scenario that a passing test with the ID is in the database suite of TASK-051 and, except for AT-US-080-03, in the route-level suite of its owner on the real quote tables (A-118). At the `v0.1.0-m0` SHA the route registry holds none of the three claim operations, or TASK-146 is merged.
 - **Not verified:** nothing was run for this entry. Which operations TASK-092, TASK-146 and TASK-234 mount is read from their cards and the contract; none of the three is built.
 - **Reversibility:** High until TASK-091 merges (one requirement note, one PRD paragraph, one assumption, card lines).
+
+### D-ORCH-148 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-041: the user's `.env.example` commit closes the D-ORCH-140 pending input; main merged into the branch; lane B and a merge-only security round on `0614a90f`; latent test defect logged
+- **User input received:** the user committed `.env.example` on `feat/TASK-041-valkey-backed-rate-limiting-per` as `96eda1e1` ("chore(config): env.example rate-limit keys and trust proxy hops (task-041 c5)"). It adds the 18 keys (`RATE_LIMIT_*` × 12, `RATE_QUOTE_CREATE_*` × 3, `SSE_MAX_STREAMS_PER_IP`, `SSE_MAX_STREAMS_PER_USER`, `AUTHZ_DENIAL_BUDGET_PER_MIN`) with the code defaults and sets `TRUST_PROXY_HOPS=0`, and it pushed the branch for the first time.
+  - This closes the "user input pending" line of D-ORCH-140 and code review C5 / R2-C1. Agents did not open `.env*`.
+  - The coordinator ran `npm run test:unit` in the TASK-041 worktree on Node 24.22.3: 279 of 280 suites and 7,547 tests passed, including `env-example-parity` and `sec-static`.
+- **Latent test defect (not a TASK-041 regression):**
+  - `packages/config/src/load-config.test.ts:136` asserts that the rendered error does not contain `abc`. The rendered error includes a stack path, and the worktree directory `agent-a5aabc5fca3215c75` contains `abc`. It fails only in a worktree whose path holds that substring.
+  - Follow-up (S4, test-engineer, next touch of `packages/config` tests): strip stack paths before the check, or use a sentinel that cannot be a path substring.
+- **Union with main:** main changed `package-lock.json` (TASK-295) and `docs/03-architecture/api/README.md` (a tooling input) since the branch's merge base `6ab40f28`. Both files are also changed by TASK-041, so P1 requires a union.
+  - The orchestrator merged `origin/main` as `0614a90f`: an automatic merge, no conflict.
+  - The lockfile keeps `effect` 3.22.4 and has no `rate-limit-redis`.
+  - The branch was pushed at `0614a90f`.
+- **Gates now running:**
+  - lane B on `0614a90f`, in the evidence worktree with a fresh `npm ci` for the new lockfile, then TASK-034;
+  - a merge-only security round 3, because the merge brings an owned path (`package-lock.json`).
+  - The hosted `security-integration` job and the merge wait on GitHub Actions billing (D-ORCH-146).
+  - Once 041-A is on main: part 041-B (rulings revision 2, D-ARCH-182), then TASK-048. TASK-040 part 040-B waits for 040-A, PR #80, which is itself blocked only by CI.
+- **Also recorded:**
+  - D-PM-087 (US-080 delivery split, QG-051-C3), committed by the orchestrator as `6e523316` because the product-manager session had no shell. Its story-note text is held in `../.orch/held/D-PM-087-stories.note.md` (tooling input).
+  - lane B `20261121T0429Z_3d3a777` (TASK-080) is VOID: a Testcontainers port-binding timeout in one file under host load. All other suites passed, including C9 and pricing-sample. It is being re-run and does not count as a fix cycle.
+- **Reversibility:** High.
