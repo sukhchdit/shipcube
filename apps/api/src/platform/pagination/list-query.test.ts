@@ -190,7 +190,7 @@ describe('defineListSpec', () => {
     expect(typed.sortFields.get('created_at')?.column).toBe('createdAt');
     const misspelt = (): unknown =>
       defineListSpec<Column>({
-        // @ts-expect-error -- 'createdat' is not a column of the model (R1-m6).
+        // @ts-expect-error -- TASK-045 'createdat' is not a column of the model (R1-m6).
         sort: { fields: { created_at: { column: 'createdat' } }, default: '-created_at' },
       });
     expect(misspelt).not.toThrow();

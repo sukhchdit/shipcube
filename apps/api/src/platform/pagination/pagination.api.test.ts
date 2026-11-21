@@ -132,11 +132,18 @@ interface Answer {
   readonly body: Record<string, unknown>;
 }
 
-/** GET `path` with `query` (values encoded) as `actorId`, a member of `orgId` (undefined: anonymous). */
-async function get(path: string, query: Record<string, string>, orgId: string | undefined = ORG_A, actorId = ACTOR_A): Promise<Answer> {
+/**
+ * The `orgId` of an anonymous call (no fixture headers). A sentinel, not `undefined`: an explicit `undefined` argument
+ * takes the parameter default (ORG_A), which signed the "anonymous" call in as a session caller, and the anonymous-only
+ * reference route then answered 401 AUTH_REQUIRED at the credential gate (lane B 20261121T0735Z_3168c19).
+ */
+const ANONYMOUS_CALLER = null;
+
+/** GET `path` with `query` (values encoded) as `actorId`, a member of `orgId` (`ANONYMOUS_CALLER`: anonymous). */
+async function get(path: string, query: Record<string, string>, orgId: string | null = ORG_A, actorId = ACTOR_A): Promise<Answer> {
   const search = new URLSearchParams(query).toString();
   const response = await fetchOnce(`${base}/api/v1${path}${search === '' ? '' : `?${search}`}`, {
-    headers: orgId === undefined ? {} : { [ORG_HEADER]: orgId, [ACTOR_HEADER]: actorId },
+    headers: orgId === ANONYMOUS_CALLER ? {} : { [ORG_HEADER]: orgId, [ACTOR_HEADER]: actorId },
   });
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
@@ -253,13 +260,13 @@ describe('US-037 cursor pagination, filtering and sorting over HTTP', () => {
   });
 
   it('[AT-US-037-07] a bounded reference list allows limit=300: every enabled country in one page, has_more false; 301 is 400', async () => {
-    const all = await get('/fixtures/reference/countries', { limit: '300' }, undefined);
+    const all = await get('/fixtures/reference/countries', { limit: '300' }, ANONYMOUS_CALLER);
     expect(all.status).toBe(200);
     const page = all.body as unknown as Page;
     expect(page.items).toHaveLength(countries.length);
     expect(page.has_more).toBe(false);
     expect(page.next_cursor).toBeNull();
-    const over = await get('/fixtures/reference/countries', { limit: '301' }, undefined);
+    const over = await get('/fixtures/reference/countries', { limit: '301' }, ANONYMOUS_CALLER);
     expect(over.status).toBe(400);
     expect(over.body['code']).toBe('VALIDATION_ERROR');
   });
