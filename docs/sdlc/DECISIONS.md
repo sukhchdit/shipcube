@@ -8592,3 +8592,129 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Not verified by me.** This session had no shell. I did not read the commit bodies of `be843ae1..e7354249` (only the reflog subjects and the last message), and I could not confirm that the worktree is clean at `e7354249`: the statements about the build come from the files of that worktree as they are on disk. No test was run; the lane B run of this head was still in progress (api suite reported green in its log). No code review or security round of part 041-B is on main yet. A change in one of them to the set, the 250 ms bound, the 5 s cool-down or the counters moves this wording again.
 - **Validation:** `[B4]`, `[B1 (7)]` and `[B3]` green in the lane B run of the part 041-B head; the three outage cases at their routes before US-040 is accepted (P6: product-manager checks them per rule, with A-114); the 2-replica run of NFR-SEC-005; after launch the minutes per month of `rate_limit_store_unavailable` per scope and the breaker-state gauge (TASK-214), with the A-053 trigger at 30 minutes in a month for scope `rate-limit` and the A-111 trigger for scope `carrier-admission`.
 - **Reversibility:** High (wording; each row is restorable from REQUIREMENTS.md 1.20 and the previous A-053 and A-111 text).
+
+### D-ARCH-217 · 2026-11-21 · principal-architect · TASK-044 code review R1-M1 (MAJOR): route (b) in form with the content of route (a). TASK-044 is delivered in two parts; part 044-B changes the tx slot and completes AT-US-042-01 and AT-US-042-05 on the default pipeline; no stream operation is mounted before it
+- **Trigger:** code review round 1 of TASK-044 (`7ed51854`, CHANGES_REQUESTED, R1-M1 routed to me) and security round 1 (D-SECPR044-01, `d04731f7`, F1 and F5). Branch head `dc64193f`, read by SHA. Documents only.
+- **The finding, confirmed by reading the code:** in the pipeline on main a stream of either contract operation answers `Cache-Control: private, no-store` (`send()` re-asserts it; `authorise.ts` marks every caller of both operations private) and is reset at the 20 s call deadline without a terminal event. AT-US-042-01 and AT-US-042-05 pass only on an anonymous fixture with the deadline raised to 40 s.
+- **Decision:**
+  1. **Two parts, one task.** Part 044-A is the branch under review with its fix cycle. It changes TASK-044's own files only and merges without a slot change. Part 044-B is a second pull request of TASK-044. It changes `execute.ts`, `define-route.ts`, `route-state.ts`, `app.ts`, `start-api.ts`, `problem-handler.ts` and the stream module, and it proves AT-US-042-01 and AT-US-042-05 on the default pipeline, with no deadline override and a caller that is not anonymous.
+  2. **Locks and order.** Part 044-B holds `api-tx-execute`, `api-routing`, `api-platform-core` and `api-sse`. On `execute.ts` the order is: TASK-040 part 040-B (first pull request), then part 044-B, then TASK-096. `app.ts` and `start-api.ts` are never in flight together with TASK-041 part 041-B or the second pull request of part 040-B. A stacked build on approved heads is allowed (D-ORCH-150).
+  3. **Gates.** Dispatch of part 044-B: the gatekeeper has verified the three ADR amendments; security-analyst has concurred with D-ARCH-218, -219, -221 and -223; part 044-A is on main or on its approved head; the locks are free. Merge: before TASK-141 is dispatched, before TASK-096 when both are dispatchable, inside Wave 2 if the locks allow, and in any case before the `v0.1.0-m0` tag.
+  4. **Until then.** No stream operation is mounted: TASK-141 and TASK-173 carry PRECONDITION PART 044-B. US-042 is partial; product-manager records the split (wording in the rulings file §7 item 1).
+  5. **What part 044-B contains** is ruled in D-ARCH-218, -219, -221 and -223. Part 044-A gains the items of D-ARCH-220 and D-ARCH-222.
+- **Premises corrected:**
+  - The review and the dispatch date the follow-ups "before TASK-091 merges". TASK-091 (batch 2.5) builds `createQuote` and the quote-token authenticator and mounts no stream. `streamQuoteResults` is mounted by TASK-141 (batch 4.5) and `streamBookingProgress` by TASK-173 (batch 6.2). The due point is the dispatch of TASK-141. D-SECPR044-01 already says "before the first stream route merges".
+  - "The ECS stop timeout is 30 s" comes from a comment in `shutdown.ts`. platform.md §5.2 gives the `api` task 35 s; 30 s is the window of REQ-PLAT-022. The arithmetic of D-ARCH-219 holds for both.
+- **Why a part of TASK-044 and not the lock holder:**
+  - Route (a) alone would hold TASK-044 until `execute.ts` is free. PR #80 is open, part 040-B is next, and no pull request can merge while hosted CI is blocked (D-ORCH-146). TASK-091 depends on TASK-044.
+  - TASK-040 part 040-B holds the locks next, but it gates TASK-049, TASK-062 and TASK-092 and has its own security conditions. A finding on stream code would hold the completion of US-038. Part 044-B gates only TASK-141 and the M0 tag.
+  - TASK-096 holds `api-tx-execute` in batch 3.1 but not `api-platform-core`, and its subject is `If-Match`.
+  - The project delivers such work as a part of the task that owns the story (020-B and 020-C, 040-B, 041-B), not as a new late task.
+- **Gatekeeper:** needed. ADR-0016 amendment 14, the ADR-0003 amendment of 2026-11-21 (rules (m) to (q)) and ADR-0010 amendment 14 change rules of Accepted ADRs (CLAUDE.md §5). The fix cycle of part 044-A does not wait; the verification of amendment 14 item 2 is its merge condition for the item of D-ARCH-220.
+- **Applied in:** ADR-0016 amendment 14 (item 9 and pointers at §10 and amendment 9); ADR-0003 amendment of 2026-11-21; ADR-0010 amendment 14; platform.md §10.4; ARCHITECTURE.md §7.1; risks.md R-ARCH-41 (version 1.30); `docs/03-architecture/rulings/wave-1-task-044-rulings.md` (new). Not edited: story files, `docs/03-architecture/api/**`, the gherkin map (lane-B tooling inputs).
+- **Card lines:** rulings file §8, 21 lines: TASK-044 (6), TASK-040 part 040-B (1), TASK-083 (1), TASK-091 (1), TASK-096 (1), TASK-108 (1), TASK-141 (3), TASK-173 (3), TASK-214 (2), TASK-142 (1), TASK-182 (1).
+- **Routed:** product-manager (rulings §7), api-designer (§6), security-analyst (concurrence, and the T-47 mitigation cell), quality-gatekeeper (the three amendments), senior-developer (the fold; the place of part 044-B in the lock order; TASK-120).
+- **Reversibility:** High (text; part 044-B is not built).
+
+### D-ARCH-218 · 2026-11-21 · principal-architect · R1-M1 (a) item 1 and D-TASK044-02: on a private response the tx slot writes `Cache-Control` from its own constant, chosen by the kind of result; a stream gets `private, no-cache, no-store`; no handler value is read
+- **Decision:**
+  1. A stream that is not anonymous answers `Cache-Control: private, no-cache, no-store`. D-TASK044-02 is accepted.
+  2. On a private response `send()` writes the header after the handler's headers from one of two constants in `route-state.ts`: `private, no-cache, no-store` when the result is a stream, `private, no-store` otherwise. It reads no value that a handler set. `sse/frame.ts` takes its value from the same constant.
+  3. **Does the third directive matter for SEC-TC-29? No.** SEC-TC-29 requires `private` and `no-store`; the helper tests for those two and accepts further directives (`tests/api/helpers/cache-control.ts`). A cache that obeys `no-store` keeps nothing to revalidate, so `no-cache` adds nothing and removes nothing (RFC 9111 §5.2.2.4, §5.2.2.5). It matters for REQ-API-017 and AT-US-042-01, which name `no-cache`.
+- **Why by the kind of result:** the rule of PR #32 m1 (a) is that the private mark decides, not header text. A slot that picks between two constants keeps that rule and needs no parser. The two values are exactly the allow-list that D-SECPR044-01 rules acceptable.
+- **Alternatives:**
+  - Keep a handler value that contains `private` and `no-store` (the review's wording). Rejected, with security-analyst: `private, no-store, max-age=60, public` passes it, and RFC 9111 §5.2.2.9 defines `public` as "may store even if it would otherwise be prohibited".
+  - Compare the token set of the handler value with the two allowed sets (the form of D-SECPR044-01). Acceptable; it gives the same two values and needs a parser. It stays the fallback if security-analyst prefers it.
+  - Amend AT-US-042-01 and the contract to `no-store`. Not needed: one value satisfies both.
+- **Owner and due:** TASK-044 part 044-B (B1, proofs (a) and (b)). security-analyst signs off in that part's round; its concurrence with the form is a dispatch gate.
+- **Routed:** api-designer: the description of `components/headers/CacheControl`, of `streamQuoteResults`, and the api/README §9 row (rulings §6 items 1, 2 and 4). product-manager: a note that "Cache-Control no-cache" in AT-US-042-01 and US-135 means the directive (rulings §7 item 5).
+- **Gatekeeper:** needed (ADR-0016 amendment 14 item 1; ADR-0003 rule (o)).
+- **Reversibility:** High.
+
+### D-ARCH-219 · 2026-11-21 · principal-architect · R1-M1 (a) item 2 and D-TASK044-03: a stream gets its own 31 s deadline, and a stop ends live streams itself with a retryable `error` frame within 1 s; the 31 s deadline exists only with the drain signal; `CALL_DEADLINE_MS` stays below the drain bound
+- **Decision:**
+  1. **Stream deadline.** `STREAM_DEADLINE_MS` is 31 s, the 30 s cap plus 1 s, armed when the slot starts the stream. The call deadline does not reach a stream. The deadline is the backstop for a stream that does not end at its cap.
+  2. **A stop ends streams.** `startApi` creates a drain signal and aborts it as the first step of the drain. The slot hands it to the stream hook as a second signal, `ending`. The stream module answers with `error` and `SERVICE_UNAVAILABLE` and settles; a stream that starts after the signal aborted sends its replay first. The slot cuts a stream that has not settled after 1 s.
+  3. **The coupling.** The slot uses 31 s only when it was given the drain signal. Otherwise a stream keeps the value of the call deadline (20 s), as today.
+  4. **Unchanged:** `CALL_DEADLINE_MS < DRAIN_TIMEOUT_MS` and its pin; the 25 s drain bound; the 3 s resource close.
+  5. The 30 s request timer of REQ-SEC-015 (TASK-108) covers a request until its response starts and never bounds a started stream.
+- **Arithmetic:**
+  - Without the drain rule a 31 s stream holds `server.close()` until the 25 s bound, is reset by the forced close, and the process exits 1.
+  - With it a stream keeps a stopping process busy for at most 1 s, whatever its age.
+  - Drain 25 s plus resource close 3 s is 28 s: inside the 30 s of REQ-PLAT-022 and 7 s before the 35 s `stopTimeout` of platform.md §5.2.
+  - In AWS the 30 s deregistration delay runs before SIGTERM, so a stream open when the target left has reached its cap by then. In Compose there is no such step and the drain signal ends the stream.
+- **The condition of D-SECPR044-01** ("keep a stream's deadline below the 25 s drain and end it with an `error` frame"): met in purpose (1 s after the drain starts, with the frame; no 31 s deadline without the drain signal), not in the letter (31 s is not below 25 s). The literal form needs a cap below 25 s, which changes REQ-API-018, US-042 and both contract operations. security-analyst's concurrence with this reading is a dispatch gate of part 044-B. If it is refused, the question returns to me with product-manager.
+- **Checked (plain `node:http`, Node 24.22.3; rulings §2):** P1 an open stream holds `server.close()` until the forced close; P2 a second signal ends it with the frame and `close()` resolves in 2 ms; P3 a stream that ignores the signal is cut at the grace; P5 one signal for both meanings loses the frame, because the slot destroys the response first.
+- **Not verified:** nothing of part 044-B is built. The probes do not use the project's slot. The ECS order (deregistration before SIGTERM) is quoted from platform.md §5.3.
+- **Why:** platform.md §10.4 has required a terminal event for open streams at SIGTERM since P3. The contract promises a 30 s cap, and booking streams run to it. A stream is a subscription to persisted state, so ending it early costs the client one reconnect.
+- **Alternatives:** a cap below the drain bound; a drain bound above the stream deadline (every stop with an open stream would take 30 s); closing the connections of open streams (a reset, no terminal event); one signal with a typed reason (P5); a 503 problem for a request that reaches its stream after the drain began (the handler has committed and the VIEW entry is written).
+- **Owner and due:** TASK-044 part 044-B (B2 to B4, proofs (c) to (f)). Card lines also on TASK-108, TASK-141, TASK-173 (the stream slot TTL covers the 31 s), TASK-142 and TASK-182 (the client side of a resume).
+- **Gatekeeper:** needed (ADR-0016 amendment 14 items 3 and 4; ADR-0003 rules (m) and (n)).
+- **Reversibility:** High.
+
+### D-ARCH-220 · 2026-11-21 · principal-architect · Found while ruling the drain: the `error` event carries no `id`, so it never moves the client's resume point
+- **Finding (by reading `sse/event-stream.ts` and `fetch-sse-parser.ts` at `dc64193f`; not executed):** the module frames `error` with the id "last plus one". The reader keeps the id of every event as its resume point and `readEventStream` returns it. A stream that has sent event 1 and ends with `error`, id 2, is reopened with `Last-Event-ID: 2`, and the replay starts after 2. The persisted result 2 is never delivered.
+- **Why it matters now:** at the 30 s cap the sequence is complete, so the case was theoretical. D-ARCH-219 makes `error` followed by a resume the normal course of every stop.
+- **Decision:** `error` is framed as `event:` and `data:` only. An event without an id leaves the client's last event id unchanged (WHATWG event stream interpretation), so every conforming reader resumes after the last result it received. `complete` keeps its id: nothing follows it, and a resume from it gets `complete` again. "Increasing `id`" in ADR-0016 §10 reads: every event except `error`.
+- **Alternatives:** keep the id and tell clients not to resume from it (the server cannot tell a real resume point from the id of an `error`); `complete` without an id as well (harmless, more churn in the contract example and the tests); an `error` that repeats the last id (not strictly increasing).
+- **Owner and due:** TASK-044 part 044-A, in its fix cycle (rulings §4 item A1): the frame, the helper rule, the api tests, and a resume test. Merge condition: the gatekeeper has verified ADR-0016 amendment 14 item 2. If it is refused, the item is reverted on its own.
+- **Routed:** api-designer (api/README §9 rows "Framing" and "Reconnect", the description of `streamQuoteResults`; rulings §6 items 2, 5 and 8); product-manager (REQ-API-017 "id per event"; rulings §7 item 6). Neither review record names this; code-reviewer and security-analyst see it in the fix-cycle round.
+- **Gatekeeper:** needed (ADR-0016 amendment 14 item 2).
+- **Reversibility:** High.
+
+### D-ARCH-221 · 2026-11-21 · principal-architect · TASK-044 code review R1-m5 and PR044-SEC-04: an end that the tx slot decides is not a failure of the request; no error line for a client that goes away; a cut is logged once as `api.stream_cut`; after the headers the problem handler destroys the response and no longer calls `next()`
+- **Decision:**
+  1. **The client went away**, before or after the headers: the slot destroys the response and returns. No `http.request_failed` line, no stack. The access line `http.request` with `aborted: true` is the record. The slot already writes no FAILED entry for its own disconnect abort; this is the same rule for the log.
+  2. **A cut by the slot** (stream deadline, end grace, buffer bound): one line `api.stream_cut` with the operation id, the route template, the correlation id and the reason, and no value. `deadline` and `end_grace` are ERROR, because the stream did not end at its cap or at the drain. `buffer_limit` is WARN. The slot destroys the response and returns.
+  3. **A stream hook that rejects** is a defect and is rethrown.
+  4. **After the headers were sent** the problem handler logs `http.request_failed`, destroys the response and returns. It no longer hands an error to Express's final handler. This is the optional remediation of PR044-SEC-04; PR44-SEC-13 stays closed, because nothing reaches `console.error`.
+  5. With D-ARCH-219 a deadline cut is no longer normal traffic: a healthy stream ends at its cap with a frame.
+- **Not adopted:** a second info line `http.stream_client_gone` (review, PR044-SEC-04). The access line already records the request with `aborted: true`, the route template, the status and the duration. The verification text of PR044-SEC-04 (no ERROR line, nothing on `console.error`, one ERROR line for a producer failure) is proof (g) of part 044-B.
+- **Scope note:** item 1 covers a disconnect during a `call` phase too. Today it writes an ERROR line with status 503 for a client that is gone, and `loginUser` and `registerUser` have a `call`.
+- **Owner and due:** TASK-044 part 044-B (B5, proof (g)), before TASK-141 is dispatched. The owner is not "the `execute.ts` lock holder" in general: part 040-B leaves these paths alone (card line 7). TASK-214 counts `api.stream_cut` by reason and keeps disconnects out of the 5xx rate behind ROLLBACK_TRIGGERS.
+- **Routed:** security-analyst (concurrence on item 4 and on the missing second line; dispatch gate).
+- **Gatekeeper:** needed (ADR-0003 rule (p); ADR-0016 amendment 14 item 6).
+- **Reversibility:** High.
+
+### D-ARCH-222 · 2026-11-21 · principal-architect · TASK-044 code review R1-m6: a stream that loses its client releases its own subscription and cancels nothing else; carrier calls belong to the fan-out of `createQuote`; ADR-0016 §10 and ADR-0010 are restated; wording for product-manager and api-designer
+- **Decision (the architecture side):**
+  1. "Disconnect cancels upstream work" (ADR-0016 §10) reads: a stream that loses its client releases, within 1 s, the work it started itself: its subscription, its timers and its stream slot.
+  2. A stream starts no carrier call and no saga step (ADR-0016 amendment 9), so it cancels none.
+  3. The calls of a rate request belong to the fan-out that `createQuote` starts in `afterCommit`. They end by the `afterCommit` signal (the shutdown drain or the phase deadline) and by the 4 s and 5 s deadlines. No request signal and no stream signal reaches `CarrierContext` for a rate request.
+  4. The general rule is unchanged: a request cancels the work it started. A `call` phase is aborted when its client goes away. A stream starts none.
+- **Why:** the results are persisted for every reader: a second stream of the same quote, a reconnect to another replica (ADR-0016 amendment 3), `getQuote` and the rate cache. A reader that could cancel them would take results from the others, and the quota of the cancelled call is spent either way. The clause is older than amendment 9, which left it standing.
+- **The module is right as built:** its producer signal aborts on disconnect, which is correct for a subscription. Only the wording changes in part 044-A (module comment item 7; the AT-US-042-06 fixture says "subscription").
+- **Wording needed from product-manager (rulings §7 items 2 to 4):**
+  - REQ-API-018: "… cap stream duration at 30 s, and release the stream's own work (its subscription and timers) within 1 s when the client disconnects", with the note that a stream starts no upstream work and cancels none.
+  - AT-US-042-06: "Given a test event stream whose producer holds a subscription / When the client disconnects at 1 s / Then the subscription is released within 1 s / And work that the stream did not start is not cancelled".
+  - AT-US-042-07 (review open question 2): the two-part wording of the review matches D-ARCH-107 (5) and A-078: 401 on a `[session]` stream, 404 on a `[session, quote-token]` stream.
+- **Text needed from api-designer (rulings §6 items 2, 3 and 6):** the description of `streamQuoteResults` ("cancels upstream work within 1 s of client disconnect") and the api/README §9 row "Termination".
+- **Siblings of the old clause, found by search:** ADR-0010 §Rate shopping (withdrawn by amendment 14); the last note of the diagram in ARCHITECTURE.md §7.1 (withdrawn by a dated note); the T-47 mitigation cell of the threat model (routed to security-analyst).
+- **Card lines:** TASK-083 (the fan-out takes one signal, its caller's), TASK-091 (the fan-out is not tied to a reader, with a test), TASK-141 and TASK-173 (the producer passes its signal to its own subscription only, with a test).
+- **Gatekeeper:** needed (ADR-0016 amendment 14 item 5; ADR-0010 amendment 14).
+- **Reversibility:** High.
+
+### D-ARCH-223 · 2026-11-21 · principal-architect · Developer decisions D-TASK044-03 and D-TASK044-05: the 30 s cap is accepted and its follow-up replaced; no backpressure is accepted, and the tx slot bounds a stream at 1 MiB of unsent bytes instead of a sink that waits for `drain`
+- **D-TASK044-03:**
+  - The cap is accepted: 30 s from the start of the stream, then `error` with `SERVICE_UNAVAILABLE` and the end.
+  - The follow-up as worded ("the stream deadline lands in `execute.ts`") is replaced by D-ARCH-219: a 31 s deadline that exists only with the drain signal.
+  - The codes of the `error` event that the convention itself sends are two: `SERVICE_UNAVAILABLE` (the cap and a stop; retryable) and `INTERNAL_ERROR` (a refused event or a failed producer; not retryable). A client treats a stream that ends without a terminal event like `SERVICE_UNAVAILABLE` (ADR-0016 amendment 14 item 8; api-designer adds the row, rulings §6 item 7).
+- **D-TASK044-05:**
+  - No backpressure is accepted, and not only for M1. A subscription to shared, persisted results cannot slow its producer for one slow reader.
+  - The control is a bound: after each write the slot reads `res.writableLength`; above 1 MiB (`STREAM_BUFFER_LIMIT_BYTES`) the stream is cut with the reason `buffer_limit`, and the client resumes.
+  - 1 MiB holds at least five events of the largest size (64 Ki characters, at most 192 KiB in UTF-8) and every replay a route may read: a route bounds its replay read (PR044-SEC-07 item 3) so that its frames stay under the bound.
+  - A sink that waits for `drain` has no owner because it is not built. Its trigger is the first stream whose events are not persisted: that stream cannot be resumed, so a cut would lose data.
+- **Checked (plain `node:http`, Node 24.22.3; rulings §2 P6 and P7):** with a client that never reads, `res.write` returns `false` from the first 64 KiB chunk and `res.writableLength` passes 1 MiB after 20 chunks. The value counts bytes, and everything written in one turn counts in full, a replay included.
+- **Owner and due:** TASK-044 part 044-B (B6, proof (h)). The constant is a code constant; performance-engineer may size it with TASK-120.
+- **Routed:** security-analyst (the bound against T-47; dispatch gate).
+- **Gatekeeper:** needed (ADR-0016 amendment 14 item 7; ADR-0003 rule (q)).
+- **Reversibility:** High.
+
+### D-ARCH-224 · 2026-11-21 · principal-architect · Observations from the TASK-044 rulings, each with an owner: keep-alive connections during the drain, the Compose stop grace, a comment, the T-47 row and the dependency of TASK-120
+- **O-1, keep-alive during the drain (probe P4).** On Node 24.22.3 a connection that was busy when `server.close()` ran answers with `Connection: keep-alive` and serves a second request afterwards. `startApi` calls `closeIdleConnections()` once, so such a connection stays until the keep-alive timeout. platform.md §10.4 says "keep-alive connections close", and US-013 says new requests are refused. Owner: TASK-214, which completes US-013 (card line 19): close a connection when its response ends once the drain has started. Not part 044-B: a stream that starts during the drain is already handled there.
+- **O-2, the Compose stop grace.** `compose.yaml` sets no `stop_grace_period`, so Docker kills a container 10 s after SIGTERM. platform.md §5.2 gives 35 s. Streams no longer need the time (D-ARCH-219); a `call` near its 20 s deadline does. Owner: TASK-214 (same card line).
+- **O-3, the comment in `shutdown.ts` line 10** names 30 s as the ECS stop timeout. The design value is 35 s; 30 s is the window of REQ-PLAT-022. Owner: TASK-044 part 044-B (B8).
+- **O-4, threat-model T-47.** Its mitigation cell says "disconnect cancels work". It should say that a disconnect releases the stream's subscription and slot. Owner: security-analyst, at the next threat-model round.
+- **O-5, TASK-120** (k6 rate-shopping SSE profiles, batch 3.7) depends on TASK-091 and TASK-280. The stream it measures is mounted by TASK-141 (batch 4.5). Owner: senior-developer, at the fold.
+- **Recorded in:** platform.md §10.4 (O-1, O-2); the rulings file §8 and §9.
+- **Reversibility:** High.
