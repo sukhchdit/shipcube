@@ -9551,3 +9551,29 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   3. merge-only security rounds;
   4. merges stay blocked while Actions refuses jobs.
 - **Reversibility:** High.
+
+### D-ORCH-162 · 2026-11-21 · sdlc-orchestrator (session B) · User-accepted deviation: the user merged #80–#84 with hosted CI billing-blocked; post-merge evidence and reviews replace the pre-merge gates
+- **What happened:** the user merged every open PR while GitHub Actions refused jobs (D-ORCH-146):
+  - #80 TASK-040 040-A → `763800f3`;
+  - #81 TASK-080 → `339b29d6`;
+  - #82 TASK-041 041-A → `61c53b5e`;
+  - #83 TASK-051 → `a93a6113`;
+  - #84, the npm minor/patch group of 28 dependency updates → `3c4d9a6d`;
+  - Dependabot #49 and #50.
+- **Deviation:** this breaks the CLAUDE.md §5 merge rule ("merges to main require ... passing CI"). The union heads also merged without fresh lane B and merge-only security rounds: `2805c809`, `22f69a82`, `93a14e44`. #84 merged without a dependency review.
+- **Accepted by the user:** it was the user's merge and the user's call, made because CI billing blocks every hosted check. It is recorded here as a user-accepted deviation, not an agent action. Agents keep the §5 rule for their own actions.
+- **Replacement evidence (post-merge, on main):**
+  - (a) one lane-B run on `3c4d9a6d` as the regression evidence for the merged features and #84;
+  - (b) a post-merge security review on main. It covers the three unions (each a pure union plus its named resolution) and #84's 28 bumps against LICENSE_ALLOWLIST, Critical/High advisories, maintenance and `min-release-age`.
+  - The merge-only rounds owed on `2805c809`, `22f69a82` and `93a14e44` close as these post-merge reviews.
+  - A failure in (a) or (b) becomes a fix task in a new P5 batch. No revert happens without a recorded decision.
+  - Lane A on main runs when billing returns.
+- **Board:** TASK-040 part 040-A, TASK-041 part 041-A, TASK-080 and TASK-051 are merged. US-038, US-040, US-080 and US-042 stay partial as decided.
+- **Queue:**
+  - stacked merges (D-ORCH-158 procedure): 041-B onto `61c53b5e`, 040-B PR 1 onto `763800f3`, then lane B, security and a PR;
+  - TASK-044, TASK-045 and TASK-034: unions, fix cycles, reviews;
+  - TASK-042 after 2026-11-23T05:54Z;
+  - next build slots: TASK-298, TASK-278, part 045-C;
+  - TASK-043 parked.
+  - New PRs are opened and left ready; whether to merge with CI red is the user's call.
+- **Reversibility:** High (records); merges are on main.
