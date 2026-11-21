@@ -166,6 +166,56 @@ describe('runZeroDowntimeProbe', () => {
     expect(report.requests).toBeLessThan(sleeps.length);
   });
 
+  it('[TASK-034 R1-n6] a request saturated during the warm-up makes the run INVALID (the workload is too heavy), not FAIL', async () => {
+    let clock = 0;
+    let pending: (() => void)[] = [];
+    let migrated = false;
+    const report = await runZeroDowntimeProbe({
+      ...base,
+      warmupMs: 40,
+      afterMs: 0,
+      maxInFlight: 1,
+      operations: [READ],
+      execute: () =>
+        new Promise<void>((resolve) => {
+          pending.push(resolve);
+        }),
+      migrate: () => {
+        migrated = true;
+        return Promise.resolve();
+      },
+      now: () => clock,
+      sleep: async () => {
+        clock += 25;
+        if (clock >= 50) {
+          pending.forEach((resolve) => resolve());
+          pending = [];
+        }
+        await Promise.resolve();
+      },
+    });
+    expect(report.phases.warmup.failures).toBe(0);
+    expect(report.saturated).toBeGreaterThan(0);
+    expect(report.verdict).toBe('invalid-workload');
+    expect(migrated).toBe(true); // the run completes; the verdict says it proves nothing
+  });
+
+  it('[TASK-034 R1-n5] an error of an idle pooled client fails a run that would otherwise pass', async () => {
+    const run = harness();
+    let idle = 0;
+    const report = await runZeroDowntimeProbe({
+      ...base,
+      operations: [READ],
+      ...run.probe,
+      migrate: () => {
+        idle += 1; // a backend terminated by the migration while its client sat idle in the pool
+        return Promise.resolve();
+      },
+      idleErrors: () => idle,
+    });
+    expect(report).toMatchObject({ verdict: 'fail', failures: 0, saturated: 0, idleErrors: 1 });
+  });
+
   it('refuses an empty workload and a non-positive rate or limit', async () => {
     const run = harness();
     await expect(runZeroDowntimeProbe({ ...base, operations: [], ...run.probe })).rejects.toThrow(/at least one operation/);
@@ -236,7 +286,7 @@ describe('db:zero-downtime-probe main', () => {
     SHADOW_DATABASE_URL: 'postgresql://platform_migrator@127.0.0.1:5432/shadow',
   });
 
-  function deps(options: { deployFails?: boolean; queryFails?: boolean } = {}) {
+  function deps(options: { deployFails?: boolean; queryFails?: boolean; idleError?: boolean } = {}) {
     const lines: string[] = [];
     const errors: string[] = [];
     const files = new Map<string, string>();
@@ -244,9 +294,11 @@ describe('db:zero-downtime-probe main', () => {
     let ended = false;
     let deployEnv: NodeJS.ProcessEnv | undefined;
     let poolArgs: [string, number] | undefined;
+    let onIdleError: ((error: unknown) => void) | undefined;
     const value: ProbeDependencies = {
-      pool: (url, max) => {
+      pool: (url, max, onError) => {
         poolArgs = [url, max];
+        onIdleError = onError;
         return {
           query: async (sql: string) => {
             await tick();
@@ -264,6 +316,7 @@ describe('db:zero-downtime-probe main', () => {
       deploy: async (deployEnvironment) => {
         await tick();
         deployEnv = deployEnvironment;
+        if (options.idleError === true) onIdleError?.(Object.assign(new Error('terminating connection'), { code: '57P01' }));
         if (options.deployFails === true) throw new Error('prisma migrate deploy exited with 1');
       },
       readFile: (path) => files.get(path) ?? '',
@@ -288,7 +341,9 @@ describe('db:zero-downtime-probe main', () => {
     expect(run.deployEnv()).not.toHaveProperty('SHADOW_DATABASE_URL');
     expect(run.deployEnv()?.['DATABASE_MIGRATOR_URL']).toBe(env()['DATABASE_MIGRATOR_URL']);
     expect(JSON.parse(run.files.get('r.json') ?? '{}')).toMatchObject({ verdict: 'pass' });
-    expect(run.lines[0]).toMatch(/^\[db:zero-downtime-probe\] PASS: \d+ requests, 0 failed, 0 saturated; migration \d+ ms; p95 [\d.]+ ms$/);
+    expect(run.lines[0]).toMatch(
+      /^\[db:zero-downtime-probe\] PASS: \d+ requests, 0 failed, 0 saturated, 0 idle-client errors; migration \d+ ms; p95 [\d.]+ ms$/,
+    );
     expect(run.ended()).toBe(true);
   });
 
@@ -300,6 +355,10 @@ describe('db:zero-downtime-probe main', () => {
     expect(await main(fast, env(), broken.value)).toBe(1);
     expect(broken.errors[0]).toMatch(/^\[db:zero-downtime-probe\] MIGRATION-FAILED: .*; prisma migrate deploy exited with 1$/);
     expect(broken.ended()).toBe(true);
+    // R1-n5: an idle client's error reaches the pool's 'error' listener and fails the run instead of crashing the CLI.
+    const idle = deps({ idleError: true });
+    expect(await main(fast, env(), idle.value)).toBe(1);
+    expect(idle.errors[0]).toMatch(/^\[db:zero-downtime-probe\] FAIL: \d+ requests, 0 failed, 0 saturated, 1 idle-client errors;/);
   });
 
   it('refuses a remote URL, URLs of different databases and a bad flag before connecting', async () => {
@@ -319,7 +378,11 @@ describe('db:zero-downtime-probe main', () => {
   it('bounds every probe request and wires the production dependencies', () => {
     expect(PROBE_POOL_LIMITS).toEqual({ connectionTimeoutMillis: 5000, statement_timeout: 5000, query_timeout: 6000 });
     expect(Object.keys(PROBE_DEPENDENCIES).sort()).toEqual(['deploy', 'pool', 'readFile', 'write', 'writeError', 'writeFile']);
-    const pool = PROBE_DEPENDENCIES.pool('postgresql://platform_app@127.0.0.1:1/platform', 2);
+    const seen: unknown[] = [];
+    const pool = PROBE_DEPENDENCIES.pool('postgresql://platform_app@127.0.0.1:1/platform', 2, (error) => seen.push(error));
+    // The real pg.Pool has the 'error' listener: an idle client's error is reported, not thrown (R1-n5).
+    (pool as unknown as { emit(event: string, error: Error): boolean }).emit('error', new Error('idle client'));
+    expect(seen).toHaveLength(1);
     const end = jest.spyOn(pool, 'end');
     return pool.end().then(() => expect(end).toHaveBeenCalled());
   });

@@ -37,6 +37,8 @@ export const randomSecret = (): string => randomBytes(32).toString('base64url');
 export interface PrismaOptions {
   /** Prisma config file (default: the repository's prisma.config.ts). */
   config?: string;
+  /** Extra variables for the CLI (a fixture config's inputs, e.g. REHEARSAL_MIGRATIONS_PATH). */
+  env?: Readonly<Record<string, string>>;
 }
 
 export class PlatformPostgres {
@@ -114,7 +116,7 @@ export class PlatformPostgres {
 
   /** Runs the Prisma CLI through the pinned-engine wrapper against `database` as the migrator. */
   async prisma(database: string, args: readonly string[], options: PrismaOptions = {}): Promise<RunResult> {
-    const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_MIGRATOR_URL: this.migratorUrl(database) };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...options.env, DATABASE_MIGRATOR_URL: this.migratorUrl(database) };
     delete env['SHADOW_DATABASE_URL'];
     const config = options.config ? ['--config', options.config] : [];
     return withFileLock(PRISMA_TREE_LOCK, () => runNode([prismaCli, ...args, ...config], { cwd: repoRoot, env, timeoutMs: 180_000 }));

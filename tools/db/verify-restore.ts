@@ -9,22 +9,27 @@
  *      last), then `pg_restore --exit-on-error`.
  *   3. Verify (`verifyRestoredDatabase`): the restored manifest equals the backup manifest (row count and row checksum
  *      per table, migration head, sequences not behind, normalised schema digest: owners, ACLs, RLS, policies, triggers
- *      and event triggers); generated anti-joins find no orphan for any foreign key; `prisma migrate status` through the
- *      pinned wrapper with the ROOT prisma.config.ts reports the schema up to date, which proves the generated
- *      `tables.external` audit-partition window holds on a restored database (SPK-08 F-01, D-ARCH-077 (1)).
+ *      and event triggers); generated anti-joins find no orphan for any foreign key. Then, through the pinned wrapper
+ *      with the ROOT prisma.config.ts (SPK-08 F-01, D-ARCH-077 (1)): with `--migration <name>`, `prisma migrate deploy`
+ *      applies that migration (and any after it) to the restored data, which rehearses it (data-model §8.6;
+ *      D-TASK034-09); then `prisma migrate status` must report the history up to date. What this proves about the
+ *      config: it loads on a restored database, the generated `tables.external` window included, and its migrations
+ *      folder matches the restored history. `migrate status` compares history only (no schema diff), so it does NOT
+ *      prove that the window covers every audit partition of the restored schema (TASK-034 code review R1-m2).
  *   4. Drop the scratch database (unless `--keep`), write `restore-report.json` into the backup folder and, after a pass
  *      with `--migration <name>`, the rehearsal record `prisma/migrations/<name>/rehearsal.json` (rule R of the
- *      migration linter; tools/db/rehearsal-record.ts).
+ *      migration linter; tools/db/rehearsal-record.ts). The `--migration` checks (name, `data-changing: yes` header,
+ *      backup head = the migration before it) run first, before a database is created (R1-n3).
  *
  * Not verified here (D-TASK034-04): the RustFS bucket copy and document SHA-256 (no documents table yet), the audit
  * chain and anchors (TASK-116's verifier), the marker stream and the `/health/ready` smoke container (the CI job).
  *
  * CLI: DATABASE_BOOTSTRAP_URL and DATABASE_MIGRATOR_URL (loopback or Unix socket, same host and port),
  * BOOTSTRAP_MIGRATOR_PASSWORD / BOOTSTRAP_APP_PASSWORD (or `*_FILE`, as for db:bootstrap); `--backup <dir>` (required),
- * `--scratch <name>`, `--migration <name>`, `--service <compose service>`, `--keep`.
+ * `--scratch <name>`, `--migration <name>`, `--service <compose service>`, `--project <compose project>`, `--keep`.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { connectPrivileged, readRolePasswords, reapplyDatabaseLevel } from './bootstrap.js';
@@ -44,8 +49,18 @@ import {
   type BackupManifest,
   type OrphanFinding,
 } from './rehearsal-manifest.js';
-import { RECORD_FILE, buildRehearsalRecord, recordText, rehearsalProblems } from './rehearsal-record.js';
-import { localDatabaseUrl, messageOf, parseFlags, pgSession, utcStamp, withDatabase, type ClosableSession } from './rehearsal-cli.js';
+import { RECORD_FILE, buildRehearsalRecord, migrationNames, recordText, rehearsalProblems } from './rehearsal-record.js';
+import {
+  archiveTarget,
+  localDatabaseUrl,
+  messageOf,
+  parseFlags,
+  pgSession,
+  utcStamp,
+  withDatabase,
+  type ArchiveTarget,
+  type ClosableSession,
+} from './rehearsal-cli.js';
 import { quoteIdentifier } from './sql-text.js';
 import { diffSnapshots, type PrismaRun, type SnapshotDiff } from './up-down-up.js';
 
@@ -54,13 +69,21 @@ export const REPORT_FILE = 'restore-report.json';
 /** Schema diff lines kept in a report (each side). */
 const DIFF_LINES = 20;
 
+/** The outcome of one Prisma CLI step: `ok`, else the exit code and the last output lines. */
+export interface StepOutcome {
+  readonly ok: boolean;
+  readonly detail: string;
+}
+
 export interface RestoreCheck {
   readonly verdict: 'pass' | 'fail';
   readonly restoredManifest: BackupManifest;
   readonly differences: readonly string[];
   readonly orphans: readonly OrphanFinding[];
   readonly schemaDiff: SnapshotDiff;
-  readonly migrateStatus: { readonly ok: boolean; readonly detail: string };
+  /** `prisma migrate deploy` of the rehearsed migration; null without one. */
+  readonly migrateDeploy: StepOutcome | null;
+  readonly migrateStatus: StepOutcome;
 }
 
 export interface VerifyRestoredOptions {
@@ -71,6 +94,11 @@ export interface VerifyRestoredOptions {
   /** A privileged session on the restored database. */
   readonly session: ClosableSession;
   readonly archive: ArchiveTool;
+  /**
+   * `prisma migrate deploy` with the root config against the restored database, as the migrator: given when a
+   * migration is rehearsed (`--migration`), run after the comparison and before the status (D-TASK034-09).
+   */
+  readonly migrateDeploy?: () => Promise<PrismaRun>;
   /** `prisma migrate status` with the root config against the restored database, as the migrator. */
   readonly migrateStatus: () => Promise<PrismaRun>;
   readonly now?: () => Date;
@@ -78,7 +106,15 @@ export interface VerifyRestoredOptions {
 
 const UP_TO_DATE = /Database schema is up to date/;
 
-/** Step 3: compares a restored database with its backup manifest (the session stays open; the caller ends it). */
+const failureDetail = (run: PrismaRun): string =>
+  `exit ${String(run.status)}: ${`${run.stdout}\n${run.stderr}`.trim().split(/\r?\n/).slice(-3).join(' | ').slice(0, 300)}`;
+
+/**
+ * Step 3: compares a restored database with its backup manifest (the session stays open; the caller ends it). The
+ * comparison runs first, on the restored data as backed up; a rehearsed migration is deployed after it. Prisma's
+ * `migrate status` exits 1 while a migration is pending ("Following migration have not yet been applied"), so a
+ * backup taken one migration behind passes only once that migration is deployed (TASK-034 code review R1-M1).
+ */
 export async function verifyRestoredDatabase(options: VerifyRestoredOptions): Promise<RestoreCheck> {
   const { session } = options;
   await applySessionSettings(session);
@@ -94,13 +130,17 @@ export async function verifyRestoredDatabase(options: VerifyRestoredOptions): Pr
   const orphans = await findOrphans(session);
   const fullDiff = options.sourceSchema === undefined ? { onlyBefore: [], onlyAfter: [] } : diffSnapshots(options.sourceSchema, schema);
   const schemaDiff = { onlyBefore: fullDiff.onlyBefore.slice(0, DIFF_LINES), onlyAfter: fullDiff.onlyAfter.slice(0, DIFF_LINES) };
+  let migrateDeploy: StepOutcome | null = null;
+  if (options.migrateDeploy !== undefined) {
+    const deploy = await options.migrateDeploy();
+    migrateDeploy = deploy.status === 0 ? { ok: true, detail: 'applied' } : { ok: false, detail: failureDetail(deploy) };
+  }
+  // After a failed deploy the history is pending or failed: the status is still taken, for the report.
   const status = await options.migrateStatus();
   const ok = status.status === 0 && UP_TO_DATE.test(status.stdout);
-  const detail = ok
-    ? 'up to date'
-    : `exit ${String(status.status)}: ${`${status.stdout}\n${status.stderr}`.trim().split(/\r?\n/).slice(-3).join(' | ').slice(0, 300)}`;
-  const verdict = differences.length === 0 && orphans.length === 0 && ok ? 'pass' : 'fail';
-  return { verdict, restoredManifest, differences, orphans, schemaDiff, migrateStatus: { ok, detail } };
+  const migrateStatus = ok ? { ok, detail: 'up to date' } : { ok, detail: failureDetail(status) };
+  const verdict = differences.length === 0 && orphans.length === 0 && (migrateDeploy?.ok ?? true) && ok ? 'pass' : 'fail';
+  return { verdict, restoredManifest, differences, orphans, schemaDiff, migrateDeploy, migrateStatus };
 }
 
 export interface VerifyRestoreOptions {
@@ -116,6 +156,8 @@ export interface VerifyRestoreOptions {
   readonly scratch: () => Promise<ClosableSession>;
   /** Runs the database-level bootstrap file (00-roles.sql) on the scratch database. */
   readonly prepareScratch: () => Promise<void>;
+  /** See VerifyRestoredOptions.migrateDeploy. */
+  readonly migrateDeploy?: () => Promise<PrismaRun>;
   readonly migrateStatus: () => Promise<PrismaRun>;
   readonly keepScratch?: boolean;
   readonly now?: () => Date;
@@ -140,7 +182,8 @@ export interface RestoreReport {
   readonly differences: readonly string[];
   readonly orphans: readonly OrphanFinding[];
   readonly schemaDiff: SnapshotDiff;
-  readonly migrateStatus: { readonly ok: boolean; readonly detail: string };
+  readonly migrateDeploy: StepOutcome | null;
+  readonly migrateStatus: StepOutcome;
 }
 
 async function withSession<T>(open: () => Promise<ClosableSession>, work: (session: ClosableSession) => Promise<T>): Promise<T> {
@@ -175,6 +218,7 @@ export async function runVerifyRestore(options: VerifyRestoreOptions): Promise<R
         database: scratch,
         session,
         archive: options.archive,
+        ...(options.migrateDeploy === undefined ? {} : { migrateDeploy: options.migrateDeploy }),
         migrateStatus: options.migrateStatus,
         now,
       }),
@@ -197,6 +241,7 @@ export async function runVerifyRestore(options: VerifyRestoreOptions): Promise<R
       differences: check.differences,
       orphans: check.orphans,
       schemaDiff: check.schemaDiff,
+      migrateDeploy: check.migrateDeploy,
       migrateStatus: check.migrateStatus,
     };
   } finally {
@@ -208,29 +253,46 @@ export async function runVerifyRestore(options: VerifyRestoreOptions): Promise<R
 
 const MIGRATION_NAME = /^\d{14}_[a-z0-9_]{1,100}$/;
 
+/** A migration a backup may rehearse: its migration.sql bytes and the migration before it. */
+export interface RehearsalTarget {
+  readonly migration: string;
+  readonly migrationSql: Buffer;
+  readonly previous: string | null;
+}
+
 /**
- * Writes `prisma/migrations/<migration>/rehearsal.json` for a passed report. Refuses a migration that is not declared
- * `data-changing: yes`, a failed report, and a backup whose migration head is not the migration just before this one.
- * Returns the record's path.
+ * The `--migration` checks, run before any database is created (R1-n3): the name is a migration directory with a
+ * migration.sql (Prisma's list, `migrationNames`; R1-n4), declared `data-changing: yes`, and the backup's migration
+ * head is the migration just before it.
  */
-export function writeRehearsalRecord(migrationsRoot: string, migration: string, manifest: BackupManifest, report: RestoreReport): string {
+export function rehearsalTarget(migrationsRoot: string, migration: string, manifest: BackupManifest): RehearsalTarget {
   if (!MIGRATION_NAME.test(migration)) throw new RehearsalError('--migration must be a migration directory name (<14 digits>_<name>)');
-  const names = readdirSync(migrationsRoot)
-    .filter((name) => statSync(join(migrationsRoot, name)).isDirectory())
-    .sort();
+  const names = migrationNames(migrationsRoot);
   const index = names.indexOf(migration);
-  const migrationFile = join(migrationsRoot, migration, 'migration.sql');
-  if (index < 0 || !existsSync(migrationFile)) throw new RehearsalError(`migration ${migration} does not exist`);
-  const migrationSql = readFileSync(migrationFile);
+  if (index < 0) throw new RehearsalError(`migration ${migration} does not exist`);
+  const migrationSql = readFileSync(join(migrationsRoot, migration, 'migration.sql'));
   if (parseHeader(migrationSql.toString('utf8')).dataChanging !== true) {
     throw new RehearsalError(`migration ${migration} is not declared "data-changing: yes"; it needs no rehearsal record`);
   }
-  if (report.verdict !== 'pass') throw new RehearsalError('the verification failed: no rehearsal record is written');
   const previous = index === 0 ? null : (names[index - 1] as string);
   if (manifest.migrationHead !== previous) {
     throw new RehearsalError(
       `the backup's migration head ${String(manifest.migrationHead)} is not the migration before ${migration} (${String(previous)}): back up the database at that state`,
     );
+  }
+  return { migration, migrationSql, previous };
+}
+
+/**
+ * Writes `prisma/migrations/<migration>/rehearsal.json` for a passed report whose run deployed the migration on the
+ * restored data (D-TASK034-09). Repeats the `rehearsalTarget` checks (the files may have changed during the run) and
+ * refuses a failed report. Returns the record's path.
+ */
+export function writeRehearsalRecord(migrationsRoot: string, migration: string, manifest: BackupManifest, report: RestoreReport): string {
+  const { migrationSql, previous } = rehearsalTarget(migrationsRoot, migration, manifest);
+  if (report.verdict !== 'pass') throw new RehearsalError('the verification failed: no rehearsal record is written');
+  if (report.migrateDeploy?.ok !== true) {
+    throw new RehearsalError('the verification did not deploy the migration on the restored data: no rehearsal record is written');
   }
   const record = buildRehearsalRecord({
     migration,
@@ -250,8 +312,9 @@ export function writeRehearsalRecord(migrationsRoot: string, migration: string, 
 /** Side effects of main, injectable for the unit tests. */
 export interface VerifyRestoreDependencies {
   readonly connect: (connectionString: string) => Promise<ClosableSession>;
-  readonly archive: (options: { service: string; user: string }) => ArchiveTool;
+  readonly archive: (options: ArchiveTarget) => ArchiveTool;
   readonly prepareScratch: (connectionString: string, env: NodeJS.ProcessEnv) => Promise<void>;
+  readonly migrateDeploy: (env: NodeJS.ProcessEnv) => Promise<PrismaRun>;
   readonly migrateStatus: (env: NodeJS.ProcessEnv) => Promise<PrismaRun>;
   readonly migrationsRoot: string;
   readonly now: () => Date;
@@ -259,24 +322,28 @@ export interface VerifyRestoreDependencies {
   readonly writeError: (line: string) => void;
 }
 
-const STATUS_TIMEOUT_MS = 5 * 60_000;
+const PRISMA_TIMEOUT_MS = { status: 5 * 60_000, deploy: 30 * 60_000 } as const;
 
-/** `prisma migrate status` through the pinned wrapper, root prisma.config.ts (no --config; SPK-08 F-01). */
-export function prismaStatus(env: NodeJS.ProcessEnv, run: typeof spawnSync = spawnSync): PrismaRun {
-  const result = run(process.execPath, [join(REPO_ROOT, 'tools', 'deps', 'prisma-cli.mjs'), 'migrate', 'status'], {
+/** `prisma migrate status | deploy` through the pinned wrapper, root prisma.config.ts (no --config; SPK-08 F-01). */
+export function prismaMigrate(command: 'status' | 'deploy', env: NodeJS.ProcessEnv, run: typeof spawnSync = spawnSync): PrismaRun {
+  const result = run(process.execPath, [join(REPO_ROOT, 'tools', 'deps', 'prisma-cli.mjs'), 'migrate', command], {
     cwd: REPO_ROOT,
     env,
     encoding: 'utf8',
-    timeout: STATUS_TIMEOUT_MS,
+    timeout: PRISMA_TIMEOUT_MS[command],
     windowsHide: true,
   });
   return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
 }
 
+/** `prisma migrate status` (see prismaMigrate). */
+export const prismaStatus = (env: NodeJS.ProcessEnv, run: typeof spawnSync = spawnSync): PrismaRun => prismaMigrate('status', env, run);
+
 export const VERIFY_RESTORE_DEPENDENCIES: VerifyRestoreDependencies = {
   connect: async (connectionString) => pgSession(await connectPrivileged({ connectionString })),
-  archive: ({ service, user }) => composeArchiveTool({ service, user }),
+  archive: (target) => composeArchiveTool(target),
   prepareScratch: (connectionString, env) => reapplyDatabaseLevel({ connection: { connectionString }, passwords: readRolePasswords(env) }),
+  migrateDeploy: (env) => Promise.resolve(prismaMigrate('deploy', env)),
   migrateStatus: (env) => Promise.resolve(prismaStatus(env)),
   migrationsRoot: join(REPO_ROOT, 'prisma', 'migrations'),
   now: () => new Date(),
@@ -290,7 +357,7 @@ export async function main(
   deps: VerifyRestoreDependencies = VERIFY_RESTORE_DEPENDENCIES,
 ): Promise<number> {
   try {
-    const flags = parseFlags(argv, { values: ['backup', 'scratch', 'migration', 'service'], switches: ['keep'] });
+    const flags = parseFlags(argv, { values: ['backup', 'scratch', 'migration', 'service', 'project'], switches: ['keep'] });
     const backupDir = flags.values.get('backup');
     if (backupDir === undefined) throw new RehearsalError('--backup <folder written by db:backup> is required');
     const bootstrap = localDatabaseUrl(env, 'DATABASE_BOOTSTRAP_URL');
@@ -300,6 +367,8 @@ export async function main(
     }
     readRolePasswords(env); // fail fast, before a database is created
     const manifest = parseManifest(JSON.parse(readFileSync(join(backupDir, BACKUP_FILES.manifest), 'utf8')) as unknown);
+    const migration = flags.values.get('migration');
+    if (migration !== undefined) rehearsalTarget(deps.migrationsRoot, migration, manifest); // fail fast (R1-n3)
     const schemaFile = join(backupDir, BACKUP_FILES.schema);
     const scratch = flags.values.get('scratch') ?? `rehearsal_${utcStamp(deps.now()).toLowerCase()}`;
     const scratchMigrator: NodeJS.ProcessEnv = { ...env, DATABASE_MIGRATOR_URL: withDatabase(migrator.url, scratch) };
@@ -309,10 +378,11 @@ export async function main(
       ...(existsSync(schemaFile) ? { sourceSchema: readFileSync(schemaFile, 'utf8') } : {}),
       scratchDatabase: scratch,
       archivePath: join(backupDir, BACKUP_FILES.archive),
-      archive: deps.archive({ service: flags.values.get('service') ?? 'postgres', user: bootstrap.user || 'postgres' }),
+      archive: deps.archive(archiveTarget(flags, bootstrap.user)),
       admin: () => deps.connect(withDatabase(bootstrap.url, 'postgres')),
       scratch: () => deps.connect(withDatabase(bootstrap.url, scratch)),
       prepareScratch: () => deps.prepareScratch(withDatabase(bootstrap.url, scratch), env),
+      ...(migration === undefined ? {} : { migrateDeploy: () => deps.migrateDeploy(scratchMigrator) }),
       migrateStatus: () => deps.migrateStatus(scratchMigrator),
       keepScratch: flags.switches.has('keep'),
       now: deps.now,
@@ -324,12 +394,13 @@ export async function main(
         ...report.differences,
         ...report.orphans.map((orphan) => `${orphan.orphans} orphan(s) for ${orphan.constraint} on ${orphan.table}`),
       ];
+      if (report.migrateDeploy?.ok === false) reasons.push(`migrate deploy: ${report.migrateDeploy.detail}`);
       if (!report.migrateStatus.ok) reasons.push(`migrate status: ${report.migrateStatus.detail}`);
       deps.writeError(`[db:verify-restore] FAIL (${summary}): ${reasons.slice(0, 10).join('; ')}`);
       return 1;
     }
-    deps.write(`[db:verify-restore] PASS: ${summary}; report ${REPORT_FILE} in the backup folder`);
-    const migration = flags.values.get('migration');
+    const rehearsed = migration === undefined ? '' : `; ${migration} deployed on the restored data`;
+    deps.write(`[db:verify-restore] PASS: ${summary}${rehearsed}; report ${REPORT_FILE} in the backup folder`);
     if (migration !== undefined) {
       writeRehearsalRecord(deps.migrationsRoot, migration, manifest, report);
       deps.write(`[db:verify-restore] wrote ${RECORD_FILE} for ${migration}`);

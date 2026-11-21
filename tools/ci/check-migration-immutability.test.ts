@@ -87,6 +87,22 @@ describe('released migrations are immutable (PR8-SEC-01 lane-A backstop)', () =>
     expect(checkRepository({ root, base: 'main' }).findings.some((f) => f.rule === 'migrations/released-changed')).toBe(true);
   });
 
+  it('[TASK-034 R1-m1] a new migration directory that sorts before a released one fails once per directory, naming the rename', () => {
+    const { root, write, commit } = repo();
+    write('prisma/migrations/20261111000000_late/migration.sql', 'CREATE TABLE c (id int);\n');
+    write('prisma/migrations/20261111000000_late/down.sql', 'DROP TABLE c;\n');
+    write('prisma/migrations/20261113000000_next/migration.sql', 'CREATE TABLE b (id int);\n');
+    commit();
+    const { findings } = checkRepository({ root, base: 'main' });
+    expect(findings.map((f) => [f.rule, f.location])).toEqual([['migrations/added-out-of-order', 'prisma/migrations/20261111000000_late']]);
+    expect(findings[0]?.message).toMatch(
+      /sorts before the released 20261112000000_baseline.*rename it with a timestamp after 20261112000000/,
+    );
+    // The pure policy: the same directory sorting after every base directory passes.
+    const added = [{ status: 'A', path: 'prisma/migrations/20261112000001_x/migration.sql' }];
+    expect(checkMigrationChanges(added, new Set(['20261112000000_baseline']))).toEqual([]);
+  });
+
   it('pure policy: paths outside prisma/migrations are ignored; NUL-separated parsing', () => {
     const changes = parseNameStatus('M\0apps/api/x.ts\0A\0prisma/migrations/x/migration.sql\0');
     expect(changes).toEqual([

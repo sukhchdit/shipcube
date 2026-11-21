@@ -5,7 +5,12 @@
  *
  * Rule: relative to the merge base, every change under `prisma/migrations/` is an ADDED file inside a migration
  * directory that did not exist on the base; `migration_lock.toml` is allow-listed. Anything else —
- * modify, delete, rename, type change, or a file added to an existing directory — fails.
+ * modify, delete, rename, type change, or a file added to an existing directory — fails. A new migration directory
+ * must also sort after every directory on the base (TASK-034 code review R1-m1, D-TASK034-10): `migrate deploy` applies
+ * a migration that sorts before an applied one after it on existing databases (an order no fresh database sees), and
+ * the rehearsal record of a released data-changing migration (rule R, tools/db/rehearsal-record.ts) names the migration
+ * before it, which a directory inserted before it would change for ever (a released record cannot be rewritten).
+ * Rename the new directory with a later timestamp instead.
  *
  * Bootstrap lane (PR #24 R1-m3, PR24-SEC-06): `tools/db/bootstrap.ts` applies the direct `prisma/bootstrap/*.sql` files
  * in byte order of their names and records each file's sha256 in its ledger, so an edited released file fails only at
@@ -45,6 +50,9 @@ const BOOTSTRAP_FILE = /^prisma\/bootstrap\/[^/]+\.sql$/u;
 export function checkMigrationChanges(changes, baseDirs) {
   /** @type {Finding[]} */
   const findings = [];
+  const lastReleased = [...baseDirs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).at(-1);
+  /** @type {Set<string>} */
+  const outOfOrder = new Set();
   for (const { status, path } of changes) {
     if (!path.startsWith(`${MIGRATIONS_DIR}/`) || path === LOCK_FILE) continue;
     const rest = path.slice(MIGRATIONS_DIR.length + 1);
@@ -60,6 +68,13 @@ export function checkMigrationChanges(changes, baseDirs) {
         rule: 'migrations/released-dir-extended',
         message: `${IMMUTABLE}: a file was added to a migration directory that already exists on the base`,
         location: path,
+      });
+    } else if (dir !== undefined && lastReleased !== undefined && dir < lastReleased && !outOfOrder.has(dir)) {
+      outOfOrder.add(dir);
+      findings.push({
+        rule: 'migrations/added-out-of-order',
+        message: `a new migration directory sorts before the released ${lastReleased}: existing databases would apply it after later migrations and the rehearsal record of a released data-changing migration would go stale; rename it with a timestamp after ${lastReleased.slice(0, 14)} (D-TASK034-10)`,
+        location: `${MIGRATIONS_DIR}/${dir}`,
       });
     }
   }

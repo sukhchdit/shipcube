@@ -81,7 +81,7 @@ describe('generated SQL', () => {
     expect(sql).toContain('FROM ONLY "public"."odd""name" AS t');
     expect(sql).toContain("pg_catalog.sha256(pg_catalog.convert_to(t::pg_catalog.text, 'UTF8'))");
     expect(sql).toContain('::pg_catalog.bit(60)::pg_catalog.int8');
-    expect(sql).toMatch(/^SELECT pg_catalog\.count\(\*\)::pg_catalog\.text AS rows, pg_catalog\.coalesce\(pg_catalog\.sum\(/);
+    expect(sql).toMatch(/^SELECT pg_catalog\.count\(\*\)::pg_catalog\.text AS rows, COALESCE\(pg_catalog\.sum\(/);
   });
 
   it("builds the orphan anti-join with the constraint's own operators, MATCH SIMPLE null handling and no ONLY", () => {

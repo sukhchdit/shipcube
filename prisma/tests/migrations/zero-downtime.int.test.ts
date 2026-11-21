@@ -104,8 +104,10 @@ async function probeTable(): Promise<string> {
   return database;
 }
 
-describe('zero-downtime probe (NFR-AVAIL-003)', () => {
-  it('[NT-AVAIL-003-b] continuous reads and writes across an expand migration (nullable column, concurrent index, new table) have 0 errors', async () => {
+// NT-AVAIL-003-b is covered here PARTIALLY: a database-level probe, not the previous api image under k6 (D-TASK034-05 as
+// corrected by D-TASK034-11; TASK-034 code review R1-m4). The image-level job has no owner task yet.
+describe('zero-downtime probe (NFR-AVAIL-003; NT-AVAIL-003-b partial: database level)', () => {
+  it('[NT-AVAIL-003-b] (partial) continuous reads and writes across an expand migration (nullable column, concurrent index, new table) have 0 errors', async () => {
     const database = await probeTable();
     const report = await probe(database, OLD_CODE, () =>
       asMigrator(
@@ -127,7 +129,7 @@ describe('zero-downtime probe (NFR-AVAIL-003)', () => {
     expect(report.operations.every((operation) => operation.requests > 0)).toBe(true);
   }, 120_000);
 
-  it('[NT-AVAIL-003-b] negative control: a RENAME COLUMN breaks the old code, and the probe counts the failures (SQLSTATE 42703)', async () => {
+  it('[NT-AVAIL-003-b] (partial) negative control: a RENAME COLUMN breaks the old code, and the probe counts the failures (SQLSTATE 42703)', async () => {
     const database = await probeTable();
     const report = await probe(database, OLD_CODE, () =>
       asMigrator(database, ['ALTER TABLE public.zdt_probe RENAME COLUMN label TO title']),
@@ -138,7 +140,7 @@ describe('zero-downtime probe (NFR-AVAIL-003)', () => {
     expect(report.samples[0]).toMatchObject({ code: '42703' });
   }, 120_000);
 
-  it("[NT-AVAIL-003-b] the repository's latest expand migration, applied as deploy applies it, under the catalog read workload of platform_app: 0 errors", async () => {
+  it("[NT-AVAIL-003-b] (partial) the repository's latest expand migration, applied as deploy applies it, under the catalog read workload of platform_app: 0 errors", async () => {
     const names = listMigrations(repositoryMigrations);
     const read = (name: string) => readFileSync(join(repositoryMigrations, name, 'migration.sql'), 'utf8');
     const target = names.findLastIndex((name) => parseHeader(read(name)).kind === 'expand');

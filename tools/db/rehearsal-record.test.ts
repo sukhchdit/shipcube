@@ -10,7 +10,7 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { lintRehearsals, lintRepository } from './lint-migrations.js';
 import { MANIFEST_FORMAT, RehearsalError, sha256Hex, type BackupManifest } from './rehearsal-manifest.js';
-import { RECORD_FILE, RECORD_FORMAT, buildRehearsalRecord, recordText, rehearsalProblems } from './rehearsal-record.js';
+import { RECORD_FILE, RECORD_FORMAT, buildRehearsalRecord, migrationNames, recordText, rehearsalProblems } from './rehearsal-record.js';
 import { findRepoRoot } from '../test-support/process.js';
 
 const scratch = mkdtempSync(join(tmpdir(), 'rehearsal-record-'));
@@ -53,7 +53,14 @@ describe('the rehearsal record (rule R input)', () => {
       migration: MIGRATION,
       migrationSha256: sha256Hex(SQL),
       backup: { database: 'platform', migrationHead: PREVIOUS, manifestSha256: DIGEST, takenAt: '2026-11-21T10:00:00.000Z' },
-      verification: { verdict: 'pass', manifestSha256: DIGEST, verifiedAt: '2026-11-21T10:05:00.000Z', tables: 12, rows: '345' },
+      verification: {
+        verdict: 'pass',
+        manifestSha256: DIGEST,
+        verifiedAt: '2026-11-21T10:05:00.000Z',
+        tables: 12,
+        rows: '345',
+        deployed: true,
+      },
     });
     expect(rehearsalProblems(JSON.parse(recordText(fresh)) as unknown, expectation)).toEqual([]);
     expect(recordText(fresh).endsWith('}\n')).toBe(true);
@@ -70,10 +77,14 @@ describe('the rehearsal record (rule R input)', () => {
     expect(rehearsalProblems(record(null), { ...expectation, previous: null })).toEqual([]);
   });
 
-  it('[NT-DATA-004-c] refuses a failed verification, a verification of another backup and an impossible order of times', () => {
+  it('[NT-DATA-004-c] refuses a failed verification, one without the deploy, a verification of another backup and an impossible order of times', () => {
     const fresh = record();
     const verification = (patch: Record<string, unknown>) => ({ ...fresh, verification: { ...fresh.verification, ...patch } });
     expect(rehearsalProblems(verification({ verdict: 'fail' }), expectation)).toEqual(['the verification did not pass']);
+    // D-TASK034-09: a record of a run that did not deploy the migration on the restored data proves no rehearsal.
+    expect(rehearsalProblems(verification({ deployed: undefined }), expectation)).toEqual([
+      'the rehearsal did not deploy the migration on the restored data',
+    ]);
     expect(rehearsalProblems(verification({ manifestSha256: 'b'.repeat(64) }), expectation)).toEqual([
       'the verification ran against another backup manifest',
     ]);
@@ -148,6 +159,13 @@ describe('rule R: a data-changing migration without a fresh, verified backup is 
   it('needs no record for a migration that is not data-changing, and none for a missing root', () => {
     expect(lintRehearsals(root(SQL.replace('data-changing: yes', 'data-changing: no')))).toEqual([]);
     expect(lintRehearsals(join(scratch, 'absent'))).toEqual([]);
+  });
+
+  it('[TASK-034 R1-n4] "previous" is the migration before in Prisma\'s list: a folder without migration.sql in between is skipped', () => {
+    const dir = root(SQL, recordText(record()));
+    mkdirSync(join(dir, '20261120000000_no_sql_between'));
+    expect(lintRehearsals(dir)).toEqual([]);
+    expect(migrationNames(dir)).toEqual([PREVIOUS, MIGRATION]);
   });
 
   it('the first migration of a root is checked against a null head', () => {

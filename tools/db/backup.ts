@@ -11,8 +11,9 @@
  * `schema.sql` (the normalised schema the manifest digests). Never commit it: the archive holds every row.
  *
  * CLI: DATABASE_BOOTSTRAP_URL (a loopback host or a Unix socket only); `--out <dir>`, `--service <compose service>`
- * (default `postgres`). The archive tool runs `pg_dump` in that Compose service over its local socket. Exit 0 = backup
- * written, 1 = refused or failed (one stderr line, no URL or value).
+ * (default `postgres`), `--project <compose project>` (default: the project Compose derives from the working
+ * directory; a task worktree has its own). The archive tool runs `pg_dump` in that Compose service over its local
+ * socket. Exit 0 = backup written, 1 = refused or failed (one stderr line, no URL or value).
  */
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -29,7 +30,16 @@ import {
   manifestTotals,
   type BackupManifest,
 } from './rehearsal-manifest.js';
-import { defaultRunDir, localDatabaseUrl, messageOf, parseFlags, pgSession, type ClosableSession } from './rehearsal-cli.js';
+import {
+  archiveTarget,
+  defaultRunDir,
+  localDatabaseUrl,
+  messageOf,
+  parseFlags,
+  pgSession,
+  type ArchiveTarget,
+  type ClosableSession,
+} from './rehearsal-cli.js';
 import { normaliseSchemaDump } from './up-down-up.js';
 
 export const BACKUP_FILES = { archive: 'platform.dump', manifest: 'manifest.json', schema: 'schema.sql' } as const;
@@ -103,7 +113,7 @@ export async function runBackup(options: BackupOptions): Promise<BackupResult> {
 /** Side effects of main, injectable for the unit tests. */
 export interface BackupDependencies {
   readonly connect: (connectionString: string) => Promise<ClosableSession>;
-  readonly archive: (options: { service: string; user: string }) => ArchiveTool;
+  readonly archive: (options: ArchiveTarget) => ArchiveTool;
   readonly now: () => Date;
   readonly write: (line: string) => void;
   readonly writeError: (line: string) => void;
@@ -111,7 +121,7 @@ export interface BackupDependencies {
 
 export const BACKUP_DEPENDENCIES: BackupDependencies = {
   connect: async (connectionString) => pgSession(await connectPrivileged({ connectionString })),
-  archive: ({ service, user }) => composeArchiveTool({ service, user }),
+  archive: (target) => composeArchiveTool(target),
   now: () => new Date(),
   write: (line) => process.stdout.write(`${line}\n`),
   writeError: (line) => process.stderr.write(`${line}\n`),
@@ -123,14 +133,14 @@ export async function main(
   deps: BackupDependencies = BACKUP_DEPENDENCIES,
 ): Promise<number> {
   try {
-    const flags = parseFlags(argv, { values: ['out', 'service'], switches: [] });
+    const flags = parseFlags(argv, { values: ['out', 'service', 'project'], switches: [] });
     const target = localDatabaseUrl(env, 'DATABASE_BOOTSTRAP_URL');
     const outDir = flags.values.get('out') ?? defaultRunDir('backup', deps.now());
     const result = await runBackup({
       database: target.endpoint.database,
       outDir,
       connect: () => deps.connect(target.url),
-      archive: deps.archive({ service: flags.values.get('service') ?? 'postgres', user: target.user || 'postgres' }),
+      archive: deps.archive(archiveTarget(flags, target.user)),
       now: deps.now,
     });
     const totals = manifestTotals(result.manifest);

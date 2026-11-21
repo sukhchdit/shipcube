@@ -24,7 +24,7 @@
  * or up to date, 1 = failure.
  */
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -363,6 +363,8 @@ const SECRET_FILE_PATH = /^\/run\/secrets(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}
 export interface ReadSecretOptions {
   /** Directory standing in for /run/secrets (tests); the `*_FILE` value is still checked against /run/secrets. */
   readonly root?: string;
+  /** The one open of the secret file (tests: a directory swapped between the path checks and the open). */
+  readonly open?: (path: string, flags: number) => number;
 }
 
 const isWithin = (root: string, target: string): boolean => {
@@ -388,9 +390,12 @@ export function readBounded(fd: number, limit: number, read: typeof readSync = r
 /**
  * Reads a confined secret file; every error names `variable` only, never the path or the content. The file is opened
  * ONCE and every later check runs on that descriptor (PR11-SEC-11 d, TASK-034): a file swapped in after the realpath
- * check cannot be read, and a FIFO or a growing file cannot force an unbounded read.
+ * check cannot be read, and a FIFO or a growing file cannot force an unbounded read. O_NOFOLLOW guards the last
+ * component only, so a directory on the path swapped between the realpath and the open could still redirect the open:
+ * after it, the path is resolved again, must still lie under the root, and must name the very file the descriptor holds
+ * (same device and inode), else the read is refused (TASK-034 code review R1, security flag 3; D-TASK034-12).
  */
-function readSecretFile(variable: string, locator: string, root: string): string {
+function readSecretFile(variable: string, locator: string, root: string, open: (path: string, flags: number) => number): string {
   const refuse = (reason: string): never => {
     throw new BootstrapError(`${variable}: ${reason}`);
   };
@@ -399,12 +404,17 @@ function readSecretFile(variable: string, locator: string, root: string): string
   let fd: number | undefined;
   try {
     const realRoot = realpathSync(root);
-    const realTarget = realpathSync(join(root, ...locator.slice(SECRET_FILE_ROOT.length + 1).split('/')));
+    const lexical = join(root, ...locator.slice(SECRET_FILE_ROOT.length + 1).split('/'));
+    const realTarget = realpathSync(lexical);
     if (!isWithin(realRoot, realTarget)) refuse(`resolves outside ${SECRET_FILE_ROOT}`);
-    fd = openSync(realTarget, SECRET_FILE_OPEN_FLAGS);
-    const info = fstatSync(fd);
+    fd = open(realTarget, SECRET_FILE_OPEN_FLAGS);
+    const info = fstatSync(fd, { bigint: true });
+    const realAfter = realpathSync(lexical);
+    if (!isWithin(realRoot, realAfter)) refuse(`resolves outside ${SECRET_FILE_ROOT}`);
+    const named = statSync(realAfter, { bigint: true });
+    if (named.dev !== info.dev || named.ino !== info.ino) refuse('changed while it was opened');
     if (!info.isFile()) refuse('is not a regular file');
-    if (info.size > SECRET_FILE_MAX_BYTES) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
+    if (info.size > BigInt(SECRET_FILE_MAX_BYTES)) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
     content = readBounded(fd, SECRET_FILE_MAX_BYTES + 1);
   } catch (error) {
     if (error instanceof BootstrapError) throw error;
@@ -431,7 +441,7 @@ export function readSecret(env: NodeJS.ProcessEnv, name: string, options: ReadSe
   const locator = env[fileVariable] ?? '';
   if (direct !== '' && locator !== '') throw new BootstrapError(`set ${name} or ${fileVariable}, not both`);
   if (direct !== '') return direct;
-  const fromFile = locator === '' ? '' : readSecretFile(fileVariable, locator, options.root ?? SECRET_FILE_ROOT);
+  const fromFile = locator === '' ? '' : readSecretFile(fileVariable, locator, options.root ?? SECRET_FILE_ROOT, options.open ?? openSync);
   if (fromFile === '') throw new BootstrapError(`${name} (or ${fileVariable}) is not set`);
   return fromFile;
 }

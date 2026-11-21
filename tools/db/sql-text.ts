@@ -191,6 +191,159 @@ export function tokenize(sql: string): Token[] {
   return tokens;
 }
 
+/** DOLLAR_TAG anchored at a position (sticky): no copy of the rest of the text per dollar sign. */
+const DOLLAR_TAG_AT = new RegExp(DOLLAR_TAG.source.slice(1), 'y');
+const dollarTagAt = (text: string, at: number): string | undefined => {
+  DOLLAR_TAG_AT.lastIndex = at;
+  return DOLLAR_TAG_AT.exec(text)?.[0];
+};
+
+/** The tolerant reading of text that does not lex (tolerantRead). */
+export interface TolerantReading {
+  /** The text between the `;` of code, comments replaced by one space; strings, names and dollar bodies as written. */
+  readonly segments: string[];
+  /** The body of every string literal (escape strings: line-break escapes decoded) and dollar-quoted string. */
+  readonly bodies: string[];
+}
+
+/**
+ * Reads text that `tokenize` refuses (an unterminated literal, an E-string continued on a new line) the way the lexer
+ * reads text that lexes, as far as the text allows: `--` comments end at LF or CR, `/* *\/` comments nest, string
+ * literals (`''` inside, backslash escapes in an E-string, and a continuation after a newline keeps an E-string's
+ * escapes live, as scan.l `quotecontinue`), quoted identifiers and dollar-quoted strings pass through, and the text is
+ * cut at every `;` of code. An unterminated comment, literal, name or dollar body runs to the end of the text. One
+ * pass, linear in the text: each dollar body is searched for its closing tag once, from its opening tag.
+ * Migration-linter rule 10 reads a body that does not lex this way (PR293-SEC-04 a; TASK-034 code review R1-M2).
+ */
+export function tolerantRead(text: string): TolerantReading {
+  const segments: string[] = [];
+  const bodies: string[] = [];
+  const n = text.length;
+  let current = '';
+  /** Start of the text not yet copied into `current`. */
+  let copied = 0;
+  /** Start of the current run of code characters (after the last comment, literal, name or dollar body). */
+  let codeStart = 0;
+  /** An E-string closed and only white space and `--` comments followed; `newline`: one of them was a line break. */
+  let afterEscape = false;
+  let newline = false;
+  const replace = (from: number, to: number, replacement: string): void => {
+    current += text.slice(copied, from) + replacement;
+    copied = to;
+  };
+  let at = 0;
+  while (at < n) {
+    const ch = text[at] as string;
+    const next = text[at + 1];
+    if (ch === '-' && next === '-') {
+      let end = at + 2;
+      while (end < n && text[end] !== '\n' && text[end] !== '\r') end += 1;
+      replace(at, end, ' ');
+      at = end;
+      codeStart = end;
+      continue;
+    }
+    if (ch === '\n' || ch === '\r') {
+      newline = true;
+      at += 1;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\f' || ch === '\v') {
+      at += 1;
+      continue;
+    }
+    const continued: boolean = afterEscape && newline;
+    afterEscape = false;
+    newline = false;
+    if (ch === '/' && next === '*') {
+      let depth = 0;
+      let end = at;
+      while (end < n) {
+        if (text[end] === '/' && text[end + 1] === '*') {
+          depth += 1;
+          end += 2;
+        } else if (text[end] === '*' && text[end + 1] === '/') {
+          depth -= 1;
+          end += 2;
+          if (depth === 0) break;
+        } else {
+          end += 1;
+        }
+      }
+      replace(at, Math.min(end, n), ' ');
+      at = Math.min(end, n);
+      codeStart = at;
+    } else if (ch === "'") {
+      const prefixed = at - 1 >= codeStart && /[eE]/.test(text[at - 1] ?? '') && (at - 2 < codeStart || !isIdentifierChar(text[at - 2]));
+      const escaped: boolean = continued || prefixed;
+      let end = at + 1;
+      let closed = false;
+      while (end < n) {
+        if (escaped && text[end] === '\\') end += 2;
+        else if (text[end] === "'" && text[end + 1] === "'") end += 2;
+        else if (text[end] === "'") {
+          end += 1;
+          closed = true;
+          break;
+        } else end += 1;
+      }
+      end = Math.min(end, n);
+      const inner = text.slice(at + 1, closed ? end - 1 : end).replaceAll("''", "'");
+      bodies.push(escaped ? decodeLineBreaks(inner) : inner);
+      afterEscape = escaped && closed;
+      at = end;
+      codeStart = end;
+    } else if (ch === '"') {
+      let end = at + 1;
+      while (end < n) {
+        if (text[end] === '"' && text[end + 1] === '"') end += 2;
+        else if (text[end] === '"') {
+          end += 1;
+          break;
+        } else end += 1;
+      }
+      at = Math.min(end, n);
+      codeStart = at;
+    } else if (ch === '$' && (at - 1 < codeStart || !isIdentifierChar(text[at - 1])) && dollarTagAt(text, at) !== undefined) {
+      const tag = dollarTagAt(text, at) as string;
+      const close = text.indexOf(tag, at + tag.length);
+      bodies.push(text.slice(at + tag.length, close === -1 ? n : close));
+      at = close === -1 ? n : close + tag.length;
+      codeStart = at;
+    } else if (ch === ';') {
+      replace(at, at + 1, '');
+      segments.push(current);
+      current = '';
+      at += 1;
+      codeStart = at;
+    } else {
+      at += 1;
+    }
+  }
+  current += text.slice(copied);
+  segments.push(current);
+  return { segments, bodies };
+}
+
+/** One escape sequence of an E-string (scan.l `xeescape`, `xeoctesc`, `xehexesc`, `xeunicode`); `\\` is one too. */
+const ESCAPE_SEQUENCE = /\\(?:([nr])|([0-7]{1,3})|x([0-9A-Fa-f]{1,2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|[\s\S])/g;
+
+/**
+ * The body of an E-string with every escape that stands for a line break (`\n`, `\r`, and the octal, hex and Unicode
+ * forms of LF and CR) written as that line break, everything else as written. Read as SQL, a `--` comment in such a
+ * body then ends where PostgreSQL's does (TASK-034 code review R1-M2).
+ */
+export function decodeLineBreaks(body: string): string {
+  return body.replace(ESCAPE_SEQUENCE, (match: string, letter?: string, octal?: string, hex?: string, u4?: string, u8?: string) => {
+    if (letter !== undefined) return letter === 'n' ? '\n' : '\r';
+    const digits = hex ?? u4 ?? u8;
+    // scan.l keeps the low byte of an octal escape.
+    const code = octal !== undefined ? Number.parseInt(octal, 8) & 0xff : digits !== undefined ? Number.parseInt(digits, 16) : -1;
+    if (code === 0x0a) return '\n';
+    return code === 0x0d ? '\r' : match;
+  });
+}
+
 /** SQL string literal for `value` (standard_conforming_strings). */
 export function quoteLiteral(value: string): string {
   if (value.includes('\0')) throw new SqlLexError('a variable value must not contain NUL');

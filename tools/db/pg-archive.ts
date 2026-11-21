@@ -12,6 +12,7 @@
  */
 import { spawn } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
+import type { Writable } from 'node:stream';
 
 import { RehearsalError } from './rehearsal-manifest.js';
 
@@ -76,105 +77,160 @@ export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 const DEFAULT_CAPTURE = 64 * 1024 * 1024;
 const STDERR_CAPTURE = 256 * 1024;
 
-/** Runs a process without a shell, with a hard timeout and bounded capture; never rejects. */
-export const runProcess: ProcessRunner = (request) =>
-  new Promise((resolve) => {
-    const child = spawn(request.command, [...request.args], {
-      stdio: [request.stdinFile === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      shell: false,
-    });
-    const { stdout: out, stderr: err } = child;
-    if (out === null || err === null) {
-      child.kill('SIGKILL');
-      resolve({ code: null, stdout: '', stderr: 'error: no output pipes', timedOut: false });
-      return;
-    }
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let timedOut = false;
-    let failure: string | undefined;
-    const limit = request.maxCapture ?? DEFAULT_CAPTURE;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGKILL');
-    }, request.timeoutMs);
-    const fail = (message: string): void => {
-      failure ??= message;
-      child.kill('SIGKILL');
-    };
-    if (request.stdoutFile === undefined) {
-      out.on('data', (chunk: Buffer) => {
-        stdoutBytes += chunk.length;
-        if (stdoutBytes > limit) fail(`stdout exceeded ${String(limit)} bytes`);
-        else stdout.push(chunk);
+/** Opens the stdout file (`wx`: a backup is never written over another). */
+export type SinkFactory = (path: string) => Writable;
+const newFileSink: SinkFactory = (path) => createWriteStream(path, { flags: 'wx' });
+
+/**
+ * A process runner without a shell, with a hard timeout and bounded capture; never rejects. With `stdoutFile` it settles
+ * only once the file sink has finished (or failed) after the process closed, so a write error at the final flush
+ * (ENOSPC) fails the run instead of being lost after it settled (TASK-034 code review R1-m3).
+ */
+export const createProcessRunner =
+  (openSink: SinkFactory = newFileSink): ProcessRunner =>
+  (request) =>
+    new Promise((resolve) => {
+      const child = spawn(request.command, [...request.args], {
+        stdio: [request.stdinFile === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        shell: false,
       });
-    } else {
-      const sink = createWriteStream(request.stdoutFile, { flags: 'wx' });
-      sink.on('error', (error) => fail(`could not write the output file (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`));
-      out.pipe(sink);
-    }
-    err.on('data', (chunk: Buffer) => {
-      if (stderrBytes < STDERR_CAPTURE) stderr.push(chunk);
-      stderrBytes += chunk.length;
-    });
-    if (request.stdinFile !== undefined && child.stdin !== null) {
-      const source = createReadStream(request.stdinFile);
-      source.on('error', (error) => fail(`could not read the input file (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`));
-      child.stdin.on('error', () => undefined); // EPIPE when the tool exits early; its exit code reports the failure
-      source.pipe(child.stdin);
-    }
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      resolve({
-        code: null,
-        stdout: '',
-        stderr: `error: could not start ${request.command} (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`,
-        timedOut,
+      const { stdout: out, stderr: err } = child;
+      if (out === null || err === null) {
+        child.kill('SIGKILL');
+        resolve({ code: null, stdout: '', stderr: 'error: no output pipes', timedOut: false });
+        return;
+      }
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let stdoutBytes = 0;
+      let stderrBytes = 0;
+      let timedOut = false;
+      let failure: string | undefined;
+      let sink: Writable | undefined;
+      const limit = request.maxCapture ?? DEFAULT_CAPTURE;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill('SIGKILL');
+      }, request.timeoutMs);
+      const fail = (message: string): void => {
+        failure ??= message;
+        child.kill('SIGKILL');
+      };
+      if (request.stdoutFile === undefined) {
+        out.on('data', (chunk: Buffer) => {
+          stdoutBytes += chunk.length;
+          if (stdoutBytes > limit) fail(`stdout exceeded ${String(limit)} bytes`);
+          else stdout.push(chunk);
+        });
+      } else {
+        sink = openSink(request.stdoutFile);
+        sink.on('error', (error) => fail(`could not write the output file (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`));
+        out.pipe(sink);
+      }
+      err.on('data', (chunk: Buffer) => {
+        if (stderrBytes < STDERR_CAPTURE) stderr.push(chunk);
+        stderrBytes += chunk.length;
+      });
+      if (request.stdinFile !== undefined && child.stdin !== null) {
+        const source = createReadStream(request.stdinFile);
+        source.on('error', (error) => fail(`could not read the input file (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`));
+        child.stdin.on('error', () => undefined); // EPIPE when the tool exits early; its exit code reports the failure
+        source.pipe(child.stdin);
+      }
+      child.on('error', (error) => {
+        clearTimeout(timer);
+        sink?.destroy();
+        resolve({
+          code: null,
+          stdout: '',
+          stderr: `error: could not start ${request.command} (${(error as NodeJS.ErrnoException).code ?? 'EIO'})`,
+          timedOut,
+        });
+      });
+      const settle = (code: number | null): void => {
+        const tail = failure === undefined ? '' : `\nerror: ${failure}`;
+        resolve({
+          code: failure === undefined ? code : null,
+          stdout: Buffer.concat(stdout).toString('utf8'),
+          stderr: Buffer.concat(stderr).toString('utf8') + tail,
+          timedOut,
+        });
+      };
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        const file = sink;
+        // The pipe ends the sink when stdout ends; 'close' follows its 'finish' or its 'error' (autoDestroy).
+        if (file === undefined || file.closed) settle(code);
+        else file.once('close', () => settle(code));
       });
     });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      const tail = failure === undefined ? '' : `\nerror: ${failure}`;
-      resolve({
-        code: failure === undefined ? code : null,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8') + tail,
-        timedOut,
-      });
-    });
-  });
+
+export const runProcess: ProcessRunner = createProcessRunner();
 
 export interface ComposeArchiveOptions {
   /** Compose service running PostgreSQL (default `postgres`). */
   readonly service?: string;
   /** Role the tools connect as over the container's socket (the bootstrap superuser, default `postgres`). */
   readonly user?: string;
-  /** Extra `docker compose` arguments before `exec` (e.g. `-p <project>`). */
+  /**
+   * Compose project (`docker compose -p <project>`). Without it Compose derives the project from the working
+   * directory, so a run from a task worktree (`../Shipqube-TASK-xxx`) talks to that worktree's stack (R1-n8).
+   */
+  readonly project?: string;
+  /** Extra `docker compose` arguments, after `compose` and before `exec`. */
   readonly composeArgs?: readonly string[];
   readonly timeoutMs?: number;
   readonly run?: ProcessRunner;
 }
 
 const SERVICE_NAME = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
+/** A Compose project name (lower-case letters, digits, `_` and `-`, starting with a letter or digit). */
+const PROJECT_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const ROLE_NAME = /^[a-z_][a-z0-9_]{0,62}$/;
 export const ARCHIVE_TIMEOUT_MS = 60 * 60_000;
+/**
+ * Extra time the host waits past the in-container `timeout`: TERM at the limit, KILL 10 s later, then the exec ends.
+ * Killing the `docker` client alone would leave `pg_dump` / `pg_restore` running in the container (R1-n7).
+ */
+export const CONTAINER_GRACE_MS = 30_000;
+/** `timeout`'s exit code when TERM at the limit stopped the tool (137, after the KILL of `-k`, could also be an OOM kill). */
+const CONTAINER_TIMEOUT_EXIT = 124;
 
 /** The archive tool over `docker compose exec -T <service>` (the local Compose stack, platform.md §2). */
 export function composeArchiveTool(options: ComposeArchiveOptions = {}): ArchiveTool {
   const service = options.service ?? 'postgres';
   const user = options.user ?? 'postgres';
   if (!SERVICE_NAME.test(service)) throw new RehearsalError('the Compose service name has an unexpected form');
+  if (options.project !== undefined && !PROJECT_NAME.test(options.project)) {
+    throw new RehearsalError('the Compose project name has an unexpected form');
+  }
   if (!ROLE_NAME.test(user)) throw new RehearsalError('the dump role name must be a plain lower-case identifier');
   const run = options.run ?? runProcess;
   const timeoutMs = options.timeoutMs ?? ARCHIVE_TIMEOUT_MS;
-  const exec = (tool: string, args: readonly string[]) => [...(options.composeArgs ?? []), 'compose', 'exec', '-T', service, tool, ...args];
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  const exec = (tool: string, args: readonly string[]) => [
+    'compose',
+    ...(options.project === undefined ? [] : ['-p', options.project]),
+    ...(options.composeArgs ?? []),
+    'exec',
+    '-T',
+    service,
+    'timeout',
+    '-k',
+    '10',
+    String(seconds),
+    tool,
+    ...args,
+  ];
   const checked = async (tool: string, request: Omit<ProcessRequest, 'command' | 'timeoutMs'>): Promise<ProcessResult> => {
-    const result = await run({ command: 'docker', timeoutMs, ...request });
+    const result = await run({ command: 'docker', timeoutMs: timeoutMs + CONTAINER_GRACE_MS, ...request });
     if (result.code !== 0) {
-      const reason = result.timedOut ? `timed out after ${String(timeoutMs)} ms` : `exited with ${String(result.code)}`;
+      const reason = result.timedOut
+        ? `timed out after ${String(timeoutMs + CONTAINER_GRACE_MS)} ms`
+        : result.code === CONTAINER_TIMEOUT_EXIT
+          ? `timed out in the container after ${String(seconds)} s`
+          : `exited with ${String(result.code)}`;
       throw new RehearsalError(`${tool} ${reason}: ${errorSummary(result.stderr)}`);
     }
     return result;

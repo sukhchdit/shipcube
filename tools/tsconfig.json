@@ -15,6 +15,7 @@
     "../prisma/tests/fixtures/concurrent-index/prisma.config.ts",
     "../prisma/tests/fixtures/concurrent-index-multi/prisma.config.ts",
     "../prisma/tests/fixtures/concurrent-index-partial/prisma.config.ts",
+    "../prisma/tests/fixtures/rehearsal/prisma.config.ts",
     "../apps/api/src/platform/db/client.ts",
     "../apps/api/src/platform/db/dedicated-connection.ts",
     "../apps/api/src/platform/db/expect-affected.ts",

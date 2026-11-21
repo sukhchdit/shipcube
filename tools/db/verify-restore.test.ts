@@ -4,7 +4,7 @@
  * PostgreSQL 18 run is prisma/tests/migrations/backup-restore.int.test.ts.
  */
 import type { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +31,7 @@ import {
   REPORT_FILE,
   VERIFY_RESTORE_DEPENDENCIES,
   main,
+  prismaMigrate,
   prismaStatus,
   runVerifyRestore,
   writeRehearsalRecord,
@@ -51,6 +52,17 @@ const SCHEMA = 'CREATE TABLE public.a (id integer);';
 const NORMALISED = normaliseSchemaDump(SCHEMA);
 const NOW = new Date('2026-11-21T10:05:00.000Z');
 const UP_TO_DATE: PrismaRun = { status: 0, stdout: '7 migrations found\nDatabase schema is up to date!\n', stderr: '' };
+/** Prisma 7.10 `migrate status` on a database one migration behind: the databaseIsBehind branch, process.exit(1). */
+const BEHIND: PrismaRun = {
+  status: 1,
+  stdout: '8 migrations found in prisma/migrations\nFollowing migration have not yet been applied:\n20261121000000_backfill\n',
+  stderr: '',
+};
+const APPLIED: PrismaRun = {
+  status: 0,
+  stdout: 'Applying migration `20261121000000_backfill`\nAll migrations have been successfully applied.\n',
+  stderr: '',
+};
 
 interface DatabaseState {
   rows: string;
@@ -217,6 +229,54 @@ describe('runVerifyRestore', () => {
     await expect(runVerifyRestore({ ...(await run.options()), scratchDatabase: 'x;drop' })).rejects.toThrow(/plain lower-case/);
   });
 
+  it('[TASK-034 R1-M1] a backup one migration behind: status alone fails (exit 1, databaseIsBehind); deploy first, then status, passes', async () => {
+    let deployed = false;
+    const status = async (): Promise<PrismaRun> => {
+      await tick();
+      return deployed ? UP_TO_DATE : BEHIND;
+    };
+    const behind = setup({ rows: '3', orphans: '0', head: HEAD }, { migrateStatus: status });
+    const without = await runVerifyRestore(await behind.options());
+    expect(without.verdict).toBe('fail');
+    expect(without.migrateDeploy).toBeNull();
+    expect(without.migrateStatus).toEqual({
+      ok: false,
+      detail: 'exit 1: 8 migrations found in prisma/migrations | Following migration have not yet been applied: | 20261121000000_backfill',
+    });
+    const rehearsed = setup(
+      { rows: '3', orphans: '0', head: HEAD },
+      {
+        migrateStatus: status,
+        migrateDeploy: async () => {
+          await tick();
+          rehearsed.steps.push('migrate deploy');
+          deployed = true;
+          return APPLIED;
+        },
+      },
+    );
+    const report = await runVerifyRestore(await rehearsed.options());
+    expect(report).toMatchObject({ verdict: 'pass', migrateDeploy: { ok: true, detail: 'applied' }, migrateStatus: { ok: true } });
+    // The comparison reads the restored data as backed up: the deploy runs after it.
+    expect(rehearsed.steps).toEqual([
+      '00-roles.sql',
+      'restore rehearsal_t1 /backup/platform.dump',
+      'schema rehearsal_t1',
+      'migrate deploy',
+    ]);
+  });
+
+  it('[TASK-034 R1-M1] a failed deploy fails the verification even when the status is then up to date', async () => {
+    const run = setup(
+      { rows: '3', orphans: '0', head: HEAD },
+      { migrateDeploy: () => Promise.resolve({ status: 1, stdout: '', stderr: 'Error: P3018 A migration failed to apply.' }) },
+    );
+    const report = await runVerifyRestore(await run.options());
+    expect(report.verdict).toBe('fail');
+    expect(report.migrateDeploy).toEqual({ ok: false, detail: 'exit 1: Error: P3018 A migration failed to apply.' });
+    expect(report.migrateStatus.ok).toBe(true);
+  });
+
   it('reports a capped schema diff when the source schema text differs', async () => {
     const run = setup({ rows: '3', orphans: '0', head: HEAD });
     const report = await runVerifyRestore({
@@ -245,10 +305,30 @@ describe('writeRehearsalRecord (rule R input)', () => {
     }
     return dir;
   };
+  /** A passed report of a run that deployed the migration on the restored data (D-TASK034-09). */
   const passed = async (): Promise<RestoreReport> => {
-    const run = setup({ rows: '3', orphans: '0', head: HEAD });
+    const run = setup({ rows: '3', orphans: '0', head: HEAD }, { migrateDeploy: () => Promise.resolve(APPLIED) });
     return runVerifyRestore(await run.options());
   };
+
+  it('[TASK-034 R1-M1] refuses a passed report whose run did not deploy the migration', async () => {
+    const run = setup({ rows: '3', orphans: '0', head: HEAD });
+    const statusOnly = await runVerifyRestore(await run.options());
+    expect(statusOnly.verdict).toBe('pass');
+    const manifest = await sourceManifest();
+    expect(() => writeRehearsalRecord(root(), MIGRATION, manifest, statusOnly)).toThrow(
+      /did not deploy the migration on the restored data/,
+    );
+  });
+
+  it('[TASK-034 R1-n4] "previous" skips a directory without migration.sql (Prisma applies only those)', async () => {
+    const dir = root();
+    mkdirSync(join(dir, '20261120000000_empty'));
+    const manifest = await sourceManifest();
+    const report = await passed();
+    expect(writeRehearsalRecord(dir, MIGRATION, manifest, report)).toBe(join(dir, MIGRATION, RECORD_FILE));
+    expect(() => writeRehearsalRecord(dir, '20261120000000_empty', manifest, report)).toThrow(/does not exist/);
+  });
 
   it('[NT-DATA-004-c] writes a record the linter accepts for a passed report taken at the previous migration', async () => {
     const dir = root();
@@ -303,44 +383,79 @@ describe('db:verify-restore main', () => {
     writeFileSync(join(dir, BACKUP_FILES.schema), NORMALISED);
     return dir;
   };
+  interface Sink {
+    lines: string[];
+    errors: string[];
+    urls: string[];
+    statusEnv?: NodeJS.ProcessEnv;
+    deployEnv?: NodeJS.ProcessEnv;
+    archiveTarget?: object;
+  }
+  const newSink = (): Sink => ({ lines: [], errors: [], urls: [] });
+  /** A folder with the migration before the rehearsed one and the data-changing `20261121000000_backfill`. */
+  let migrationRoots = 0;
+  const cliMigrations = (): string => {
+    migrationRoots += 1;
+    const migrations = join(work, `cli-migrations-${String(migrationRoots)}`);
+    for (const [name, header] of [
+      [HEAD, 'no'],
+      ['20261121000000_backfill', 'yes'],
+    ] as const) {
+      mkdirSync(join(migrations, name), { recursive: true });
+      writeFileSync(
+        join(migrations, name, 'migration.sql'),
+        `-- migration-kind: migrate\n-- data-changing: ${header}\n-- reversible: yes\nSELECT 1;\n`,
+      );
+    }
+    return migrations;
+  };
+  /**
+   * `pending`: the restored history is one migration behind, as rule R requires; `migrate status` then reports it as
+   * Prisma 7.10 does (exit 1) until `migrate deploy` ran (R1-M1).
+   */
   const deps = (
     restored: DatabaseState,
-    sink: { lines: string[]; errors: string[]; urls: string[]; statusEnv?: NodeJS.ProcessEnv },
+    sink: Sink,
     migrationsRoot = work,
-  ): VerifyRestoreDependencies => ({
-    connect: async (url) => {
-      await tick();
-      sink.urls.push(url);
-      return database(restored, []);
-    },
-    archive: () => ({
-      dump: () => Promise.resolve(),
-      dumpSchema: () => Promise.resolve(SCHEMA),
-      restore: () => Promise.resolve(),
-    }),
-    prepareScratch: async (url) => {
-      await tick();
-      sink.urls.push(`prepare ${url}`);
-    },
-    migrateStatus: async (statusEnv) => {
-      await tick();
-      sink.statusEnv = statusEnv;
-      return UP_TO_DATE;
-    },
-    migrationsRoot,
-    now: () => NOW,
-    write: (line) => sink.lines.push(line),
-    writeError: (line) => sink.errors.push(line),
-  });
+    { pending = false, deploy = APPLIED }: { pending?: boolean; deploy?: PrismaRun } = {},
+  ): VerifyRestoreDependencies => {
+    let deployed = false;
+    return {
+      connect: async (url) => {
+        await tick();
+        sink.urls.push(url);
+        return database(restored, []);
+      },
+      archive: (target) => {
+        sink.archiveTarget = target;
+        return { dump: () => Promise.resolve(), dumpSchema: () => Promise.resolve(SCHEMA), restore: () => Promise.resolve() };
+      },
+      prepareScratch: async (url) => {
+        await tick();
+        sink.urls.push(`prepare ${url}`);
+      },
+      migrateDeploy: async (deployEnv) => {
+        await tick();
+        sink.deployEnv = deployEnv;
+        sink.urls.push('migrate deploy');
+        deployed = deploy.status === 0;
+        return deploy;
+      },
+      migrateStatus: async (statusEnv) => {
+        await tick();
+        sink.statusEnv = statusEnv;
+        return pending && !deployed ? BEHIND : UP_TO_DATE;
+      },
+      migrationsRoot,
+      now: () => NOW,
+      write: (line) => sink.lines.push(line),
+      writeError: (line) => sink.errors.push(line),
+    };
+  };
 
   it('[NT-REC-003-a] restores into rehearsal_<stamp>, checks status against the scratch database without the shadow URL, writes the report: exit 0', async () => {
     const dir = await backupDir();
-    const sink = { lines: [] as string[], errors: [] as string[], urls: [] as string[] } as {
-      lines: string[];
-      errors: string[];
-      urls: string[];
-      statusEnv?: NodeJS.ProcessEnv;
-    };
+    const sink = newSink();
     expect(await main(['--backup', dir], env(), deps({ rows: '3', orphans: '0', head: HEAD }, sink))).toBe(0);
     expect(sink.errors).toEqual([]);
     expect(sink.urls).toEqual([
@@ -355,44 +470,95 @@ describe('db:verify-restore main', () => {
     expect(sink.lines[0]).toMatch(
       /^\[db:verify-restore\] PASS: 1 tables, 3 rows, restore \d+ ms; report restore-report\.json in the backup folder$/,
     );
-    expect(JSON.parse(readFileSync(join(dir, REPORT_FILE), 'utf8'))).toMatchObject({ verdict: 'pass' });
+    expect(JSON.parse(readFileSync(join(dir, REPORT_FILE), 'utf8'))).toMatchObject({ verdict: 'pass', migrateDeploy: null });
+    expect(sink.urls).not.toContain('migrate deploy'); // no --migration: nothing is deployed
+    expect(sink.archiveTarget).toEqual({ service: 'postgres', user: 'postgres' });
   });
 
-  it('[NT-DATA-004-c] with --migration writes the rehearsal record after a pass', async () => {
-    const migrations = join(work, 'cli-migrations');
-    for (const [name, header] of [
-      [HEAD, 'no'],
-      ['20261121000000_backfill', 'yes'],
-    ] as const) {
-      mkdirSync(join(migrations, name), { recursive: true });
-      writeFileSync(
-        join(migrations, name, 'migration.sql'),
-        `-- migration-kind: migrate\n-- data-changing: ${header}\n-- reversible: yes\nSELECT 1;\n`,
-      );
-    }
-    const sink = { lines: [] as string[], errors: [] as string[], urls: [] as string[] };
+  it('[NT-DATA-004-c] [TASK-034 R1-M1] with --migration: the backup is one migration behind, deploy rehearses it on the restored data, status is then up to date, the record is written', async () => {
+    const migrations = cliMigrations();
+    const sink = newSink();
     const code = await main(
-      ['--backup', await backupDir(), '--migration', '20261121000000_backfill', '--scratch', 'rehearsal_cli'],
+      ['--backup', await backupDir(), '--migration', '20261121000000_backfill', '--scratch', 'rehearsal_cli', '--project', 'shipqube'],
       env(),
-      deps({ rows: '3', orphans: '0', head: HEAD }, sink, migrations),
+      deps({ rows: '3', orphans: '0', head: HEAD }, sink, migrations, { pending: true }),
     );
     expect(sink.errors).toEqual([]);
     expect(code).toBe(0);
+    expect(sink.urls.slice(0, 4)).toEqual([
+      'postgresql://postgres@127.0.0.1:5432/postgres',
+      'prepare postgresql://postgres@127.0.0.1:5432/rehearsal_cli',
+      'postgresql://postgres@127.0.0.1:5432/rehearsal_cli',
+      'migrate deploy',
+    ]);
+    expect(sink.deployEnv?.['DATABASE_MIGRATOR_URL']).toBe('postgresql://platform_migrator@127.0.0.1:5432/rehearsal_cli');
+    expect(sink.deployEnv).not.toHaveProperty('SHADOW_DATABASE_URL');
+    expect(sink.archiveTarget).toEqual({ service: 'postgres', user: 'postgres', project: 'shipqube' });
+    expect(sink.lines[0]).toMatch(/; 20261121000000_backfill deployed on the restored data; report restore-report\.json/);
     expect(sink.lines.at(-1)).toBe(`[db:verify-restore] wrote ${RECORD_FILE} for 20261121000000_backfill`);
+    const record = JSON.parse(readFileSync(join(migrations, '20261121000000_backfill', RECORD_FILE), 'utf8')) as { verification: object };
+    expect(record.verification).toMatchObject({ verdict: 'pass', deployed: true });
   });
 
-  it('[NT-REC-003-a] exit 1 with the reasons on a failed verification, and no record', async () => {
-    const sink = { lines: [] as string[], errors: [] as string[], urls: [] as string[] };
+  it('[TASK-034 R1-M1] with --migration, a failed deploy is a FAIL with its reason, and no record', async () => {
+    const migrations = cliMigrations();
+    const sink = newSink();
     const code = await main(
       ['--backup', await backupDir(), '--migration', '20261121000000_backfill'],
       env(),
-      deps({ rows: '1', orphans: '2', head: HEAD }, sink),
+      deps({ rows: '3', orphans: '0', head: HEAD }, sink, migrations, {
+        pending: true,
+        deploy: { status: 1, stdout: '', stderr: 'Error: P3018' },
+      }),
+    );
+    expect(code).toBe(1);
+    expect(sink.errors[0]).toMatch(/: migrate deploy: exit 1: Error: P3018; migrate status: exit 1: .*have not yet been applied/);
+    expect(existsSync(join(migrations, '20261121000000_backfill', RECORD_FILE))).toBe(false);
+  });
+
+  it('[NT-REC-003-a] exit 1 with the reasons on a failed verification, and no record', async () => {
+    const migrations = cliMigrations();
+    const sink = newSink();
+    const code = await main(
+      ['--backup', await backupDir(), '--migration', '20261121000000_backfill'],
+      env(),
+      deps({ rows: '1', orphans: '2', head: HEAD }, sink, migrations, { pending: true }),
     );
     expect(code).toBe(1);
     expect(sink.errors[0]).toMatch(
       /^\[db:verify-restore\] FAIL \(1 tables, 1 rows, restore \d+ ms\): table public\.a: 3 rows expected, 1 restored; 2 orphan\(s\) for fk on public\.b$/,
     );
     expect(sink.lines).toEqual([]);
+    expect(existsSync(join(migrations, '20261121000000_backfill', RECORD_FILE))).toBe(false);
+  });
+
+  it('[TASK-034 R1-n3] the --migration checks run before any database work: nothing is created or printed as PASS', async () => {
+    for (const [migration, message] of [
+      ['20261121000001_absent', /migration 20261121000001_absent does not exist/],
+      [HEAD, /is not declared "data-changing: yes"/],
+      ['../etc', /must be a migration directory name/],
+    ] as const) {
+      const sink = newSink();
+      expect(
+        await main(
+          ['--backup', await backupDir(), '--migration', migration],
+          env(),
+          deps({ rows: '3', orphans: '0', head: HEAD }, sink, cliMigrations()),
+        ),
+      ).toBe(1);
+      expect(sink.errors[0]).toMatch(message);
+      expect(sink.urls).toEqual([]);
+      expect(sink.lines).toEqual([]);
+    }
+    const atAnotherHead = newSink();
+    const code = await main(
+      ['--backup', await backupDir({ rows: '3', orphans: '0', head: null }), '--migration', '20261121000000_backfill'],
+      env(),
+      deps({ rows: '3', orphans: '0', head: HEAD }, atAnotherHead, cliMigrations()),
+    );
+    expect(code).toBe(1);
+    expect(atAnotherHead.errors[0]).toMatch(/migration head null is not the migration before 20261121000000_backfill/);
+    expect(atAnotherHead.urls).toEqual([]);
   });
 
   it('refuses a missing --backup, a remote URL, a migrator on another server and missing role passwords, before any database work', async () => {
@@ -418,7 +584,7 @@ describe('db:verify-restore main', () => {
     }
   });
 
-  it('[SPK-08 F-01] runs migrate status through the pinned wrapper with the root prisma.config.ts (no --config) and wires the production dependencies', () => {
+  it('[SPK-08 F-01] runs migrate status and deploy through the pinned wrapper with the root prisma.config.ts (no --config) and wires the production dependencies', () => {
     const calls: unknown[][] = [];
     const fake = ((...args: unknown[]) => {
       calls.push(args);
@@ -433,9 +599,15 @@ describe('db:verify-restore main', () => {
     expect(options.cwd).toBe(REPO_ROOT); // the root prisma.config.ts, with the generated tables.external window
     expect(options.env).toBe(statusEnv);
     expect(options.timeout).toBeGreaterThan(0);
+    prismaMigrate('deploy', statusEnv, fake);
+    const [, deployArgs, deployOptions] = calls[1] as [string, string[], { cwd: string; timeout: number }];
+    expect(deployArgs.slice(1)).toEqual(['migrate', 'deploy']);
+    expect(deployOptions.cwd).toBe(REPO_ROOT);
+    expect(deployOptions.timeout).toBeGreaterThan(options.timeout);
     expect(Object.keys(VERIFY_RESTORE_DEPENDENCIES).sort()).toEqual([
       'archive',
       'connect',
+      'migrateDeploy',
       'migrateStatus',
       'migrationsRoot',
       'now',

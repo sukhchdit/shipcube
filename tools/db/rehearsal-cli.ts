@@ -87,6 +87,19 @@ export function localDatabaseUrl(env: NodeJS.ProcessEnv, variable: string): Loca
   return { url, endpoint, user: decodeURIComponent(new URL(url).username) };
 }
 
+/** Where the archive tool runs: the Compose service, the role on its socket, and the Compose project when given. */
+export interface ArchiveTarget {
+  readonly service: string;
+  readonly user: string;
+  readonly project?: string;
+}
+
+/** `--service` (default `postgres`), `--project` (default: Compose's, from the working directory) and the URL's user. */
+export function archiveTarget(flags: ParsedFlags, user: string): ArchiveTarget {
+  const project = flags.values.get('project');
+  return { service: flags.values.get('service') ?? 'postgres', user: user || 'postgres', ...(project === undefined ? {} : { project }) };
+}
+
 /** `url` with its database replaced by `database` (query and credentials kept). */
 export function withDatabase(url: string, database: string): string {
   const next = new URL(url);

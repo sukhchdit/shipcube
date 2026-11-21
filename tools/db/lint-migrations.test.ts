@@ -25,7 +25,6 @@ import {
   loneCarriageReturnLines,
   main,
   parseHeader,
-  quoteAwareSegments,
   readReviewers,
   routineBodyChangesData,
   routineDefinitionSha256,
@@ -33,7 +32,7 @@ import {
   type LockTimeoutEvent,
 } from './lint-migrations.js';
 import { renderRls } from './render-rls.js';
-import { SqlLexError, normalise, tokenize } from './sql-text.js';
+import { EscapeContinuationError, SqlLexError, normalise, tokenize, tolerantRead } from './sql-text.js';
 import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { findRepoRoot } from '../test-support/process.js';
 
@@ -1390,12 +1389,12 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     expect(ruleOf(aggregate)).toEqual([[0, 'migration.sql', '14']]);
   });
 
-  it('[PR293-SEC-04] (a) text that does not lex is also cut at the ; outside quotes: a name holding ; hides no following UPDATE (contrived shape of the record)', () => {
+  it('[PR293-SEC-04] (a) text that does not lex is also cut at the ; of code: a name holding ; hides no following UPDATE (contrived shape of the record)', () => {
     const shape = normalise(`begin perform 1; update "fixture;items" set note = 1; raise notice 'x; end`);
     expect(() => tokenize(shape)).toThrow(SqlLexError); // the shape does not lex: the fallback reads it
     expect(routineBodyChangesData(shape)).toBe(true);
-    expect(quoteAwareSegments(`a; update "x;y" set b = 'c;d'; e "f`)).toEqual(['a', ' update "x;y" set b = \'c;d\'', ' e "f']);
-    expect(quoteAwareSegments(`a 'it''s; here'; b`)).toEqual([`a 'it''s; here'`, ' b']);
+    expect(tolerantRead(`a; update "x;y" set b = 'c;d'; e "f`).segments).toEqual(['a', ' update "x;y" set b = \'c;d\'', ' e "f']);
+    expect(tolerantRead(`a 'it''s; here'; b`)).toEqual({ segments: [`a 'it''s; here'`, ' b'], bodies: ["it's; here"] });
     // Controls: the same unlexable text without DML, and a row lock, stay clean.
     expect(routineBodyChangesData(normalise(`begin perform 1; select "fixture;items"; raise notice 'x; end`))).toBe(false);
     expect(routineBodyChangesData(normalise(`begin perform 1 from "a;b" for update; raise notice 'x; end`))).toBe(false);
@@ -1403,8 +1402,48 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     expect(ruleOf(findings).filter(([, , rule]) => rule === '10')).toEqual([[0, 'migration.sql', '10']]);
   });
 
-  it('[PR293-SEC-04] (a) the fallback reading stays linear: time(4n) / time(n) < 8 on unlexable text full of quotes and semicolons', () => {
-    const body = (n: number) => `'${'; update "a; b'.repeat(n)}`;
+  /** A PostgreSQL-valid E-string continued on a new line (PR293-SEC-02): the body then does not lex, and the fallback reads it. */
+  const CONTINUED = "PERFORM E'x'\n'y';";
+  it.each([
+    ['(C) a -- line before the UPDATE', `${CONTINUED} -- tidy up\nUPDATE public.fixture_items SET note = 1;`, 'c'],
+    ["(D) PERFORM 1; -- don't before the DELETE", `${CONTINUED} PERFORM 1; -- don't\nDELETE FROM public.fixture_items;`, 'd'],
+    ['(E) /* x */ DELETE', `${CONTINUED} /* x */ DELETE FROM public.fixture_items;`, 'e'],
+    ['a nested block comment holding ; and a quote', `${CONTINUED} /* a /* b; ' */ c */ DELETE FROM public.fixture_items;`, 'nested'],
+    ['a -- comment holding ; and a quote, ended by a lone CR', `${CONTINUED} -- a; b 'c\rUPDATE public.fixture_items SET note = 1;`, 'cr'],
+    [
+      'a comment between the ; and a WITH write',
+      `${CONTINUED} -- w\nWITH d AS (DELETE FROM public.fixture_items RETURNING 1) SELECT 1;`,
+      'with',
+    ],
+  ])('[TASK-034 R1-M2] the PR293-SEC-04 (a) fallback skips comments as the lexed path does: %s is rule 10', (_label, statements, key) => {
+    const body = `BEGIN ${statements} END`;
+    expect(() => tokenize(body)).toThrow(EscapeContinuationError);
+    expect(routineBodyChangesData(body)).toBe(true);
+    const findings = lintTexts(`r1m2-${key}`, [`DO $$ ${body} $$;`]);
+    expect(ruleOf(findings).filter(([, , rule]) => rule === '10')).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[TASK-034 R1-M2] controls: DML that only a comment holds stays clean in the fallback, and the tolerant reading blanks comments', () => {
+    expect(routineBodyChangesData(`BEGIN ${CONTINUED} -- UPDATE public.fixture_items SET note = 1\nPERFORM 1; END`)).toBe(false);
+    expect(routineBodyChangesData(`BEGIN ${CONTINUED} /* DELETE FROM public.fixture_items */ PERFORM 1; END`)).toBe(false);
+    // The kept over-approximation: a ; inside the comment before the DML still cuts the naive split (fail closed).
+    expect(routineBodyChangesData(`BEGIN ${CONTINUED} /* ; DELETE FROM public.fixture_items; */ PERFORM 1; END`)).toBe(true);
+    expect(tolerantRead("a -- b; 'c\nd; /* e /* ; */ f */ g; $q$ h; $q$ i").segments).toEqual(['a  \nd', '   g', ' $q$ h; $q$ i']);
+  });
+
+  it('[TASK-034 R1-M2] dynamic SQL in a literal: a comment before the DML hides it neither with a line break nor with an E-string line-break escape', () => {
+    const withBreak = lintTexts('r1m2-dyn', ["DO $$ BEGIN EXECUTE 'SELECT 1; -- note\nDELETE FROM public.fixture_items'; END $$;"]);
+    expect(ruleOf(withBreak)).toEqual([[0, 'migration.sql', '10']]);
+    expect(routineBodyChangesData("BEGIN EXECUTE E'SELECT 1; -- note\\nDELETE FROM public.fixture_items'; END")).toBe(true);
+    expect(routineBodyChangesData("BEGIN EXECUTE E'SELECT 1; -- note\\012DELETE FROM public.fixture_items'; END")).toBe(true);
+    // Control: the DML inside the comment of the dynamic SQL is no statement.
+    expect(routineBodyChangesData("BEGIN EXECUTE 'SELECT 1 -- DELETE FROM public.fixture_items\n'; END")).toBe(false);
+  });
+
+  it('[PR293-SEC-04] (a) the fallback reading stays linear: time(4n) / time(n) < 8 on unlexable text full of quotes, semicolons and comments', () => {
+    const quotes = (n: number) => `'${'; update "a; b'.repeat(n)}`;
+    const comments = (n: number) =>
+      `BEGIN ${CONTINUED} ${"-- it's; x\n; /* a /* b; ' */ c */ PERFORM \"a;b\", 'c;d', $q$ e; $q$;\r".repeat(n)} END`;
     const fastest = (text: string) =>
       Math.min(
         ...[0, 1, 2].map(() => {
@@ -1413,9 +1452,15 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
           return performance.now() - started;
         }),
       );
-    const small = fastest(body(20_000));
-    const large = fastest(body(80_000));
-    expect(large / Math.max(small, 1)).toBeLessThan(8);
+    for (const [body, n] of [
+      [quotes, 20_000],
+      [comments, 5_000], // 60 characters a unit: 300 KB against 1.2 MB
+    ] as const) {
+      const small = fastest(body(n));
+      const large = fastest(body(4 * n));
+      expect(large / Math.max(small, 1)).toBeLessThan(8);
+    }
+    expect(routineBodyChangesData(comments(10))).toBe(false);
   });
 
   it("[PR293-SEC-04] (b) a string literal in a body is read as dynamic SQL, prose included: RAISE NOTICE 'running in update mode' stays a rule-10 finding (fail closed, kept by D-TASK034)", () => {

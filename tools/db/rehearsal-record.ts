@@ -7,11 +7,17 @@
  * whose record is missing or stale. "Fresh" needs no clock:
  *  - `migrationSha256` equals the SHA-256 of the committed `migration.sql` bytes, so an edit after the rehearsal voids it;
  *  - the backup's `_prisma_migrations` head is the migration just before this one, so the backup was taken at the state
- *    this migration changes (a migration merged in between voids it too);
- *  - the verification passed, against that same backup manifest, and was not dated before the backup.
+ *    this migration changes (a migration merged in between voids it too; one added later can never sort before it:
+ *    tools/ci/check-migration-immutability.mjs refuses a new migration directory that sorts before a released one,
+ *    TASK-034 code review R1-m1, D-TASK034-10);
+ *  - the verification passed, against that same backup manifest, was not dated before the backup, and deployed this
+ *    migration on the restored data (`prisma migrate deploy`, then status up to date; D-TASK034-09).
  * The record is a claim written by a tool, not a signature: the outcome controls are the rehearsal itself (lane B
  * `restore-rehearsal`) and, at M5, the CD pipeline's snapshot-restore-verify step before a data-changing deploy (§8.6).
  */
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { RehearsalError, sha256Hex, type BackupManifest } from './rehearsal-manifest.js';
 
 export const RECORD_FORMAT = 'platform.rehearsal-record/v1';
@@ -33,6 +39,8 @@ export interface RehearsalRecord {
     readonly verifiedAt: string;
     readonly tables: number;
     readonly rows: string;
+    /** The migration was deployed on the restored data and the history was then up to date (D-TASK034-09). */
+    readonly deployed: true;
   };
 }
 
@@ -69,6 +77,7 @@ export function rehearsalProblems(raw: unknown, expected: RecordExpectation): st
     );
   }
   if (verification['verdict'] !== 'pass') problems.push('the verification did not pass');
+  if (verification['deployed'] !== true) problems.push('the rehearsal did not deploy the migration on the restored data');
   if (typeof backup['manifestSha256'] !== 'string' || !HEX64.test(backup['manifestSha256']))
     problems.push('the backup manifest digest is malformed');
   else if (verification['manifestSha256'] !== backup['manifestSha256'])
@@ -108,8 +117,19 @@ export function buildRehearsalRecord(inputs: RecordInputs): RehearsalRecord {
       verifiedAt: inputs.verifiedAt,
       tables: inputs.totals.tables,
       rows: inputs.totals.rows,
+      deployed: true,
     },
   };
+}
+
+/**
+ * The migration directories Prisma applies (those that hold a migration.sql), in name order: the "previous" migration
+ * of rule R and of the record writer is the one before in this list (TASK-034 code review R1-n4).
+ */
+export function migrationNames(root: string): string[] {
+  return readdirSync(root)
+    .filter((name) => existsSync(join(root, name, 'migration.sql')))
+    .sort();
 }
 
 /** The file text of a record: two-space JSON with a final newline (Prettier's JSON form). */

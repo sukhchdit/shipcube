@@ -124,18 +124,20 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { sha256Hex } from './rehearsal-manifest.js';
-import { RECORD_FILE, rehearsalProblems } from './rehearsal-record.js';
+import { RECORD_FILE, migrationNames, rehearsalProblems } from './rehearsal-record.js';
 import { RenderRlsError, renderRls } from './render-rls.js';
 import {
   SqlLexError,
   type Token,
   containsEscapeString,
+  decodeLineBreaks,
   literalBody,
   normalise,
   referencedVariables,
   splitStatements,
   sqlText,
   tokenize,
+  tolerantRead,
 } from './sql-text.js';
 import { RLS_CLASSES, loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { CONTEXT_DISCARD, contextReads, contextWrites } from './tenant-key-forms.js';
@@ -718,6 +720,9 @@ function masked(statement: string): string {
   );
 }
 
+/** A string or dollar token's body read as SQL: an E-string's line-break escapes are line breaks there (TASK-034 R1-M2). */
+const nestedSql = (token: Token): string => (token.escape === true ? decodeLineBreaks(literalBody(token)) : literalBody(token));
+
 /**
  * Rule 10 inside a DO block (PR #5 R2-m2, PR #11 review m6): a data-changing statement at a PL/pgSQL statement start
  * (file start, `;`, BEGIN, THEN, ELSE, LOOP, EXECUTE) or at the start of a string literal (dynamic SQL, `EXECUTE '…'`,
@@ -753,27 +758,38 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
     const withRest = after(segment, withStart.exec(segment));
     return withRest !== undefined && withWrite.test(withRest);
   };
+  const writes = (segment: string): boolean => segmentWrites(normalise(segment));
   /**
-   * Segments end at a `;` of CODE only: a `;` inside a string literal or a quoted identifier (`UPDATE "a;b"`,
-   * `WITH x AS (SELECT ';') DELETE …`) never cuts a statement (PR293-SEC-01 rows 9-11). Each string literal and dollar
-   * body is also read as a body of its own (dynamic SQL, `EXECUTE 'SELECT 1; DELETE …'`), down to MAX_DYNAMIC_DEPTH.
-   * Text that does not lex is read whole, cut at every `;`, and cut at every `;` outside a quoted name or a string
-   * (quoteAwareSegments, the lexed path's code-`;` cut as far as the text allows), so a name holding `;` hides no
-   * following statement there either (fail closed; PR293-SEC-04 a, TASK-034).
+   * `text` is read as written (line breaks kept, so a `--` comment ends where PostgreSQL's does) and each segment is
+   * normalised before matching. Segments end at a `;` of CODE only: a `;` inside a string literal or a quoted identifier
+   * (`UPDATE "a;b"`, `WITH x AS (SELECT ';') DELETE …`) never cuts a statement (PR293-SEC-01 rows 9-11), and a comment
+   * is one space, so a comment before a statement hides it nowhere (TASK-034 code review R1-M2). Each string literal and
+   * dollar body is also read as a body of its own (dynamic SQL, `EXECUTE 'SELECT 1; DELETE …'`; an E-string with its
+   * line-break escapes decoded), down to MAX_DYNAMIC_DEPTH.
+   * Text that does not lex is read whole and cut at every `;` (over-approximations, kept), and read by `tolerantRead`:
+   * the lexed path's code-`;` cut and comment blanking, and its nested bodies, as far as the text allows (fail closed;
+   * PR293-SEC-04 a, TASK-034).
    */
   const check = (text: string, depth: number): boolean => {
     let tokens: Token[];
     try {
       tokens = tokenize(text);
     } catch {
-      return segmentWrites(text) || text.split(';').some(segmentWrites) || quoteAwareSegments(text).some(segmentWrites);
+      const whole = normalise(text);
+      if (segmentWrites(whole) || whole.split(';').some(segmentWrites)) return true;
+      const reading = tolerantRead(text);
+      return reading.segments.some(writes) || (depth < MAX_DYNAMIC_DEPTH && reading.bodies.some((body) => check(body, depth + 1)));
     }
     const segments: string[] = [];
     let current = '';
     for (const token of tokens) {
+      if (token.kind === 'comment') {
+        current += ' ';
+        continue;
+      }
       if (token.kind !== 'code') {
         current += token.text;
-        if ((token.kind === 'string' || token.kind === 'dollar') && depth < MAX_DYNAMIC_DEPTH && check(literalBody(token), depth + 1)) {
+        if ((token.kind === 'string' || token.kind === 'dollar') && depth < MAX_DYNAMIC_DEPTH && check(nestedSql(token), depth + 1)) {
           return true;
         }
         continue;
@@ -786,34 +802,11 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
       }
     }
     segments.push(current);
-    return segments.some(segmentWrites);
+    return segments.some(writes);
   };
   return (text) => check(text, 0);
 }
 
-/**
- * Rule 10's reading of text that does not lex (PR293-SEC-04 a): the segments between the `;` that stand outside a
- * double-quoted name and outside a single-quoted string. A doubled quote closes and reopens, which leaves the state as
- * PostgreSQL's; a quote that never closes runs to the end of the text. One pass, linear in the text.
- */
-export function quoteAwareSegments(text: string): string[] {
-  const segments: string[] = [];
-  let start = 0;
-  let quote: string | undefined;
-  for (let at = 0; at < text.length; at += 1) {
-    const char = text[at];
-    if (quote !== undefined) {
-      if (char === quote) quote = undefined;
-    } else if (char === '"' || char === "'") {
-      quote = char;
-    } else if (char === ';') {
-      segments.push(text.slice(start, at));
-      start = at + 1;
-    }
-  }
-  segments.push(text.slice(start));
-  return segments;
-}
 /**
  * PL/pgSQL statement starts before which a data-changing form also runs: `FOR target IN <query>` and `OPEN cursor
  * [[NO] SCROLL] FOR <query>` accept INSERT, UPDATE, DELETE or MERGE with RETURNING (PR293-SEC-01 rows 2, 7, 8). A bare
@@ -824,7 +817,7 @@ const doBodyChangesData = bodyDataChanging(`begin|then|else|loop|execute|in|${OP
 
 /** True when `statement` is a DO block whose body changes data (rule 10). */
 function doBlockChangesData(statement: string): boolean {
-  return /^do\b/.test(codeOnly(statement)) && doBodyChangesData(normalise(sqlText(statement, true)));
+  return /^do\b/.test(codeOnly(statement)) && doBodyChangesData(sqlText(statement, true));
 }
 
 /**
@@ -986,10 +979,11 @@ export class RoutineRegistry {
  */
 function writingRoutineCall(statement: string, registry: RoutineRegistry): string | undefined {
   const maskedText = masked(statement);
-  const text = normalise(sqlText(statement, true));
+  const expanded = sqlText(statement, true);
+  const text = normalise(expanded);
   if (ROUTINE_DEFINITION.test(maskedText)) {
     const name = DEFINED_NAME.exec(maskedText);
-    const writes = routineBodyChangesData(text);
+    const writes = routineBodyChangesData(expanded);
     if (name === null) {
       return writes
         ? 'a routine whose body changes data, with a name the linter cannot read (its calls cannot be recognised; fail closed)'
@@ -1730,20 +1724,18 @@ export function readReviewers(path: string): string[] {
 /**
  * Rule R (backup guardrail, CLAUDE.md §5 Database; data-model §8.6; TASK-034): every migration declared
  * `data-changing: yes` carries `rehearsal.json`, a passed backup/restore verification bound to its migration.sql bytes
- * and taken at the migration just before it (tools/db/rehearsal-record.ts). The repository lanes and the CLI run it;
- * the fixture cases of lintMigrations do not, so their outcomes are unchanged. A migration whose header does not parse
- * is rule 1's; one without `data-changing: yes` needs no record.
+ * and taken at the migration just before it in Prisma's list (`migrationNames`), whose run deployed the migration on
+ * the restored data (tools/db/rehearsal-record.ts; D-TASK034-09). The repository lanes and the CLI run it; the fixture
+ * cases of lintMigrations do not, so their outcomes are unchanged. A migration whose header does not parse is rule
+ * 1's; one without `data-changing: yes` needs no record. A released record stays fresh because no new migration folder
+ * may sort before a released one (tools/ci/check-migration-immutability.mjs, D-TASK034-10).
  */
 export function lintRehearsals(root: string, labelRoot: string = root): LintFinding[] {
   if (!existsSync(root)) return [];
-  const names = readdirSync(root)
-    .filter((name) => statSync(join(root, name)).isDirectory())
-    .sort();
+  const names = migrationNames(root);
   const findings: LintFinding[] = [];
   names.forEach((name, index) => {
-    const migrationFile = join(root, name, 'migration.sql');
-    if (!existsSync(migrationFile)) return;
-    const bytes = readFileSync(migrationFile);
+    const bytes = readFileSync(join(root, name, 'migration.sql'));
     if (parseHeader(bytes.toString('utf8')).dataChanging !== true) return;
     const file = join(labelRoot, name, RECORD_FILE);
     const add = (message: string) => findings.push({ file, rule: 'R', message });

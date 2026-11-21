@@ -38,6 +38,8 @@ coverage
 **/.react-router
 **/*.tsbuildinfo
 prisma/generated
+# Rehearsal artefacts: db:backup writes platform.dump (every row) under reports/ (TASK-034 code review R1-n2).
+reports
 
 # Key material.
 *.pem

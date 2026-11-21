@@ -5,6 +5,7 @@ import {
   EscapeContinuationError,
   SqlLexError,
   containsEscapeString,
+  decodeLineBreaks,
   literalBody,
   normalise,
   quoteIdentifier,
@@ -15,6 +16,7 @@ import {
   stripComments,
   substituteVariables,
   tokenize,
+  tolerantRead,
 } from './sql-text.js';
 import { ATOMIC_BODY_CASES, HOSTILE_TAIL, HOSTILE_TAIL_STATEMENTS, caseText } from './atomic-body-cases.js';
 import { LEXER_CASES } from './lexer-cases.js';
@@ -386,5 +388,70 @@ describe('SQL text helpers (bootstrap runner, migration linter)', () => {
     expect(() => tokenize("SELECT 'open")).toThrow(/unterminated string literal/);
     expect(() => tokenize('SELECT "open')).toThrow(/unterminated quoted identifier/);
     expect(() => tokenize('SELECT $x$ open')).toThrow(/unterminated dollar-quoted string/);
+  });
+});
+
+describe('tolerantRead: the lexed reading of text that does not lex (TASK-034 code review R1-M2, PR293-SEC-04 a)', () => {
+  /** The reading rule 10 takes from tokens: comments blank, cut at the ; of code, every literal body. */
+  const lexedReading = (text: string): { segments: string[]; bodies: string[] } => {
+    const segments: string[] = [];
+    const bodies: string[] = [];
+    let current = '';
+    for (const token of tokenize(text)) {
+      if (token.kind === 'comment') current += ' ';
+      else if (token.kind !== 'code') {
+        current += token.text;
+        if (token.kind === 'string' || token.kind === 'dollar') {
+          bodies.push(token.escape === true ? decodeLineBreaks(literalBody(token)) : literalBody(token));
+        }
+      } else {
+        const parts = token.text.split(';');
+        current += parts[0] ?? '';
+        for (const part of parts.slice(1)) {
+          segments.push(current);
+          current = part;
+        }
+      }
+    }
+    segments.push(current);
+    return { segments, bodies };
+  };
+
+  const texts = [
+    ...LEXER_CASES.map((entry) => entry.text),
+    ...ATOMIC_BODY_CASES.map(caseText),
+    String.raw`SELECT E'it\'s; x' ; SELECT 'a''b;c'; -- d; 'e` + '\n/* f /* g; */ h */ SELECT "i;j"\r; SELECT $q$ k; $r$ $q$, $$ l $$;',
+    String.raw`SELECT éE'\'; SELECT 2; --'`,
+    'SELECT a$q$; SELECT 1 $q$ x; $q$; SELECT 1::text',
+    "SELECT 1;E'\\n'; -- c\nE'x'; SELECT 'a'\n'b'",
+  ];
+
+  it.each(texts.map((text, index) => [index, text] as const))(
+    'reads text that lexes exactly as the tokens do (case %i)',
+    (_index, text) => {
+      expect(tolerantRead(text)).toEqual(lexedReading(text));
+    },
+  );
+
+  it('reads past what the lexer refuses: a continued E-string keeps its escapes live, unterminated pieces run to the end', () => {
+    const continued = `SELECT E'a'\n-- c\n'${String.raw`\'; DELETE`}'; UPDATE t`;
+    expect(() => tokenize(continued)).toThrow(EscapeContinuationError);
+    expect(tolerantRead(continued)).toEqual({
+      segments: [`SELECT E'a'\n \n'${String.raw`\'; DELETE`}'`, ' UPDATE t'],
+      bodies: ['a', String.raw`\'; DELETE`],
+    });
+    // A block comment between the parts ends the continuation (scan.l: only white space and -- comments continue).
+    expect(tolerantRead(`SELECT E'a'\n/* c */'${String.raw`\'`}; x`).bodies).toEqual(['a', '\\']);
+    expect(tolerantRead("SELECT 'open; x").segments).toEqual(["SELECT 'open; x"]);
+    expect(tolerantRead('SELECT "open; x').segments).toEqual(['SELECT "open; x']);
+    expect(tolerantRead('SELECT $q$ open; x')).toEqual({ segments: ['SELECT $q$ open; x'], bodies: [' open; x'] });
+    expect(tolerantRead('SELECT 1 /* open; x')).toEqual({ segments: ['SELECT 1  '], bodies: [] });
+    expect(tolerantRead("SELECT 1 -- open; 'x")).toEqual({ segments: ['SELECT 1  '], bodies: [] });
+  });
+
+  it('decodes exactly the E-string escapes that stand for a line break', () => {
+    expect(decodeLineBreaks(String.raw`a\nb\rc\12d\012e\15f\x0ag\xDh\u000Ai\U0000000Dj`)).toBe('a\nb\rc\nd\ne\rf\ng\rh\ni\rj');
+    // `\\` is one escape (the n after it is a letter), \412 keeps its low byte (LF), the rest stays as written.
+    expect(decodeLineBreaks(String.raw`\\n \t \x41 \101 A \412 \q`)).toBe(`${String.raw`\\n \t \x41 \101 A `}\n${String.raw` \q`}`);
   });
 });

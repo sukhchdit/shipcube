@@ -4,8 +4,8 @@
  * running during a rolling deploy, so the probe drives the OLD code's queries at a fixed rate while the migration runs
  * and for a while after it, and passes only with 0 failed requests.
  *
- * Phases: warm-up (before the migration starts; any failure there makes the run INVALID: the workload itself is
- * wrong), during (the migration runs), after (`afterMs` once it finished). Requests start on a fixed schedule (open
+ * Phases: warm-up (before the migration starts; any failure or saturated request there makes the run INVALID: the
+ * workload itself is wrong or too heavy for the database; TASK-034 code review R1-n6), during (the migration runs), after (`afterMs` once it finished). Requests start on a fixed schedule (open
  * loop), with at most `maxInFlight` outstanding; a request that cannot start because the limit is reached counts as
  * `saturated` and fails the run too, because a blocked query is downtime as much as an error is. A failure is counted
  * in the phase in which it completes. Failures are reported as operation name, phase and SQLSTATE, with a bounded
@@ -16,8 +16,10 @@
  * or table fails it; an added nullable column, table or concurrent index does not. `--workload <json>` adds writes
  * (`[{ "name", "kind": "read" | "write", "sql", "params": ["{{uuid}}", "{{seq}}", …] }]`).
  *
- * The §8.7 CI job (the previous release's api image under a 20 rps k6 probe) needs a release image; until then this
- * database-level probe is the zero-downtime evidence (D-TASK034-05).
+ * The §8.7 job of NT-AVAIL-003-b (the previous api image, i.e. the last release tag or, before the first tag, the
+ * previous `main` image, under a 20 rps k6 probe) is not built: no task owns it yet. Until it is, this database-level
+ * probe is PARTIAL evidence for NT-AVAIL-003-b (D-TASK034-05, premise corrected by D-TASK034-11; code review R1-m4).
+ * An error of an idle pooled client (a backend terminated during the migration) counts as a failure (R1-n5).
  *
  * CLI: DATABASE_URL (the probe role, normally platform_app) and DATABASE_MIGRATOR_URL, both loopback or a Unix socket
  * on the same host and port; the migration is `prisma migrate deploy` through the pinned wrapper. Flags: `--rate`
@@ -69,6 +71,8 @@ export interface ProbeOptions {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly uuid?: () => string;
+  /** Errors of idle pooled clients so far (the pool's 'error' events); any makes the run fail (R1-n5). */
+  readonly idleErrors?: () => number;
 }
 
 export interface PhaseCounts {
@@ -82,6 +86,8 @@ export interface ProbeReport {
   readonly requests: number;
   readonly failures: number;
   readonly saturated: number;
+  /** Errors of idle pooled clients (a terminated backend), counted as failures of the run. */
+  readonly idleErrors: number;
   readonly phases: Readonly<Record<Phase, PhaseCounts>>;
   readonly migrationMs: number;
   readonly migrationError: string | null;
@@ -180,7 +186,7 @@ export async function runZeroDowntimeProbe(options: ProbeOptions): Promise<Probe
   const warmupEnd = now() + options.warmupMs;
   await drive(() => now() >= warmupEnd);
   await Promise.allSettled([...inFlight]);
-  const warmupFailures = counts.warmup.failures;
+  const warmupInvalid = counts.warmup.failures > 0 || saturated > 0;
 
   phase = 'during';
   let migrationDone = false;
@@ -206,14 +212,14 @@ export async function runZeroDowntimeProbe(options: ProbeOptions): Promise<Probe
 
   const sorted = [...latencies].sort((a, b) => a - b);
   const failures = counts.during.failures + counts.after.failures;
-  const verdict =
-    warmupFailures > 0
-      ? 'invalid-workload'
-      : migrationError !== null
-        ? 'migration-failed'
-        : failures > 0 || saturated > 0
-          ? 'fail'
-          : 'pass';
+  const idleErrors = options.idleErrors?.() ?? 0;
+  const verdict = warmupInvalid
+    ? 'invalid-workload'
+    : migrationError !== null
+      ? 'migration-failed'
+      : failures > 0 || saturated > 0 || idleErrors > 0
+        ? 'fail'
+        : 'pass';
   const round = (value: number) => Math.round(value * 10) / 10;
   return {
     format: PROBE_REPORT_FORMAT,
@@ -221,6 +227,7 @@ export async function runZeroDowntimeProbe(options: ProbeOptions): Promise<Probe
     requests: counts.warmup.requests + counts.during.requests + counts.after.requests,
     failures,
     saturated,
+    idleErrors,
     phases: counts,
     migrationMs,
     migrationError,
@@ -290,9 +297,11 @@ export const PROBE_POOL_LIMITS = { connectionTimeoutMillis: 5_000, statement_tim
 
 /** Side effects of main, injectable for the unit tests. */
 export interface ProbeDependencies {
+  /** A pool of `max` clients; `onIdleError` receives the pool's 'error' events (an idle client's backend went away). */
   readonly pool: (
     connectionString: string,
     max: number,
+    onIdleError: (error: unknown) => void,
   ) => { query(sql: string, params: unknown[]): Promise<unknown>; end(): Promise<void> };
   readonly deploy: (env: NodeJS.ProcessEnv) => Promise<void>;
   readonly readFile: (path: string) => string;
@@ -326,7 +335,11 @@ export function prismaDeploy(env: NodeJS.ProcessEnv): Promise<void> {
 }
 
 export const PROBE_DEPENDENCIES: ProbeDependencies = {
-  pool: (connectionString, max) => new pg.Pool({ ...databaseConnectionSettings(new URL(connectionString)), ...PROBE_POOL_LIMITS, max }),
+  pool: (connectionString, max, onIdleError) => {
+    const pool = new pg.Pool({ ...databaseConnectionSettings(new URL(connectionString)), ...PROBE_POOL_LIMITS, max });
+    pool.on('error', onIdleError); // without a listener an idle client's error crashes the CLI (the PR #13 class)
+    return pool;
+  },
   deploy: prismaDeploy,
   readFile: (path) => readFileSync(path, 'utf8'),
   writeFile: (path, text) => writeFileSync(path, text),
@@ -351,7 +364,10 @@ export async function main(
       throw new RehearsalError('DATABASE_URL and DATABASE_MIGRATOR_URL must name the same host, port and database');
     }
     const maxInFlight = integerFlag(flags, 'max-in-flight', 16, 1, 256);
-    const pool = deps.pool(app.url, maxInFlight);
+    let idleErrors = 0;
+    const pool = deps.pool(app.url, maxInFlight, () => {
+      idleErrors += 1;
+    });
     try {
       const reads = await catalogReadWorkload({
         query: async <T extends object>(sql: string) => ((await pool.query(sql, [])) as { rows: T[] }).rows,
@@ -370,10 +386,11 @@ export async function main(
         warmupMs: integerFlag(flags, 'warmup-ms', 5_000, 0, 600_000),
         afterMs: integerFlag(flags, 'after-ms', 60_000, 0, 3_600_000),
         maxInFlight,
+        idleErrors: () => idleErrors,
       });
       const reportFile = flags.values.get('report');
       if (reportFile !== undefined) deps.writeFile(reportFile, `${JSON.stringify(report, null, 2)}\n`);
-      const line = `${report.verdict.toUpperCase()}: ${String(report.requests)} requests, ${String(report.failures)} failed, ${String(report.saturated)} saturated; migration ${String(report.migrationMs)} ms; p95 ${String(report.latencyMs.p95)} ms`;
+      const line = `${report.verdict.toUpperCase()}: ${String(report.requests)} requests, ${String(report.failures)} failed, ${String(report.saturated)} saturated, ${String(report.idleErrors)} idle-client errors; migration ${String(report.migrationMs)} ms; p95 ${String(report.latencyMs.p95)} ms`;
       if (report.verdict === 'pass') {
         deps.write(`[db:zero-downtime-probe] ${line}`);
         return 0;

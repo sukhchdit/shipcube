@@ -54,7 +54,10 @@ export interface BackupManifest {
 
 /**
  * Session settings under which row text is deterministic (and the scan bounded). `SET` values, applied in order. The
- * statement timeout bounds one table scan of the rehearsal (30 min), never a production path.
+ * server statement timeout (30 min) is a backstop only: the sessions come from `connectPrivileged`, whose client
+ * `query_timeout` (QUERY_TIMEOUT_MS of bootstrap.ts, 310 s) ends a slower fingerprint or anti-join first, as a client
+ * read timeout (TASK-034 code review R1-n1). A database that needs longer scans needs a session with a larger client
+ * timeout. Never a production path.
  */
 export const MANIFEST_SESSION_SETTINGS: readonly string[] = [
   "SET statement_timeout = '30min'",
@@ -112,10 +115,13 @@ export class RehearsalError extends Error {
 
 export const qualifiedName = (schema: string, name: string): string => `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`;
 
-/** Row count and order-independent checksum of one table (ONLY: a partition is fingerprinted as its own table). */
+/**
+ * Row count and order-independent checksum of one table (ONLY: a partition is fingerprinted as its own table).
+ * COALESCE is SQL syntax, not a pg_catalog function, so it stays unqualified (lane B 20261121T0630Z: 42883).
+ */
 export function tableFingerprintSql(schema: string, name: string): string {
   const rowHash = `('x' OPERATOR(pg_catalog.||) pg_catalog.substr(pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(t::pg_catalog.text, 'UTF8')), 'hex'), 1, 15))::pg_catalog.bit(60)::pg_catalog.int8`;
-  return `SELECT pg_catalog.count(*)::pg_catalog.text AS rows, pg_catalog.coalesce(pg_catalog.sum(${rowHash}), 0)::pg_catalog.text AS checksum FROM ONLY ${qualifiedName(schema, name)} AS t`;
+  return `SELECT pg_catalog.count(*)::pg_catalog.text AS rows, COALESCE(pg_catalog.sum(${rowHash}), 0)::pg_catalog.text AS checksum FROM ONLY ${qualifiedName(schema, name)} AS t`;
 }
 
 export interface ForeignKey {

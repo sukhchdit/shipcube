@@ -9,8 +9,11 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  renameSync,
   rmSync,
+  rmdirSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
   type readSync,
 } from 'node:fs';
@@ -170,6 +173,70 @@ describe('readSecret: *_FILE hardening parity with the file provider (ADR-0018 a
 
   it('refuses a link whose real path leaves the root', () => {
     expect(refusal({ S_FILE: '/run/secrets/escape/s' })).toBe('S_FILE: resolves outside /run/secrets');
+  });
+
+  describe('[TASK-034 security flag 3] a directory on the path swapped between the path checks and the open', () => {
+    const swapRoot = mkdtempSync(join(work, 'swap-root-'));
+    const elsewhere = mkdtempSync(join(work, 'swap-elsewhere-'));
+    mkdirSync(join(swapRoot, 'sub'));
+    writeFileSync(join(swapRoot, 'sub', 's'), value);
+    writeFileSync(join(elsewhere, 's'), 'not-the-secret');
+    const sub = join(swapRoot, 'sub');
+    const held = join(swapRoot, 'sub-held');
+    /** `sub` becomes a junction (Windows) or a directory symlink (POSIX) to a folder outside the root. */
+    const swapOut = () => {
+      renameSync(sub, held);
+      symlinkSync(elsewhere, sub, 'junction');
+    };
+    /** Removes the link itself (never its target) and puts the real folder back. */
+    const swapBack = () => {
+      if (process.platform === 'win32') rmdirSync(sub);
+      else unlinkSync(sub);
+      renameSync(held, sub);
+    };
+    const readWith = (open: (path: string, flags: number) => number): string => {
+      try {
+        readSecret({ S_FILE: '/run/secrets/sub/s' }, 'S', { root: swapRoot, open });
+      } catch (error) {
+        expect(error).toBeInstanceOf(BootstrapError);
+        const { message } = error as Error;
+        for (const leak of [value, swapRoot, elsewhere]) expect(message).not.toContain(leak);
+        return message;
+      }
+      throw new Error('expected a refusal');
+    };
+
+    it('control: without a swap the file under the root is read', () => {
+      expect(readSecret({ S_FILE: '/run/secrets/sub/s' }, 'S', { root: swapRoot, open: (path, flags) => openSync(path, flags) })).toBe(
+        value,
+      );
+    });
+
+    it('a swap that stays in place is refused: the path resolves outside the root after the open', () => {
+      try {
+        expect(
+          readWith((path, flags) => {
+            swapOut();
+            return openSync(path, flags);
+          }),
+        ).toBe('S_FILE: resolves outside /run/secrets');
+      } finally {
+        swapBack();
+      }
+    });
+
+    it('a swap undone right after the open is refused: the descriptor holds another file than the path names', () => {
+      expect(
+        readWith((path, flags) => {
+          swapOut();
+          try {
+            return openSync(path, flags);
+          } finally {
+            swapBack();
+          }
+        }),
+      ).toBe('S_FILE: changed while it was opened');
+    });
   });
 
   it('refuses a directory, a file over 64 KiB and a missing file', () => {

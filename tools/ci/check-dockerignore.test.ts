@@ -110,6 +110,7 @@ describe('repository .dockerignore (sheet line 543, platform.md §3.2)', () => {
     'apps/api/dist/main.js',
     'apps/web/build/client/index.html',
     'prisma/generated/prisma/client.ts',
+    'reports/rehearsal/20261121T101500Z-backup/platform.dump',
     'server.pem',
     'certs/server.key',
     '.claude/settings.json',

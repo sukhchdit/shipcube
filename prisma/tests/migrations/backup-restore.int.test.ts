@@ -8,7 +8,7 @@
  * float, bytea, jsonb, interval, timestamptz, NULLs), a foreign key, a partitioned table with a foreign key and identity
  * sequences. The scratch database gets only the database-level 00-roles.sql before pg_restore.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -34,6 +34,8 @@ import { PlatformPostgres, SUPERUSER } from '../harness/postgres.js';
 
 const repoRoot = findRepoRoot();
 const repositoryMigrations = join(repoRoot, 'prisma', 'migrations');
+/** Root schema and audit window, migrations from REHEARSAL_MIGRATIONS_PATH (R1-M1). */
+const REHEARSAL_CONFIG = join(repoRoot, 'prisma', 'tests', 'fixtures', 'rehearsal', 'prisma.config.ts');
 const work = mkdtempSync(join(tmpdir(), 'rehearsal-int-'));
 
 let db: PlatformPostgres;
@@ -135,7 +137,10 @@ async function databaseExists(name: string): Promise<boolean> {
   }
 }
 
-describe('backup and restore rehearsal (NFR-REC-003)', () => {
+// NT-REC-003-a is covered here PARTIALLY: the database layer (row counts, checksums, FK anti-joins, schema digest,
+// migration history). The bucket copy, document SHA-256, catalog C1-C14 on the restore, audit chain and anchors and the
+// /health/ready smoke are deferred (D-TASK034-04; TASK-034 code review R1-m4).
+describe('backup and restore rehearsal (NFR-REC-003; NT-REC-003-a partial: database layer)', () => {
   let source: string;
   let backup: BackupResult;
   let archive: string;
@@ -152,7 +157,7 @@ describe('backup and restore rehearsal (NFR-REC-003)', () => {
     });
   }, 300_000);
 
-  it('[NT-REC-003-a] the manifest fingerprints every table (partitions included) at the migration head', () => {
+  it('[NT-REC-003-a] (partial) the manifest fingerprints every table (partitions included) at the migration head', () => {
     const rows = new Map(backup.manifest.tables.map((table) => [table.table, table.rows]));
     expect(rows.get('public.zz_rehearsal_parent')).toBe('300');
     expect(rows.get('public.zz_rehearsal_child')).toBe('600');
@@ -165,7 +170,7 @@ describe('backup and restore rehearsal (NFR-REC-003)', () => {
     expect(backup.manifest.schemaSha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it('[NT-REC-003-a] [NT-DATA-004-c] restore into a scratch database: row counts and checksums equal, 0 orphans, schema equal, migrate status up to date with the root config (SPK-08 F-01)', async () => {
+  it('[NT-REC-003-a] (partial) [NT-DATA-004-c] restore into a scratch database: row counts and checksums equal, 0 orphans, schema equal, migrate status up to date with the root config (SPK-08 F-01: the config loads, history only)', async () => {
     const report = await runVerifyRestore(verifyOptions(backup, 'rehearsal_ok', archive, true));
     expect(report.differences).toEqual([]);
     expect(report.orphans).toEqual([]);
@@ -177,7 +182,7 @@ describe('backup and restore rehearsal (NFR-REC-003)', () => {
     expect(await databaseExists('rehearsal_ok')).toBe(true);
   }, 300_000);
 
-  it('[NT-REC-003-a] negative controls on the restored database: a deleted row, a changed row and an orphan each fail the verification', async () => {
+  it('[NT-REC-003-a] (partial) negative controls on the restored database: a deleted row, a changed row and an orphan each fail the verification', async () => {
     const verify = async () => {
       const restored = await session('rehearsal_ok');
       try {
@@ -226,7 +231,7 @@ describe('backup and restore rehearsal (NFR-REC-003)', () => {
     }
   }, 300_000);
 
-  it('[NT-REC-003-a] a tampered manifest fails the verification, and the scratch database is dropped afterwards', async () => {
+  it('[NT-REC-003-a] (partial) a tampered manifest fails the verification, and the scratch database is dropped afterwards', async () => {
     const tables = backup.manifest.tables.map((table) =>
       table.table === 'public.zz_rehearsal_events_2026' ? { ...table, checksum: `${table.checksum}1` } : table,
     );
@@ -240,34 +245,68 @@ describe('backup and restore rehearsal (NFR-REC-003)', () => {
     await expect(runVerifyRestore(verifyOptions(backup, source, archive, false))).rejects.toThrow(/must not be the backed-up database/);
   }, 300_000);
 
-  it('[NT-DATA-004-c] the passed rehearsal becomes the record that lets a data-changing migration through the linter; an edit after it does not pass', async () => {
-    const report = await runVerifyRestore(verifyOptions(backup, 'rehearsal_record', archive, false));
-    expect(report.verdict).toBe('pass');
+  it('[NT-DATA-004-c] [TASK-034 R1-M1] a data-changing migration one step past the backup, in the real prisma/migrations layout: status alone is behind (exit 1); deploy rehearses it on the restored data, status is then up to date, and the record lets it through the linter; an edit after it does not pass', async () => {
+    // A copy of the repository folder plus the migration under rehearsal; the fixture config points Prisma at it.
     const root = join(work, 'migrations');
-    const head = backup.manifest.migrationHead as string;
-    mkdirSync(join(root, head), { recursive: true });
-    writeFileSync(join(root, head, 'migration.sql'), readFileSync(join(repositoryMigrations, head, 'migration.sql')));
+    cpSync(repositoryMigrations, root, { recursive: true });
     const name = '29991231000000_rehearsal_probe';
     mkdirSync(join(root, name));
-    const sql =
-      "-- migration-kind: migrate\n-- data-changing: yes\n-- reversible: yes\nUPDATE public.zz_rehearsal_child SET note = '' WHERE note IS NULL;\n";
+    const sql = [
+      '-- migration-kind: migrate',
+      '-- data-changing: yes',
+      '-- reversible: yes',
+      'CREATE TABLE public.zz_rehearsal_probe (id integer PRIMARY KEY);',
+      'INSERT INTO public.zz_rehearsal_probe (id) SELECT g FROM pg_catalog.generate_series(1, 3) g;',
+      '',
+    ].join('\n');
     writeFileSync(join(root, name, 'migration.sql'), sql);
+    writeFileSync(join(root, name, 'down.sql'), 'DROP TABLE IF EXISTS public.zz_rehearsal_probe;\n');
+    expect(backup.manifest.migrationHead).toBe(listMigrations(repositoryMigrations).at(-1)); // the migration before `name`
     expect(lintRehearsals(root).map((finding) => finding.rule)).toEqual(['R']);
+    const rehearsal = { config: REHEARSAL_CONFIG, env: { REHEARSAL_MIGRATIONS_PATH: root } };
+
+    // Prisma 7.10 `migrate status` on the restored database, one migration behind: exit 1, so no record without deploy.
+    const behind = await runVerifyRestore({
+      ...verifyOptions(backup, 'rehearsal_behind', archive, false),
+      migrateStatus: () => db.prisma('rehearsal_behind', ['migrate', 'status'], rehearsal),
+    });
+    expect(behind.verdict).toBe('fail');
+    expect(behind.migrateStatus.ok).toBe(false);
+    expect(behind.migrateStatus.detail).toMatch(/^exit 1: .*29991231000000_rehearsal_probe/);
+    expect(() => writeRehearsalRecord(root, name, backup.manifest, behind)).toThrow(/no rehearsal record is written/);
+
+    const report = await runVerifyRestore({
+      ...verifyOptions(backup, 'rehearsal_record', archive, true),
+      migrateDeploy: () => db.prisma('rehearsal_record', ['migrate', 'deploy'], rehearsal),
+      migrateStatus: () => db.prisma('rehearsal_record', ['migrate', 'status'], rehearsal),
+    });
+    expect(report.differences).toEqual([]); // compared before the deploy, on the data as backed up
+    expect(report.migrateDeploy).toEqual({ ok: true, detail: 'applied' });
+    expect(report.migrateStatus).toEqual({ ok: true, detail: 'up to date' });
+    expect(report.verdict).toBe('pass');
+    const restored = await session('rehearsal_record');
+    try {
+      expect(await restored.query('SELECT count(*)::integer AS n FROM public.zz_rehearsal_probe')).toEqual([{ n: 3 }]);
+    } finally {
+      await restored.end();
+    }
+    await superuserRun('postgres', ['DROP DATABASE rehearsal_record WITH (FORCE)']);
+
     writeRehearsalRecord(root, name, backup.manifest, report);
     expect(JSON.parse(readFileSync(join(root, name, RECORD_FILE), 'utf8'))).toMatchObject({
       migration: name,
-      verification: { verdict: 'pass' },
+      verification: { verdict: 'pass', deployed: true },
     });
     expect(lintRehearsals(root)).toEqual([]);
     writeFileSync(join(root, name, 'migration.sql'), `${sql}DELETE FROM public.zz_rehearsal_child WHERE note = '';\n`);
     expect(lintRehearsals(root).map((finding) => finding.message)).toEqual([
       'stale or failed rehearsal record: migration.sql changed after the rehearsal (its SHA-256 differs from the record)',
     ]);
-  }, 300_000);
+  }, 600_000);
 });
 
-describe('a backup under concurrent writes is one consistent snapshot', () => {
-  it('[NT-REC-003-a] inserts committed while pg_dump runs are in neither the manifest nor the archive: the restore still verifies', async () => {
+describe('a backup under concurrent writes is one consistent snapshot (NT-REC-003-a partial)', () => {
+  it('[NT-REC-003-a] (partial) inserts committed while pg_dump runs are in neither the manifest nor the archive: the restore still verifies', async () => {
     const source = await sourceWithFixture();
     const writer = await db.superuser(source);
     let writing = true;
