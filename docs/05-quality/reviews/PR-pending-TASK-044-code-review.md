@@ -384,3 +384,246 @@ SECURITY-FLAGS (for security-analyst):
   (CWE-779): the concurrency caps do not bound it per unit of time.
 - (4) PR44-SEC-13: closure verified on this branch. The PR #80 union needs the R1-m4 edit.
 - (5) R1-M1 (a) item 1: a `send()` change that keeps a handler `Cache-Control` must be checked against SEC-TC-29.
+
+# Round 2: delta review of part 044-A (`dc64193f..cbd590db`)
+
+| Field | Value |
+| --- | --- |
+| Part | TASK-044 part 044-A (D-ARCH-217; US-042 partial per D-PM-089) |
+| Head reviewed | `cbd590db` (2 commits on round 1's head `dc64193f`: `3b56ab54` fix cycle 1, D-TASK044-14..18; `cbd590db` fix cycle 2, test only, D-TASK044-19) |
+| Delta | 12 files, +835/-163. Source: `sse/{event-stream,frame,privacy}.ts`, `packages/ui/src/sse/fetch-sse-parser.ts`, `packages/ui/src/index.ts` (2 constants). Tests: the 4 matching unit suites, `tests/api/event-stream.api.test.ts`, `tests/api/helpers/expect-event-stream{,.test}.ts`. `problem-handler.ts`, `execute.ts`, `define-route.ts`, `route-state.ts`, `app.ts` and `start-api.ts` are unchanged, as D-ARCH-217 requires |
+| Reviewer | code-reviewer (Claude Opus 5.5), 2026-11-21 |
+| Round | 2 (delta) |
+| Developer decisions ruled | D-TASK044-14 .. D-TASK044-19 (commit bodies) |
+| Inputs | Round 1 above; D-ARCH-217 to D-ARCH-224 and the rulings file §4, §5 and §8 (TASK-044 card line 2 items (1) to (4)); D-QG-007 (QG-044-C1 closed by D-SD-012 `2f6a89d5`; amendment 14 item 2 VERIFIED); D-PM-089 (`2c913729`; story text and map rows held); security rounds 1 and 2 (D-SECPR044-01/02, `ef446899`); the lane B result on `3b56ab54` (one failure, the malformed `Last-Event-ID` 400 without `private`) |
+
+```
+VERDICT: APPROVED_WITH_NITS (conditional on the merge conditions in R2.6)
+SUMMARY: Every round-1 finding owned by this branch is closed with a regression test: R1-m1 (guarded outcome
+  continuation), R1-m2 (guard on the serialised wire value, linear e-mail pattern, keys completed), R1-m3 (WHATWG id
+  buffer), and NITs n1-n4, n6 and n8. Card line 2 items (1)-(3) are in: the error event has no id, a resume test, the
+  subscription wording and the header comment. 163/163 unit and 12/12 api tests pass in my extract. Of 14 mutant runs,
+  10 are killed, 3 survive by design and 1 is a NIT.
+  The cbd590db test-only fix is sound and hides no product gap: on a route with no anonymous member the problem
+  handler marks every problem private, and removing that rule turns the problem-handler and declared-credentials api
+  suites red. One MINOR (R2-m1): the wrapper's retirement is owned by TASK-141, which does not own the file; it belongs
+  to part 044-B.
+  PR #80 merged first (763800f3), so R1-m4 is now due on this branch: the union compiles and passes the SSE suites,
+  and lint is red on the one unused `appError` line, as predicted.
+```
+
+## R2.1 What I verified myself
+
+Everything ran on `git archive` extracts under the session scratchpad (`cr044r2/`). Node 24.22.3. `node_modules` was junctioned to the main checkout. I generated a Prisma client per extract, because main's git-ignored client is stale for `organisations`. A `@platform/prisma` junction points into each copy. `@platform/shared` resolved to main's working tree; its only delta since base is one additive hunk in `classification/registry.ts`. Nothing ran in the TASK-044 worktree. The tests/api buildinfo was redirected out of the junction.
+
+**On `cbd590db`:**
+- **Read in full:**
+  - the delta (both commits);
+  - the commit bodies D-TASK044-14..19;
+  - `problem-handler.ts` `isAuthenticatedProblem` / `sendProblem`;
+  - `route-state.ts` `declaresPrivateResponse`;
+  - `tests/api/helpers/cache-control.ts`, the SEC-TC-29 predicate the validator applies.
+- **Typecheck:** `tsc -b --force apps/api packages/ui tests/api`, exit 0. This includes compiling the test wrapper against `PipelineSlots` and `RouteSlot`.
+- **ESLint `--max-warnings 0` on the 12 changed files:** clean, apart from the round-1 copy artefact. That artefact is `import-x/no-extraneous-dependencies` on `@platform/shared` in `expect-event-stream.ts:10`. The unchanged `contract-validator.ts` imports the same package. **Prettier `--check`:** clean.
+- **Unit suites** (`--maxWorkers=2`): `platform/sse/*`, `fetch-sse-parser`, `expect-event-stream`, `errors/problem-handler`. **7 suites, 163/163 pass.**
+
+  Coverage of the touched files:
+
+  | File | Lines | Branches | Uncovered branch lines |
+  | --- | --- | --- | --- |
+  | `event-stream.ts` | 100 % | 97.4 % | 162, 234 |
+  | `frame.ts` | 100 % | 100 % | none |
+  | `privacy.ts` | 100 % | 100 % | none |
+  | `fetch-sse-parser.ts` | 100 % | 98.6 % | 193 |
+  | `expect-event-stream.ts` | 94.8 % | 94.3 % | not listed |
+- **The api suite `tests/api/event-stream.api.test.ts`** (no database; 33.7 s): **12/12 pass.** This is my own check, not lane B evidence. It covers:
+  - round 1's 9 tests;
+  - the two PR044-SEC-02 rows;
+  - the D-ARCH-220 resume test.
+- **Mutants: 14 runs (13 mutants; PH runs against two suites), 10 killed, 3 survive by design, 1 survives as a NIT.** Each mutant ran against its own suite and every file was restored byte for byte (`cmp` against the commit). Script: `cr044r2/mutate-cr044r2.mjs`.
+
+  | Mutant | Suite | Result |
+  | --- | --- | --- |
+  | P-a reader copies the id buffer only when the block has data | reader | killed (1) |
+  | P-b reader drops the pending pieces of a line split across chunks | reader | killed (2) |
+  | P-c reader data cap `>=` instead of `>` | reader | **survives** (R2-n1) |
+  | P-d reader resets the id buffer after dispatch | reader | killed (2) |
+  | E-a `outcomeOf` accepts any object | event-stream | killed (2) |
+  | E-b `complete` takes the last id instead of plus one | event-stream | killed (4) |
+  | E-c a terminal name is accepted as a live event | event-stream | killed (1) |
+  | Pv-a party keys holding a string pass | privacy | killed (1) |
+  | Pv-b arrays not searched | privacy | killed (3) |
+  | PH-a problem handler ignores the route declaration | `problem-handler.test.ts` only | survives (unit suite does not pin it) |
+  | PH-b the same mutant | `problem-handler.api` + `declared-credentials.api` | **killed (3)**: the product rule is pinned in the api project |
+  | W-a the cbd590db wrapper does not mark the refusal private (the `3b56ab54` composition) | event-stream api, 400 test | killed (1): reproduces the lane B failure |
+  | W-b the wrapper only on the `validate` step | event-stream api | survives (expected: the step list is wider than this suite needs) |
+  | W-c the product rule removed, wrapper kept | event-stream api, 400 + AT-07 | survives (expected: the fixture is anonymous, so this suite cannot see the product rule) |
+
+  The security round ran 15 further mutants against `3b56ab54`, all killed. Mine do not repeat them.
+
+**On the union with main** (`git merge-tree --write-tree main cbd590db` = tree `8d53a3dc`; main `a47d6966` carries PR #80 as `763800f3`):
+- **Overlap:** the only file changed on both sides since the merge base `530629f4` is `problem-handler.ts`. It merges cleanly as text.
+- **Typecheck** of api, ui and tests/api: exit 0.
+- **Unit and api suites:** the SSE unit suites, `problem-handler` (unit and api) and `event-stream.api.test.ts` give **9 suites, 237/237 pass**.
+- **ESLint on the union `problem-handler.ts`:** `109:13 'appError' is assigned a value but never used`. That is R1-m4 exactly, and nothing else.
+
+**Not run, per the dispatch and the host rule:**
+- lane B;
+- the full `lint`, `typecheck`, `test:unit` and `build`;
+- coverage merge;
+- Docker.
+
+Lane B on `cbd590db` is queued.
+
+## R2.2 Closure of round 1
+
+| Finding | Status at `cbd590db` | Evidence |
+| --- | --- | --- |
+| R1-M1 | **Closed by ruling** | D-ARCH-217: part 044-A/044-B split with content (a) in part 044-B (D-ARCH-218/219/221/223), recorded by product-manager in D-PM-089; the header comment of the api test names AT-US-042-01 and -05 as proven in a test composition (card line 2 item (3)) |
+| R1-m1 | **Closed** | `settle` wraps `end` (`event-stream.ts` `settle`); `outcomeOf` checks the shape; `send` catches an accessor throw. Unit rows: `undefined`, `null`, `{}`, `42`, a string, a throwing getter (8 rows). Mutant E-a killed; security probe R3 proved no unhandled rejection and no exit on the real `createApp` |
+| R1-m2 | **Closed** (residual PR044-SEC-08, INFO, part 044-B) | `frameOf` serialises once with the 64 KiB cap, frames, then scans `JSON.parse(json)`. The e-mail pattern `/[^\s@]@[^\s@]+\.[^\s@]/` accepts the same strings as the old one (fast-check oracle) and is linear. Keys added (`receivername`, `personname`, `streetline(s)`, `address`, `address1..3`, `username`, `surname`, `mail`, `tel`, `ip`, `ipaddress`); party keys holding a string. A key that is an e-mail or phone is reported as `<parent>/*`. Api rows `toJson` and `emailKey`. Mutants Pv-a, Pv-b killed |
+| R1-m3 | **Closed** | `idBuffer` copied to `lastEventId` at every blank line, also without data; truncated-block tests in the parser and in `readEventStream`. Mutants P-a, P-d killed |
+| R1-m4 | **Open, now due on this branch** | PR #80 merged first (`763800f3`). This branch is the second merger: see R2.6 item 1 |
+| R1-m5 | **Routed** | D-ARCH-221 / ADR-0003 rule (p): part 044-B (B5, proof (g)), before TASK-141 is dispatched. The owner is no longer "the lock holder" in general |
+| R1-m6 | **Routed** | D-ARCH-222 (architecture text) and D-PM-089 (REQ-API-018, AT-US-042-06 retitled "Client abort releases the stream", new AT-US-135-13). The module comment item 7 and the AT-06 fixture now say "subscription" (card line 2 item (2)). The story text and map rows are held: R2.6 item 5 |
+| R1-n1 | Closed | `readEventStream` cancels the body on a parser or handler throw (unit test with a recording `cancel`) |
+| R1-n2 | Closed | `errorCodeOf`: syntax plus `isErrorCode`; see R2-n3 for the silent rewrite |
+| R1-n3, R1-n4 | Closed as guidance | Module comment, "For the stream routes"; the cards of TASK-141 and TASK-173 carry them (D-SD-012) |
+| R1-n5 | Routed | D-PM-089 map rows (AT-US-042-07 suite `api`), held with the story text |
+| R1-n6 | Closed | The booking fixture is built with `defineRoute` and its declared type; no cast |
+| R1-n7 | Open (api-designer) | api/README §17 still names `packages/shared/src/api/sse.ts`; due at the api-designer fold (rulings §6 rides part 044-B) |
+| R1-n8 | Closed | Only the new chunk is scanned; pending pieces joined once per line. Security: 1,000,000 one-character chunks in 116 ms (round 1: 11 s at 32 Ki) |
+
+Card line 2 of the rulings: (1) error without an id: done, with unit, reader, helper and api pins, and the resume test; (2) subscription wording: done; (3) header comment: done; (4) the R1-m4 union edit: due now (R2.6 item 1). The merge condition for item (1), the gatekeeper's verification of ADR-0016 amendment 14 item 2, is **met** by D-QG-007.
+
+## R2.3 The cbd590db fix: sound test-only fix, not a masked product gap
+
+**What failed.**
+- Lane B on `3b56ab54` failed one test: the malformed `Last-Event-ID` gives a 400 whose `Cache-Control` is `no-store` without `private`.
+- The contract validator applies SEC-TC-29 from the operation's effective `security`. `streamQuoteResults` is `[bearerAuth]` or `[quoteToken]`, with no anonymous alternative, so every one of its responses must carry `private, no-store` (`cache-control.ts:130`).
+- The fixture route declares `auth: 'anonymous'` (D-ARCH-218 is part 044-B, so today a non-anonymous stream would get `private, no-store` from `send()`).
+- The problem handler decides privacy from the route descriptor (`problem-handler.ts:95-97`; `route-state.ts:135-140`). For the anonymous fixture it answers `no-store`.
+
+**Why it is not a product gap.**
+- A real `streamQuoteResults` route carries the contract's auth set, which has no `anonymous` member.
+- For such a route, `declaresPrivateResponse` returns true and every problem is `private, no-store`, whatever step refuses.
+- That rule is pinned: mutant PH-b (remove it) turns `problem-handler.api.test.ts` and `declared-credentials.api.test.ts` red (3 failures).
+- The divergence is the fixture's auth declaration, not the pipeline.
+
+**Why the wrapper is acceptable.**
+- It changes only error paths of six pre-execute steps, and only for `operationId === 'streamQuoteResults'`.
+- The stream itself and the booking fixture keep the default slots.
+- The step names are typed against `PipelineSlots`, so a rename fails `tsc`.
+- A changed `operationId` silently drops the wrapper, but then the same 400 test goes red again. The failure mode is loud.
+- W-a reproduces the lane B failure, so the fix addresses exactly the observed cause.
+
+**The latent since `dc64193f` claim holds.** The test, the fixture, the problem handler, the slots and the contract are byte-identical between `dc64193f` and `3b56ab54`. In round 1 I did not run the api suite (lane B was pending) and did not catch it.
+
+**What it costs.** See R2-m1.
+- The new assertion in the 400 test (`private`, `no-store`) is produced by the test's own wrapper. In this composition it pins the wrapper, not SEC-TC-29; the comment "SEC-TC-29: a problem of an operation with no anonymous alternative is never stored" overstates it.
+- The commit gives the retirement to TASK-141. TASK-141 mounts the real route in its own module and does not own `tests/api/event-stream.api.test.ts`; nothing on its card mentions the wrapper.
+
+## R2.4 Findings (new in round 2)
+
+### MINOR
+
+**R2-m1: the test-only refusal wrapper has no real retirement owner, and its assertion is circular.**
+
+Where:
+- `tests/api/event-stream.api.test.ts:190-222` (`PRE_STREAM_STEPS`, `privateRefusals`);
+- `:278-280` (the new assertion);
+- `:1-12` (the header comment, which lists the anonymous fixture and the 40 s deadline but not this third divergence).
+
+What happens:
+- The wrapper re-implements a product rule (problem privacy from the declared auth set) inside a binding lane-B acceptance suite.
+- Commit `cbd590db` says TASK-141 drops it. TASK-141 does not own the file, and no card line says so.
+- The anonymous quote fixture exists only because of the `send()` gap that part 044-B closes (B1). The file is a part 044-B file (card line 4).
+- Without an owner, the wrapper outlives its reason. The 400 test then keeps asserting a header the test itself sets.
+
+Fix:
+- **senior-developer** adds a part 044-B card line: once B1 is in, give the quote fixture its contract auth set (`session` + `quote-token`, with the authn test seam of proof (a)), delete `privateRefusals` and `PRE_STREAM_STEPS`, and keep the 400 test's `private, no-store` assertion. It then proves SEC-TC-29 through the product rule.
+- **On this branch (optional, can ride the R1-m4 merge commit):** one sentence in the header comment naming the wrapper as the third test-composition divergence, retired by part 044-B; and reword the 400 test comment to "the test composition restores the product rule; see the wrapper".
+
+### NIT
+
+**R2-n1: the reader's per-event data cap boundary is unpinned.**
+- Where: `packages/ui/src/sse/fetch-sse-parser.ts:89`.
+- Mutant P-c (`>=` for `>`) survives. The test uses cap 8 with 9 characters.
+- Fix: add a row with exactly `maxLength` accepted and one more refused.
+
+**R2-n2: `outcomeOf` says it reads `event` once, but `end` reads `outcome.event` again.**
+- Where: `apps/api/src/platform/sse/event-stream.ts` (`outcomeOf` JSDoc; `end`, `if (outcome.event === 'error')`).
+- A getter that changes value between the reads lands in the other branch. Both branches are guarded, so it is harmless, but the comment is wrong.
+- Fix: return the read `event` with the outcome, or drop "reads `event` once".
+
+**R2-n3: a non-catalogue error code is rewritten silently.**
+- Where: `errorCodeOf` / `end`.
+- An `error` outcome whose code is not in the catalogue is sent as `INTERNAL_ERROR`, and `onFailure` hears nothing. A producer defect such as `CARRIER_BUSY` is then invisible in the route's logs.
+- Fix, owner part 044-B (holds `api-sse`): report `producer_failed` with an `SseOutcomeError` naming the rejected code's syntax class, not its text, or document the rewrite in the module comment.
+
+**R2-n4: little headroom in the linear-time pin.**
+- Where: `privacy.test.ts:137-157`.
+- A linear scan gives about 16 against a bound of 32 (quadratic about 256), measured on sub-millisecond timings. The best-of-7 makes a flake unlikely, but lane A runs workers in parallel.
+- If it ever flakes, replace it with counted work (R1's suggestion) rather than widening the bound.
+
+**R2-n5: the AT-US-042-07 test title still says "without a bearer token or quote token".**
+- D-PM-089 makes AT-07 the bearer-only case (the 404 of the quote stream is AT-US-135-06), and the fixture is `session` only.
+- product-manager accepted the tests as built, so this is optional.
+- Fix: part 044-B may drop "or quote token" from the description and keep the ID.
+
+## R2.5 Rulings on D-TASK044-14 .. 19
+
+| ID | Ruling |
+| --- | --- |
+| 14 The `error` event has no id | **Accepted.** Matches D-ARCH-220 and ADR-0016 amendment 14 item 2, which D-QG-007 verified. `complete` keeps last + 1. The helper refuses an id on `error` and a missing id elsewhere. The resume test delivers 2, 3 and `complete` 4 from resume point 1. E-b killed; security M5/M12 killed |
+| 15 Guard on the wire value | **Accepted.** One serialisation (the `SseJson` brand makes `formatSseFrame` take only capped text), parse, then scan. The pattern is the same language as before (security: 0 differences over 2.4 M exhaustive strings). The closed key list stays closed, which is right. Residual PR044-SEC-08 is routed to part 044-B |
+| 16 One guarded continuation | **Accepted.** `settle` plus `outcomeOf` plus a non-throwing `send`. The catalogue check is R1-n2. R2-n2 and R2-n3 are NITs. The replay-iteration residual PR044-SEC-09 goes to part 044-B (B4 rewrites the replay start) |
+| 17 WHATWG id buffer and reader bounds | **Accepted.** P-a, P-b and P-d killed; R2-n1 is the one boundary gap. The `retry` clamp of 1..60 s is a sensible client policy |
+| 18 Test method | **Accepted.** The ratio pin has R2-n4 as a watch item. The `unhandledRejection` spy limitation in Jest is accepted: the hook-settles assertion plus security's process-level probe R3 on the real `createApp` (no exit request, no fatal line) cover it |
+| 19 The test-only private-refusal wrapper | **Accepted as sound** (R2.3): it hides no product gap. The retirement owner is wrong (R2-m1) |
+
+## R2.6 Merge conditions (replace round 1's §5)
+
+1. **R1-m4, now on this branch.** PR #80 is on main (`763800f3`, main `a47d6966`).
+   - Merge main into the branch and delete the unused `const appError = …` at the union's `problem-handler.ts:109`.
+   - Run lint on the result.
+   - My union tree `8d53a3dc` shows this is the only red, and that the typecheck and 237 SSE/problem-handler tests pass.
+   - The merge must be a pure union except for that one line. I verify it in a merge-only round: merge-tree identity, the one-line hand edit, and file-set conservation.
+2. **Lane B on the final post-merge head**, not only on `cbd590db`.
+   - `tests/api/event-stream.api.test.ts`: 12 tests, each in the JUnit by title (round 1's 9, the two PR044-SEC-02 rows, the D-ARCH-220 resume).
+   - The api suites that cover the union `problem-handler.ts`: `problem-handler.api`, `declared-credentials.api` and `idempotency.api`.
+   - The queued run on `cbd590db` is a useful early signal. It does not replace this.
+3. **Lane A on the final head:** full lint (closes R1-m4), format, typecheck, unit, build and diff coverage.
+4. **Security merge-only round on the post-merge head.** `problem-handler.ts` is owned and changes through main, which voids the round-2 binding (security R2.6 C4, R2.9 C6). `cbd590db` itself changes only the unowned `tests/api/**`, so the binding to `3b56ab54` holds until that merge.
+5. **D-PM-089's held text lands on main before the merge.**
+   - What: the US-042 story text (a), with the qa-lead map rows of AT-US-042-06 ("Client abort releases the stream") and AT-US-042-07 (suite `api`; closes R1-n5).
+   - Why: this is QG-044-C2 (f).
+   - quality-gatekeeper then closes QG-044-C2. The traceability and STATUS rows (REQ-API-017/018 partial, US-042 partial) go with senior-developer's fold, per D-PM-089.
+6. **R2-m1:** the part 044-B card line for the wrapper's retirement (senior-developer). The two comment edits are optional on this branch.
+7. **Already met:**
+   - R1-M1, by ruling (D-ARCH-217, D-PM-089);
+   - the merge condition of card line 2 item (1), by D-QG-007;
+   - R1-m5 and R1-m6 have owners (part 044-B B5; D-ARCH-222 with D-PM-089);
+   - QG-044-C1, by D-SD-012.
+8. **Carried to part 044-B (not conditions of this merge):**
+   - PR044-SEC-08 and PR044-SEC-09 (security F6/F7);
+   - R2-n3;
+   - R1-n7 (api-designer, with the rulings §6 texts);
+   - proofs (a) to (i);
+   - security G1 (the five conditions).
+
+GOOD:
+- The fixes go to the root, not around the probes. One serialisation feeds both the wire and the guard, so `toJSON`, getters and size can never disagree. The `SseJson` brand makes the order a type rule.
+- The guard's pattern change was proven equivalent by an oracle, not argued.
+- The id-buffer fix follows WHATWG to the letter (copy at every blank line, buffer persists), with truncation tests in both the parser and `readEventStream`.
+- The D-ARCH-220 change came with a real resume test over HTTP, not only a frame assertion.
+- For the lane B failure, the developer:
+  - located the cause precisely (fixture auth versus contract security, latent since `dc64193f`);
+  - kept the product code untouched;
+  - limited the shim to one operation and its error paths;
+  - documented why.
+
+SECURITY-FLAGS (for security-analyst):
+- (1) R2.3: the `cbd590db` wrapper is test-only and marks responses more private, never less. No product path changes. The product rule it stands in for is pinned by api suites (PH-b killed).
+- (2) Merge condition 4: the post-merge head voids the round-2 binding through `problem-handler.ts`. The R1-m4 deletion is the only hand edit expected.
+- (3) R2-n3: the silent rewrite of a non-catalogue `error` code leaves no log trace of a producer defect (part 044-B, with PR044-SEC-08/09).
