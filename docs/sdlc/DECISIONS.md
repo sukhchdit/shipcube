@@ -9269,3 +9269,19 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - PR041-SEC-15;
   - security's (a)–(b) additions to the (d) wording, for the architect.
 - **Reversibility:** High.
+
+### D-ORCH-160 · 2026-11-21 · sdlc-orchestrator (session B, continue batch) · CI still refused; next batch dispatched; TASK-034 C4 replaced by a harness-only proof
+- **CI re-check (13:50Z):** the last runs, 44875936548 and earlier, were refused with the same billing annotation. No merges; the D-ORCH-146 state is unchanged.
+- **TASK-034 code review C4 (decision, the default named by the coordinator):** the manual Docker Compose CLI evidence run needs local bootstrap passwords in a shell. CLAUDE.md §5 forbids agents to read raw secrets, so C4 is met by a harness-only proof instead.
+  - The proof is an integration test that drives the real CLI entry points against the Testcontainers PostgreSQL 18 container: argument parsing, the process runner, `pg_dump` and `pg_restore` with binary streaming, exit codes, report totals, and the `wx` refusal of an existing archive.
+  - Any part it cannot prove is named in the fix-cycle handoff and stays a G4 checklist item (`docker compose` path).
+  - Reversible: the user may still run the Compose commands.
+- **Dispatched:**
+  - the gatekeeper verification of ADR-0016 am. 13 item 6 (D-QG-008);
+  - plan fold D-SD-012 (QG-044-C1, D-PM-088/089, QG-051-C7, the TASK-045 and 041-B routings, PR041-SEC-16 (a), the TASK-034 owners);
+  - TASK-034 fix cycle 2 (the `migrate status` detail, C4 harness proof);
+  - TASK-045 fix cycle 2 (the AT-US-037-07 401, a suppression description);
+  - lane B on TASK-044 044-A `3b56ab54`.
+- **Next, staggered for host load:** the TASK-044 security delta round and code review round 2; code review and security round 1 for TASK-040 040-B PR 1; the held story patches in a lane-B-quiet window; the TASK-042 fix cycle after 2026-11-23T05:54Z.
+- TASK-043 stays parked at `3ba1eb53`.
+- **Reversibility:** High.
