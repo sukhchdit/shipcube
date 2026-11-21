@@ -7689,3 +7689,18 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
     - TASK-083 / TASK-101: explanation entries stay operator-side (INT).
     - M2 pricing admin: `notes` stays non-personal, or the column is reclassified.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-147 · 2026-11-21 · sdlc-orchestrator (session B) · Lane-B results for TASK-043, TASK-051 and TASK-080; the extra gitleaks fingerprint is a false positive in a TASK-051 commit; builds TASK-042/045 done, TASK-034 dispatched
+- **TASK-043 `3ba1eb53` (`20261121T0315Z_3ba1eb5`):** FAIL, only on the three `.env.example` parity rows. Every other suite passed: integration 433 (including both up-down-up copies), migrations 30, catalog 113, rls 157, api 179, unit 8,368 (including `open-queue`). D-TASK043-14 and -15 are confirmed. The run is diagnostic and was moved aside; a PASS needs the user's two `OUTBOX_RELAY_*` lines. The branch is pushed, so the user can commit on it. No PR is open: CI is blocked (D-ORCH-146).
+- **TASK-080 `4a0faee3` (`20261121T0357Z_4a0faee`):** FAIL on catalog C9 only, which security PR080-SEC-05 predicted (`ck_pricing_config_versions__source` is missing from `ENUM_CHECKS`). The fix cycle that is running carries it, with code review R1-M1 (`ADMIN`). gitleaks-full passed on this run.
+- **TASK-051 `203d02eb` (`20261121T0336Z_203d02e`):** FAIL on C2/C6 (`23001` on PostgreSQL 18; with principal-architect) and on gitleaks-full (one finding beyond the 17-line baseline).
+  - **Triage (orchestrator, code review L-2):** `gitleaks-full` was run on `203d02eb`. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys.ts:75` in TASK-051's own commit `b34f954e`. That line is a doc comment, "The other key columns, `child=parent` in key order". It is a false positive with no secret.
+  - TASK-080 has the same base (`e245e6e6`) and its gitleaks-full passed, so main is clean.
+  - **Handling:** the D-SECPR040-02 route (2). The fix cycle rewords the comment, and the branch is then superseded by `feat/TASK-051-guest-capable-tables-atomic-claim-v2`, one squash commit on main. Nothing is pushed or rewritten, and the baseline does not change. security-analyst confirms this in the TASK-051 record.
+- **Built:**
+  - TASK-042 (i18n) at `b8ba7788`. It adds six MIT/BSD-3 packages, so the lockfile changes (D-TASK042-01). Security vets them; whichever of TASK-041 and TASK-042 merges second keeps both lockfile sides.
+  - TASK-045 (cursor pagination) at `b380f429`. No new config key; it reuses `CURSOR_KEY`. The UI half is deferred as part B (D-TASK045-01). Wiring into the app waits for TASK-041's locks (D-TASK045-07).
+  - Their reviews follow the TASK-051 security round, to keep host load down.
+- **Dispatched (free locks, Wave 0 still open):** TASK-034, the backup/restore rehearsal and zero-downtime migration probe tooling.
+  - Held by locks: TASK-284 (api-routing, api-tx-execute; on the path to TASK-052), TASK-030 (lint) and TASK-031 (pkg-audit-redaction). TASK-041 holds those locks and waits on the user; TASK-040 holds api-tx-execute.
+- **Reversibility:** High.
