@@ -2,7 +2,8 @@
 - [ID regex must allow digits](feedback_id_parsing.md) — REQ-I18N/NFR-A11Y rows vanish with [A-Z]+; sanity-check totals vs stats table
 - [QG-041 conditions (ADR-0016 am. 12)](project_qg041_adr0016_am12_conditions.md) — D-QG-001 VERIFIED_WITH_CONDITIONS 2026-11-20; C1..C4 open
 - [QG-043 conditions (ADR-0004 am. 2)](project_qg043_adr0004_am2_conditions.md) — D-QG-002 PASS_WITH_CONDITIONS 2026-11-20; C1..C7 open; story half of C5 on main since a3d0a02b
-- [QG-040 conditions (ADR-0014 am. 5-16)](project_qg040_adr0014_am5_9_conditions.md) — D-QG-003/004 2026-11-20; open: C3 (a), C4 rest, C6 map rows, C7 (Mock checkout contract), C8 (fold); next id D-QG-005
+- [QG-040 conditions (ADR-0014 am. 5-16)](project_qg040_adr0014_am5_9_conditions.md) — D-QG-003/004 2026-11-20; open: C3 (a), C4 rest, C6 map rows, C7 (Mock checkout contract), C8 (fold)
+- [QG-051 conditions (ADR-0005 am. 15)](project_qg051_adr0005_am15_conditions.md) — D-QG-005 PASS_WITH_CONDITIONS 2026-11-21; C1..C4 before TASK-051 merge, C5 before TASK-091, C6 before TASK-087; next id D-QG-006
 - [Shared main checkout mechanics](feedback_shared_checkout_mechanics.md) — main moves mid-session; re-read HEAD before "missing" findings; guarded one-shot commits
 - [Verify "all N IDs" claims by set-diff](feedback_verify_count_claims.md) — late decisions add IDs that derived docs miss (NFR-RES-007 at G2)
-- [ADR amendment verification heuristics](feedback_adr_amendment_checks.md) — eight checks: universal claims, the other Accepted text, what runs before a moved check, contract prose, Applied-in vs commit
+- [ADR amendment verification heuristics](feedback_adr_amendment_checks.md) — twelve checks: universal claims (merged and designed), the other Accepted text and gate arm, contract prose, Applied-in vs commit
