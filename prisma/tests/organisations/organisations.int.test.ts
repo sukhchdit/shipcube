@@ -297,7 +297,7 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result['mergeNotMatchedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.memberships \(INSERT\)$/);
   });
 
-  it('[D-ARCH-165] [D-ARCH-166] operator staff grants O1 to O6: a self-join into the operator organisation needs a grant (O1); platform_app reads and cannot write grants (O2); a granted user joins and reads across tenants (O3); the other rules hold (O4); a customer join needs none (O5); INVITED is not reachable by UPDATE (O6)', async () => {
+  it('[SEC-TC-79] [D-ARCH-165] [D-ARCH-166] operator staff grants O1 to O6: a self-join into the operator organisation needs a grant (O1); platform_app reads and cannot write grants (O2); a granted user joins and reads across tenants (O3); the other rules hold (O4); a customer join needs none (O5); INVITED is not reachable by UPDATE (O6)', async () => {
     const result = await rolledBack(operatorStaffGrants);
     const rule = (text: string): RegExp => new RegExp(`^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: ${text}$`);
     expect(result.o1.join).toMatch(rule('an operator membership needs a staff grant'));

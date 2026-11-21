@@ -239,11 +239,11 @@ describe('rulings §2.7 guest binding as platform_app (SEC-TC-76; D-ARCH-162, D-
     ['G4', 'a package naming an unknown id', () => pkg(null, w.h1, randomUUID(), 1), GUEST_KEY],
     ['G5', 'its own package, a free seq', () => pkg(null, w.h1, w.qh1.quote, 2), 'ok'],
     ['G6', 'its own package, a duplicate seq', () => pkg(null, w.h1, w.qh1.quote, 1), '23505 ux_gc_quote_packages__guest_quote_seq'],
-  ] as const)('[SEC-TC-76] [D-ARCH-162] %s guest H1: %s -> %s', async (_id, _what, params, expected) => {
+  ] as const)('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] %s guest H1: %s -> %s', async (_id, _what, params, expected) => {
     expect(await asAppOutcome(guestH1(), INSERT_PACKAGE_SQL, params())).toBe(expected);
   });
 
-  it("[SEC-TC-76] [D-ARCH-162] G7 guest H1: a guest row carrying H2's hash -> 42501 (row security WITH CHECK)", async () => {
+  it("[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] G7 guest H1: a guest row carrying H2's hash -> 42501 (row security WITH CHECK)", async () => {
     expect(sqlState(await asAppOutcome(guestH1(), INSERT_PACKAGE_SQL, pkg(null, w.h2, w.qh2.quote, 2)))).toBe('42501');
   });
 
@@ -258,7 +258,7 @@ describe('rulings §2.7 guest binding as platform_app (SEC-TC-76; D-ARCH-162, D-
       () => pkg(w.orgA, null, w.qa.quote, 1, w.userA),
       '23505 ux_gc_quote_packages__org_quote_seq',
     ],
-  ] as const)('[SEC-TC-76] [D-ARCH-162] %s organisation A: %s -> %s', async (_id, _what, params, expected) => {
+  ] as const)('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] %s organisation A: %s -> %s', async (_id, _what, params, expected) => {
     expect(await asAppOutcome(orgA(), INSERT_PACKAGE_SQL, params())).toBe(expected);
   });
 
@@ -293,7 +293,7 @@ describe('rulings §2.7 guest binding as platform_app (SEC-TC-76; D-ARCH-162, D-
     ],
     ['S4', 'organisation A: the first active share of its own quote', orgA, () => share(w.orgA, null, w.qa2.quote, w.userA), 'ok'],
     ['S4', 'guest H1: the first active share of its own quote', guestH1, () => share(null, w.h1, w.qh1Bare.quote), 'ok'],
-  ] as const)('[SEC-TC-76] [D-ARCH-163] %s %s -> %s', async (_id, _what, ctx, params, expected) => {
+  ] as const)('[SEC-TC-76] [SEC-TC-80] [D-ARCH-163] %s %s -> %s', async (_id, _what, ctx, params, expected) => {
     expect(await asAppOutcome(ctx(), INSERT_SHARE_SQL, params())).toBe(expected);
   });
 
@@ -311,11 +311,11 @@ describe('rulings §2.7 guest binding as platform_app (SEC-TC-76; D-ARCH-162, D-
       () => [randomUUID(), w.orgA, null, randomUUID(), w.userA],
       '23503 fk_gc_quotes__requote_of_quote_id',
     ],
-  ] as const)('[SEC-TC-76] [D-ARCH-162] %s (T2-O) %s -> %s', async (_id, _what, params, expected) => {
+  ] as const)('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] %s (T2-O) %s -> %s', async (_id, _what, params, expected) => {
     expect(await asAppOutcome(orgA(), INSERT_REQUOTE_SQL, params())).toBe(expected);
   });
 
-  it('[SEC-TC-76] [D-ARCH-162] R4 (T2-O) a guest quote with a re-quote reference -> 23514 ck_gc_quotes__requote_org_only', async () => {
+  it('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] R4 (T2-O) a guest quote with a re-quote reference -> 23514 ck_gc_quotes__requote_org_only', async () => {
     const params = [randomUUID(), null, w.h1.bytes, w.qh1.quote, ANONYMOUS_ACTOR];
     expect(await asAppOutcome(guestH1(), INSERT_REQUOTE_SQL, params)).toBe('23514 ck_gc_quotes__requote_org_only');
   });
@@ -326,7 +326,7 @@ describe('rulings §2.3 / §2.7 the claim is one statement (SEC-TC-76; D-ARCH-16
   const params = (): unknown[] => [w.orgA, w.userA, w.qh1.quote];
   const UNCHANGED = (): Record<GcTable, [string | null, string | null]> => each([null, w.h1.hex]);
 
-  it("[SEC-TC-76] [D-ARCH-162] [PR7-SEC-04] C1 the claim of H1's quote by A, one statement with RESTRICT keys: 1 row through expectAffected; the quote, package, option and share now belong to A", async () => {
+  it("[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] [PR7-SEC-04] C1 the claim of H1's quote by A, one statement with RESTRICT keys: 1 row through expectAffected; the quote, package, option and share now belong to A", async () => {
     const observed = await rolledBack(async (client) => {
       await asApp(client, claimA());
       const count = expectAffected(affected(await client.query(CLAIM_SQL, params())), 1);
@@ -340,15 +340,15 @@ describe('rulings §2.3 / §2.7 the claim is one statement (SEC-TC-76; D-ARCH-16
     expect(observed).toEqual({ count: 1, claim: [{ claimed_by: w.userA, claimed_from: w.h1.hex }], owners: each([w.orgA, null]) });
   });
 
-  it('[SEC-TC-76] [D-ARCH-162] [D-ARCH-211] C2 control: the quote first, then its children -> 23001 (restrict_violation, PostgreSQL 18) on the guest key of the packages', async () => {
+  it('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] [D-ARCH-211] C2 control: the quote first, then its children -> 23001 (restrict_violation, PostgreSQL 18) on the guest key of the packages', async () => {
     expect(await asAppOutcome(claimA(), claimSql([]), params())).toBe('23001 fk_gc_quote_packages__guest_token_hash_quote_id');
   });
 
-  it('[SEC-TC-76] [D-ARCH-162] C3 control: the children first, then the quote -> 23503 on the organisation key of the packages', async () => {
+  it('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] C3 control: the children first, then the quote -> 23503 on the organisation key of the packages', async () => {
     expect(await asAppOutcome(claimA(), childClaimSql('gc_quote_packages'), params())).toBe('23503 fk_gc_quote_packages__org_id_quote_id');
   });
 
-  it("[SEC-TC-76] [D-ARCH-162] [PR7-SEC-13] C4 the statement with H2's token for H1's quote: 0 rows, expectAffected raises NOT_FOUND, nothing changed", async () => {
+  it("[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] [PR7-SEC-13] C4 the statement with H2's token for H1's quote: 0 rows, expectAffected raises NOT_FOUND, nothing changed", async () => {
     const observed = await rolledBack(async (client) => {
       await asApp(client, claimContext(w.orgA, w.userA, w.h2));
       const error = affectedError(affected(await client.query(CLAIM_SQL, params())));
@@ -357,7 +357,7 @@ describe('rulings §2.3 / §2.7 the claim is one statement (SEC-TC-76; D-ARCH-16
     expect(observed).toEqual({ error: 'NOT_FOUND', status: 404, owners: UNCHANGED() });
   });
 
-  it("[SEC-TC-76] [D-ARCH-162] [PR7-SEC-13] C5 a second claim by B after A's: 0 rows, expectAffected raises NOT_FOUND, the rows stay A's", async () => {
+  it("[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] [PR7-SEC-13] C5 a second claim by B after A's: 0 rows, expectAffected raises NOT_FOUND, the rows stay A's", async () => {
     const observed = await rolledBack(async (client) => {
       await asApp(client, claimA());
       const first = affected(await client.query(CLAIM_SQL, params()));
@@ -368,7 +368,7 @@ describe('rulings §2.3 / §2.7 the claim is one statement (SEC-TC-76; D-ARCH-16
     expect(observed).toEqual({ first: 1, error: 'NOT_FOUND', owners: each([w.orgA, null]) });
   });
 
-  it('[SEC-TC-76] [D-ARCH-162] [D-ARCH-211] C6 the statement without the quote_shares update -> 23001 (restrict_violation, PostgreSQL 18) on the guest key of the shares (no child stays behind)', async () => {
+  it('[SEC-TC-76] [SEC-TC-80] [D-ARCH-162] [D-ARCH-211] C6 the statement without the quote_shares update -> 23001 (restrict_violation, PostgreSQL 18) on the guest key of the shares (no child stays behind)', async () => {
     const withoutShares = claimSql(GC_CHILDREN.filter((child) => child !== 'gc_quote_shares'));
     expect(await asAppOutcome(claimA(), withoutShares, params())).toBe('23001 fk_gc_quote_shares__guest_token_hash_quote_id');
   });
@@ -384,14 +384,17 @@ describe('ADR-0005 am. 10 item 11: the de-claim guard alone, as the superuser (P
   ] as const;
   const cases = GC_TABLES.flatMap((table) => transitions.map(([name, set, row, extra]) => [table, name, set, row, extra] as const));
 
-  it.each(cases)('[D-ARCH-065] [PR7-SEC-04] %s: %s is refused by the trigger with RLS bypassed', async (table, _name, set, row, extra) => {
-    const observed = await rolledBack((client) =>
-      outcome(client, `UPDATE public.${table} ${set} WHERE id = $1::uuid`, [row(w)[ROW_KEY[table]], ...extra()]),
-    );
-    expect(observed).toBe(FORBIDDEN);
-  });
+  it.each(cases)(
+    '[SEC-TC-80] [D-ARCH-065] [PR7-SEC-04] %s: %s is refused by the trigger with RLS bypassed',
+    async (table, _name, set, row, extra) => {
+      const observed = await rolledBack((client) =>
+        outcome(client, `UPDATE public.${table} ${set} WHERE id = $1::uuid`, [row(w)[ROW_KEY[table]], ...extra()]),
+      );
+      expect(observed).toBe(FORBIDDEN);
+    },
+  );
 
-  it('[D-ARCH-065] [PR7-SEC-12 (d)] the legitimate claim (NULL -> org, hash -> NULL) passes the trigger as the superuser too', async () => {
+  it('[SEC-TC-80] [D-ARCH-065] [PR7-SEC-12 (d)] the legitimate claim (NULL -> org, hash -> NULL) passes the trigger as the superuser too', async () => {
     const observed = await rolledBack(async (client) => {
       const count = affected(await client.query(CLAIM_SQL, [w.orgA, w.userA, w.qh1.quote]));
       return { count, owners: await owners(client, w.qh1) };
@@ -415,13 +418,16 @@ describe('US-080 scenarios, database halves (AT-US-080-01..07)', () => {
     ['another organisation (B)', (): ProbeContext => orgContext(w.orgB, w.userB)],
     ['organisation A with the empty guest binding', (): ProbeContext => orgContext(w.orgA, w.userA)],
     ['the empty context', (): ProbeContext => ({ org: '', actor: '', guestHash: '' })],
-  ] as const)("[AT-US-080-02] (database half) %s reads 0 rows of H1's quote and children (the route answers 404)", async (_who, ctx) => {
-    const observed = await rolledBack(async (client) => {
-      await asApp(client, ctx());
-      return visible(client, w.qh1);
-    });
-    expect(observed).toEqual(NONE_VISIBLE);
-  });
+  ] as const)(
+    "[AT-US-080-02] [SEC-TC-80] (database half) %s reads 0 rows of H1's quote and children (the route answers 404)",
+    async (_who, ctx) => {
+      const observed = await rolledBack(async (client) => {
+        await asApp(client, ctx());
+        return visible(client, w.qh1);
+      });
+      expect(observed).toEqual(NONE_VISIBLE);
+    },
+  );
 
   it('[AT-US-080-03] (database half) a nullable org_id exists only on flagged tables: GUEST_CAPABLE (the manifests and the gc_ probe tables) or a listed SYSTEM table; org_id is NOT NULL on every TENANT table; a GUEST_CAPABLE row needs exactly one owner', async () => {
     const classes = loadTableClasses();
@@ -477,7 +483,7 @@ describe('US-080 scenarios, database halves (AT-US-080-01..07)', () => {
     expect(observed).toEqual({ first: 1, error: 'NOT_FOUND' });
   });
 
-  it('[AT-US-080-06] (database half) a context with the guest hash and no organisation or actor cannot claim: 42501 WITH CHECK, nothing changed (D-TASK051-06)', async () => {
+  it('[AT-US-080-06] [SEC-TC-80] (database half) a context with the guest hash and no organisation or actor cannot claim: 42501 WITH CHECK, nothing changed (D-TASK051-06)', async () => {
     const observed = await rolledBack(async (client) => {
       await asApp(client, guestContext(w.h1));
       const claim = await outcome(client, CLAIM_SQL, [w.orgA, w.userA, w.qh1.quote]);
