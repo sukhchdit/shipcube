@@ -269,6 +269,17 @@ export const logLevelGuard: Guard = ({ values, appEnv }) =>
     ? [{ key: 'APP_LOG_LEVEL', code: 'forbidden-in-environment', rule: 'logLevel.floor' }]
     : [];
 
+/**
+ * ADR-0016 am. 12 item 9 (D-ARCH-179, PR041-SEC-05): the API names its trusted proxy hops in staging and production.
+ * Unset is `missing` (the default 0 would trust none, so every client would share the proxy's address); 0 is
+ * `forbidden-in-environment` (those environments always sit behind at least one proxy). Local and test accept both.
+ */
+export const trustProxyGuard: Guard = ({ raw, values, appEnv, service }) => {
+  if (service !== 'api' || !isHardenedAppEnv(appEnv)) return [];
+  if (raw.TRUST_PROXY_HOPS === undefined) return [{ key: 'TRUST_PROXY_HOPS', code: 'missing' }];
+  return values.TRUST_PROXY_HOPS === 0 ? [{ key: 'TRUST_PROXY_HOPS', code: 'forbidden-in-environment', rule: 'trustProxy.hops' }] : [];
+};
+
 const exceeds = (values: GuardInput['values'], key: string, limitKey: string): boolean => {
   const value = values[key];
   const limit = values[limitKey];
@@ -346,6 +357,7 @@ export const GUARDS: readonly Guard[] = Object.freeze([
   companionGuard,
   credentialPairGuard,
   logLevelGuard,
+  trustProxyGuard,
   sessionGuard,
   databaseGuard,
   keyMaterialGuard,
