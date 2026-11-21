@@ -429,3 +429,118 @@ Main's real checker (`tools/ci/check-security-owned-paths.mjs`) ran in a sparse 
 | Field | Value |
 |---|---|
 | Verdict | PASS_WITH_CONDITIONS. No Critical, High or Medium finding open at `3168c194`. Closed: PR045-SEC-01 (classes found), -02, -03; -04 and -05 in code; -07 contract half. Open: LOW latent PR045-SEC-08 (= R2-m1, routed to part 045-C), INFO PR045-SEC-06 (TASK-073 card), INFO PR045-SEC-07 module half (TASK-096), INFO PR045-SEC-09 (= R2-n2, TASK-073 card). Merge condition C4: lane B green on `3168c194`. C5 and F2' ride part 045-C |
+
+---
+
+# Round 3: delta review of fix cycle 2
+
+| Field | Value |
+|---|---|
+| PR | Not opened yet. Branch `feat/TASK-045-cursor-pagination-filtering-sorting`, pushed (origin at `77326dc5`). One fix commit `c02dbf27` on round 2's head `3168c194` (`test(api): task-045 anonymous reference-list caller, suppression task id`; D-TASK045-15 in its body), then the docs-only lane B evidence commit `77326dc5` |
+| Head | c02dbf27692e36f8303ece8bef5be0ba08f1a57a |
+| Delta | `3168c194..c02dbf27`: 2 files, +13 / -6, both tests under the owned path `apps/api/src/platform/pagination/` (`pagination.api.test.ts`, `list-query.test.ts`). No production file, dependency, lockfile, configuration key, migration or contract change. The api image never carries them (`.dockerignore` hides tests; `prune-dist.mjs` removes compiled tests). `77326dc5` adds 8 files under `docs/05-quality/tests/runs/20261121T1414Z_c02dbf2/` and nothing else |
+| Merge base with main | Still `530629f4`. Main has moved since round 2 (D-ORCH-161, D-ORCH-162): local main `4ba683ad` (then docs-only commits) carries PR #80 (TASK-040 part 040-A), #81 (TASK-080), #82 (TASK-041 part 041-A), #83 (TASK-051) and the dependency PRs #16, #49, #50 and #84. So `530629f4..main` now changes code: 160 files outside `docs/` and `.claude/agent-memory/`, among them `errors/`, `idempotency/`, `rate-limit/`, `tx/execute.ts`, `routing/pipeline.ts`, `authz/authorise.ts`, `app.ts` and the lockfile. None of the branch's 18 files is among them, and `git merge-tree --write-tree main c02dbf27` is clean (tree `8746a2c6`). See R3.5 |
+| Lane A evidence | None: no PR exists yet |
+| Lane B evidence | Run `20261121T1414Z_c02dbf2` (commit `77326dc5`): verdict PASS, `git_sha` `c02dbf27692e…`, `git_dirty` false, `build_clean` true, profile `pr`. Api 201 passed, integration 425, unit 8349 (2 skipped: the two POSIX file-mode cases of `file-secret-provider.test.ts`, host-bound), rls-cross-tenant 157, catalog 113; 0 failures. The `report_sha256` values of the api, integration and unit reports match the committed files |
+| Binding items checked | Rounds 1 and 2 above; D-TASK045-15 (commit body of `c02dbf27`); the failed lane B `20261121T0735Z_3168c19` on `3168c194` as that body reports it (AT-US-037-07 answered 401; one check-suppressions finding); D-ORCH-161 (the main move and the union queue) |
+| Reviewer / date | security-analyst, 2026-11-21, round 3 (delta). Host rules: foreground commands only, each at most 8 minutes, no Docker, nothing run in the TASK-045 worktree (git plumbing from the main checkout; probes on `git archive` extracts of `c02dbf27` and of the union tree `8746a2c6` in the session scratchpad, with a `node_modules` junction to the main checkout) |
+
+## R3.1 Summary
+
+The fix cycle changes two test files and no production code. The round-2 lane B failure was a defect in a test helper, and the fix keeps both the reference route's authentication and the credential gate as they were:
+
+- **The defect.** The helper is `get(path, query, orgId = ORG_A, actorId = ACTOR_A)`. AT-US-037-07 passed an explicit `undefined` for its "anonymous" calls, and in JavaScript an explicit `undefined` takes the parameter default. So the call carried the fixture org header, the fixture's stub authenticator signed it in as a session caller, and the anonymous-only reference route answered 401 `AUTH_REQUIRED` at authorise step 1. The fix passes a `null` sentinel, `ANONYMOUS_CALLER`, which sends no fixture headers. Reproduced: with `undefined` put back, AT-US-037-07 fails with 200 expected and 401 received (M1).
+- **Authentication is not widened.** The reference route's declaration (the `fixtureRoute` default `auth: 'anonymous'`, permission unchanged) is untouched. `authorise.ts`, `authenticate.ts`, `routing/tests/fixture-route.ts` and `pagination/tests/list-fixture.ts` have the same blobs at `3168c194` and `c02dbf27`. On main, `authenticate.ts` and `fixture-route.ts` are the same blobs too. Main's `authorise.ts` differs only by PR #82's denial budget on the 403 path; step 1 (`if (!route.auth.includes(principal.credential))` → 401) is textually the same. Probed at the head: a fixture-session caller on the reference route is 401 `AUTH_REQUIRED` (G1), and an anonymous caller on a session route is 401 (G2).
+- **What the case proves.** The anonymous caller at `limit=300` gets 200 with all 250 fixture countries in one page (more than the default 100), `has_more` false and `next_cursor` null. At 301 it gets 400 `VALIDATION_ERROR`. Lane B passed this case on `c02dbf27`, and my replay on the extract passes it (22 of 22 in the file).
+- **The credential gate stays owned by its own tests.** With step 1 disabled (M2), the committed pagination suite still passes: it does not own the gate, as D-TASK045-15 says. My gate probes G1 and G2 fail, and `authorise.test.ts` fails 9 of 20. The gate is pinned where it belongs.
+- **The suppression.** `list-query.test.ts:193` only rewords the `@ts-expect-error` description to `-- TASK-045 <reason>`. The directive, and the misspelt-column type check it asserts (R1-m6), are unchanged.
+- **Secrets.** A gitleaks v8.30.1 emulation finds 0 in the 13 added lines and 0 in the 16,782 lines of the evidence commit. Its controls are reproduced.
+
+No new finding. **C4 is discharged on `c02dbf27`.** Verdict: **PASS_WITH_CONDITIONS**, with no merge condition left for this PR. The remaining items are routed and carded (R3.6).
+
+## R3.2 Method and evidence
+
+| Probe | What | Result |
+|---|---|---|
+| Diff and blobs | `git diff 3168c194..c02dbf27`; blob hashes of `authz/authorise.ts`, `authn/authenticate.ts`, `routing/tests/fixture-route.ts` and `pagination/tests/list-fixture.ts` at `3168c194`, `c02dbf27` and main | 2 test files changed. The four blobs are identical at `3168c194` and `c02dbf27`. On main: `authenticate.ts` and `fixture-route.ts` identical, `list-fixture.ts` absent (a branch file), `authorise.ts` changed by PR #82 outside step 1 (R3.1) |
+| P0, replay | The head's `pagination.api.test.ts` (Jest 30 `--selectProjects api --maxWorkers=2`) on a `git archive c02dbf27` extract | 22 of 22 pass |
+| M1, the pre-fix call | Both AT-US-037-07 calls pass `undefined` again | AT-US-037-07 fails, 200 expected, 401 received (the lane B `0735Z` failure); 21 others pass |
+| P1, gate probes | A copy of the suite with three cases appended: G1, a fixture-session caller (`ORG_A`) on `/fixtures/reference/countries` → 401 `AUTH_REQUIRED`; G2, `ANONYMOUS_CALLER` on `/fixtures/records` → 401 `AUTH_REQUIRED`; C1, the anonymous 300 / 301 pair with the full count | 25 of 25 pass |
+| M2, gate off | `if (!route.auth.includes(principal.credential))` in `authorise.ts` replaced with `if (false)` | Probe copy: G1 and G2 fail (200 received). Committed suite: 22 of 22 pass. `authorise.test.ts`: 9 of 20 fail (the PR32-SEC-02 credential-gate cases) |
+| Restore | Blob hashes of the edited extract files compared with `c02dbf27` after each mutant | Identical |
+| Union | The pagination, validate, errors and authz suites and `tools/openapi/list-contract.test.ts` (unit and api projects), first on the head extract, then on the extract of `git merge-tree --write-tree main c02dbf27` (`8746a2c6`, main `4ba683ad`) | Head: 11 suites, 267 tests pass. Union: 12 suites (main adds `rendered-problem.test.ts`), 271 tests pass. One transient failure in `problem-handler.api.test.ts` (a file this delta does not touch) on the head extract's first run, while the host was loaded, did not repeat: the file passed alone (62 of 62) and in the full rerun |
+| Gitleaks | The emulation of round 2, rebuilt: the upstream v8.30.1 default config (222 rules; 221 regex rules compile, 1 path-only) plus main's `.gitleaks.toml`, per-hunk fragments from `git log -p -U0 --diff-merges=first-parent --text`, keyword prefilter, secret group, entropy, no generic digit check, global, rule and repository allowlists (`regexTarget`, conditions, stopwords, a line target with its preceding newline) | `3168c194..c02dbf27`: 13 added lines, **0 findings**. `c02dbf27..77326dc5`: 16,782 lines, **0**. Controls: `b34f954e` gives exactly its known `prisma/tests/catalog/tenant-keys.ts:generic-api-key:75`; `dd7a2ddc` gives its two `generic-api-key` hits at lines 272 and 273 without the repository config and 0 with it (the commit-bound D-ORCH-068 entry). Values were never printed |
+| Record binding | Main's real checker in merge-ref form | R3.7 |
+
+Not run: Docker, PostgreSQL, the generated suites, lint, typecheck and build. Lane B covers the suites on the exact head; the type-check of the sentinel narrowing belongs to the code review.
+
+## R3.3 Observations (no finding)
+
+- **The stub authenticator differs from production.** The fixture slot `signedIn` creates a session principal whenever the org header is present, whatever the route declares. The production `authenticate` reads only the credential kinds in `route.auth` (`presentedKinds`), so a session-capable client on an anonymous-only route stays anonymous there. That is why the helper defect showed up as a gate refusal and not as a wrong page. It is test-only, with no production effect. If part 045-C touches this file anyway, the stub could honour `route.auth` the same way. Optional.
+- **The sentinel guards new calls only by convention.** Under `orgId: string | null = ORG_A`, an explicit `undefined` still type-checks and still means `ORG_A`. A future anonymous case written with `undefined` would repeat the defect, and it would fail loudly (401). The type is the code review's concern; there is no security effect.
+
+## R3.4 Status of round 1 and round 2 items
+
+| ID | Status at `c02dbf27` |
+|---|---|
+| PR045-SEC-01, -02, -03 | Closed (round 2). The lane B api and PostgreSQL 18 cases of R2.8 pass on `c02dbf27` (the six PR045-SEC-01 rows, the controls, the deleted and RLS-moved boundary 400s, the policy probe, the binding 400s) |
+| PR045-SEC-04, -05 | Closed in code (round 2). F2', the rotation-runbook line, rides part 045-C |
+| PR045-SEC-06 (INFO) | Open, carded on TASK-073 (`41bcb54a`) |
+| PR045-SEC-07 (INFO) | Contract half closed; module half on TASK-096 (D-ORCH-150) |
+| PR045-SEC-08 (LOW latent) | Open, routed to part 045-C (F6). Not touched by this delta |
+| PR045-SEC-09 (INFO latent) | Open, TASK-073 card line (F7) |
+| C4 | **Discharged:** lane B `20261121T1414Z_c02dbf2` PASS on `c02dbf27`, with every case of R2.8 present and passing (22 `pagination.api.test.ts` cases, 9 `list-keyset.int.test.ts` cases on PostgreSQL 18) |
+| C5 | Open, carded: part 045-C, before the first list route is mounted and before TASK-073 opens its PR |
+| F5 | Open: principal-architect, before G3 |
+
+## R3.5 Main has moved
+
+Main now carries code that the branch does not. PR #80 changed `errors/classify.ts`, `problem-handler.ts`, `rendered-problem.ts` and `tx/execute.ts`, which render and run every TASK-045 refusal. PR #82 changed `routing/pipeline.ts`, `app.ts` and the 403 path of `authorise.ts`. The file sets do not overlap and the three-way merge is clean. On the union tree, the TASK-045 unit and api suites pass together with the errors and authz suites that include PR #80's and PR #82's changes (R3.2, Union).
+
+So for security, merging this branch with main needs no new round, because no owned path changes on both sides. Simulation S4 passes when the event base is the new merge base, which is what a `synchronize` event after the merge carries. D-ORCH-161's queue item "unions on … TASK-045 (if it overlaps main)" has no textual overlap to resolve. Whether lane B must run again on a merge commit is the orchestrator's call under its stacked-build rule. A merge with a main that also changes one of the branch's 18 files needs a merge-only round (simulation C6).
+
+## R3.6 Routing
+
+Unchanged from R2.6, minus C4:
+
+| ID | Item | Owner | Due |
+|---|---|---|---|
+| C5 | The codec is built once in the composition root, with its own security round (carded) | senior-developer (part 045-C) | Before the first list route is mounted, and before TASK-073 opens its PR |
+| F2' | PR045-SEC-05 rotation-runbook line | orchestrator (part 045-C card line); devops (runbook) | With part 045-C |
+| F3 | PR045-SEC-06 conditions | TASK-073 (carded); principal-architect (register wording) | TASK-073 merge; next ADR-0018 fold |
+| F4' | PR045-SEC-07 module side | TASK-096 | With TASK-096 |
+| F5 | NUL refusal for every request string in the validate slot | principal-architect | Before G3 |
+| F6 | PR045-SEC-08: a required integer range | senior-developer (part 045-C) | Part 045-C merge |
+| F7 | PR045-SEC-09 conditions (a) to (c) on the TASK-073 card | orchestrator (card fold) | TASK-073 dispatch |
+
+SEC-TC-82 and SEC-TC-83 proposals stand as in R2.6. The record is renamed to `PR-<NNNN>-TASK-045-security-review.md` once the PR exists.
+
+## R3.7 Record binding
+
+Main's real checker (`tools/ci/check-security-owned-paths.mjs` at main `4ba683ad`) ran in a sparse shared clone, invoked as `ci.yml` invokes it: `--root` is the work tree of a simulated merge ref (the record committed on a main commit, then `git merge-tree` with the PR head and `commit-tree`), `--base` is the event base, `--head` is the PR head (`pull_request.head.sha`), and `--pr 9999`. The record content was this file with round 3 appended, under the name `PR-9999-TASK-045-security-review.md`. Main's classifier gives `security_paths=true` for `530629f4..c02dbf27` (16 paths) and for `3168c194..c02dbf27` (2 paths: the two test files are owned).
+
+Method note: round 2 passed the merge ref as `--head`. That was equivalent while `530629f4..main` was docs-only. Now that main carries code, it would count main's owned files as changed by the PR (134 owned, every scenario missing), which the real gate never does.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 record on main merged with `c02dbf27` (`--base` = merge base `530629f4`) | pass | pass, 16 owned, satisfied by `c02dbf27` |
+| S1b the same with `--base` = the main tip that carries the record (the base of an `opened` event) | pass | pass, satisfied by `c02dbf27` |
+| S2 the real evidence commit `77326dc5` as the PR head | pass | pass, satisfied by `c02dbf27` |
+| S3 an unowned edit after the evidence commit (`tools/openapi/list-contract.ts`) | pass | pass |
+| S4 the branch merges the real main `4ba683ad` (no overlap; `--base` = the new merge base) | pass | pass, 16 owned, satisfied by `c02dbf27` |
+| C1 no record | missing | missing |
+| C2 the record only under this `PR-pending` name | missing | missing: the orchestrator renames it once the PR exists |
+| C3 a later FAIL verdict row | missing | missing |
+| C4 round 3's Head row naming a main commit (the `b380f429` and `3168c194` rows stay) | missing | missing: both have owned changes after them |
+| C5 an owned edit after the evidence commit (`pagination/page.ts`) | missing | missing: a later owned head needs its own round |
+| C6 the branch merges a main that also changed `validate.ts` (owned overlap) | missing | missing: such a merge needs a merge-only round |
+| C7 rounds 1 and 2 alone (the record before this section) | missing | missing: `3168c194` has `list-query.test.ts` and `pagination.api.test.ts` changed after it, so this round was required |
+| C8 S4 with the stale base `530629f4` | missing | missing (134 owned): the record holds after a main merge only for an event whose base is the new merge base |
+
+13 of 13 as expected. The combined record has three Head rows (`b380f429`, `3168c194`, `c02dbf27`) and three Verdict rows; the last one is this round's.
+
+## R3.8 Verdict
+
+| Field | Value |
+|---|---|
+| Verdict | PASS_WITH_CONDITIONS. Binding: head `c02dbf27` (delta `3168c194..c02dbf27`, two test files, no production code). No Critical, High or Medium finding open; no new finding. C4 discharged (lane B `20261121T1414Z_c02dbf2` PASS on `c02dbf27`); no merge condition remains for this PR. Open and routed: C5 and F2' (part 045-C), LOW latent PR045-SEC-08 (F6, part 045-C), INFO PR045-SEC-06 and -09 (TASK-073 card), INFO PR045-SEC-07 module half (TASK-096), F5 (principal-architect, before G3). A later owned push, or a main merge that changes one of the branch's 18 files, needs a new round |

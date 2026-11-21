@@ -9603,3 +9603,35 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - orchestrator: C3 to C5, the refined D-ORCH-158 rule for 040-B and 041-B, and an owner for PR040-SEC-13.
   - security-analyst: C2 and C3; the T-79 and R-05 text before G3.
 - **Reversibility:** High (a review record).
+
+### D-SECPR045-03 · 2026-11-21 · security-analyst · TASK-045 security round 3 (delta for fix cycle 2, `3168c194..c02dbf27`: the anonymous caller of AT-US-037-07 and a suppression description, two test files) = PASS_WITH_CONDITIONS at head `c02dbf27` (appended as round 3 to `docs/05-quality/security/PR-pending-TASK-045-security-review.md` on main); C4 discharged
+
+- **Decision:** no Critical, High or Medium finding is open at `c02dbf27`, and the round adds no finding. No merge condition remains for this PR: C4 is discharged by lane B `20261121T1414Z_c02dbf2` (PASS, `git_sha` `c02dbf27`, clean tree; every R2.8 case present and passing).
+- **Delta.** Two `*.test.ts` files under the owned `pagination/` path, +13 / -6. No production code, dependency, configuration, migration or contract change, and the api image never carries tests. The evidence commit `77326dc5` adds only `docs/05-quality/tests/runs/20261121T1414Z_c02dbf2/`.
+- **Concurrence with D-TASK045-15** (the 401 was a test-helper defect):
+  - An explicit `undefined` takes the parameter default `ORG_A`. The "anonymous" call therefore carried the fixture org header, the stub signed it in as a session caller, and step 1 refused it on the anonymous-only route. Reproduced: with `undefined` put back, the case fails 200 → 401 (M1).
+  - The `null` sentinel sends no headers. At 300 the anonymous caller gets 200 with all 250 fixture countries, `has_more` false; at 301 it gets 400 `VALIDATION_ERROR` (replay 22 of 22).
+  - The route's auth is not widened, and the credential gate is untouched. `authorise.ts` and `authenticate.ts` are the same blobs at `3168c194` and `c02dbf27`. Main's `authorise.ts` differs only by PR #82's denial budget on the 403 path.
+  - Probed: a fixture-session caller on the reference route and an anonymous caller on a session route are both 401. With step 1 disabled (M2), those probes fail and `authorise.test.ts` fails 9 of 20, while the pagination suite still passes. So the gate is pinned by its own tests, not by this suite, as the decision says.
+- **Other checks:**
+  - The `@ts-expect-error` change is only the description.
+  - Gitleaks v8.30.1 emulation (rebuilt: the 222 upstream rules and main's `.gitleaks.toml`): 0 findings in the 13 added lines and 0 in the 16,782 evidence lines. Controls reproduced: `b34f954e` line 75; `dd7a2ddc` lines 272 and 273 without the repository config, 0 with it.
+- **Main has moved** (PR #80 to #84; D-ORCH-161, D-ORCH-162):
+  - No file overlap with the branch's 18 files, and the merge is clean (tree `8746a2c6`).
+  - On the union, the pagination, validate, errors and authz suites and the contract checker pass (12 suites, 271 tests).
+  - A main merge without overlap needs no new security round. A merge that also changes one of the 18 files needs a merge-only round.
+- **Record binding:** main's real checker invoked as `ci.yml` invokes it (`--root` = the merge-ref tree, `--base` = the event base, `--head` = the PR head): 13 of 13 scenarios as expected.
+  - Round 3's Head row binds `c02dbf27`. Rounds 1 and 2 alone no longer satisfy the checker, because the two test files changed after `3168c194`.
+  - After a main merge, the record holds only for an event whose base is the new merge base (C8).
+  - Method correction: round 2's simulation passed the merge ref as `--head`. That is wrong once main carries code (134 owned files counted).
+- **Conditions and routing (unchanged from D-SECPR045-02, minus C4):**
+  - C5 and F2' (part 045-C, before the first list route is mounted and before TASK-073 opens its PR);
+  - PR045-SEC-08 (F6, part 045-C);
+  - PR045-SEC-06 and -09 (TASK-073 card);
+  - the PR045-SEC-07 module half (TASK-096);
+  - F5 (principal-architect, before G3).
+  - The orchestrator renames the record to `PR-<NNNN>-TASK-045-security-review.md` once the PR exists.
+- **Observations, not findings:**
+  - The fixture `signedIn` stub signs in whatever the route declares, while production reads only declared kinds. It is test-only; part 045-C may align it.
+  - An explicit `undefined` still type-checks as `ORG_A`. That is for the code review.
+- **Reversibility:** High (a review record).
