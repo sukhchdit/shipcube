@@ -686,3 +686,152 @@ export async function stdColumns(client: Client): Promise<Record<string, string>
     ),
   };
 }
+
+/** As platform_migrator, the provisioning lane's role (D-ARCH-165): the only writer of operator_staff_grants. */
+async function asMigrator(client: Client): Promise<void> {
+  await client.query('SET LOCAL ROLE platform_migrator');
+}
+
+const GRANT_INSERT = `INSERT INTO public.operator_staff_grants (created_by, updated_by, user_id)
+                      VALUES ($1::uuid, $1::uuid, $2::uuid) ON CONFLICT (user_id) DO NOTHING`;
+const VISIBLE_ORGANISATIONS = `SELECT count(*)::int AS n FROM public.organisations`;
+
+/** Organisations `actor` sees with the OPERATOR scope in the context of the operator organisation. */
+async function operatorView(client: Client, actor: string): Promise<number> {
+  await asApp(client, OPERATOR_ORG, actor, 'OPERATOR');
+  const [row] = await rows<{ n: number }>(client, VISIBLE_ORGANISATIONS);
+  return row?.n ?? -1;
+}
+
+/**
+ * [D-ARCH-165] [D-ARCH-166] Operator staff grants (rulings/wave-1-r-arch-34-operator-rulings.md §3.4 item 7, cases O1
+ * to O6; PR65-SEC-02 (b), PR65-SEC-04 (a)). Every case as platform_app with the production context statement, except
+ * the grant write of O3, which the provisioning lane makes as platform_migrator.
+ */
+export async function operatorStaffGrants(client: Client): Promise<{
+  o1: { join: string; sees: number };
+  o2: { appInsert: string; appRead: string };
+  o3: { grant: string; regrant: string; join: string; roleLink: string; sees: number };
+  o4: { otherActor: string; suspended: string };
+  o5: string;
+  o6: { invited: string; lifecycle: string };
+}> {
+  const { orgA, userA, membershipA } = await world(client);
+  const support = await roleId(client, 'OPERATOR_SUPPORT');
+  const [stranger, staff, other] = [
+    await freshUser(client, 'Stranger'),
+    await freshUser(client, 'Staff'),
+    await freshUser(client, 'Other'),
+  ];
+
+  // O1: no grant, the operator organisation's context, the own ACTIVE membership.
+  await asApp(client, OPERATOR_ORG, stranger);
+  const o1Join = await outcome(client, MEMBERSHIP_INSERT, [OPERATOR_ORG, stranger, 'ACTIVE', null, stranger]);
+  const o1 = { join: o1Join, sees: await operatorView(client, stranger) };
+
+  // O2: platform_app cannot write a grant; it can read the table.
+  await asApp(client, orgA, userA);
+  const o2 = {
+    appInsert: await outcome(client, GRANT_INSERT, [SYSTEM, stranger]),
+    appRead: await outcome(client, 'SELECT user_id FROM public.operator_staff_grants'),
+  };
+
+  // O3: the provisioning lane grants; the granted user joins and links an operator role; the OPERATOR scope then reads
+  // another organisation's row.
+  await asSuperuser(client);
+  await asMigrator(client);
+  const grant = await outcome(client, GRANT_INSERT, [SYSTEM, staff]);
+  const regrant = await outcome(client, GRANT_INSERT, [SYSTEM, staff]);
+  const [grants] = await rows<{ n: number }>(
+    client,
+    'SELECT count(*)::int AS n FROM public.operator_staff_grants WHERE user_id = $1::uuid',
+    [staff],
+  );
+  await asApp(client, OPERATOR_ORG, staff);
+  const join = await outcome(client, MEMBERSHIP_INSERT, [OPERATOR_ORG, staff, 'ACTIVE', null, staff]);
+  const [membership] = await rows<{ id: string }>(
+    client,
+    'SELECT id FROM public.memberships WHERE org_id = $1::uuid AND user_id = $2::uuid',
+    [OPERATOR_ORG, staff],
+  );
+  const roleLink = await outcome(client, ROLE_INSERT, [OPERATOR_ORG, membership?.id ?? null, support, staff]);
+  const sees = await operatorView(client, staff);
+  const o3 = { grant: `${grant} (${String(grants?.n ?? 0)} row)`, regrant, join, roleLink, sees };
+
+  // O4: the unchanged rules hold for a granted user (another actor inserts him; he joins SUSPENDED).
+  await asSuperuser(client);
+  await asMigrator(client);
+  await client.query(GRANT_INSERT, [SYSTEM, other]);
+  await asApp(client, OPERATOR_ORG, staff);
+  const otherActor = await outcome(client, MEMBERSHIP_INSERT, [OPERATOR_ORG, other, 'ACTIVE', null, staff]);
+  await asApp(client, OPERATOR_ORG, other);
+  const suspended = await outcome(client, MEMBERSHIP_INSERT, [OPERATOR_ORG, other, 'SUSPENDED', null, other]);
+
+  // O5: a user without a grant joins a BUSINESS_CUSTOMER organisation.
+  await asApp(client, orgA, stranger);
+  const o5 = await outcome(client, MEMBERSHIP_INSERT, [orgA, stranger, 'ACTIVE', null, stranger]);
+
+  // O6: ACTIVE -> INVITED is refused by UPDATE; ACTIVE <-> SUSPENDED and -> REMOVED stay ok.
+  await asApp(client, orgA, userA);
+  const setStatus = `UPDATE public.memberships SET status = $2::text, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`;
+  const invited = await outcome(client, setStatus, [membershipA, 'INVITED', userA]);
+  const lifecycle = [
+    await outcome(client, setStatus, [membershipA, 'SUSPENDED', userA]),
+    await outcome(client, setStatus, [membershipA, 'ACTIVE', userA]),
+    await outcome(client, setStatus, [membershipA, 'REMOVED', userA]),
+  ].join(',');
+
+  return { o1, o2, o3, o4: { otherActor, suspended }, o5, o6: { invited, lifecycle } };
+}
+
+/**
+ * [D-ARCH-214] Operator staff grants O7 (rulings/wave-1-r-arch-34-operator-rulings.md §3.4 item 7 and §8.11; security
+ * review PR051-SEC-03). A SUSPENDED membership of the operator organisation whose grant the migrator has deleted is
+ * set ACTIVE by another session in that organisation's context: refused, and the member still sees one organisation
+ * with the OPERATOR scope. The same update once the grant is back succeeds, and the member then reads across tenants.
+ * SUSPENDED -> ACTIVE in a BUSINESS_CUSTOMER organisation needs no grant. The memberships are fixture rows (triggers
+ * off), as a membership that predates the grant's deletion would be.
+ */
+export async function operatorReactivation(client: Client): Promise<{
+  withoutGrant: string;
+  seesWithoutGrant: number;
+  withGrant: string;
+  seesWithGrant: number;
+  customer: string;
+}> {
+  const { orgA, userA } = await world(client);
+  const [former, admin, customerMember] = [
+    await freshUser(client, 'Former'),
+    await freshUser(client, 'Admin'),
+    await freshUser(client, 'Customer'),
+  ];
+  const [operatorMembership, customerMembership] = [randomUUID(), randomUUID()];
+  await fixture(client, [
+    insertMembership(operatorMembership, OPERATOR_ORG, former, 'SUSPENDED'),
+    insertMembership(customerMembership, orgA, customerMember, 'SUSPENDED'),
+  ]);
+  const setStatus = `UPDATE public.memberships SET status = $2::text, updated_by = $3::uuid, version = version + 1 WHERE id = $1::uuid`;
+
+  // The provisioning lane granted the user once and has deleted the grant since (offboarding).
+  await asSuperuser(client);
+  await asMigrator(client);
+  await client.query(GRANT_INSERT, [SYSTEM, former]);
+  await client.query('DELETE FROM public.operator_staff_grants WHERE user_id = $1::uuid', [former]);
+  await asApp(client, OPERATOR_ORG, admin);
+  const withoutGrant = await outcome(client, setStatus, [operatorMembership, 'ACTIVE', admin]);
+  const seesWithoutGrant = await operatorView(client, former);
+
+  // The grant is back: the same update succeeds and the OPERATOR scope reads the other organisations.
+  await asSuperuser(client);
+  await asMigrator(client);
+  await client.query(GRANT_INSERT, [SYSTEM, former]);
+  await asApp(client, OPERATOR_ORG, admin);
+  const withGrant = await outcome(client, setStatus, [operatorMembership, 'ACTIVE', admin]);
+  const seesWithGrant = await operatorView(client, former);
+
+  // A customer organisation needs no grant.
+  await asApp(client, orgA, userA);
+  const customer = await outcome(client, setStatus, [customerMembership, 'ACTIVE', userA]);
+
+  return { withoutGrant, seesWithoutGrant, withGrant, seesWithGrant, customer };
+}

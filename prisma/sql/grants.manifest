@@ -75,3 +75,7 @@ platform_definer SELECT public.users
 platform_definer SELECT public.organisations
 platform_definer SELECT public.memberships
 platform_definer SELECT public.invitations
+
+# operator staff grants (TASK-051, migration 20261120210000_operator_staff_grants; D-ARCH-165, data-model §3.2): GLOBAL,
+# runtimeReadOnly; platform_app reads them (the membership lifecycle guard runs as the invoker), never writes them.
+platform_app SELECT public.operator_staff_grants
