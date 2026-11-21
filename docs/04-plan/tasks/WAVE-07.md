@@ -235,6 +235,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-141 and US-146 scenarios
+- MERGE PREREQUISITE PR080-SEC-06 (INFO, CWE-693; D-SECPR080-02; TASK-080 security record PR-0081 round 2, section R2.3), unless an earlier task that changes tools/eslint-rules/pricing-purity.mjs took it (the next change to that file carries it): platform/pricing-purity reports import x = require(...) (a TSImportEqualsDeclaration visitor) and a computed import() specifier inside packages/pricing, so neither form rests only on the unprotected rules @typescript-eslint/no-require-imports and platform/static-module-specifier; the validated 8-line patch and two fixtures of the record, every other fixture and source unchanged; tools/eslint-rules is an owned path, so the PR carries a security record
 - AT-US-141-01 … AT-US-141-07: all 7 scenarios of US-141, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-146-01 … AT-US-146-06: all 6 scenarios of US-146, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

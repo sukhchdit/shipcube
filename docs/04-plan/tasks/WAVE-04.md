@@ -143,6 +143,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-158 scenarios (S-W01)
 - SEC-TC-54 (client part): after claim, sign-out, 404 and expiry sweep no qt: entry remains; at most 20 kept; token never in URL/history/Referer
+- DISPATCH GATE, PUBLIC BUNDLE FORECAST (TASK-042 code review m4; D-TASK042-10; ADR-0026 amendment 3; D-ARCH-014; D-SD-011): TASK-042 left 16.03 kB gz of the 170 kB public initial budget (i18next about 15.9 kB, the ICU stack about 13.3 kB); before this task is dispatched principal-architect forecasts the home quote widget and hero stack (React Hook Form, Zod, TanStack Query, Axios) against the budget and names the lever; the first lever named by the review is to pre-compile messages to ASTs at build time and drop the runtime parser (about 8.4 kB), before the suffix-plural fallback of D-ARCH-014
 - AT-US-158-01 … AT-US-158-08: all 8 scenarios of US-158, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -510,6 +511,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-109 scenarios
+- PUBLIC BUNDLE FORECAST (TASK-042 code review m4; D-SD-011): the forecast and lever of the TASK-125 DISPATCH GATE apply to this task as well; size-limit stays green at this task head
 - AT-US-109-01 … AT-US-109-07: all 7 scenarios of US-109, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

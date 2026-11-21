@@ -8185,3 +8185,103 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **C3.** A delta round if a later branch commit changes an owned path, `app.ts`, `start-api.ts` or `packages/config/src/schema.ts`. A merge-only round if a later main merge brings a change to one of the 27 owned paths, most likely `package-lock.json`.
 - **Routed:** unchanged from D-SECPR041-02. The part 041-B round (items 4, 7 and 8, PR041-SEC-02 (b), PR041-SEC-09, E1-E5) is due before TASK-052 is dispatched. My threat-model alignment is due before G3.
 - **Reversibility:** High (a review record).
+
+### D-SD-011 · 2026-11-21 · senior-developer · Plan fold for QG-051-C2 of D-QG-005: the 21 card lines of rulings §8.9 (D-ARCH-207..216), the D-SECPR051-01 card lines, the `saga_steps` line on TASK-092, the US-080 delivery split of D-PM-087 and the session routings of TASK-043, TASK-080, TASK-045, TASK-042, TASK-034 and D-ORCH-148; new late task TASK-298 for the C16 follow-up (plan regenerated: 298 tasks, 82 batches, 0 errors, 0 warnings; IDs, waves, batches, titles and branches of TASK-001..297 unchanged)
+- **Input:**
+  - D-QG-005 condition QG-051-C2.
+  - Rulings `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §8.9 as it stands after D-ARCH-215 and D-ARCH-216 (21 lines), §8.8 and §8.10 item 5.
+  - D-SECPR051-01 (PR051-SEC-02, -04, -05; SEC-TC-79..81); D-PM-087.
+  - D-SECPR043-03 and TASK-043 code review round 4 (`81bdc81e`).
+  - D-SECPR080-01, D-SECPR080-02 and TASK-080 code review round 2 (`965a5a34`).
+  - TASK-045 code review round 1 (`d12c22fd`) and D-SECPR045-01, which landed during the fold.
+  - TASK-042 code review round 1 (`7f7dcf52`); the TASK-034 commit `6feac2e8` (D-TASK034-01); D-ORCH-148.
+  - TASK-051 code review round 2 (`d99ccfc9`, R2-m1, F1, F2), which landed during the fold.
+- **Decision, per card:**
+  - **TASK-051 (`guestclaim`):**
+    - `us` becomes empty and `part` holds US-080 (D-PM-087).
+    - "All US-080 scenarios" is replaced by SCENARIO OWNERSHIP.
+    - The seven §8.9 lines are added verbatim.
+    - The D-ARCH-164 line ("names P2003 or 23503") points to ONE ANSWER, BOTH SQLSTATES.
+    - New lines:
+      - SAME-ORGANISATION ROUND (PR051-SEC-02 (a));
+      - SEC-TC-79 AND SEC-TC-80 (qa-lead after merge; the missing title tags of R2-m1, with the two routes the review names);
+      - C16 FOLLOW-UP NOT HERE (TASK-298).
+  - **TASK-087 (`quote`):**
+    - UNIQUE KEYS ARE NULLS DISTINCT, as reworded by D-ARCH-215.
+    - C16 (c) AND (d), with "(they are TASK-298 …; MERGE PREREQUISITE)" inserted after "merged before this task opens its PR".
+    - OWNER COLUMN ASSIGNER (PR051-SEC-04: a catalog check for a BEFORE UPDATE trigger that assigns `org_id` or `guest_token_hash`).
+  - **TASK-091 (`guestquote`):**
+    - `part` gains US-080.
+    - Lines added: DISPATCH GATE (with the QG-051-C5 verification and the D-PM-087 order note), GUEST BINDING ROUTE SIDE, US-080 HTTP HALVES (with the D-PM-087 sentence) and SEC-TC-81.
+    - In the AUTHENTICATOR CONTRACT line, the clause "claimQuote with a wrong token is 404 while the quote stays unclaimed" moves to TASK-146.
+    - The constant-time comparison sentence is marked for reconciliation by the QG-051-C5 ruling.
+  - **TASK-146 (`claim`):**
+    - `us` gains US-080; the task completes it.
+    - The D-ARCH-162 line ("fails with 23503") is replaced by the §8.9 ONE statement line (23001 and 23503).
+    - CLAIM CONTEXT is added.
+    - US-080 HTTP HALVES is added with the reworded AT-US-080-05 clause and the D-PM-087 end sentence.
+    - Three more lines: REAL CLAIM STATEMENT IN SEC-TC-07 (PR051-SEC-02 (b); it may be the same test as the AT-US-080-05 repeat), WRONG TOKEN ON CLAIM (moved from TASK-091) and SEC-TC-81.
+  - **TASK-234:** the saveQuote line.
+  - **TASK-237:**
+    - The last clause of the D-ARCH-162 line now reads 23001.
+    - DUPLICATE CASE ON THE REAL TABLE is added.
+  - **TASK-154:** CUSTOMS CURRENCY KEY.
+  - **TASK-092 (D-QG-005 C2 extra):** SAGA STEP UNIQUE KEY.
+    - `ux_saga_steps__saga_step_shipment` is created with `org_id` leading, so C16 (b) passes it (rule B1).
+    - Every relation states `Restrict`.
+    - principal-architect corrects the data-model §3.12 and §6.3 sketch at dispatch.
+  - **TASK-089:** STAFF GRANT READS (PR051-SEC-05).
+  - **TASK-049:**
+    - MERGE PREREQUISITES PR043-SEC-09 AND PR043-SEC-10 replace the PR043-SEC-08 line.
+    - MERGE PREREQUISITE CODEOWNERS FOR EVENTS is added.
+  - **TASK-015 part 015-C:** item (4) of CODEOWNERS ADDITIONS gains the due point (before TASK-049 merges; otherwise TASK-049 adds the line itself).
+  - **TASK-047 and TASK-040 part 040-B:** the BOUNDARIES RESOLVED-FILE POLICY twin lines gain PR043-SEC-11 (a) to (d), which are R4-n2 (a) to (c) widened, and the back-quoted `import()` spelling of R4-C3.
+  - **TASK-192 (US-141):** MERGE PREREQUISITE PR080-SEC-06.
+    - No card changes `pricing-purity.mjs` before US-141, so the line sits on the US-141 task.
+    - It moves to the next task that changes `pricing-purity.mjs`.
+  - **TASK-221:** PRICING CONFIGURATION IS AN AUDITED DATASET.
+  - **TASK-083 and TASK-101:** EXPLANATION ENTRIES STAY OPERATOR-SIDE.
+  - **TASK-045 (`pagination`):**
+    - PART B MOVED: the UI Pagination component goes to **TASK-081**, the audit viewer UI. It is the first list screen, and it consumes the first list API, TASK-073.
+    - The `f` line is annotated.
+    - **PART 045-C:** the cursor codec is wired into the composition root.
+  - **TASK-081:** the file line and a PAGINATION COMPONENT line.
+  - **TASK-073:** AUDIT LIST ON THE KEYS PATH, CURSOR CODEC FROM THE COMPOSITION ROOT and CONTRACT RIDERS.
+    - AUDIT LIST ON THE KEYS PATH covers R1-m2, the D-TASK045-08 condition, PR045-SEC-04 and PR045-SEC-06.
+    - CONTRACT RIDERS carries the half-open ranges, the `listCountries` `x-max-limit` line and the TASK-080 R1-n5 `engine_version` examples. They ride the api-designer change request this card already carries.
+  - **TASK-040:** a CONTRACT RIDERS fallback, used if part 040-B's second pull request reaches api-designer first.
+  - **TASK-042:** SUITE ACTIVATION AFTER MERGE (`i18n-parity`, qa-lead, manifest-only).
+  - **TASK-068 and TASK-069:** DISPATCH GATE, APP NAMESPACE (n6, ux-designer).
+  - **TASK-125:** DISPATCH GATE, PUBLIC BUNDLE FORECAST (m4, principal-architect). It is the first home page that loads the form and query stack into the public bundle.
+  - **TASK-137:** a pointer to that gate.
+  - **TASK-034:** DATA-MODEL TEXT FOR RULE R (principal-architect, next architecture fold) and SUITE ACTIVATION AFTER MERGE (`restore-rehearsal`, qa-lead).
+  - **D-ORCH-148:** LATENT TEST DEFECT on TASK-284, TASK-041 (part 041-B) and TASK-015 (part 015-C). Whichever of them first changes a test under `packages/config` fixes it, and the others drop the line.
+  - **`waveExceptions`:** `'US-080':{through:5,dcBy:['guestclaim','guestquote'],decision:'D-PM-087'}`, the form D-PM-087 proposed.
+  - **Wave exit texts:**
+    - Wave 2: 71 of 74 DC, with US-061, US-062 and US-080 partial.
+    - Wave 3: 109 of 113 M0 Must, with US-040, US-061, US-062 and US-080 partial, and the dossier names the four HTTP halves.
+    - Wave 5: US-080 complete with TASK-146.
+- **C16 follow-up (D-ARCH-215/216; F1 of the TASK-051 round-2 review): a new late task, TASK-298 (batch 1.11, database-engineer, S, opus).**
+  - **What it holds:** depends on TASK-051; lock `prisma-rls`; files `prisma/tests/catalog/tenant-keys.ts` (+ test) and `c16-tenant-keys.int.test.ts`; the two §8.9 lines verbatim, MERGE ORDER and RIPPLE.
+  - **It merges before TASK-087 opens its PR.** This is a MERGE PREREQUISITE line on TASK-087, not a dependency edge, so the start of TASK-087 on the M0 path is not delayed.
+  - **Why it does not fit an existing card:** the TASK-051 fix cycle is finished. Its v2 supersede `c1c8a6ec` has no `conenforced` or `confdeltype` reading, and code review round 2 accepted it without the arms. Adding them would reopen the security delta and supersede rounds on a PR that is on the path to TASK-089 (demo users). No other card owns the two files.
+- **Not folded, for the orchestrator:**
+  - STATUS shows the TASK-091 DISPATCH GATE and the TASK-051 row as US-080 partial (QG-051-C2 last item; D-PM-087 item 6). STATUS is the orchestrator's file.
+  - The held story notes of D-PM-087 (US-080, US-166) are lane-B tooling inputs; this fold changes no story file, no file under `docs/03-architecture/api/**` and not the gherkin map. The CONTRACT RIDERS line names the contract edits for api-designer.
+  - The briefs `docs/04-plan/briefs/TASK-034.md`, `TASK-042.md`, `TASK-045.md` and `TASK-051.md` are not regenerated, because those tasks are built. Part 045-C and TASK-298 get their briefs at dispatch.
+  - Recording D-TASK045-01/07 and D-TASK042-10 is the orchestrator's (review conditions). This entry names the owners they asked for: TASK-081 for part B, TASK-045 part 045-C for the codec, principal-architect at the TASK-125 gate for m4.
+- **Alternatives:**
+  - The C16 arms in the TASK-051 fix cycle. Rejected for the reason above.
+  - The codec wiring on TASK-073. Rejected because a module task does not edit the composition root (the TASK-073 card already applies this rule to the platform guard). Part 045-C keeps the wiring in the task that owns the codec, with its own security round (D-SECPR045-01 C5).
+  - A dependency edge TASK-298 → TASK-087. Not taken: the merge-point rule of D-SD-001.
+- **Validation:**
+  - `gen.mjs .` gives 0 errors and 0 warnings and lists the US-080 exception. Then `--write`.
+  - The per-column diff of `task-map.csv` against the pre-fold copy changes only:
+    - `refs` on 8 rows;
+    - `completes_stories`, `partial_stories`, `story_ids` and `req_ids` on TASK-051, TASK-091 and TASK-146 (US-080 and REQ-RLS-013, as D-PM-087 says);
+    - one new row, TASK-298.
+  - IDs, waves, batches, titles, branches, dependencies and DC are unchanged. The critical path is unchanged.
+- **Also updated:**
+  - PLAN.md: the decisions row, the Wave 2 and Wave 3 rows, the M0 checkpoint paragraph and the counts note (298 tasks).
+  - traceability.md v1.16: the REQ-RLS-013 row per D-PM-087.
+- **Reversibility:** High (plan text; nothing built).

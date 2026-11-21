@@ -4,7 +4,7 @@ Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Pr
 
 Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 73.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** 110 of the 113 M0 Must stories complete and US-040, US-061 and US-062 partial (D-PM-068, D-PM-078; the `v0.1.0-m0` dossier names the six open route-level scenarios of US-061 and US-062 and the two stream scenarios of US-040, AT-US-040-15 and -16); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
+**Exit check:** 109 of the 113 M0 Must stories complete and US-040, US-061, US-062 and US-080 partial (D-PM-068, D-PM-078, D-PM-087; the `v0.1.0-m0` dossier names the six open route-level scenarios of US-061 and US-062, the two stream scenarios of US-040, AT-US-040-15 and -16, and the four HTTP halves of US-080, AT-US-080-04 to -07); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
 
 **Stories completed in this wave (22):** US-019, US-021, US-022, US-039, US-041, US-043, US-045, US-046, US-047, US-069, US-079, US-089, US-093, US-102, US-105, US-113, US-120, US-123, US-125, US-204, US-205, US-292.
 
@@ -231,6 +231,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-125 scenarios (Mock passes the full suite)
 - RATE RESPONSE RULES (ADR-0010 amendment 12 item 1; D-ARCH-168): per adapter, noServiceReason is set only when quotes is empty, and it is never AUTH_FAILED, RATE_LIMITED, TIMEOUT, CARRIER_UNAVAILABLE, CARRIER_BUSY, CAPABILITY_NOT_SUPPORTED or CARRIER_UNKNOWN_ERROR (a failed call throws)
 - LABEL CONTRACT CASE (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): an adapter returns raw { format, content } and the guard builds the LabelDocument; a case where createShipment returns a bad label ends with the label dropped (carrier.label.refused, recoverLabel path), never thrown; the real PDF and ZPL fixtures of every adapter pass createLabelDocument and the sniffers
+- EXPLANATION ENTRIES STAY OPERATOR-SIDE (D-SECPR080-01 routing; TASK-080 security record PR-0081 section 8): the explanation entries of PricingResult (rule key, rate, priority) are classified INT, so a customer-facing response carries the charge lines only, unless a ruling says otherwise; the task that serialises PricingResult into a quote response asserts that no explanation field reaches it
 - AT-US-125-01 … AT-US-125-05: all 5 scenarios of US-125, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
