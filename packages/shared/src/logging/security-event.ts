@@ -48,7 +48,7 @@ export const RUNTIME_SECURITY_EVENTS = [
   'audit_mutation_rejected',
   'audit_partition_squatted',
   // TASK-041 (D-SECT39-01 item 5): the rate-limit / denial-budget store (Valkey) is unavailable and the instance fell back
-  // to its per-instance counters. In the README §13 runtime table (api-designer to acknowledge).
+  // to its per-instance counters. In the README §13 runtime table (acknowledged D-API-003).
   'rate_limit_store_unavailable',
 ] as const;
 export type RuntimeSecurityEventName = (typeof RUNTIME_SECURITY_EVENTS)[number];
