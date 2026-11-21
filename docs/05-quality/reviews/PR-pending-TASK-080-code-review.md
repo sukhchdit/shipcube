@@ -97,3 +97,98 @@ Forward note (no finding, for the real-adapter tasks): when an adapter's `create
 - The text-level cross-check between the pricing literal and the seed literal respects the no-import boundary in both directions without a manifest change.
 - The seed integration test covers the whole lifecycle on the real migrated schema: apply, no-op, SEED_INSERT_ONLY_CHANGED with no config-change emitted, owner immutability, `platform_app` 42501, and draft editability.
 - The carrier money helper fails closed with a safe cause, never echoes the value, and has a round-trip property.
+
+## Round 2: delta review of fix cycle 1
+
+| Field | Value |
+|---|---|
+| Head | `3d3a7775` (one commit on `4a0faee3`: `fix(pricing): task-080 fc1, source check, truncate guard, canonical hash, purity hardening`; decisions D-TASK080-14..19 in its body), branch `feat/TASK-080-default-margin-pricing-as-itemised`; not pushed, no PR number yet |
+| Reviewer | code-reviewer, 2026-11-21 |
+| Delta | `4a0faee3..3d3a7775`: 28 files, +348/−42. Every hunk maps to a round-1 finding, a security finding (PR080-SEC-01..05) or a NIT. No scope creep |
+| Main delta since base | `e245e6e6..origin/main` is still docs only (7 commits), so there is no code conflict |
+| Inputs | Round 1 above; security record `docs/05-quality/security/PR-pending-TASK-080-security-review.md` (PR080-SEC-01..05, conditions C1..C4); D-ORCH-147 (lane B at `4a0faee3` was red on C9 only) |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Every round-1 finding is closed except NIT n5, which is deferred with the contract lock (accepted). R1-M1 is fixed
+         as SEED/SAMPLE/OPERATOR and pinned three ways. The canonical hash is order-free and independently reproduced.
+         The purity rule fails closed by name, and the TRUNCATE guard works on a PostgreSQL replay. 14 of 15 new mutants
+         are killed; the survivor is equivalent. Three NITs. Merge waits on lane B and security on this head.
+```
+
+### R2.1 What I verified myself
+
+Host rules of the dispatch: foreground only, one command at a time, timeouts of 8 minutes or less, no Docker, nothing run in the PR worktree. I ran everything in a `git archive 3d3a7775` extract in the session scratchpad. Its `node_modules` was junctioned to the PR worktree's; that worktree is at the same SHA and clean, so the `@platform/*` links resolve to identical sources. The git-ignored `prisma/generated` was copied in. The `tsBuildInfoFile` paths of `tools` and `tests/*` that point at the root cache were redirected into the extract, so nothing was written into the worktree. Afterwards the junction was removed first, then the extract; the worktree was still at `3d3a7775`, clean, with 748 `node_modules` entries.
+
+| Check | How | Result |
+|---|---|---|
+| Types | `tsc -b packages/shared packages/pricing packages/carriers prisma tools` | Clean |
+| Lint | `eslint --max-warnings 0` (repository config, type-aware) on `packages/pricing`, `packages/carriers/src`, `packages/shared/src/vocabularies`, `prisma/seed`, `prisma/tests/seed`, `c01-c12.int.test.ts` and the four changed `tools/` files | Clean. The real pricing sources and tests raise no `shadowed` false positive |
+| Format | `prettier --check` on the 25 changed `.ts`/`.mjs` files | Clean |
+| Migrations | `tsx tools/db/lint-migrations.ts`; `prisma validate` | No findings; valid |
+| Pricing unit tests and coverage | `--testPathPatterns packages/pricing/ --coverage` | 7 suites, 115 tests pass. `canonical-json.ts`, `sample.ts`, `margin.ts`, `engine.ts`: 100 % lines and branches |
+| Other touched suites | carriers `normalise/money` and `canonical/codes`, shared `vocabularies`, `prisma/seed/reference/`, `check-suppressions`, `pricing-purity-shared` | 66/66 pass. The 3 `check-suppressions` CLI rows need a git root; they pass after a `git init` of the extract (21/21) |
+| Lint fixtures | `tools/lint/negative-fixtures` | 432/440. The 8 failures are the round-1 extract artefacts (7 repository probes and the `@platform/source` resolver). Every pricing-purity row passes, including the 6 new ones |
+| Independent hash | tsx probe: a separate sorted-key serialiser over `SAMPLE_PRICING_CONFIG` | Its text equals `canonicalJson`'s. The SHA-256 is `c4be2d6d…180b`, which equals `SAMPLE_PRICING_CONFIG_SHA256` and `PRICING_SAMPLE_CONTENT_SHA256`. The dataset hash `63600bde…79d3` is pinned by the passing seed suite |
+| `canonicalJson` edge probes | `-0`, `1e21`, `0.1 + 0.2`, lone surrogates in a key and a value, a `toJSON` string member, symbol and non-enumerable keys, extra array properties, a cycle | JSON-identical number and string forms; `toJSON` is kept as data. Symbol-keyed, non-enumerable and extra array members are dropped silently, and a cycle throws `RangeError` (R2-n1) |
+| PostgreSQL replay (PGlite 0.4.3, PG 17.5 WASM; not a substitute for lane B) | The whole migration applied (`uuidv7()` → `gen_random_uuid()`), the table owned by `platform_migrator`, statements run under `SET LOCAL ROLE platform_migrator` | `ADMIN` and `ISO` → 23514; `OPERATOR` is admitted. `TRUNCATE` over drafts only → allowed (0 rows). With a published row, each of these → P0001 `PRICING_VERSION_IMMUTABLE`: `TRUNCATE`, `TRUNCATE ONLY … RESTART IDENTITY`, and `DELETE` of the draft then `TRUNCATE` in one transaction. `tgtype` 25 (AFTER ROW UPDATE/DELETE) and 34 (BEFORE STATEMENT TRUNCATE). Both functions are SECURITY INVOKER with `search_path=pg_catalog, pg_temp`. `down.sql` leaves 0 functions in `platform`, and the migration re-applies |
+| Catalog reading | C9 `enumCheckValues` sorts (the drift row proves it), so `['OPERATOR', 'SAMPLE', 'SEED']` is the rendered form. C11 public-EXECUTE scan: the new function gets its ACL from the `01-schemas.sql` default privileges (`REVOKE EXECUTE … FROM PUBLIC` for `platform_migrator`), as the row guard does. The dynamic-SQL scan (no `EXECUTE` in the body) and C15 assigners (no `NEW` assignment) do not select it. No helper or test truncates `pricing_config_versions` except the new case (`grep`; the `authz-seed` TRUNCATE rows are authz tables as `platform_app`) | No predicted lane-B failure |
+| Purity probes (real config, probe files in the extract's `packages/pricing/src`, then deleted) | A parameter `Date`, an overload `function process(…): string;`, `enum Unit { Date = 1 }`, `catch (crypto)`, `` import(`@platform/shared`) ``, `` import(`node:fs`) `` | All four bindings → `shadowed <name>`. The template root → `@platform/shared (whole module)`. The template `node:fs` → pricing-purity and boundaries |
+| Mutants (15, one at a time, file restored and byte-compared after each) | pricing-purity (5), `check-suppressions` (1), `canonicalJson` (5), `carrierDecimalToMoney` context (2), margin carry-over (1), an `openapi.yaml` enum gaining `- REMOTE_AREA` (1) | **14 killed:** binding pass off; ambient skip removed (double report); literal-only specifiers; lib globals in the binding pass (crash); pricing-purity unprotected; no key sort; `localeCompare` order; any object plain; `map` keeps holes; non-finite admitted; both context drops; rejected carry-over dropped (n4); enum gains a surcharge (n2). **1 survivor, equivalent:** `TSDeclareFunction` without `[declare=true]`. An overload is still reported, as `declare process` instead of `shadowed process` |
+| Not re-run | every `*.int.test.ts` (seed, catalog C5/C9/C10/C11/C15), `up-down-up`, full `test:unit`, coverage merge, web/admin build, lane A | Lane B on PostgreSQL 18 is running on `3d3a7775` (the orchestrator's evidence); merge condition R2-1 |
+
+### R2.2 Closure of the round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed** | `CHECK ("source" IN ('SEED', 'SAMPLE', 'OPERATOR'))`, the data-model §1.7 `reference_source` values without `ISO`. The migration header, the `pricing.prisma` comment and C9 `ENUM_CHECKS` say the same. The seed int test pins `ADMIN` → 23514 on the named constraint and `OPERATOR` admitted on a draft; my replay agrees. D-TASK080-14 replaces D-TASK080-05. It also closes PR080-SEC-05 (C9 knows the constraint) |
+| R1-m1 | **Closed** | `checkSource` uses the shared `staticSpecifier` (literal or expression-free template), the helper `no-external-calls-in-tenant-tx` and `system-model-owner` already use. Fixture `bad-template-import-subpath` has its `[AT-US-138-02]` row; the literal-only mutant is killed. The security closure call is security's (PR080-SEC-03) |
+| R1-m2 | **Closed (preferred route)** | `canonicalJson`: sorted keys at every depth, no white space, refuses non-JSON values. The hash and the seed literal are re-pinned to the canonical text, and a test shows that a rebuilt copy with a different key order has the same hash. The sort and order mutants are killed. Exported from `@platform/pricing` for US-152. See R2-n1 and R2-n2 |
+| R1-m3 | **Closed** | `bad-declare-process` and `bad-declare-math` fixtures. `WATCHED_GLOBALS` is exported and pinned element by element in `pricing-purity-shared.test.ts`. The optional distinct `declare global` wording was not taken; that is acceptable |
+| R1-m4 | **Closed** | Optional `CarrierAmountContext` (`carrier`, `operation`) is spread into both throws. The constructor validates both. The test checks `toJSON()` with and without the context and that the value is not echoed. Each throw's context-drop mutant is killed |
+| R1-n1 | Closed | JSDoc: "a non-zero digit beyond the currency's exponent", `"12.340"` named as accepted |
+| R1-n2 | Closed | The test now scans every `enum:` block (143 in `openapi.yaml`, no flow-style enums) and allows only `FUEL`, which is shared with `ChargeLine.source`. The REMOTE_AREA mutant is killed |
+| R1-n3 | Closed | D-TASK080-19 records that both DR-B30 pins stay in `codes.test.ts` on the re-exported (identical) lists |
+| R1-n4 | Closed | A `runPricing` test puts a counting stub before `marginStep` (3 + 1 = 4); the carry-over mutant is now killed |
+| R1-n5 | **Deferred, accepted** | Round 1 itself said "not this PR's lock". Merge condition R2-5 routes it |
+| R1-n6 | Closed | `TSDeclareFunction[declare=true]` only. An overload signature is now reported by the binding pass as `shadowed <name>` (probed) |
+| R1-n7 | Closed | BEFORE TRUNCATE FOR EACH STATEMENT trigger with its own invoker function, so PR080-SEC-04 is implemented. It is pinned by the new int case (drafts truncate; published → P0001 for the owner, 42501 for `platform_app`, rows unchanged) and by my replay. `down.sql` drops the new function |
+| PR080-SEC-01 | Implemented | `platform/pricing-purity` is in `PROTECTED_RULES`, with a test row; the unprotect mutant is killed. Closure is security's call |
+| PR080-SEC-02 | Implemented | The binding pass covers the destructured `declare`, the type-only import alias and the type-only namespace, with three fixtures (the namespace row also expects `no-namespace`). Closure is security's call |
+
+### R2.3 New findings (round 2)
+
+| ID | Severity | File:line | Issue | Suggested fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `packages/pricing/src/config/canonical-json.ts:7-10, 33-39` | The JSDoc says every non-JSON value "is refused with PRICING_CONFIG_INVALID, never silently dropped". Probed: symbol-keyed members, non-enumerable own properties and extra properties of an array are dropped silently (`Object.keys`, `Array.from`), and a cycle throws `RangeError: Maximum call stack size exceeded`. The inputs today (the frozen literal; rule rows in US-152) cannot carry any of these, so the hash is not at risk. | Either narrow the wording ("own enumerable string keys; a cycle is not detected"), or refuse `Object.getOwnPropertySymbols(value).length > 0` and map a cycle to PRICING_CONFIG_INVALID (a `WeakSet` of ancestors). |
+| R2-n2 | NIT | D-TASK080-15 (commit body; DECISIONS.md text) | For JSON values, `canonicalJson` is exactly RFC 8785 (JCS): UTF-16 code-unit key order and ECMAScript number and string serialisation. That is a standard a non-TypeScript verifier (an auditor's script, a SQL-side check) can reproduce without reading this file. | Name RFC 8785 in the D-TASK080-15 text when the orchestrator records it, and optionally in the module JSDoc. No code change. |
+| R2-n3 | NIT | `tools/eslint-rules/pricing-purity.mjs:32-35` | The binding pass reports any binding named like a watched global, so `enum Unit { Date = 1 }` (an enum member) and `catch (crypto)` are reported too (probed). This is fail-closed and harmless. The header lists declarations, parameters and locals, but not enum members. | Add "an enum member" to the list in the header, or leave as is. |
+
+No BLOCKER, MAJOR or MINOR finding in the delta.
+
+### R2.4 Rulings on D-TASK080-14..19
+
+| Decision | Ruling |
+|---|---|
+| D-TASK080-14 `source` ∈ {SEED, SAMPLE, OPERATOR} (replaces D-TASK080-05) | **Accepted.** It follows data-model §1.7 `reference_source` and leaves out `ISO`, which no pricing version can have. Reserving `OPERATOR` now is the second option round 1 offered, and the §1.7 value is the one the M2 admin will write, so no CHECK swap is needed. The seed validator still admits ISO/SEED/SAMPLE only, so the seed cannot write `OPERATOR` |
+| D-TASK080-15 `content_sha256` = SHA-256 of the UTF-8 `canonicalJson(config)` (amends D-TASK080-02) | **Accepted.** It is a definition US-152 can reproduce from rule rows, it is pinned by an order-independence test and a 1,000-run property, and I reproduced it independently. See R2-n2 (cite RFC 8785) and R2-n1 (doc wording). Duplicating the sorted-key serialiser is correct here, because pricing may import neither `prisma/seed/framework/hash.ts` nor `packages/audit` |
+| D-TASK080-16 purity fails closed by name; `staticSpecifier`; overloads excluded from `declare`; rule protected | **Accepted.** Reporting any binding of a watched name is the right shape: it closes the bypass class instead of enumerating syntax. Pricing has no legitimate local called `Date`, `Math` or `process`. The skip set keeps one report per ambient declaration (the double-report mutant is killed). See R2-n3 |
+| D-TASK080-17 BEFORE TRUNCATE statement trigger, drafts may be truncated | **Accepted.** A separate function is needed because `OLD` does not exist at statement level. It is INVOKER with a fixed `search_path` and a fully qualified table, and it uses the same SQLSTATE and message as the row guard. Editing the unmerged migration is correct (it is not on main). The owner can still `DROP TRIGGER`; as in round 1, that is a documentation point, not a finding |
+| D-TASK080-18 optional `{ carrier, operation }` context | **Accepted.** Backward compatible (the default is `{}`), validated by the `CarrierError` constructor, and the value is never echoed. Real adapters (TASK-101 and the DHL/FedEx/UPS tasks) should always pass it |
+| D-TASK080-19 DR-B30 pins stay in `packages/carriers` (amends D-TASK080-12 wording) | **Accepted.** They test the same list objects through the re-export; nothing is lost |
+
+### R2.5 Merge conditions (replace round 1's §5)
+
+1. **R2-1 Lane B on PostgreSQL 18 green on `3d3a7775`** (running now): `prisma/tests/seed/pricing-sample.int.test.ts` (all four cases, including the TRUNCATE case and the `ADMIN` 23514 / `OPERATOR` row), catalog C5, C9 (now with `ck_pricing_config_versions__source`), C10, C11 (public EXECUTE on the new function), C15, the migrations lint and `up-down-up`. At `4a0faee3` only C9 was red (D-ORCH-147).
+2. **R2-2 Security-analyst delta record on `3d3a7775`**, closing PR080-SEC-01..05 and conditions C1..C4. Owned paths changed again: the migration and `down.sql`, `pricing.prisma`, the seed and its tests, `c01-c12.int.test.ts`, `pricing-purity.mjs`, `check-suppressions.mjs`, `negative-fixtures.test.ts` and 6 `bad-*` fixtures.
+3. **R2-3 Planned union merges:** whoever merges second re-merges `origin/main` and keeps both sides in `packages/shared/src/classification/registry.ts`, `prisma/sql/grants.manifest`, `tools/db/grants-manifest.test.ts` (TASK-040 PR #80, TASK-043, TASK-051), `tools/lint/negative-fixtures.test.ts` (TASK-043) and, new in this round, `prisma/tests/catalog/c01-c12.int.test.ts` (TASK-040 also edits it). Migration timestamps stay monotonic: TASK-040 `20261120100000` and TASK-051 `20261120210000` sort before this PR's `20261121000000`. After the union, re-run `negative-fixtures` and C9.
+4. **R2-4 Hosted lane A green**, including `security-integration` (the PR changes `prisma/**`).
+5. **R2-5 The orchestrator records D-TASK080-01..19 in DECISIONS.md** with the round-1 and round-2 rulings (-05 superseded by -14, -02 amended by -15, -12 by -19). Route R1-n5 (OpenAPI `engine_version` examples) to the next contract-touching task with a named owner.
+6. NITs R2-n1..n3 are optional; no further code review round is needed for them.
+
+### R2.6 Good patterns worth keeping
+
+- The fix pins every closed finding with the mutant that would have survived (n2, n4, the context drops, the key order), not only a happy-path row.
+- `canonicalJson` refuses values instead of converting them (`undefined`, holes, non-finite numbers, non-plain objects), and its property test checks round-trip and order independence on arbitrary JSON.
+- The purity rule now reasons about names, not syntax forms, and reuses the repository's `staticSpecifier` instead of re-implementing it.
+- The TRUNCATE case uses two clones, one with drafts only and one seeded, so both sides of the guard are tested on the real schema, with the rows compared before and after.
