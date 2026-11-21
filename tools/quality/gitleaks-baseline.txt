@@ -1,6 +1,6 @@
 # PR25-SEC-01 (docs/05-quality/security/PR-0025-TASK-007-fu-security-review.md section 3.2): exact-fingerprint baseline
-# of the 17 historic generic-api-key hits on main (example values and one synthetic test literal; none is a credential,
-# nothing needs rotation). History cannot be rewritten (CLAUDE.md section 5), so the full-history scan needs this list.
+# of the 19 historic generic-api-key hits on main (example values, one synthetic test literal and two quoted doc-comment
+# phrases; none is a credential, nothing needs rotation). History cannot be rewritten (CLAUDE.md section 5), so the full-history scan needs this list.
 # Format: <commit>:<path>:<rule>:<line> (gitleaks .gitleaksignore format). Exact fingerprints only: never add a path or
 # commit allowlist to .gitleaks.toml for these. (Lane A cannot read this file, so a false positive in an already-pushed
 # PR commit gets one commit AND path AND rule AND anchored-line entry in .gitleaks.toml instead; D-ORCH-068 is the
@@ -30,3 +30,9 @@ d5cdfa2877011a9c781dff375f2e8575b54cc603:docs/03-architecture/api/openapi.yaml:g
 b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:7673
 b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:12235
 b8f805f48711b9aa0fada72020e271f0e088e24e:docs/03-architecture/api/openapi.yaml:generic-api-key:15883
+
+# d7585e7 (D-ORCH-147 triage) and ed15691 (TASK-034 brief notes): PR080-SEC-07 (D-SECPR080-03, D-ORCH-168), a quoted
+# TASK-051 doc-comment phrase about a key-column pair, no secret. Both quotes were reworded on main in 1a2b9d7; the old
+# lines stay in history, so only these two exact commit+path+rule+line fingerprints are added (D-SEC-PR45-01).
+d7585e78786e01bf772609d44f1f923203e58c5e:docs/sdlc/DECISIONS.md:generic-api-key:7697
+ed156913c734f0bc18945e7e7172fc4666331ad2:.claude/agent-memory/security-analyst/project_p5_task051.md:generic-api-key:23
