@@ -73,15 +73,16 @@ const statusOf = (error: unknown): number =>
   error instanceof RouteReturnedError ? error.result.status : error instanceof AppError ? error.status : 500;
 /** When set, the next fail-closed DOWNLOAD entry fails with 503 AUDIT_UNAVAILABLE (once). */
 let failEntryOnce = false;
-/** Recording capture: the in-transaction entry, the DOWNLOAD entry and the FAILED entry become events. */
+/** Recording capture: the in-transaction entry, the VIEW / DOWNLOAD entry and the FAILED entry become events. */
 const capture: AuditCapture = {
   mount: (mounted) => ({
-    readOnlyHandler: mounted.audit.action === 'DOWNLOAD',
+    readOnlyHandler: mounted.audit.action === 'DOWNLOAD' || mounted.audit.action === 'VIEW',
     inTransaction: (_ctx, result) => {
       events.push(`audit ${String(result.status)}`);
       return Promise.resolve();
     },
     afterCommit: (_request, result) => {
+      if (mounted.audit.action === 'VIEW') events.push(`view-entry ${String(result.status)}`);
       if (mounted.audit.action !== 'DOWNLOAD') return Promise.resolve();
       if (failEntryOnce) {
         failEntryOnce = false;
@@ -190,6 +191,9 @@ const routes: RouteDescriptor[] = [
           throw new AppError('VALIDATION_ERROR', {
             errors: [{ pointer: '/body/qty', code: 'OUT_OF_RANGE', message: 'Field is out of range.', limit: 10n } as never],
           });
+        case 'html':
+          // PR040-SEC-11 (code review R1-n4): a 2xx the store never completes (not JSON).
+          return { status: 201, headers: { 'Content-Type': 'text/html; charset=utf-8' }, body: `<p>${id}</p>` };
         case 'client-secret':
           // The gateway intent of checkoutOrder (PR040-SEC-03): its client secret is stored, encrypted only.
           return { status: 201, body: { id, payment_intent: { id: 'pi_1', client_secret: intentSecret } } };
@@ -216,6 +220,22 @@ const routes: RouteDescriptor[] = [
     handler: (ctx) => {
       runs.push('email');
       return { status: 202, body: { address: ctx.input.params['addressId'] } };
+    },
+  }),
+  route({
+    // PR040-SEC-11: a read-only (VIEW) idempotent route whose 2xx is not JSON, so the store refuses to complete it.
+    operationId: 'viewAddressPage',
+    path: '/pages/:addressId',
+    idempotency: 'optional',
+    audit: { action: 'VIEW', entity: 'address', sensitivity: 'NORMAL', reasonRequired: false },
+    schema: { params: Joi.object({ addressId: Joi.string().required() }), body: Joi.object({ qty: Joi.number().integer().required() }) },
+    handler: (ctx) => {
+      runs.push('page');
+      return {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        body: `<p>${String(ctx.input.params['addressId'])}</p>`,
+      };
     },
   }),
   defineRoute<string, string>({
@@ -794,5 +814,39 @@ describe('[US-038] idempotency keys', () => {
     const retry = await post('/orders', { qty: 1, outcome: 'throw-unserialisable' }, withKey());
     expect(retry.status).toBe(500);
     expect(runs).toHaveLength(2);
+  });
+
+  it('[PR040-SEC-11] [R1-n4] a writing route returning a text/html 2xx answers 500: rolled back, one FAILED entry, no row, the retry runs again', async () => {
+    const first = await post('/orders', { qty: 1, outcome: 'html' }, withKey());
+    expect(first.status).toBe(500);
+    expect(first.headers.get('content-type')).toMatch(/^application\/problem\+json/u);
+    expect(keys.rows.size).toBe(0);
+    // The completion inside the handler transaction refused the media type: nothing committed, the key was released.
+    expect(events).not.toContain('audit 201');
+    expect(events.filter((event) => event.startsWith('failed-entry'))).toEqual(['failed-entry 500']);
+    expect(events).toContain('release');
+    const retry = await post('/orders', { qty: 1, outcome: 'html' }, withKey());
+    expect(retry.status).toBe(500);
+    expect(retry.headers.get('idempotent-replayed')).toBeNull();
+    expect(runs).toHaveLength(2);
+  });
+
+  it('[PR040-SEC-11] a read-only (VIEW) route returning a text/html 200 answers once, logs the WARN and leaves no row (the INFO residual)', async () => {
+    const first = await post('/pages/p-1', { qty: 1 }, withKey());
+    expect([first.status, first.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
+    expect(first.headers.get('idempotent-replayed')).toBeNull();
+    // The VIEW entry is written, then the completion is refused (RangeError) and the key released after the commit.
+    const order = ['view-entry 200', 'complete 200', 'release'].map((event) => events.indexOf(event));
+    expect(order).not.toContain(-1);
+    expect(order).toEqual([...order].sort((left, right) => left - right));
+    expect(keys.rows.size).toBe(0);
+    expect(lines.filter((line) => line.level === 'warn')).toEqual([
+      { level: 'warn', event: 'api.idempotency_completion_failed', fields: { error: 'RangeError', status: 200 } },
+    ]);
+    // What PR040-SEC-11 records: idempotency is lost on such a route, so the retry runs the route again.
+    const retry = await post('/pages/p-1', { qty: 1 }, withKey());
+    expect(retry.status).toBe(200);
+    expect(retry.headers.get('idempotent-replayed')).toBeNull();
+    expect(runs).toEqual(['page', 'page']);
   });
 });

@@ -56,8 +56,13 @@ const byId = (operationId: string): ContractOperation => {
   return op;
 };
 
+/** The document-level `security` an operation without its own inherits (absent: none). */
+let documentSecurity: unknown;
+
 beforeAll(async () => {
-  operations = listOperations(await loadContract());
+  const contract = await loadContract();
+  operations = listOperations(contract);
+  documentSecurity = (contract as unknown as Loose)['security'];
 });
 
 describe('[SEC-TC-53] x-idempotency of the ADR-0014 one-time-secret routes', () => {
@@ -89,14 +94,24 @@ describe('[SEC-TC-53] x-idempotency of the ADR-0014 one-time-secret routes', () 
  */
 const isIdempotent = (op: ContractOperation): boolean => op.operation['x-idempotency'] !== 'not-applicable';
 
-/** (a) Public: an operation-level `security` that is empty or has an empty requirement (no credential needed). */
-const isPublic = (op: ContractOperation): boolean => {
-  const security = op.operation['security'];
-  return (
-    Array.isArray(security) &&
-    (security.length === 0 || security.some((requirement) => isRecord(requirement) && Object.keys(requirement).length === 0))
-  );
-};
+/** The schemes that give a principal an organisation, a guest-token hash or an actor (scope.ts), so a key not network-scoped. */
+const IDENTIFYING_SCHEMES: readonly string[] = ['bearerAuth', 'quoteToken'];
+
+/**
+ * (a) Network-scoped (PR040-SEC-12, code review R1-n3 (a)): the effective `security` (the operation's, else the
+ * document's; none when neither declares one) is empty or has an alternative with neither `bearerAuth` nor
+ * `quoteToken`, so the caller can arrive with no organisation, guest token or actor and the key is scoped by the client
+ * network (ADR-0014 amendment 11). A signature webhook, a refresh-cookie route and a public route all count.
+ */
+const isNetworkScoped =
+  (inherited: unknown) =>
+  (op: ContractOperation): boolean => {
+    const security = Object.hasOwn(op.operation, 'security') ? op.operation['security'] : inherited;
+    if (!Array.isArray(security) || security.length === 0) return true;
+    return security.some(
+      (requirement) => isRecord(requirement) && !IDENTIFYING_SCHEMES.some((scheme) => Object.hasOwn(requirement, scheme)),
+    );
+  };
 
 const isViewOrDownload = (op: ContractOperation): boolean => {
   const audit = op.operation['x-audit'];
@@ -105,16 +120,34 @@ const isViewOrDownload = (op: ContractOperation): boolean => {
 
 /**
  * (c) A schema (dereferenced; `allOf`/`oneOf`/`anyOf`, nested properties and items included) that declares a
- * `client_secret` property. Examples are not schemas and are skipped; a reference cycle is visited once.
+ * `client_secret` property. The `example` and `examples` keywords are not schemas and are skipped; a PROPERTY of either
+ * name is a schema and is walked (code review R1-n3 (c)). A reference cycle is visited once.
  */
 function declaresClientSecret(schema: unknown, seen: Set<unknown> = new Set()): boolean {
   if (typeof schema !== 'object' || schema === null || seen.has(schema)) return false;
   seen.add(schema);
   if (Array.isArray(schema)) return schema.some((item) => declaresClientSecret(item, seen));
   const node = schema as Loose;
-  if (isRecord(node['properties']) && Object.hasOwn(node['properties'], 'client_secret')) return true;
-  return Object.entries(node).some(([name, value]) => name !== 'example' && name !== 'examples' && declaresClientSecret(value, seen));
+  const properties = node['properties'];
+  if (isRecord(properties)) {
+    if (Object.hasOwn(properties, 'client_secret')) return true;
+    if (Object.values(properties).some((property) => declaresClientSecret(property, seen))) return true;
+  }
+  return Object.entries(node).some(
+    ([name, value]) => name !== 'properties' && name !== 'example' && name !== 'examples' && declaresClientSecret(value, seen),
+  );
 }
+
+/**
+ * (d) PR040-SEC-11 (code review R1-n4): the media types of the 2xx responses of an operation other than
+ * `application/json` (a 2xx with no content has none). The store completes only JSON or problem+JSON (D-TASK040-19); a
+ * non-JSON 2xx would be a 500 on a writing route and, on a read-only one, a key released after the response was sent.
+ */
+const nonJsonSuccessMediaTypes = (op: ContractOperation): string[] =>
+  Object.entries(op.operation.responses ?? {})
+    .filter(([status]) => /^2(?:\d\d|XX)$/u.test(status))
+    .flatMap(([, response]) => (isRecord(response) && isRecord(response['content']) ? Object.keys(response['content']) : []))
+    .filter((mediaType) => mediaType !== 'application/json');
 
 /** The 2xx response schemas of an operation contain a `client_secret` property. */
 const returnsClientSecret = (op: ContractOperation): boolean =>
@@ -136,17 +169,34 @@ const planted = (op: ContractOperation, changes: Loose): ContractOperation => ({
 });
 
 describe('[PR040-SEC-07] the idempotent operation sets the store relies on (a security decision to change)', () => {
-  it('(a) the public idempotent operations are exactly {recordConsent} (the only network-scoped keys)', () => {
-    expect(idempotentIdsWhere(operations, isPublic)).toEqual(['recordConsent']);
+  it('(a) the network-scoped idempotent operations are exactly {recordConsent} (PR040-SEC-12: effective security)', () => {
+    expect(Array.isArray(documentSecurity)).toBe(true);
+    expect(idempotentIdsWhere(operations, isNetworkScoped(documentSecurity))).toEqual(['recordConsent']);
   });
 
   it('(a) planted: a bearer operation made public is named; a public not-applicable one is not', () => {
-    expect(idempotentIdsWhere([...operations, planted(byId('createOrder'), { security: [] })], isPublic)).toEqual([
+    const networkScoped = isNetworkScoped(documentSecurity);
+    expect(idempotentIdsWhere([...operations, planted(byId('createOrder'), { security: [] })], networkScoped)).toEqual([
       'planted',
       'recordConsent',
     ]);
-    expect(idempotentIdsWhere([planted(byId('createOrder'), { security: [{}, { bearerAuth: [] }] })], isPublic)).toEqual(['planted']);
-    expect(idempotentIdsWhere([planted(byId('createQuote'), { security: [] })], isPublic)).toEqual([]);
+    expect(idempotentIdsWhere([planted(byId('createOrder'), { security: [{}, { bearerAuth: [] }] })], networkScoped)).toEqual(['planted']);
+    expect(idempotentIdsWhere([planted(byId('createQuote'), { security: [] })], networkScoped)).toEqual([]);
+  });
+
+  it('(a) planted (PR040-SEC-12): a signature webhook made optional is named; so is an operation without security under a document-level []', () => {
+    const webhook = planted(byId('receiveStripeWebhook'), { 'x-idempotency': 'optional' });
+    expect(webhook.operation['security']).toEqual([{ stripeSignature: [] }]);
+    expect(idempotentIdsWhere([...operations, webhook], isNetworkScoped(documentSecurity))).toEqual(['planted', 'recordConsent']);
+    // An operation that declares no security inherits the document's: bearerAuth today, nothing under `security: []`.
+    const op = byId('createOrder');
+    const withoutSecurity = Object.fromEntries(Object.entries(op.operation).filter(([name]) => name !== 'security'));
+    const inheriting: ContractOperation = { ...op, operationId: 'planted', operation: withoutSecurity };
+    expect(idempotentIdsWhere([inheriting], isNetworkScoped(documentSecurity))).toEqual([]);
+    expect(idempotentIdsWhere([inheriting], isNetworkScoped([]))).toEqual(['planted']);
+    expect(idempotentIdsWhere([inheriting], isNetworkScoped(undefined))).toEqual(['planted']);
+    // A quote-token alternative identifies the caller (a guest-token hash): not network-scoped.
+    expect(idempotentIdsWhere([planted(byId('createOrder'), { security: [{ quoteToken: [] }] })], isNetworkScoped([]))).toEqual([]);
   });
 
   it('(b) the idempotent operations with a VIEW or DOWNLOAD audit action are exactly {emailShipmentDocuments}', () => {
@@ -174,6 +224,28 @@ describe('[PR040-SEC-07] the idempotent operation sets the store relies on (a se
     for (const responses of [exampleOnly, errorOnly]) {
       expect(idempotentIdsWhere([planted(byId('createOrder'), { responses })], returnsClientSecret)).toEqual([]);
     }
+  });
+
+  it('(c) planted (code review R1-n3 (c)): a client_secret under a PROPERTY named example or examples is named', () => {
+    for (const name of ['example', 'examples']) {
+      const schema = { type: 'object', properties: { [name]: { type: 'object', properties: { client_secret: { type: 'string' } } } } };
+      const responses = { '200': { content: { 'application/json': { schema } } } };
+      expect([name, idempotentIdsWhere([planted(byId('createOrder'), { responses })], returnsClientSecret)]).toEqual([name, ['planted']]);
+    }
+  });
+
+  it('(d) every 2xx of every idempotent operation is application/json or has no content (PR040-SEC-11)', () => {
+    const found = operations.filter(isIdempotent).flatMap((op) => nonJsonSuccessMediaTypes(op).map((type) => `${op.operationId} ${type}`));
+    expect(found).toEqual([]);
+  });
+
+  it('(d) planted: a text/csv 200 on an idempotent operation is named; on a not-applicable one, or on a 4xx, it is not', () => {
+    const csv = { '200': { content: { 'text/csv': { schema: { type: 'string' } } } } };
+    const nonJson = (op: ContractOperation): boolean => nonJsonSuccessMediaTypes(op).length > 0;
+    expect(idempotentIdsWhere([...operations, planted(byId('createOrder'), { responses: csv })], nonJson)).toEqual(['planted']);
+    expect(idempotentIdsWhere([planted(byId('createQuote'), { responses: csv })], nonJson)).toEqual([]);
+    const problem = { '409': { content: { 'application/problem+json': { schema: { type: 'object' } } } }, '204': {} };
+    expect(idempotentIdsWhere([planted(byId('createOrder'), { responses: problem })], nonJson)).toEqual([]);
   });
 });
 

@@ -95,17 +95,23 @@ export const DEADLINE_RETRY_AFTER_SECONDS = 1;
 export const LEASE_SKEW_MARGIN_MS = 5_000;
 
 /**
- * The idempotency lease of a request (ADR-0014 amendment 10, D-ARCH-200; PR040-SEC-04 = code review R2-n1): not
- * shorter than the longest stretch between two writes of `lease_until`, or between the last write and the end of the
- * request, plus {@link LEASE_SKEW_MARGIN_MS}, and never below {@link IDEMPOTENCY_LEASE_MS} (the 30 s floor). One
- * transaction counts with its full bound T = admission wait + pool wait (`maxWait`) + `timeout`. The stretches:
- *  - through `call`: the call deadline D, plus T for the renewal that ends it;
- *  - after the last write: at most three transactions and the FAILED entry wait (the handler transaction; the
- *    fail-closed entry of a VIEW or DOWNLOAD route, or the FAILED entry wait of a failure; the completion or release).
- * So `lease = max(30 s, max(D + T, 3 × T + FAILED_ENTRY_WAIT_MS) + 5 s)`; 32.25 s at the defaults (D = 20 s,
+ * The idempotency lease of a request (ADR-0014 amendment 10 as corrected by amendment 18; D-ARCH-200, D-ARCH-232;
+ * PR040-SEC-04, PR040-SEC-10 = code review R1-m1): not shorter than the longest stretch from a write of `lease_until`
+ * (a claim, a takeover or a renewal) to the statement that next protects the row (the next renewal, or the completion),
+ * plus {@link LEASE_SKEW_MARGIN_MS}, and never below {@link IDEMPOTENCY_LEASE_MS} (the 30 s floor). `lease_until` is
+ * the application clock read before the writing statement, so every stretch counts from that reading:
+ *  - the rest of the writing transaction, at most `timeout`;
+ *  - every later transaction with its full bound T = admission wait + pool wait (`maxWait`) + `timeout`, the one that
+ *    ends the stretch included;
+ *  - the call deadline D where the stretch holds a `call`, and the FAILED entry wait F where a failure comes before the
+ *    completion.
+ * The six stretches of amendment 18: `load` timeout + 2T; `call` timeout + D + T; a failed `call` timeout + D + F + T;
+ * the handler of a writing route timeout + T; a failed `load` or handler timeout + 2T + F; the handler of a VIEW or
+ * DOWNLOAD route (handler, fail-closed entry, completion) timeout + 3T. A release needs no lease (nothing was stored).
+ * So `lease = max(30 s, timeout + max(D + T, 3 × T) + F + 5 s)`; 38.25 s at the defaults (D = 20 s, `timeout` = 5 s,
  * T = 0.25 + 2 + 5 s). `admissionWaitMs` is `DB_TENANT_ADMISSION_WAIT_MS`; when the composition does not pass it, its
  * validated upper bound `maxWait` is used (the admission wait may not exceed it, with-tenant-tx.ts), which only
- * lengthens the lease.
+ * lengthens the lease (D-TASK040-18).
  */
 export function idempotencyLeaseMs(
   transaction: TransactionOptions,
@@ -113,7 +119,7 @@ export function idempotencyLeaseMs(
   admissionWaitMs: number = transaction.maxWait,
 ): number {
   const oneTransaction = admissionWaitMs + transaction.maxWait + transaction.timeout;
-  const longest = Math.max(callDeadlineMs + oneTransaction, 3 * oneTransaction + FAILED_ENTRY_WAIT_MS);
+  const longest = transaction.timeout + Math.max(callDeadlineMs + oneTransaction, 3 * oneTransaction) + FAILED_ENTRY_WAIT_MS;
   return Math.max(IDEMPOTENCY_LEASE_MS, longest + LEASE_SKEW_MARGIN_MS);
 }
 
