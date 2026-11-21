@@ -8881,3 +8881,22 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - lane-B queue: TASK-034 `9c40d31e` running, then TASK-045 `3168c194` and TASK-040B `a4aadd2e`.
   - Their results land in worktrees, `../.orch/laneb-queue/queue.log` and on main as uncommitted or local commits; the next session picks them up from D-ORCH-151/152 and the STATUS resume pointer.
 - **Reversibility:** High.
+
+### D-ORCH-153 · 2026-11-21 · sdlc-orchestrator (session B, after handback) · TASK-044 part 044-A fix cycle 1 done at `3b56ab54`
+- **Head:** `3b56ab54` on `feat/TASK-044-server-sent-events-convention`, one commit on `dc64193f`, unpushed. It carries D-TASK044-14..18 in its body.
+- **Closed in code:**
+  - R1-m1 = PR044-SEC-03: one guarded continuation and a check on the producer outcome's shape.
+  - R1-m2 = PR044-SEC-01/02: the guard scans the serialised wire value, the e-mail pattern is linear, keys are value-checked, and the key list is complete.
+  - R1-m3: the reader sets the id buffer at dispatch.
+  - D-ARCH-220: `error` carries no `id`, with the resume proven at the unit, reader and api level.
+  - Architect items (2) and (3); NITs n1, n2, n6, n8; PR044-SEC-06.
+  - 242 unit tests pass and 6 of 6 mutants are killed.
+- **Already verified:** ADR-0016 amendment 14 item 2, the merge condition of A1, by D-QG-007.
+- **Owed before 044-A merges:**
+  - a security delta round on `3b56ab54`;
+  - lane B `tests/api/event-stream.api.test.ts` (12 tests) on `3b56ab54`;
+  - code review round 2;
+  - QG-044-C1, the plan fold;
+  - QG-044-C2, D-PM-089;
+  - the R1-m4 union edit with PR #80.
+- **Reversibility:** High.

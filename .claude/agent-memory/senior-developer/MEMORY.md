@@ -64,3 +64,4 @@
 - [TASK-041 part B stacked](feedback_task041b_stacked.md) — unset upstream on stacked branch, host api-run limit, heredoc parse fails, breaker/wrapper notes
 - [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
 - [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes
+- [TASK-044 fc1](feedback_task044_fc1.md) — unhandledRejection spy vacuous in Jest, equal-work ratio pins, id-less SSE frame helper ripple, scan the wire
