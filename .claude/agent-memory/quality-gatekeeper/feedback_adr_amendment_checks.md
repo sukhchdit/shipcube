@@ -27,5 +27,12 @@ Also check whether a story marked "completes" on the task keeps that status when
 
 Also check whether the plan fold has happened before the verdict: card lines written in a D-ARCH entry are not on any card until senior-developer folds them, and a routing that says "no card names it yet" is an owner-less routing.
 
+When closing conditions (D-QG-006), three more checks paid off:
+- **Routings that land after the fold.** A security delta round written after the plan fold routes new items to cards (PR051-SEC-06 to TASK-298, the O7 tag "before G3"). Grep the plan for each finding id of the latest security and review records; an item on the card of the task that is about to merge has no owner afterwards.
+- **A JUnit title is not the assertion.** Find the case in the JUnit, then read the `expect` line at the code head with `git show <sha>:<path>` (exact `toBe` against an either-or), and recompute the report hashes against `summary.json` (`git_sha`, `git_dirty`, image digest).
+- **Which suite ran the case.** Compare the classname in the JUnit with the suite column of `gherkin-test-map.md`; a split story can read as covered in the trace on its database half alone (US-080).
+
+To check a fold: extract the quoted card lines from the rulings table with a script, test each as a substring of `plan-data.mjs`, and run `gen.mjs .` (no `--write`) on a `git archive` of main that includes `docs/04-plan`, `docs/01-requirements` and `tools/ci`.
+
 **Why:** These found five of the seven QG-043 conditions; none was visible from the amended ADR alone.
 **How to apply:** Any D-QG verification, and G2-style architecture checks at later gates. Commit trailer: use the attribution line of the session's own system reminder; a dispatch may name a different model. Related: [[verify-all-n-ids-claims-by-diff]], [[shared-main-checkout-mechanics]].

@@ -87,3 +87,4 @@
 - [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb + r2 delta/supersede @39cac6e5 PASS_W_COND (a385cc9c); 01/02a/03 closed; INFO 06 TASK-298; O7 in SEC-TC-79
 - [P5 TASK-045 cursors/keyset](project_p5_task045.md) — r1 @b380f429 + r2 @3168c194 PASS_W_COND (658d9918); C1-C3 closed; LOW 08 smallint (045-C), INFO 09; C4 lane B
 - [P5 TASK-042 i18n](project_p5_task042.md) — r1 @b8ba7788 PASS_W_COND (35f8ef0a); MED 01 i18next repo advisory -> bump >=27.1.3 (C1, delta round); INFO 02-05
+- [P5 TASK-044 SSE convention](project_p5_task044.md) — r1 @dc64193f PASS_W_COND (d04731f7); PR44-SEC-13 closed; MED 01 e-mail ReDoS in guard; LOW 02-05; C1-C3, delta round
