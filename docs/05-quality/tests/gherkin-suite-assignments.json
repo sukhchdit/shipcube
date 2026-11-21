@@ -79,7 +79,7 @@
     "US-039": {"scenarios":7,"default":"api","overrides":{"06":"abuse"}},
     "US-040": {"scenarios":17,"default":"rate-limit","overrides":{"12":"rbac-matrix"}},
     "US-041": {"scenarios":5,"default":"api"},
-    "US-042": {"scenarios":8,"default":"api","overrides":{"07":"rbac-matrix"}},
+    "US-042": {"scenarios":8,"default":"api"},
     "US-043": {"scenarios":6,"default":"headers"},
     "US-044": {"scenarios":7,"default":"csrf-cookie"},
     "US-045": {"scenarios":7,"default":"abuse"},

@@ -263,7 +263,7 @@ Feature: Order number allocation
 - **Milestone:** M0 · **MoSCoW:** Must · **Size:** M · **Depends on:** US-197, US-198, US-199, US-200, US-201, EPIC-06
 - **Linked REQs:** REQ-BOOK-020
 - **As a** signed-in customer **I want** to book a Mock quote through the API **so that** the platform proves the full booking path in M0 (PRD 6.1).
-- **Notes:** Saga steps per DR-B03: authorise, create carrier shipment, capture, generate documents, schedule pickup, notify. Triggered via the outbox. M0 uses the Mock carrier and Mock gateway only.
+- **Notes:** Saga steps per DR-B03: authorise, create carrier shipment, capture, generate documents, schedule pickup, notify. Triggered via the outbox. M0 uses the Mock carrier and Mock gateway only. With `mock_ok` the Mock gateway answers AUTHORISED to the checkout request itself; the request writes the payment as AUTHORISED, moves the shipments to PAID and publishes the event from which the worker saga starts, and no worker step authorises or confirms (ADR-0012 amendment 6, D-ARCH-205; D-PM-086). The first scenario's response literal is 201, the status of `checkoutOrder` in the API contract; it read 202 until D-PM-086.
 
 #### Acceptance criteria
 ```gherkin
@@ -273,7 +273,7 @@ Feature: Mock booking saga
 
   Scenario: Happy path through the worker
     When the customer POSTs the booking with Idempotency-Key "k1" and token "mock_ok"
-    Then the response is 202 with the order number
+    Then the response is 201 with the order number
     And the shipment moves DRAFT -> QUOTED -> PENDING_PAYMENT -> PAID -> BOOKING -> BOOKED -> LABEL_READY
     And the worker called the Mock carrier createShipment exactly once
     And payment status is CAPTURED for the booked amount
