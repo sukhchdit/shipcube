@@ -142,9 +142,36 @@ export function prepareSchemas(schemas: RouteSchemas): PreparedSchemas {
   return { params: prepare(schemas.params), query: prepare(schemas.query), body: prepare(schemas.body), headers: prepare(schemas.headers) };
 }
 
+const listQueries = new WeakMap<Joi.ObjectSchema, boolean>();
+
+/** A list query schema declares both pagination parameters, `limit` and `cursor` (US-037; AT-US-037-09). */
+export function isListQuerySchema(schema: Joi.ObjectSchema | undefined): boolean {
+  if (schema === undefined) return false;
+  let list = listQueries.get(schema);
+  if (list === undefined) {
+    const keys = (schema.describe() as { keys?: Record<string, unknown> }).keys ?? {};
+    list = Object.hasOwn(keys, 'limit') && Object.hasOwn(keys, 'cursor');
+    listQueries.set(schema, list);
+  }
+  return list;
+}
+
+/** `filter[<name>]` (the API's simple query parser) or `filter` / `filter/<name>` (a nested parser). */
+const FILTER_POINTER = /^\/query\/filter(?:\[|\/|$)/;
+
+/**
+ * A list route answers an unknown filter key with 400 INVALID_FILTER (REQ-API-008, api/README.md §4; D-TASK045-04): the
+ * closed query schema declares the allow-listed `filter[...]` keys, so any other one is an unknown field. A filter
+ * VALUE outside its schema stays VALIDATION_ERROR with its pointer. Other routes keep UNKNOWN_FIELD for every key.
+ */
+function hasUnknownFilter(schemas: PreparedSchemas, issues: readonly ValidationIssue[]): boolean {
+  return isListQuerySchema(schemas.query) && issues.some((issue) => issue.code === 'UNKNOWN_FIELD' && FILTER_POINTER.test(issue.pointer));
+}
+
 /**
  * Validates every part and returns the converted input, or throws 400 VALIDATION_ERROR naming every issue (capped at
- * MAX_VALIDATION_ISSUES). A route without a body schema accepts no body (undefined or `{}`).
+ * MAX_VALIDATION_ISSUES); on a list route an unknown filter key throws 400 INVALID_FILTER instead. A route without a
+ * body schema accepts no body (undefined or `{}`).
  */
 export function validateRequest(schemas: PreparedSchemas, raw: RawRequestParts): RouteInput {
   const issues: ValidationIssue[] = [];
@@ -162,6 +189,7 @@ export function validateRequest(schemas: PreparedSchemas, raw: RawRequestParts):
   const headers = schemas.headers === undefined ? {} : run('headers', schemas.headers, declaredHeaders(schemas.headers, raw.headers));
   const serverControlled = serverControlledIssues(raw.body);
   const body = schemas.body === undefined && raw.body === undefined ? undefined : run('body', schemas.body, raw.body);
+  if (hasUnknownFilter(schemas, issues)) throw new AppError('INVALID_FILTER');
   if (issues.length > 0 || serverControlled.length > 0) {
     // The server-controlled issue (with its explicit message) replaces Joi's generic UNKNOWN_FIELD at the same pointer.
     const named = new Set(serverControlled.map((issue) => issue.pointer));
