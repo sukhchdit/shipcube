@@ -11067,3 +11067,41 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **040-B PR1** `9d1687b1`: security round 2 PASS_WITH_CONDITIONS (D-SECPR040B1-02); PR040-SEC-14 INFO to PR 2; owed: lane B (`run-live75`), lane-A route (c), PR, record rename.
 - **041-B** `214ec79b`: code r4 AWN (D-CRPR041B-01), security r3 PWC with QG-041B-C4 discharged (D-SECPR041B-03); PR041-SEC-17 INFO + R4-n3 to the TASK-108 card line 22 (guard C or D, architect to choose); owed: lane B, README §7 rider from the held patch (an owned-path commit needs a security delta first; README is docs), gatekeeper D-QG-011 for C4/C5 (a), PR.
 - **Reversibility:** High.
+
+### D-DEVOPS-003 · 2026-11-21 · devops-engineer · PR080-SEC-07 route (c): PR #88 adds three commit-bound `.gitleaks.toml` tables (D-SEC-PR45-01) for the branch merges `c33e5e92`, `0ccdd009` and `aade2672`, so that lane A's range scan passes; main's `d7585e78`/`ed156913` are not added
+- **Trigger:** orchestrator session C, a follow-up to D-DEVOPS-001/-002 and D-SECPR040B1-02 (finding 6). #85 baselines the three merge fingerprints for gitleaks-full only. Lane A's `Gitleaks (PR commit range)` reads `.gitleaks.toml` from the tested base and never reads the baseline, so lane A would still flag `DECISIONS.md:7697` (`generic-api-key`) in each merge.
+- **PR #88 (`chore/gitleaks-allow-merge-commits-pr080-sec-07` from `origin/main` `88fd7360`, head `641ff03c`, one commit, ready):**
+  - Three `[[allowlists]]` tables, one per merge commit:
+    - `c33e5e927f903847daf59ca5f2aa5440562401ef`: TASK-044, head `33262314`, local only
+    - `0ccdd009acfe4eab53adb2bb69064aa0d537a6d9`: 040-B, head `9d1687b1`
+    - `aade267273af4bb868a4e4c4578aeb4f7378a261`: 041-B, head `214ec79b`
+  - Each table has the PR #45 shape: `condition = "AND"`, `regexTarget = "line"`, one full SHA, `targetRules` `generic-api-key`, path `^docs/sdlc/DECISIONS\.md$`, and one `^\n?<exact line>$` pattern.
+  - The pattern's only variable part is the quoted phrase as its class and length, `[a-z=]{12}`. The value appears nowhere: not in the config, the tests, the commit or the PR body.
+  - A comment block names PR080-SEC-07 and D-SEC-PR45-01, and each table has its fingerprint comment.
+  - Line 7697 has the same content hash in `d7585e78` and all three merges. Each merge is in exactly one branch head and not in `origin/main`.
+- **Main commits `d7585e78` and `ed156913`: not needed.** Lane A scans `base.sha..head.sha` (first-parent), and both are ancestors of main, so no PR range holds them. They stay baseline-only (route (b), #85). A negative control pins this: the same line at `d7585e78` is still reported by the config.
+- **Tests:** `tools/ci/sec-static.test.ts`.
+  - The D-ORCH-068 shape pin now lists five tables.
+  - New `[PR080-SEC-07]` shape test. Each table has one SHA, one rule and one path. The line pattern is literal except the one class, and all three patterns are identical. Mutations are refused: a widened class, an open end, `.*`, two commits, a widened path.
+  - New `[PR080-SEC-07]` negative-control test. Admitted: the line at the three commits, with and without the leading newline. Still reported:
+    - main `d7585e78`, a fourth commit, an abbreviated SHA;
+    - other, nested and suffixed paths; another rule;
+    - the phrase with a digit, with upper case, at 13 characters, or replaced by an AWS-shaped value;
+    - an appended secret, a re-indented line, a prefix, a doubled newline.
+- **Checks:**
+  - Unit Jest `sec-static.test.ts`: 1/1 suite, 20/20 tests. This used a temporary junction to main's `node_modules` (the docker lock was held by the orchestrator-A lane B queue), removed with `rmdir` afterwards.
+  - Prettier is clean. `tsc -p tools/tsconfig.json --noEmit` gives 0 errors in the touched file; the 107 errors elsewhere are environmental (no generated Prisma client in the worktree). ESLint shows only the 2 known junction artefacts on the unchanged `@platform/config` imports. commitlint passes with 1 warning.
+  - A Node `generic-api-key` check over the added lines finds 0 candidates.
+  - `git merge-tree` against #85, #86 and #87 is clean.
+- **Not run:** the real gitleaks image (D-SEC-PR45-01 condition 5 belongs in the security record). Hosted CI on #88 did not start: the runner was refused for account billing or spending limit, the same as on #85.
+- **Lane B: not queued.** gitleaks-full reads `.gitleaks.toml` from the base ref, and this branch's ancestry holds none of the merges, so a run here would show nothing new. After merge the tables also cover the merges in the task branches' gitleaks-full, which makes #85's three merge lines redundant there but harmless.
+- **Incident (fixed):** `gh pr create` first used a stale `pr-body.md` from the shared scratchpad (the #86 body). The body was replaced within a minute (`gh pr edit`). Both texts are ids only.
+- **Routed:**
+  - orchestrator: merge order #85, #86, #87, #88, then the task PRs. `.gitleaks.toml` is a PR46-SEC-16 lane A input, so landing #88 voids earlier hosted proofs.
+  - security-analyst: the security record for #88 (owned paths `.gitleaks.toml` and `tools/ci/**`), with the real-image before/after and controls.
+  - TASK-044: its merge `c33e5e92` is local only. It can still redo the merge after `1a2b9d7d` (route (a)) and then needs no table. If so, the table can be dropped in a later PR.
+- **Alternatives:**
+  - One table with three `commits` (rejected: D-SEC-PR45-01 allows exactly one SHA per table).
+  - A path or regex-only entry (rejected: D-SEC-PR45-01).
+  - A v2 squash supersede of each branch (rejected by the dispatch; stays open).
+- **Reversibility:** High (config plus tests; the tables match only three fixed commits).
