@@ -56,6 +56,17 @@ const pick = (row: KeyRow, select: Select): Record<string, unknown> => {
   return Object.fromEntries(Object.keys(select).map((field) => [field, copy[field]]));
 };
 
+/**
+ * The row CHECKs the store's writes can reach (migrations 20261120100000 and 20261121000000): a COMPLETED row has its
+ * status and its sealed response with the key id, an IN_PROGRESS row has neither. A violation throws like PostgreSQL.
+ */
+function checkRow(row: KeyRow): void {
+  const completed = row.status === 'COMPLETED';
+  if (completed !== (row.responseStatus !== null)) throw new Error('check violation: ck_idempotency_keys__completed');
+  if (completed !== (row.responseBody !== null)) throw new Error('check violation: ck_idempotency_keys__completed_body');
+  if ((row.responseBody === null) !== (row.responseBodyKeyId === null)) throw new Error('check violation: ck_idempotency_keys__body_key');
+}
+
 /** The operations a test can make fail (inside the transaction that issues them). */
 export type KeyOperation = 'createManyAndReturn' | 'findUnique' | 'updateMany' | 'updateManyAndReturn' | 'deleteMany';
 
@@ -93,6 +104,7 @@ export class MemoryKeys {
       for (const row of hit) {
         remember(row.id);
         Object.assign(row, data, { version: row.version + 1 });
+        checkRow(row);
       }
       return hit;
     };

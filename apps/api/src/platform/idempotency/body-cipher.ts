@@ -2,8 +2,10 @@
  * Encryption of stored response bodies (SEC-TC-04; ADR-0014 amendment 1; ADR-0018 key register row `idempotency-body`
  * and amendment 1; data-model §3.5 `response_body`, §10.4; TASK-040). Pure: no I/O.
  *
- * `response_body` = AES-256-GCM(IDEMPOTENCY_BODY_KEY, 96-bit random nonce) of the UTF-8 JSON body, stored as
- * `nonce ‖ ciphertext ‖ 128-bit tag`, with `response_body_key_id` beside it and
+ * `response_body` = AES-256-GCM(body key, 96-bit random nonce) of the UTF-8 JSON of the stored response envelope
+ * `{v, origin, status, headers, body}` (store.ts; ADR-0014 amendment 15), stored as `nonce ‖ ciphertext ‖ 128-bit tag`,
+ * with `response_body_key_id` beside it. The body key is HKDF-SHA256 of the configured IDEMPOTENCY_BODY_KEY material
+ * with the info label `platform-idempotency-body-v1`, never the material itself (from-config.ts, PR040-SEC-01).
  * AAD = UTF-8(JCS(["idempotency_keys", "response_body", hex(scope_hash), response_body_key_id])). A body copied to
  * another scope, or relabelled with another key id, fails authentication.
  *

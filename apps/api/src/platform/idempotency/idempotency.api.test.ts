@@ -24,7 +24,7 @@ import { closeLoopbackServer, fetchOnce, LOOPBACK_TEST_TIMEOUT_MS } from '../rou
 import { createBodyCipher } from './body-cipher.js';
 import { createIdempotencyStore, IDEMPOTENCY_TTL_MS, type IdempotencyStore } from './store.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
-import { type LogLine, MemoryKeys, memoryRunner, recordingLog, TEST_BODY_KEY, TEST_NETWORK_KEY } from './tests/memory-keys.js';
+import { type KeyRow, type LogLine, MemoryKeys, memoryRunner, recordingLog, TEST_BODY_KEY, TEST_NETWORK_KEY } from './tests/memory-keys.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -54,9 +54,10 @@ const store: IdempotencyStore = {
     events.push('claim');
     return base.begin(db, input);
   },
-  complete: (db, claim, result) => {
+  // The origin is handed on (a slot-rendered problem replays through the problem handler, R3-M1).
+  complete: (db, claim, result, origin) => {
     events.push(`complete ${String(result.status)}`);
-    return base.complete(db, claim, result);
+    return base.complete(db, claim, result, origin);
   },
   release: (db, claim) => {
     events.push('release');
@@ -125,6 +126,8 @@ const limiter: PipelineSlots['rateLimit'] = () => (req: Request, _res: Response,
 };
 
 const runs: string[] = [];
+/** A gateway-client-secret-shaped value, built per run (no secret-shaped literal in the source, PR33-SEC-08). */
+const intentSecret = ['pi', randomUUID().slice(0, 8), 'secret', randomUUID().slice(0, 8)].join('_');
 let gate: Promise<void> | undefined;
 
 const ROUTE = {
@@ -182,6 +185,14 @@ const routes: RouteDescriptor[] = [
           throw new AppError('RATE_LIMITED', { retryAfterSeconds: 1 });
         case 'throw-500':
           throw new Error('handler bug');
+        case 'throw-unserialisable':
+          // PR040-SEC-09: a code defect, an errors[] item that JSON cannot serialise.
+          throw new AppError('VALIDATION_ERROR', {
+            errors: [{ pointer: '/body/qty', code: 'OUT_OF_RANGE', message: 'Field is out of range.', limit: 10n } as never],
+          });
+        case 'client-secret':
+          // The gateway intent of checkoutOrder (PR040-SEC-03): its client secret is stored, encrypted only.
+          return { status: 201, body: { id, payment_intent: { id: 'pi_1', client_secret: intentSecret } } };
         default:
           return { status: 201, body: { id, qty, actor: ctx.principal.actorId }, headers: { Location: `/api/v1/orders/${id}` } };
       }
@@ -731,5 +742,57 @@ describe('[US-038] idempotency keys', () => {
     const stored = Buffer.from(row?.responseBody ?? new Uint8Array()).toString('latin1');
     expect(stored.includes(USER_A)).toBe(false);
     expect(stored.includes('ord_')).toBe(false);
+  });
+
+  it('[SEC-TC-04] [PR040-SEC-03] a stored gateway client secret is replayed, and no clear column holds a client-secret shape', async () => {
+    const first = await post('/orders', { qty: 1, outcome: 'client-secret' }, withKey());
+    const replay = await post('/orders', { qty: 1, outcome: 'client-secret' }, withKey());
+    expect([first.status, replay.status]).toEqual([201, 201]);
+    expect(replay.text).toBe(first.text);
+    expect(replay.text).toContain(intentSecret);
+    expect(runs).toHaveLength(1);
+    const [row] = [...keys.rows.values()];
+    if (row === undefined) throw new Error('no row');
+    const { responseBody, ...clear } = row;
+    const clearText = JSON.stringify(clear, (_name, value: unknown) =>
+      value instanceof Uint8Array ? Buffer.from(value).toString('latin1') : value,
+    );
+    expect(clearText).not.toMatch(/_secret_/u);
+    expect(clearText).not.toContain(intentSecret);
+    expect(Buffer.from(responseBody ?? new Uint8Array()).toString('latin1')).not.toContain(intentSecret);
+  });
+
+  it('[PR040-SEC-02] a clear status or Location changed by a database writer is never replayed: 500, the handler not run again', async () => {
+    const tampers: ReadonlyArray<readonly [string, (row: KeyRow) => void]> = [
+      ['k-status', (row) => (row.responseStatus = 409)],
+      ['k-location', (row) => (row.responseHeaders = { Location: 'https://attacker.example.test/' })],
+    ];
+    for (const [key, tamper] of tampers) {
+      expect((await post('/orders', { qty: 1 }, withKey(key))).status).toBe(201);
+      for (const row of keys.rows.values()) if (row.idemKey === key) tamper(row);
+      const retry = await post('/orders', { qty: 1 }, withKey(key));
+      expect(retry.status).toBe(500);
+      expect(retry.headers.get('location')).toBeNull();
+      expect(retry.headers.get('idempotent-replayed')).toBeNull();
+    }
+    expect(runs).toHaveLength(2);
+    expect(lines.filter((line) => line.level === 'error').map((line) => line.fields?.['reason'])).toEqual([
+      'stored response mismatch',
+      'stored response mismatch',
+    ]);
+  });
+
+  it('[PR040-SEC-09] a thrown 4xx whose document cannot be rendered releases the key: no row, the retry runs again', async () => {
+    const first = await post('/orders', { qty: 1, outcome: 'throw-unserialisable' }, withKey());
+    expect(first.status).toBe(500);
+    expect(keys.rows.size).toBe(0);
+    expect(events).toContain('release');
+    expect(lines.filter((line) => line.event === 'api.idempotency_problem_unrendered')).toEqual([
+      { level: 'warn', event: 'api.idempotency_problem_unrendered', fields: { error: 'TypeError' } },
+    ]);
+    // Not held until the lease ends: the retry executes at once instead of answering 409 IDEMPOTENCY_IN_PROGRESS.
+    const retry = await post('/orders', { qty: 1, outcome: 'throw-unserialisable' }, withKey());
+    expect(retry.status).toBe(500);
+    expect(runs).toHaveLength(2);
   });
 });

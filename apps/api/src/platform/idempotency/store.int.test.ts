@@ -15,6 +15,7 @@ import { AppError } from '@platform/shared';
 
 import type { AppDb, AppTransactionClient, TenantContext } from '../db/index.js';
 import { type ActiveDatabaseRuntime, databaseRuntimeFromConfig } from '../db/runtime.js';
+import { systemDelegates } from '../db/system-db.js';
 import type { Principal } from '../routing/define-route.js';
 import { ANONYMOUS, readonlySet } from '../routing/route-state.js';
 import { createRuntimeLog } from '../runtime/log.js';
@@ -187,5 +188,53 @@ describe('[REQ-API-011] the idempotency store on PostgreSQL 18 (store.ts over th
     if (replay.kind !== 'replay-problem') throw new Error(`expected replay-problem, got ${replay.kind}`);
     expect(replay.error).toMatchObject({ code: 'ORG_TYPE_NOT_ALLOWED', status: 422, replayed: true, body: problem.error.body });
     expect(log.lines).toEqual([]);
+  });
+
+  it('[PR040-SEC-02] a body-less 204 completes with its sealed envelope (ck_idempotency_keys__completed_body holds) and replays', async () => {
+    const req = request();
+    const claim = claimOf(await begin(req));
+    await inTx((db) => store.complete(db, claim, { status: 204 }));
+    const row = await stored(claim.id);
+    expect(row).toMatchObject({ status: 'COMPLETED', response_status: 204, response_body_key_id: 'idempotency-body-v1' });
+    expect(Buffer.isBuffer(row?.['response_body'])).toBe(true);
+    expect(await begin(req)).toEqual({ kind: 'replay', result: { status: 204, headers: { 'Idempotent-Replayed': 'true' } } });
+  });
+
+  it('[PR040-SEC-02] a clear status changed by a database writer is unreadable; nulling the ciphertext is refused by the CHECK', async () => {
+    const req = request();
+    const claim = claimOf(await begin(req));
+    await inTx((db) => store.complete(db, claim, { status: 201, body: { id: 'ord_tamper' }, headers: { Location: '/api/v1/orders/2' } }));
+    await inTx((db) => systemDelegates(db).idempotencyKey.updateMany({ where: { id: claim.id }, data: { responseStatus: 409 } }));
+    await expect(begin(req)).rejects.toThrow('stored response mismatch');
+    await expect(
+      inTx((db) =>
+        systemDelegates(db).idempotencyKey.updateMany({ where: { id: claim.id }, data: { responseBody: null, responseBodyKeyId: null } }),
+      ),
+    ).rejects.toThrow();
+    expect(log.lines.map((line) => line.event)).toEqual(['api.idempotency_replay_unreadable']);
+    log.lines.length = 0;
+  });
+
+  it('[SEC-TC-04] [PR040-SEC-03] a stored gateway client secret is only ciphertext: no clear column holds a client-secret shape', async () => {
+    const req = request();
+    const claim = claimOf(await begin(req));
+    const intentSecret = ['seti', String(counter), 'secret', claim.id.slice(0, 8)].join('_');
+    await inTx((db) => store.complete(db, claim, { status: 201, body: { setup_intent: { id: 'seti_1', client_secret: intentSecret } } }));
+    const admin = await postgres.superuser();
+    try {
+      // Every column but the ciphertext, as text: none holds the secret or its shape.
+      const { rows } = await admin.query<{ clear: string; body: Buffer }>(
+        'SELECT (to_jsonb(k) - $2::text)::text AS clear, response_body AS body FROM public.idempotency_keys k WHERE id = $1',
+        [claim.id, 'response_body'],
+      );
+      const [row] = rows;
+      expect(row?.clear).toContain('"response_status": 201');
+      expect(row?.clear).not.toMatch(/_secret_/u);
+      expect(row?.body.toString('latin1')).not.toContain(intentSecret);
+    } finally {
+      await admin.end();
+    }
+    const replay = await begin(req);
+    expect(replay).toMatchObject({ kind: 'replay', result: { body: { setup_intent: { client_secret: intentSecret } } } });
   });
 });

@@ -18,7 +18,11 @@
  *     `replay-problem` for a stored thrown 4xx (problem.ts); an unreadable row is logged at ERROR and throws;
  *     IN_PROGRESS with a live lease is `in-progress` (409 + Retry-After 1, AT-US-038-05); with an expired lease (a
  *     crashed request) the lease is taken over (conditional on the row version) and the request executes.
- *  2. `complete`: COMPLETED with the response, conditional on the claim's id, version and IN_PROGRESS. Inside the
+ *  2. `complete`: COMPLETED with the response, conditional on the claim's id, version and IN_PROGRESS. The response is
+ *     ONE sealed envelope `{v, origin, status, headers, body}`, with or without a body (ADR-0014 amendment 15,
+ *     PR040-SEC-02): a replay reads the status, the headers and the body from the opened envelope only; the clear
+ *     `response_status` and `response_headers` are informational copies that must equal it, else the row is unreadable;
+ *     `ck_idempotency_keys__completed_body` makes a completed row always carry the ciphertext. Inside the
  *     handler transaction for a 2xx (atomic with the business change and its audit entry); in a short transaction of
  *     its own for a returned or thrown 4xx, after the rolled-back handler transaction (D-TASK029-16/-17, D-ARCH-143); after
  *     the fail-closed entry of a read-only (VIEW / DOWNLOAD) handler. A claim
@@ -52,6 +56,15 @@ const STORED_HEADERS: ReadonlyMap<string, string> = new Map([
   // A stored thrown 4xx is marked application/problem+json (problem.ts); a handler's own Content-Type is kept too.
   ['content-type', 'Content-Type'],
 ]);
+const WIRE_HEADERS: ReadonlySet<string> = new Set(STORED_HEADERS.values());
+/**
+ * The only `Content-Type` values a stored response may carry (ADR-0014 amendment 15, PR040-SEC-02 defence in depth):
+ * every idempotent 2xx of the contract is JSON and a stored 4xx is a problem document. Anything else is refused when
+ * the key is completed and when it is replayed, so a replay can never be sent as `text/html`.
+ */
+const STORED_CONTENT_TYPE = /^application\/(?:problem\+)?json(?:;[ \t]*charset=utf-8)?$/iu;
+/** The version of the sealed response envelope; an envelope of another version is unreadable. */
+const ENVELOPE_VERSION = 1;
 
 /** The `ck_idempotency_keys__status` values (catalog C9; enum-checks.test.ts compares them with the migration). */
 export const IDEMPOTENCY_KEY_STATUSES = ['IN_PROGRESS', 'COMPLETED'] as const;
@@ -99,12 +112,25 @@ export class IdempotencyClaimLostError extends Error {
 
 /**
  * Who produced a stored response (code review R3-M1): the route (`handler`: a result it returned, replayed through
- * `send` as returned, whatever its Content-Type) or the tx slot (`slot-problem`: a thrown 4xx it rendered once, replayed
- * through the problem handler). Stored inside the AES-GCM body envelope `{ origin, body }` (AAD-bound to the scope and
- * key id), never in a column or header a row could carry without the key, and never derived from the Content-Type.
+ * `send` as returned) or the tx slot (`slot-problem`: a thrown 4xx it rendered once, replayed through the problem
+ * handler). Stored inside the sealed envelope (AAD-bound to the scope and key id), never in a column or header a row
+ * could carry without the key, and never derived from the Content-Type (ADR-0014 amendment 15).
  */
 export type StoredOrigin = 'handler' | 'slot-problem';
 const STORED_ORIGINS: ReadonlySet<unknown> = new Set<StoredOrigin>(['handler', 'slot-problem']);
+
+/**
+ * The sealed form of a stored response (ADR-0014 amendment 15; D-ARCH-204; PR040-SEC-02, CWE-345): the status, the
+ * allow-listed headers (wire names), the origin and the body are authenticated together by the AES-GCM tag; `body` is
+ * absent for a response without one (a 202, a 204).
+ */
+interface StoredEnvelope {
+  readonly v: typeof ENVELOPE_VERSION;
+  readonly origin: StoredOrigin;
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body?: unknown;
+}
 
 /** Class-only log fields; never the key, the scope hash, the path or a body. */
 export type IdempotencyLogFields = Readonly<Record<string, string | number | boolean>>;
@@ -152,16 +178,55 @@ function storedHeadersOf(headers: RouteResult['headers']): Record<string, string
   return stored;
 }
 
-function replayedHeadersOf(stored: unknown): Record<string, string> {
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isStoredContentType = (headers: Readonly<Record<string, string>>): boolean => {
+  const contentType = headers['Content-Type'];
+  return contentType === undefined || STORED_CONTENT_TYPE.test(contentType);
+};
+
+/** The headers of an opened envelope: allow-listed wire names with string values and an allowed Content-Type. */
+function envelopeHeadersOf(value: unknown): Record<string, string> {
+  if (!isRecord(value)) throw new IdempotencyReplayError('stored envelope malformed');
   const headers: Record<string, string> = {};
-  if (typeof stored === 'object' && stored !== null && !Array.isArray(stored)) {
-    for (const [name, value] of Object.entries(stored)) {
-      const wire = STORED_HEADERS.get(name.toLowerCase());
-      if (wire !== undefined && typeof value === 'string') headers[wire] = value;
-    }
+  for (const [name, header] of Object.entries(value)) {
+    if (!WIRE_HEADERS.has(name) || typeof header !== 'string') throw new IdempotencyReplayError('stored envelope malformed');
+    headers[name] = header;
   }
-  headers[IDEMPOTENT_REPLAYED_HEADER] = 'true';
+  if (!isStoredContentType(headers)) throw new IdempotencyReplayError('stored content type refused');
   return headers;
+}
+
+/** The opened envelope of a stored response (ADR-0014 amendment 15); anything else is unreadable. */
+function envelopeOf(text: string): StoredEnvelope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new IdempotencyReplayError('stored envelope malformed');
+  }
+  if (!isRecord(parsed) || parsed['v'] !== ENVELOPE_VERSION || !STORED_ORIGINS.has(parsed['origin'])) {
+    throw new IdempotencyReplayError('stored envelope malformed');
+  }
+  const status = parsed['status'];
+  if (typeof status !== 'number' || !Number.isInteger(status) || !isStoredStatus(status)) {
+    throw new IdempotencyReplayError('stored status malformed');
+  }
+  const envelope: StoredEnvelope = {
+    v: ENVELOPE_VERSION,
+    origin: parsed['origin'] as StoredOrigin,
+    status,
+    headers: envelopeHeadersOf(parsed['headers']),
+  };
+  return Object.hasOwn(parsed, 'body') ? { ...envelope, body: parsed['body'] } : envelope;
+}
+
+/** The clear `response_headers` copy names exactly the sealed headers with the same values. */
+function sameHeaders(clear: unknown, sealed: Readonly<Record<string, string>>): boolean {
+  if (!isRecord(clear)) return false;
+  const names = Object.keys(clear);
+  return names.length === Object.keys(sealed).length && names.every((name) => Object.hasOwn(sealed, name) && clear[name] === sealed[name]);
 }
 
 const EXISTING = {
@@ -198,20 +263,19 @@ export function createIdempotencyStore(options: IdempotencyStoreOptions): Idempo
     }
   }
 
+  /**
+   * The status, the headers and the body come from the opened envelope only (PR040-SEC-02); the clear columns must equal
+   * it, so a row whose status or headers were changed without the key is unreadable, never replayed.
+   */
   function readStored(row: ExistingRow, scopeHash: Uint8Array<ArrayBuffer>): { result: RouteResult; origin: StoredOrigin } {
-    const status = row.responseStatus;
-    if (status === null || !isStoredStatus(status)) throw new IdempotencyReplayError('stored status missing');
-    const headers = replayedHeadersOf(row.responseHeaders);
-    if (row.responseBody === null) return { result: { status, headers }, origin: 'handler' };
-    if (row.responseBodyKeyId === null) throw new IdempotencyReplayError('body key id missing');
-    const text = cipher.open(scopeHash, { ciphertext: row.responseBody, keyId: row.responseBodyKeyId });
-    const envelope = JSON.parse(text) as unknown;
-    if (typeof envelope !== 'object' || envelope === null || !('body' in envelope) || !('origin' in envelope)) {
-      throw new IdempotencyReplayError('stored envelope malformed');
+    if (row.responseBody === null || row.responseBodyKeyId === null) throw new IdempotencyReplayError('stored response missing');
+    const envelope = envelopeOf(cipher.open(scopeHash, { ciphertext: row.responseBody, keyId: row.responseBodyKeyId }));
+    if (row.responseStatus !== envelope.status || !sameHeaders(row.responseHeaders, envelope.headers)) {
+      throw new IdempotencyReplayError('stored response mismatch');
     }
-    const { origin, body } = envelope;
-    if (!STORED_ORIGINS.has(origin)) throw new IdempotencyReplayError('stored envelope malformed');
-    return { result: { status, headers, body }, origin: origin as StoredOrigin };
+    const { status, origin } = envelope;
+    const headers = { ...envelope.headers, [IDEMPOTENT_REPLAYED_HEADER]: 'true' };
+    return { result: Object.hasOwn(envelope, 'body') ? { status, headers, body: envelope.body } : { status, headers }, origin };
   }
 
   /** What the existing row of a scope answers; `undefined`: claim again (the row is gone or expired). */
@@ -280,15 +344,26 @@ export function createIdempotencyStore(options: IdempotencyStoreOptions): Idempo
     async complete(db: AppDb, claim: IdempotencyClaim, result: RouteResult, origin: StoredOrigin = 'handler'): Promise<void> {
       if (!isStoredStatus(result.status)) throw new RangeError(`status ${String(result.status)} is never stored`);
       if (origin === 'slot-problem' && result.body === undefined) throw new RangeError('a slot-rendered problem has a body');
-      // The envelope { origin, body } is what is sealed: the origin is covered by the AES-GCM tag (R3-M1).
-      const sealed = result.body === undefined ? undefined : cipher.seal(claim.scopeHash, JSON.stringify({ origin, body: result.body }));
+      const headers = storedHeadersOf(result.headers);
+      if (!isStoredContentType(headers)) throw new RangeError('a Content-Type other than JSON or problem+JSON is never stored');
+      // One envelope is sealed, with or without a body: status, headers, origin and body are all covered by the AES-GCM
+      // tag (PR040-SEC-02; R3-M1); the clear status and headers are informational copies of it.
+      const envelope: StoredEnvelope = {
+        v: ENVELOPE_VERSION,
+        origin,
+        status: result.status,
+        headers,
+        ...(result.body === undefined ? {} : { body: result.body }),
+      };
+      const sealed = cipher.seal(claim.scopeHash, JSON.stringify(envelope));
       const { count } = await systemDelegates(db).idempotencyKey.updateMany({
         where: { id: claim.id, version: claim.version, status: IN_PROGRESS },
         data: {
           status: COMPLETED,
           responseStatus: result.status,
-          responseHeaders: storedHeadersOf(result.headers),
-          ...(sealed === undefined ? {} : { responseBody: sealed.ciphertext, responseBodyKeyId: sealed.keyId }),
+          responseHeaders: headers,
+          responseBody: sealed.ciphertext,
+          responseBodyKeyId: sealed.keyId,
         },
       });
       if (count !== 1) throw new IdempotencyClaimLostError();

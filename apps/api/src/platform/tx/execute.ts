@@ -95,15 +95,25 @@ export const DEADLINE_RETRY_AFTER_SECONDS = 1;
 export const LEASE_SKEW_MARGIN_MS = 5_000;
 
 /**
- * The idempotency lease of a request (TASK-040 fix cycle 1, code review m4): long enough that no phase between two
- * renewals can outlive it, so a retry cannot take a running request's key over and repeat its `call`. The stretches
- * are: claim -> `load` transaction -> renewal; renewal -> `call` (bounded by the enforced call deadline) -> renewal;
- * renewal -> handler transaction -> FAILED entry wait -> completion transaction. A transaction is bounded by its
- * admission and pool wait (`maxWait`) plus its `timeout`. Never below {@link IDEMPOTENCY_LEASE_MS}.
+ * The idempotency lease of a request (ADR-0014 amendment 10, D-ARCH-200; PR040-SEC-04 = code review R2-n1): not
+ * shorter than the longest stretch between two writes of `lease_until`, or between the last write and the end of the
+ * request, plus {@link LEASE_SKEW_MARGIN_MS}, and never below {@link IDEMPOTENCY_LEASE_MS} (the 30 s floor). One
+ * transaction counts with its full bound T = admission wait + pool wait (`maxWait`) + `timeout`. The stretches:
+ *  - through `call`: the call deadline D, plus T for the renewal that ends it;
+ *  - after the last write: at most three transactions and the FAILED entry wait (the handler transaction; the
+ *    fail-closed entry of a VIEW or DOWNLOAD route, or the FAILED entry wait of a failure; the completion or release).
+ * So `lease = max(30 s, max(D + T, 3 × T + FAILED_ENTRY_WAIT_MS) + 5 s)`; 32.25 s at the defaults (D = 20 s,
+ * T = 0.25 + 2 + 5 s). `admissionWaitMs` is `DB_TENANT_ADMISSION_WAIT_MS`; when the composition does not pass it, its
+ * validated upper bound `maxWait` is used (the admission wait may not exceed it, with-tenant-tx.ts), which only
+ * lengthens the lease.
  */
-export function idempotencyLeaseMs(transaction: TransactionOptions, callDeadlineMs: number): number {
-  const oneTransaction = transaction.maxWait + transaction.timeout;
-  const longest = Math.max(callDeadlineMs, 2 * oneTransaction + FAILED_ENTRY_WAIT_MS);
+export function idempotencyLeaseMs(
+  transaction: TransactionOptions,
+  callDeadlineMs: number,
+  admissionWaitMs: number = transaction.maxWait,
+): number {
+  const oneTransaction = admissionWaitMs + transaction.maxWait + transaction.timeout;
+  const longest = Math.max(callDeadlineMs + oneTransaction, 3 * oneTransaction + FAILED_ENTRY_WAIT_MS);
   return Math.max(IDEMPOTENCY_LEASE_MS, longest + LEASE_SKEW_MARGIN_MS);
 }
 
@@ -139,6 +149,11 @@ export interface ExecuteOptions {
    * handler's default; part 040-B passes the same value to both when it wires the store.
    */
   readonly problemTypeBase?: string;
+  /**
+   * `DB_TENANT_ADMISSION_WAIT_MS`, one term of the transaction bound the idempotency lease counts
+   * ({@link idempotencyLeaseMs}). Default: the runner's `maxWait`, the validated upper bound of that wait.
+   */
+  readonly admissionWaitMs?: number;
 }
 
 /** A route declares an idempotency mode but the composition supplied no key store (a wiring bug; PR32-SEC-03). */
@@ -353,7 +368,7 @@ async function run({ route, request, options, audit, lifetime, idempotent, deadl
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
   const { load, call } = route;
-  const leaseMs = idempotencyLeaseMs(runner.transactionOptions, deadlineMs);
+  const leaseMs = idempotencyLeaseMs(runner.transactionOptions, deadlineMs, options.admissionWaitMs);
   if (idempotent !== undefined) {
     const begun = await beginIdempotent(runner, tenant, idempotencyStoreOf(options), idempotent, { request, audit, lifetime }, leaseMs);
     if (begun.kind === 'replay') return { result: begun.result, committed: false };
@@ -408,7 +423,7 @@ async function run({ route, request, options, audit, lifetime, idempotent, deadl
         await settleClaim(runner, tenant, idempotencyStoreOf(options), claim, error.result);
       } else {
         const context = { correlationId: request.correlationId, url, typeBase: options.problemTypeBase };
-        const stored = storedProblemOf(error, context);
+        const stored = storableProblemOf(error, context, idempotencyStoreOf(options).log);
         await settleClaim(runner, tenant, idempotencyStoreOf(options), claim, stored?.result, 'slot-problem');
         if (stored !== undefined) throw stored.error;
       }
@@ -503,6 +518,25 @@ async function beginIdempotent(
 }
 
 const errorClass = (error: unknown): string => (error instanceof Error ? error.name : 'non-error');
+
+/**
+ * The storable document of a thrown failure (problem.ts), or `undefined` when it is not stored. A failure whose
+ * document cannot be rendered (an `errors[]` item that cannot be serialised: a code defect) is not stored either, so its
+ * key is released instead of being held until the lease ends (PR040-SEC-09, CWE-755); the original failure goes on to
+ * the problem handler, and a WARN line names the class of the rendering error only.
+ */
+function storableProblemOf(
+  error: unknown,
+  context: Parameters<typeof storedProblemOf>[1],
+  log: IdempotencyStore['log'],
+): ReturnType<typeof storedProblemOf> {
+  try {
+    return storedProblemOf(error, context);
+  } catch (renderError) {
+    log.warn('api.idempotency_problem_unrendered', { error: errorClass(renderError) });
+    return undefined;
+  }
+}
 
 /**
  * Settles a claim whose result did not complete inside the handler transaction (TASK-040; D-TASK029-16/-17, PR #56

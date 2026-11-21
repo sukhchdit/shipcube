@@ -112,12 +112,26 @@ describe('idempotency store protocol (data-model §6.2)', () => {
     });
   });
 
-  it('a stored response without a body (204) replays without one', async () => {
+  it('[PR040-SEC-02] a stored response without a body (202, 204) is sealed too and replays from its envelope without one', async () => {
     const { keys, begin, claimOf, inTx, store } = setup();
-    const claim = claimOf(await begin());
-    await inTx((db) => store.complete(db, claim, { status: 204 }));
-    expect(keys.rows.get(claim.id)).toMatchObject({ responseBody: null, responseBodyKeyId: null, responseHeaders: {} });
-    expect(await begin()).toEqual({ kind: 'replay', result: { status: 204, headers: { 'Idempotent-Replayed': 'true' } } });
+    for (const [status, key] of [
+      [204, 'key-204'],
+      [202, 'key-202'],
+    ] as const) {
+      const claim = claimOf(await begin(request(1, key)));
+      await inTx((db) => store.complete(db, claim, { status, headers: { Location: '/api/v1/jobs/1' } }));
+      const row = keys.rows.get(claim.id);
+      expect(row).toMatchObject({
+        responseStatus: status,
+        responseBodyKeyId: 'idempotency-body-v1',
+        responseHeaders: { Location: '/api/v1/jobs/1' },
+      });
+      expect(row?.responseBody).toBeInstanceOf(Uint8Array);
+      expect(await begin(request(1, key))).toEqual({
+        kind: 'replay',
+        result: { status, headers: { Location: '/api/v1/jobs/1', 'Idempotent-Replayed': 'true' } },
+      });
+    }
   });
 
   it('[AT-US-038-04] the same key with another fingerprint is reused, completed or not', async () => {
@@ -192,8 +206,11 @@ describe('idempotency store protocol (data-model §6.2)', () => {
       },
     ]);
     expect(JSON.stringify(log.lines)).not.toMatch(/key-1|ord_1|12\.50/u);
-    if (row !== undefined) row.responseStatus = null;
-    await expect(begin()).rejects.toThrow('stored status missing');
+    if (row !== undefined) {
+      row.responseBodyKeyId = 'idempotency-body-v1';
+      row.responseBody = null;
+    }
+    await expect(begin()).rejects.toThrow('stored response missing');
   });
 
   it('[m5] a row released twice between the insert and the read ends the claim as in-progress after two rounds', async () => {
@@ -263,6 +280,110 @@ describe('idempotency store protocol (data-model §6.2)', () => {
   });
 });
 
+describe('[PR040-SEC-02] the sealed response envelope (ADR-0014 amendment 15)', () => {
+  const cipher = createBodyCipher(TEST_BODY_KEY);
+
+  /** A completed key and its row, ready for a database writer's change. */
+  async function completed(result: RouteResult = created) {
+    const context = setup();
+    const claim = context.claimOf(await context.begin());
+    await context.inTx((db) => context.store.complete(db, claim, result));
+    const row = context.keys.rows.get(claim.id);
+    if (row === undefined) throw new Error('no row');
+    return { ...context, claim, row };
+  }
+
+  /** The replay is refused as unreadable (500), with one ERROR line naming the class and the fixed reason only. */
+  async function expectUnreadable(context: Awaited<ReturnType<typeof completed>>, reason: string): Promise<void> {
+    await expect(context.begin()).rejects.toThrow(IdempotencyReplayError);
+    expect(context.log.lines).toEqual([
+      { level: 'error', event: 'api.idempotency_replay_unreadable', fields: { error: 'IdempotencyReplayError', reason } },
+    ]);
+  }
+
+  it('seals status, headers, origin and body together; the clear columns are copies of the envelope', async () => {
+    const { row, claim } = await completed();
+    const opened = JSON.parse(
+      cipher.open(claim.scopeHash, { ciphertext: new Uint8Array(row.responseBody ?? []), keyId: TEST_BODY_KEY.keyId }),
+    ) as unknown;
+    const headers = { Location: '/api/v1/orders/ord_1', ETag: '"v1"' };
+    expect(opened).toEqual({ v: 1, origin: 'handler', status: 201, headers, body: { id: 'ord_1', total: '12.50' } });
+    expect([row.responseStatus, row.responseHeaders]).toEqual([201, headers]);
+  });
+
+  it('a clear status changed by a database writer (201 to 409) is never replayed', async () => {
+    const context = await completed();
+    context.row.responseStatus = 409;
+    await expectUnreadable(context, 'stored response mismatch');
+  });
+
+  it('a clear Location or Content-Type changed, added or removed is never replayed', async () => {
+    for (const headers of [
+      { Location: 'https://attacker.example.test/', ETag: '"v1"' },
+      { Location: '/api/v1/orders/ord_1', ETag: '"v1"', 'Content-Type': 'text/html' },
+      { Location: '/api/v1/orders/ord_1' },
+      null,
+    ]) {
+      const context = await completed();
+      context.row.responseHeaders = headers;
+      await expectUnreadable(context, 'stored response mismatch');
+    }
+  });
+
+  it('a completed row whose ciphertext was nulled is unreadable (and refused by ck_idempotency_keys__completed_body)', async () => {
+    const context = await completed({ status: 204 });
+    context.row.responseBody = null;
+    context.row.responseBodyKeyId = null;
+    await expectUnreadable(context, 'stored response missing');
+  });
+
+  it('an envelope of another version, without its fields, or of the part 040-A form {origin, body} is unreadable', async () => {
+    for (const envelope of [
+      { v: 2, origin: 'handler', status: 201, headers: {}, body: {} },
+      { origin: 'handler', body: { id: 'ord_1' } },
+      { v: 1, origin: 'server', status: 201, headers: {}, body: {} },
+      { v: 1, origin: 'handler', status: 500, headers: {}, body: {} },
+      { v: 1, origin: 'handler', status: '201', headers: {}, body: {} },
+      { v: 1, origin: 'handler', status: 201, headers: { 'X-Other': 'x' } },
+      { v: 1, origin: 'handler', status: 201, headers: { Location: 7 } },
+      { v: 1, origin: 'handler', status: 201, headers: [] },
+      [1, 'handler'],
+    ]) {
+      const context = await completed();
+      context.row.responseBody = cipher.seal(context.claim.scopeHash, JSON.stringify(envelope)).ciphertext;
+      await expect(context.begin()).rejects.toThrow(IdempotencyReplayError);
+      expect(context.log.lines.map((line) => line.event)).toEqual(['api.idempotency_replay_unreadable']);
+    }
+    const context = await completed();
+    context.row.responseBody = cipher.seal(context.claim.scopeHash, 'not json').ciphertext;
+    await expectUnreadable(context, 'stored envelope malformed');
+  });
+
+  it('a sealed Content-Type outside application/json and application/problem+json is refused at replay', async () => {
+    const context = await completed();
+    const headers = { 'Content-Type': 'text/html' };
+    const envelope = { v: 1, origin: 'handler', status: 201, headers, body: { id: 'ord_1' } };
+    context.row.responseBody = cipher.seal(context.claim.scopeHash, JSON.stringify(envelope)).ciphertext;
+    context.row.responseHeaders = headers;
+    await expectUnreadable(context, 'stored content type refused');
+  });
+
+  it('completion refuses a Content-Type outside the allow-list and accepts JSON and problem+JSON with charset utf-8', async () => {
+    const { begin, claimOf, inTx, store, keys } = setup();
+    for (const contentType of ['text/html', 'application/json; charset=iso-8859-1', 'application/jsonp', 'text/plain']) {
+      const claim = claimOf(await begin(request(1, `ct-${contentType}`)));
+      await expect(
+        inTx((db) => store.complete(db, claim, { status: 200, headers: { 'content-type': contentType }, body: {} })),
+      ).rejects.toThrow('is never stored');
+    }
+    for (const contentType of ['application/json', 'application/json; charset=utf-8', 'Application/Problem+JSON;charset=UTF-8']) {
+      const claim = claimOf(await begin(request(1, `ok-${contentType}`)));
+      await inTx((db) => store.complete(db, claim, { status: 200, headers: { 'content-type': contentType }, body: {} }));
+      expect(keys.rows.get(claim.id)?.responseHeaders).toEqual({ 'Content-Type': contentType });
+    }
+  });
+});
+
 describe('idempotencyStoreFrom (ADR-0018 key register row idempotency-body)', () => {
   const version = (keyId: string, bytes: Uint8Array, localOnly = false) => ({ keyId, localOnly, material: { reveal: () => bytes } });
   const log = SILENT_IDEMPOTENCY_LOG;
@@ -280,13 +401,11 @@ describe('idempotencyStoreFrom (ADR-0018 key register row idempotency-body)', ()
     expect(store?.log).toBe(log);
   });
 
-  it('derives 32 key bytes from a local-only marker, per key id; a deployed key is its material', () => {
+  it('derives 32 key bytes from a local-only marker, per key id', () => {
     const marker = new TextEncoder().encode('local-only-idempotency');
     const derived = bodyKeyOf(version('idempotency-body-v1', marker, true));
     expect(derived.key).toHaveLength(32);
     expect(Buffer.from(bodyKeyOf(version('idempotency-body-v2', marker, true)).key).equals(Buffer.from(derived.key))).toBe(false);
-    const material = new Uint8Array(32).fill(6);
-    expect(bodyKeyOf(version('idempotency-body-v1', material)).key).toBe(material);
   });
 
   it('a malformed key throws at composition (fail fast before listening)', () => {

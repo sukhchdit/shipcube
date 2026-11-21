@@ -190,7 +190,7 @@ describe('[REQ-API-011] idempotency_keys statements (PostgreSQL 18)', () => {
     expect(await withTenantTx(CALLER, (db) => claim(db, expiring))).toBeDefined();
   });
 
-  it('the CHECKs refuse a malformed key, a half-stored body, a stored 5xx or 429, and a completed row without a status', async () => {
+  it('[PR040-SEC-02] the CHECKs refuse a malformed key, a half-stored body, a stored 5xx or 429, a completed row without a status or a sealed response', async () => {
     const app = new pg.Client({ connectionString: postgres.appUrl(database) });
     await app.connect();
     const insert = (columns: Record<string, unknown>) => {
@@ -232,6 +232,15 @@ describe('[REQ-API-011] idempotency_keys statements (PostgreSQL 18)', () => {
       await expect(
         insert({ status: 'COMPLETED', response_status: 422, response_body: randomBytes(40), response_body_key_id: 'idempotency-body-v1' }),
       ).resolves.toMatchObject({ rowCount: 1 });
+      // Migration 20261121000000 (TASK-040 part 040-B): a COMPLETED row always has its sealed response, an IN_PROGRESS
+      // row never has one (ck_idempotency_keys__completed_body).
+      await expect(insert({ status: 'COMPLETED', response_status: 204 })).rejects.toMatchObject({
+        code: '23514',
+        constraint: 'ck_idempotency_keys__completed_body',
+      });
+      await expect(
+        insert({ status: 'IN_PROGRESS', response_body: randomBytes(40), response_body_key_id: 'idempotency-body-v1' }),
+      ).rejects.toMatchObject({ code: '23514', constraint: 'ck_idempotency_keys__completed_body' });
     } finally {
       await app.end();
     }

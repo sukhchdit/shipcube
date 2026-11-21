@@ -25,10 +25,12 @@ model ReferenceDatasetVersion {
 /// HTTP idempotency keys (ADR-0014 §HTTP idempotency and amendments 1, 4; REQ-API-009..011, DR-A20; data-model §3.5,
 /// §6.2; TASK-040). SYSTEM class, module `idempotency` (tools/db/table-classes/idempotency.json): read and written only
 /// by apps/api/src/platform/idempotency/** through `systemDelegates(tx)` (PR19-SEC-01, D-ARCH-080). `responseBody` is
-/// AES-256-GCM ciphertext under IDEMPOTENCY_BODY_KEY (`responseBodyKeyId`; AAD binds hex(scope_hash) and the key id).
-/// Hard-delete allow-listed (5xx/429 outcomes, expired keys). Kept in the migration SQL: the CHECKs
-/// `ck_idempotency_keys__version`, `__scope_hash`, `__method`, `__key`, `__fingerprint`, `__status`, `__response_status`,
-/// `__completed`, `__body_key`, `__body_key_id` and the standard-columns guard trigger.
+/// the AES-256-GCM sealed response envelope {v, origin, status, headers, body} under the HKDF-derived body key
+/// (`responseBodyKeyId`; AAD binds hex(scope_hash) and the key id; ADR-0014 amendment 15); `responseStatus` and
+/// `responseHeaders` are informational copies that must equal it. Hard-delete allow-listed (5xx/429 outcomes, expired
+/// keys). Kept in the migration SQL: the CHECKs `ck_idempotency_keys__version`, `__scope_hash`, `__method`, `__key`,
+/// `__fingerprint`, `__status`, `__response_status`, `__completed`, `__completed_body` (a COMPLETED row has its sealed
+/// response, TASK-040 part 040-B), `__body_key`, `__body_key_id` and the standard-columns guard trigger.
 model IdempotencyKey {
   id                String   @id(map: "pk_idempotency_keys") @default(dbgenerated("uuidv7()")) @db.Uuid
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
