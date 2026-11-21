@@ -31,6 +31,7 @@ import { principalOf } from '../routing/route-state.js';
 import { SlotNotImplementedError, type RouteSlot } from '../routing/slot.js';
 import type { StoreBreaker } from './breaker.js';
 import type { RateLimitCounter, StepZeroLabel } from './counter.js';
+import type { InFlightLedger } from './in-flight.js';
 import type { RateDecision, RateLimiter, RateReading } from './limiter.js';
 import { AUTHN_FAILED_RULE, authnFailedRule, classPolicy, clientIpKey, type RateLimitSettings, stepZeroRule } from './policy.js';
 
@@ -49,6 +50,8 @@ export interface RateLimitKit {
   readonly events: SecurityEventSink;
   /** The process breaker of the store (ADR-0016 am. 12 item 7): createApp hands it to the denial budget too. */
   readonly breaker: StoreBreaker;
+  /** The per-instance in-flight ledger of the failed-authentication gate (in-flight.ts; D-TASK041-18). */
+  readonly inFlight: InFlightLedger;
 }
 
 /** The orchestrators' liveness and readiness probes (class `none`, README §7) are never counted. */
@@ -126,6 +129,12 @@ function stepZeroLabel(credentialed: boolean, decision: RateDecision): StepZeroL
  * answered 429 with the rest of the failed window, valid credentials included (ADR-0016 am. 13 item 2, the accepted
  * scope). Everything else (API docs, OPTIONS, paths outside the prefix, a cookie-only request off the cookie routes)
  * takes the anonymous budget, whatever headers it carries, and is never refused by the failed-authentication budget.
+ *
+ * A parallel burst would read the same settled count, so a credentialed request is also admitted against the IP's
+ * in-flight ledger (in-flight.ts; R1-M1, D-TASK041-18): it holds one unit from here until the authentication slot's
+ * outcome is known (authn-failed.ts releases it, after a spend has landed) or, if the slot is never reached, until the
+ * response closes. While `settled + held` reaches the limit it is answered 429 with `Retry-After: 1`. A request whose
+ * response closed before the store answered (an aborted client) is never admitted, so an abort cannot skip the hold.
  */
 export function ipLimiter(kit: RateLimitKit | undefined, options: StepZeroOptions): RequestHandler {
   if (kit === undefined) return passThrough();
@@ -138,9 +147,19 @@ export function ipLimiter(kit: RateLimitKit | undefined, options: StepZeroOption
     const ip = clientIpKey(req.ip);
     const rule = stepZeroRule(ip, credentialed, kit.settings);
     const consumeOptions = { onStoreFailure: 'fail-open', scope: 'rate-limit' } as const;
-    const decided = credentialed
-      ? kit.limiter.consumeGated(rule, authnFailedRule(ip, kit.settings), consumeOptions)
-      : kit.limiter.consume([rule], consumeOptions);
+    let decided: Promise<RateDecision>;
+    if (credentialed) {
+      const gate = authnFailedRule(ip, kit.settings);
+      let closed = false;
+      res.once('close', () => {
+        closed = true;
+        kit.inFlight.release(res);
+      });
+      const admit = (settled: number): boolean => !closed && kit.inFlight.admit(ip, settled, gate.limit, res);
+      decided = kit.limiter.consumeGated(rule, gate, { ...consumeOptions, admit });
+    } else {
+      decided = kit.limiter.consume([rule], consumeOptions);
+    }
     decided.then((decision) => answer(decision, res, next, () => kit.counter.refused(stepZeroLabel(credentialed, decision)))).catch(next);
   };
 }
@@ -162,7 +181,9 @@ const LITERAL_PATH = /^(?:\/[A-Za-z0-9._~-]+)+$/u;
 /**
  * The exact full paths of the module routes that declare `refresh-cookie` (`getCsrfToken`, `refreshSession`,
  * `logoutSession`; ADR-0016 am. 13 item 1). createApp derives them from the mounted routes at boot and refuses a
- * cookie route with a non-literal path, so a cookie route can never be served under a path step 0 does not know.
+ * cookie route with a non-literal path, so step 0 can match every cookie route by its exact path. The Express routers
+ * are case-insensitive and not strict, so another spelling of a cookie path (`/api/v1/auth/refresh/`,
+ * `/API/V1/auth/refresh`) is still served; such a request takes the unauthenticated budget instead (am. 13 item 1).
  */
 export function refreshCookieRoutePaths(routes: readonly RouteDescriptor[], apiPrefix: string): ReadonlySet<string> {
   const paths = new Set<string>();

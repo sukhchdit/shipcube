@@ -1,9 +1,12 @@
 /**
  * The failed-authentication budget through the real createApp (PR041-SEC-02 (b), PR041-SEC-09; ADR-0016 amendment 12
  * items 3, 4 and 6, amendment 13 items 1 to 3; rulings B1 tests (1) to (7) and (9) to (13), B2; conditions E4 and E5;
- * TASK-041 part 041-B). Valkey is the script-interpreting fake shared by every "replica"; the real Lua is proved in
+ * TASK-041 part 041-B; the parallel burst of R1-M1 and D-TASK041-18, the replaced pipeline of R1-m2). Valkey is the script-interpreting fake shared by every "replica"; the real Lua is proved in
  * rate-limit.int.test.ts, the startApi half (B1 (8)) in start-api.denial-budget.api.test.ts.
  */
+import { request as httpRequest } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { AppError, presentedKinds } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
@@ -13,10 +16,11 @@ import { generateKeyPair, jwtVerify } from 'jose';
 import { createApp, type AppDependencies, type AppLogger } from '../../app.js';
 import { precheckAccessToken } from '../authn/access-token-precheck.js';
 import type { Principal } from '../routing/define-route.js';
-import { bootFailureOf } from '../routing/pipeline.js';
+import { bootFailureOf, defaultPipelineSlots } from '../routing/pipeline.js';
 import { ANONYMOUS, markPrivateResponse, readonlySet, setPrincipal } from '../routing/route-state.js';
 import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
+import { closeLoopbackServer } from '../routing/tests/loopback.js';
 import { createRateLimitCounter } from './counter.js';
 import type { RateLimitDependencies } from './kit.js';
 import { RefreshCookiePathError } from './limits.js';
@@ -458,5 +462,147 @@ describe('[E5] [ADR-0016 am. 13 item 3] the exp pre-check in front of the verifi
     }
     expect(verifications).toBe(0);
     expect(h.valkey.value(failedKey(IP_A))).toBe(3);
+  });
+});
+
+/** A seam that answers after `delayMs` (a stand-in for a verification or a lookup) and records its peak concurrency. */
+function slowSeam(delayMs: number): Seam & { active: number; peak: number } {
+  const state = {
+    entered: 0,
+    active: 0,
+    peak: 0,
+    slot: (() => (req: Request, res: Response, next: NextFunction) => {
+      state.entered += 1;
+      state.active += 1;
+      state.peak = Math.max(state.peak, state.active);
+      setTimeout(() => {
+        state.active -= 1;
+        markPrivateResponse(res);
+        if (req.get('authorization') === 'Bearer valid') {
+          setPrincipal(res, session);
+          next();
+          return;
+        }
+        next(new AppError('AUTH_REQUIRED'));
+      }, delayMs);
+    }) as RouteSlot,
+  };
+  return state;
+}
+
+/** Sends `count` bearers from `ip` to the [session] route at once; resolves with every reply. */
+const parallelBearers = (app: ReturnType<typeof createApp>, ip: string, count: number, bearer = 'Bearer junk') =>
+  Promise.all(Array.from({ length: count }, () => request(app).get('/api/v1/me').set(fromIp(ip)).set('Authorization', bearer)));
+
+/** Polls `done` every 10 ms (a condition, not a sleep); fails after `deadlineMs`. */
+async function until(done: () => boolean, deadlineMs = 30_000): Promise<void> {
+  const started = Date.now();
+  while (!done()) {
+    if (Date.now() - started > deadlineMs) throw new Error('condition not reached');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+describe('[R1-M1] [D-TASK041-18] a parallel burst is bounded by the budget (the in-flight ledger)', () => {
+  it('60 parallel junk bearers with limit 5: the authenticator is entered 5 times (per-instance slack 0), 5 x 401 and 55 x 429', async () => {
+    const h = harness();
+    const slow = slowSeam(20);
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: slow.slot });
+    const replies = await parallelBearers(app, IP_A, 60);
+    expect(slow.entered).toBe(5);
+    expect(replies.filter((reply) => reply.status === 401)).toHaveLength(5);
+    const refused = replies.filter((reply) => reply.status === 429);
+    expect(refused).toHaveLength(55);
+    for (const reply of refused) {
+      expect((reply.body as { code?: unknown }).code).toBe('RATE_LIMITED');
+      expect(reply.headers['retry-after']).toMatch(/^\d+$/);
+      expect(reply.headers['ratelimit-limit']).toBe('5');
+      expect(reply.headers['ratelimit-remaining']).toBe('0');
+    }
+    expect(h.valkey.value(failedKey(IP_A))).toBe(5);
+    expect(h.counter.snapshot()).toEqual({ 'step0-authn-failed': 55 });
+    expect(securityEvents(h, 'rate_limit_auth')).toHaveLength(1);
+    // The window is spent: the next request is refused before the authenticator, valid or not.
+    expect((await request(app).get('/api/v1/me').set(fromIp(IP_A)).set('Authorization', 'Bearer valid')).status).toBe(429);
+    expect(slow.entered).toBe(5);
+  });
+
+  it('[D-TASK041-18] the residual: two replicas over one Valkey each admit up to the limit, so at most 2 x 5 reach an authenticator', async () => {
+    const valkey = new FakeValkey();
+    const [first, second] = [slowSeam(20), slowSeam(20)];
+    const one = harness(valkey).app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: first.slot });
+    const two = harness(valkey).app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: second.slot });
+    const replies = (await Promise.all([parallelBearers(one, IP_A, 30), parallelBearers(two, IP_A, 30)])).flat();
+    expect(first.entered).toBeLessThanOrEqual(5);
+    expect(second.entered).toBeLessThanOrEqual(5);
+    const entered = first.entered + second.entered;
+    expect(entered).toBeGreaterThanOrEqual(5);
+    expect(replies.filter((reply) => reply.status === 401)).toHaveLength(entered);
+    expect(replies.filter((reply) => reply.status === 429)).toHaveLength(60 - entered);
+    expect(valkey.value(failedKey(IP_A))).toBe(entered);
+  });
+
+  it('valid credentials of one IP are refused (Retry-After 1) only while the limit of its authentications is in flight; every unit is released', async () => {
+    const h = harness();
+    const slow = slowSeam(20);
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: slow.slot });
+    const replies = await parallelBearers(app, IP_A, 30, 'Bearer valid');
+    expect(slow.peak).toBeLessThanOrEqual(5);
+    expect(replies.filter((reply) => reply.status === 200).length).toBeGreaterThanOrEqual(5);
+    for (const reply of replies.filter((candidate) => candidate.status !== 200)) {
+      expect([reply.status, reply.headers['retry-after']]).toEqual([429, '1']);
+    }
+    expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+    // Nothing is left held: five refusals in sequence still reach the authenticator.
+    expect(await junkBearers(app, IP_A, 5)).toEqual([401, 401, 401, 401, 401]);
+  });
+
+  it('a credentialed request that never reaches the authentication slot (404) releases its unit when the response closes', async () => {
+    const h = harness();
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 2 });
+    for (let call = 0; call < 5; call += 1) {
+      expect((await request(app).get('/api/v1/no-such-route').set(fromIp(IP_A)).set('Authorization', 'Bearer junk')).status).toBe(404);
+    }
+    expect(await junkBearers(app, IP_A, 3)).toEqual([401, 401, 429]);
+  });
+
+  it('a request whose client went away before step 0 answered is never admitted, so an abort cannot skip the hold', async () => {
+    const h = harness();
+    h.valkey.hang = true;
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    try {
+      const outgoing = httpRequest({
+        host: '127.0.0.1',
+        port: (server.address() as AddressInfo).port,
+        path: '/api/v1/me',
+        agent: false,
+        headers: { ...fromIp(IP_A), Authorization: 'Bearer junk' },
+      });
+      outgoing.on('error', () => undefined);
+      outgoing.end();
+      // Step 0 has sent its store call (it hangs until the 250 ms bound); then the client goes away.
+      await until(() => h.valkey.calls === 1);
+      outgoing.destroy();
+      await until(() => h.counter.snapshot()['step0-authn-failed'] === 1);
+      expect(h.seam.entered).toBe(0);
+    } finally {
+      await closeLoopbackServer(server);
+    }
+  });
+});
+
+describe('[R1-m2] [K3] the wrapper is composed around a replaced pipeline too', () => {
+  it('with `pipeline` and `rateLimit`, a refusal of the replaced authentication slot spends one unit', async () => {
+    const h = harness();
+    const passThrough: RouteSlot = () => (_req: Request, _res: Response, next: NextFunction) => next();
+    const app = h.app(
+      { RATE_LIMIT_PUBLIC_PER_MIN: 5 },
+      { pipeline: { ...defaultPipelineSlots({ tenantTx: undefined }), rateLimit: passThrough, authenticate: h.seam.slot } },
+    );
+    expect(await junkBearers(app, IP_A, 1)).toEqual([401]);
+    expect(h.seam.entered).toBe(1);
+    expect(h.valkey.value(failedKey(IP_A))).toBe(1);
   });
 });

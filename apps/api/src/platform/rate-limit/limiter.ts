@@ -9,10 +9,10 @@
  * minute per scope as the runtime security event `rate_limit_store_unavailable` (class-only fields, no host).
  *
  * The failed-authentication budget (ADR-0016 amendment 12 item 4, amendment 13; TASK-041 part 041-B) uses two calls:
- * {@link RateLimiter.spend} counts a refused credential, and {@link RateLimiter.consumeGated} counts a step-0 hit and
- * reads that budget in the same store call.
+ * {@link RateLimiter.spend} counts a refused credential, and {@link RateLimiter.consumeGated} counts a step-0 hit,
+ * reads that budget in the same store call and admits the request against the in-flight ledger (in-flight.ts).
  */
-import { createMemoryStore, type RateLimitStore, type WindowPeek } from './store.js';
+import { createMemoryStore, type RateLimitStore, type WindowHit, type WindowPeek } from './store.js';
 
 /** A fixed-window rule: `limit` hits per `windowMs` under `name` and `key` (an identifier, never personal data). */
 export interface RateRule {
@@ -57,15 +57,25 @@ export interface SpendResult {
   readonly reached: boolean;
 }
 
+export interface GatedConsumeOptions extends ConsumeOptions {
+  /**
+   * The admission of a request `rule` allowed (in-flight.ts; D-TASK041-18): called with the gate's settled count in the
+   * same synchronous step as the store reply is judged; false refuses the request with the gate's reading and a
+   * one-second retry. Absent, every allowed request is admitted.
+   */
+  readonly admit?: ((settled: number) => boolean) | undefined;
+}
+
 export interface RateLimiter {
   consume(rules: readonly RateRule[], options: ConsumeOptions): Promise<RateDecision>;
   /**
    * Counts one hit of `rule` and reads `gate` in ONE store call. While the gate's count is at or above its limit the
    * request is refused with the gate's reading and the rest of the gate's window (`first` is false: the gate's event is
-   * emitted by the spend that reaches its limit). Otherwise `rule` decides. On a store failure `rule` follows
-   * `options.onStoreFailure` and the gate is read from the per-instance fallback, where the spends of the outage went.
+   * emitted by the spend that reaches its limit). Otherwise `rule` decides, and a request it allows must pass
+   * `options.admit`. On a store failure `rule` follows `options.onStoreFailure` and the gate is read from the
+   * per-instance fallback, where the spends of the outage went.
    */
-  consumeGated(rule: RateRule, gate: RateRule, options: ConsumeOptions): Promise<RateDecision>;
+  consumeGated(rule: RateRule, gate: RateRule, options: GatedConsumeOptions): Promise<RateDecision>;
   /** Spends one unit of `rule` (never refused here); on a store failure the per-instance fallback counts it. Never rejects. */
   spend(rule: RateRule, scope: string): Promise<SpendResult>;
   /** A concurrency slot (SSE streams, README §7): false when `max` holders already hold one. Fails open on a store error. */
@@ -115,16 +125,25 @@ async function evaluate(store: RateLimitStore, rules: readonly RateRule[]): Prom
   return { allowed: true, reading: closest };
 }
 
-/** The refusal of a spent gate (failed count at or above the limit), or undefined while the gate is open. */
-function gateRefusal(gate: RateRule, peek: WindowPeek): RateDecision | undefined {
-  if (peek.count < gate.limit) return undefined;
-  const resetSeconds = seconds(peek.resetMs);
+/** A refusal by the gate: its reading with no unit left, and a retry after `resetSeconds`. */
+function gateRefusal(gate: RateRule, resetSeconds: number): RateDecision {
   return {
     allowed: false,
     reading: { rule: gate.name, limit: gate.limit, remaining: 0, resetSeconds },
     retryAfterSeconds: resetSeconds,
     first: false,
   };
+}
+
+/**
+ * The gated decision over one reading of the gate: refused with the rest of the gate's window while the gate is spent;
+ * else the rule's `decision`, and a request it allows is refused for one second unless `admit` admits it (the earlier
+ * admitted requests of the key are still in flight). Synchronous, so the admission and the reading are one step.
+ */
+function gated(gate: RateRule, peek: WindowPeek, decision: RateDecision, admit: GatedConsumeOptions['admit']): RateDecision {
+  if (peek.count >= gate.limit) return gateRefusal(gate, seconds(peek.resetMs));
+  if (!decision.allowed || admit === undefined || admit(peek.count)) return decision;
+  return gateRefusal(gate, 1);
 }
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
@@ -139,21 +158,19 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         return onStoreFailure === 'fallback' ? evaluate(fallback, rules) : { allowed: true, reading: undefined };
       }
     },
-    async consumeGated(rule, gate, { onStoreFailure, scope }) {
+    async consumeGated(rule, gate, { onStoreFailure, scope, admit }) {
+      const gateKey = counterKey(gate.name, gate.key);
+      let reply: { readonly hit: WindowHit; readonly peek: WindowPeek };
       try {
-        const { hit, peek } = await options.store.hitAndPeek(
-          counterKey(rule.name, rule.key),
-          rule.windowMs,
-          counterKey(gate.name, gate.key),
-          gate.windowMs,
-        );
-        return gateRefusal(gate, peek) ?? judge(rule, hit.count, hit.resetMs);
+        reply = await options.store.hitAndPeek(counterKey(rule.name, rule.key), rule.windowMs, gateKey, gate.windowMs);
       } catch {
         options.onStoreUnavailable(scope);
-        const refused = gateRefusal(gate, await fallback.peek(counterKey(gate.name, gate.key), gate.windowMs));
-        if (refused !== undefined) return refused;
-        return onStoreFailure === 'fallback' ? evaluate(fallback, [rule]) : { allowed: true, reading: undefined };
+        // The rule first and the gate last, so that the gate's reading and the admission are one step after the last await.
+        const decision: RateDecision =
+          onStoreFailure === 'fallback' ? await evaluate(fallback, [rule]) : { allowed: true, reading: undefined };
+        return gated(gate, await fallback.peek(gateKey, gate.windowMs), decision, admit);
       }
+      return gated(gate, reply.peek, judge(rule, reply.hit.count, reply.hit.resetMs), admit);
     },
     async spend(rule, scope) {
       const key = counterKey(rule.name, rule.key);

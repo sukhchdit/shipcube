@@ -295,3 +295,20 @@ describe('[PR041-SEC-02] [B1 (8)] startApi composes the failed-authentication bu
     expect(valkey.value('rl:step0:authn-failed:203.0.113.51')).toBeUndefined();
   });
 });
+
+describe('[R1-m2] [B3] [K1] [K2] the composition shares one store breaker between the limiters and the denial budget', () => {
+  it('with a hanging store the first request waits the 250 ms bound once; during the cool-down step 5 and the denials make no store call', async () => {
+    const { app, valkey } = await start();
+    valkey.hang = true;
+    const started = Date.now();
+    expect((await request(app).get('/api/v1/address-book').set('X-Forwarded-For', '203.0.113.60')).status).toBe(403);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(240);
+    // Step 0 reached the store and timed out; step 5 (the kit's store, K1) and the denial budget (K2) were refused
+    // by the open breaker without a call.
+    expect(valkey.calls).toBe(1);
+    for (let denial = 0; denial < 2; denial += 1) {
+      expect((await request(app).get('/api/v1/address-book').set('X-Forwarded-For', '203.0.113.61')).status).toBe(403);
+    }
+    expect(valkey.calls).toBe(1);
+  });
+});

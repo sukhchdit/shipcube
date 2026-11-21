@@ -121,7 +121,12 @@ end
 return {count, ttl, peeked, pttl}
 `;
 
-/** The read half of HIT_AND_PEEK_SCRIPT alone. */
+/**
+ * The read half of HIT_AND_PEEK_SCRIPT alone. No production path calls the Valkey `peek` today (the step-0 gate reads
+ * through `hitAndPeek`; during an outage the limiter peeks the in-memory fallback). It is kept deliberately (n5 of the
+ * part-B review): `peek` is part of the one store port both stores implement, so the fallback can be any store, and
+ * its script is proved against a real Valkey in rate-limit.int.test.ts.
+ */
 export const PEEK_SCRIPT = `
 local peeked = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
 local pttl = 0

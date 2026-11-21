@@ -10,14 +10,19 @@ import type { Express } from 'express';
 
 import { closeLoopbackServer, fetchOnce } from '../../routing/tests/loopback.js';
 
-const served = new Map<Express, { readonly base: string; readonly server: Server }>();
+/**
+ * One server per app, recorded synchronously on the first call: parallel first calls (a burst) share it instead of each
+ * listening on a server of its own that nothing closes (R1-M1 burst rows).
+ */
+const served = new Map<Express, { readonly base: Promise<string>; readonly server: Server }>();
 
-async function baseOf(app: Express): Promise<string> {
+function baseOf(app: Express): Promise<string> {
   const existing = served.get(app);
   if (existing !== undefined) return existing.base;
   const server = app.listen(0, '127.0.0.1');
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  const base = new Promise<string>((resolve) => {
+    server.once('listening', () => resolve(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}`));
+  });
   served.set(app, { base, server });
   return base;
 }

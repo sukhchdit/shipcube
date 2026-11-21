@@ -37,7 +37,8 @@ function decodeObject(segment: string): Readonly<Record<string, unknown>> | unde
 
 /**
  * Classifies `token` (the bearer value, without the scheme) at `nowSeconds` with `toleranceSeconds` of clock skew, as
- * the verification would: expired when `exp <= now - tolerance`.
+ * the verification would: expired when `exp <= now - tolerance`. `nowSeconds` is whole seconds, as jose's `epoch()`
+ * (`Math.floor(Date.now() / 1000)`); a fractional clock would move the expired boundary against the verification.
  */
 export function precheckAccessToken(token: string, nowSeconds: number, toleranceSeconds: number): AccessTokenPrecheck {
   if (token.length === 0 || token.length > ACCESS_TOKEN_MAX_LENGTH) return 'malformed';

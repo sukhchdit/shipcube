@@ -87,7 +87,7 @@ describe('[B3] [ADR-0016 am. 12 item 7] the store breaker', () => {
     expect(breaker.state()).toBe('open');
   });
 
-  it('[B3] with a hanging store the first call waits the 250 ms bound, each of the next 20 returns in under 5 ms, and after the cool-down one probe is sent', async () => {
+  it('[B3] with a hanging store the first call waits the 250 ms bound, the next 20 fail fast without a store call (no bounded wait can start), and after the cool-down one probe is sent', async () => {
     const valkey = new FakeValkey();
     valkey.hang = true;
     const clock = { now: 0 };
@@ -100,12 +100,13 @@ describe('[B3] [ADR-0016 am. 12 item 7] the store breaker', () => {
     const started = performance.now();
     expect(await limiter.consume([rule], OPEN)).toEqual({ allowed: true, reading: undefined });
     expect(performance.now() - started).toBeGreaterThanOrEqual(STORE_TIMEOUT_MS - 5);
+    // Deterministic, not wall-clock (n2): the 250 ms bound starts only inside a store call, so a call that never
+    // reaches the client cannot wait. The cool-down is read from the injected clock, which does not move here.
     for (let call = 0; call < 20; call += 1) {
-      const at = performance.now();
       expect(await limiter.consume([rule], OPEN)).toEqual({ allowed: true, reading: undefined });
-      expect(performance.now() - at).toBeLessThan(5);
+      expect(valkey.calls).toBe(1);
+      expect(breaker.state()).toBe('open');
     }
-    expect(valkey.calls).toBe(1);
     expect(outages).toHaveLength(21);
     clock.now += BREAKER_COOLDOWN_MS;
     valkey.hang = false;

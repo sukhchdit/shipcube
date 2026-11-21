@@ -162,6 +162,60 @@ describe('[B1] the wrapper around the authentication slot', () => {
     expect(passed).toBe(1);
   });
 
+  it('[R1-m1] a promise rejected with a falsy value, and a falsy throw, are passed on as errors and spend nothing', async () => {
+    const k = kit();
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the falsy rejection under test
+    const rejectsUndefined: RouteSlot = () => () => Promise.reject(undefined);
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the falsy rejection under test
+    const rejectsFalse: RouteSlot = () => () => Promise.reject(false);
+    const throwsUndefined: RouteSlot = () => () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- the falsy throw under test
+      throw undefined;
+    };
+    const passed = [await run(rejectsUndefined, k), await run(rejectsFalse, k), await run(throwsUndefined, k)];
+    expect(passed.map((error) => (error instanceof Error ? error.message : error))).toEqual([
+      'Rejected promise',
+      'Rejected promise',
+      'Thrown falsy value',
+    ]);
+    // None is a refused credential (no AppError): nothing was spent, so the limit of 2 is still two refusals away.
+    await run(refusing, k);
+    expect(k.events).toEqual([]);
+    await run(refusing, k);
+    expect(k.events).toHaveLength(1);
+  });
+
+  it('[R1-M1] the in-flight unit of the request is released when the outcome is known: at once, or after the spend has landed', async () => {
+    const k = kit();
+    const ip = '203.0.113.7';
+    const heldDuringSpend: number[] = [];
+    const observed = {
+      ...k.composed,
+      limiter: {
+        ...k.composed.limiter,
+        spend: (...args: Parameters<typeof k.composed.limiter.spend>) => {
+          heldDuringSpend.push(k.composed.inFlight.held(ip));
+          return k.composed.limiter.spend(...args);
+        },
+      },
+    };
+    const accepting: RouteSlot = () => (_req, _res, next) => next();
+    const heldAtNext: number[] = [];
+    for (const slot of [accepting, refusing]) {
+      const holder = {} as Response;
+      expect(k.composed.inFlight.admit(ip, 0, 2, holder)).toBe(true);
+      await new Promise<void>((resolve) => {
+        withAuthnFailedBudget(slot, observed)(route)(request(), holder, (() => {
+          heldAtNext.push(k.composed.inFlight.held(ip));
+          resolve();
+        }) as NextFunction);
+      });
+    }
+    expect(heldAtNext).toEqual([0, 0]);
+    // The refusal's unit was still held while its spend was issued: no step-0 reading in between can miss it.
+    expect(heldDuringSpend).toEqual([1]);
+  });
+
   it('an accepted request, a refusal without a declared credential and a server fault spend nothing', async () => {
     const k = kit();
     const accepting: RouteSlot = () => (_req, _res, next) => next();

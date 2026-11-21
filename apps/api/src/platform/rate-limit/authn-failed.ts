@@ -15,6 +15,8 @@
  *   settled (bounded by the store timeout and the breaker; a store failure uses the per-instance fallback).
  * - The spend that reaches the limit emits `rate_limit_auth` with `class: 'authn-failed'` and `key_type: 'ip'`, once per
  *   key and window (ADR-0016 am. 12 item 6). Step 0 reads the budget (limits.ts `ipLimiter`).
+ * - Once the slot's outcome is known (after the spend, when there is one) the wrapper releases the in-flight unit step 0
+ *   holds for the request (in-flight.ts; R1-M1, D-TASK041-18), so a parallel burst is bounded by the budget too.
  */
 import { isAppError, presentedKinds } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
@@ -49,10 +51,14 @@ export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit): Route
     const declared: readonly string[] = route.auth;
     return function authenticate(req: Request, res: Response, next: NextFunction): void {
       let settled = false;
+      // The outcome is known: the in-flight unit step 0 holds for this request (in-flight.ts) is released, after the
+      // spend has landed when there is one, so the next step-0 reading counts this refusal either way.
       const done = (error?: unknown): void => {
+        // Only the first outcome counts; a later call or a rejection that arrives after it is dropped on purpose.
         if (settled) return;
         settled = true;
         if (!spendsAuthnBudget(error) || !presentsDeclaredCredential(declared, req.headers)) {
+          kit.inFlight.release(res);
           next(error);
           return;
         }
@@ -61,16 +67,22 @@ export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit): Route
           .then(({ reached }) => {
             if (reached) kit.events.emit('rate_limit_auth', { class: AUTHN_FAILED_EVENT_CLASS, key_type: 'ip' });
           })
+          // `spend` never rejects; only a throwing event sink lands here. It must not change the answer, and the
+          // sink is the logger itself, so there is nowhere else to report it.
           .catch(() => undefined)
-          .finally(() => next(error));
+          .finally(() => {
+            kit.inFlight.release(res);
+            next(error);
+          });
       };
       // A synchronous throw and a rejected promise of the slot are refusals too: Express would pass them on past
-      // the wrapper.
+      // the wrapper. A promise rejected with a falsy value is an error, as the Express 5 router makes it (R1-m1); a
+      // falsy synchronous throw is one too (stricter than the router, which would continue the request).
       try {
         const result: unknown = inner(req, res, done);
-        if (isThenable(result)) result.then(undefined, done);
+        if (isThenable(result)) result.then(undefined, (error: unknown) => done(error || new Error('Rejected promise')));
       } catch (error) {
-        done(error);
+        done(error || new Error('Thrown falsy value'));
       }
     };
   };
