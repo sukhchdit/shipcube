@@ -50,3 +50,6 @@
 - [Batch 1.1 lessons](feedback_batch_11.md) — type-only files fail diff gate, BullMQ name/id rules, tenant-key std-columns models, lock handover
 - [Plan fold D-SD-001](feedback_plan_fold_dsd001.md) — idAt moves tasks w/o renumbering, waveExceptions, no-dod cards, briefs dir, D-SD series, fetch not pull --rebase
 - [Dispatch plan 11-19](feedback_dispatch_plan_1119.md) — push freeze during PR CI start-up, hold slots for gated critical path, Wave 2 fillers, stale-card grep, f-level overlap check
+- [TASK-043 resume triage](feedback_task043_resume_triage.md) — up-down-up runs twice per lane B run (cross-suite load proof), pg client.js:170 = connect timeout
+- [TASK-080 resume](feedback_task080_resume.md) — new table/model ripples (TenantDb pin, grants pins), prisma test import limits, parseDecimal exponents
+- [TASK-051 guest claim](feedback_task051_guest_claim.md) — shared probe modules in prisma/tests/harness, suite placement for pending SEC-TC, sibling self-match trap

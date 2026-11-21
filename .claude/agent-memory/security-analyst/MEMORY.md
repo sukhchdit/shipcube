@@ -82,3 +82,4 @@
 - [P5 TASK-043 outbox](project_p5_task043.md) — r1 @da996002 (feb00326) + r2 @93f9faa0 (86ec0678) PASS_W_F-U; 01/03/04 closed; 08 INFO + R3-m2 due TASK-049; C4-1/C4-3 open
 - [P5 TASK-040 idempotency 040-A](project_p5_task040.md) — r1 @3dc1e225, r2 @e96bd979, r3 supersede @2abd665f v2 (c481471c) PASS_W_F-U; LOWs due 040-B PR1
 
+- [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit
