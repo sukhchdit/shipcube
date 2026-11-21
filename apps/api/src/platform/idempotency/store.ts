@@ -44,7 +44,7 @@ import { scopeOf } from './scope.js';
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1_000;
 /**
  * The minimum in-progress lease (data-model §6.2): a crashed request's key is taken over after it. The tx slot sizes the
- * lease of each request to cover its longest phase and renews it between phases (`leaseMsFor`, tx/execute.ts).
+ * lease of each request to cover its longest phase and renews it between phases (`idempotencyLeaseMs`, tx/execute.ts).
  */
 export const IDEMPOTENCY_LEASE_MS = 30_000;
 /** `Retry-After` of 409 IDEMPOTENCY_IN_PROGRESS (api/README §5 "Conflicts"). */

@@ -57,7 +57,7 @@ const pick = (row: KeyRow, select: Select): Record<string, unknown> => {
 };
 
 /**
- * The row CHECKs the store's writes can reach (migrations 20261120100000 and 20261121000000): a COMPLETED row has its
+ * The row CHECKs the store's writes can reach (migrations 20261120100000 and 20261121120000): a COMPLETED row has its
  * status and its sealed response with the key id, an IN_PROGRESS row has neither. A violation throws like PostgreSQL.
  */
 function checkRow(row: KeyRow): void {

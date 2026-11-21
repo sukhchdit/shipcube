@@ -210,7 +210,9 @@ describe('[REQ-API-011] the idempotency store on PostgreSQL 18 (store.ts over th
       inTx((db) =>
         systemDelegates(db).idempotencyKey.updateMany({ where: { id: claim.id }, data: { responseBody: null, responseBodyKeyId: null } }),
       ),
-    ).rejects.toThrow();
+      // check_violation, not a permission or any other failure. The runner's DbError carries the SQLSTATE only, never the
+      // driver message (PR7-SEC-03), so the constraint name is pinned by the raw-SQL case of idempotency-keys.int.test.ts.
+    ).rejects.toMatchObject({ name: 'DbError', reason: 'DB_ERROR', sqlState: '23514' });
     expect(log.lines.map((line) => line.event)).toEqual(['api.idempotency_replay_unreadable']);
     log.lines.length = 0;
   });

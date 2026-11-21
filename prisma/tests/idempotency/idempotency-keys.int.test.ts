@@ -232,7 +232,7 @@ describe('[REQ-API-011] idempotency_keys statements (PostgreSQL 18)', () => {
       await expect(
         insert({ status: 'COMPLETED', response_status: 422, response_body: randomBytes(40), response_body_key_id: 'idempotency-body-v1' }),
       ).resolves.toMatchObject({ rowCount: 1 });
-      // Migration 20261121000000 (TASK-040 part 040-B): a COMPLETED row always has its sealed response, an IN_PROGRESS
+      // Migration 20261121120000 (TASK-040 part 040-B): a COMPLETED row always has its sealed response, an IN_PROGRESS
       // row never has one (ck_idempotency_keys__completed_body).
       await expect(insert({ status: 'COMPLETED', response_status: 204 })).rejects.toMatchObject({
         code: '23514',
