@@ -114,8 +114,17 @@ describe('the typecheck solution reaches every workspace (AT-US-001-04)', () => 
 
   /** Projects outside the npm workspaces that the solution must still type-check. */
   // tests/api and tests/contract-stubs are test-only folders without a manifest (TASK-017), like tests/fixtures;
-  // tests/compose is the opt-in Compose/image stack suite (TASK-014).
-  const NON_WORKSPACE_PROJECTS = ['tools', 'tests/api', 'tests/compose', 'tests/contract-stubs', 'tests/factories', 'tests/helpers'];
+  // tests/compose is the opt-in Compose/image stack suite (TASK-014); tests/contract holds the contract suites without an
+  // app (TASK-040 x-idempotency).
+  const NON_WORKSPACE_PROJECTS = [
+    'tools',
+    'tests/api',
+    'tests/compose',
+    'tests/contract',
+    'tests/contract-stubs',
+    'tests/factories',
+    'tests/helpers',
+  ];
   const workspaceDirs = listManifests(repoRoot)
     .map(({ dir }) => dir)
     .filter((dir) => dir !== '.');
