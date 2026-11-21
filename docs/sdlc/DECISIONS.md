@@ -11218,3 +11218,46 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Regenerated:** `task-map.csv` (the TASK-119 refs column only) and `tasks/WAVE-03.md`. No brief exists for TASK-119.
 - **Context:** TASK-034 fix cycle 3 (fix head `1bac00b1`) builds the switch, the report field and the manifest field this line checks.
 - **Reversibility:** High.
+
+### D-SECCHORE-01 · 2026-11-21 · security-analyst · Security round 1 of the three main-red chore PRs: #85 gitleaks-full baseline 17 -> 22 at `72249e40` = PASS_WITH_FOLLOW-UPS; #86 Valkey back on the harness digest at `72e3dc9f` = PASS_WITH_FOLLOW-UPS; #87 Node 24 base images at `0ccac6bf` = PASS_WITH_FOLLOW-UPS (records `docs/05-quality/security/PR-0085-chore-gitleaks-baseline-security-review.md`, `PR-0086-chore-valkey-security-review.md`, `PR-0087-chore-node24-security-review.md`, committed on main)
+- **Trigger:** D-ORCH-171 (security records owed for the owned paths of #85, #86 and #87). Before finalising I read D-CRCHORE-01, D-ORCH-172, D-DEVOPS-003 and D-CRCHORE-02.
+- **Decision:** across the three PRs, 0 Critical, 0 High, 0 Medium. One LOW and three INFO.
+  1. **#85:**
+     - **The five lines are one false positive.** Each of the five fingerprints names a line that is an added line of its commit's first-parent diff. On each, the `generic-api-key` rule matches exactly one value, and the value is identical in all five: a quoted child-equals-parent pair from a TASK-051 doc comment, 12 characters, entropy 3.585. It is not a credential, and nothing needs rotation.
+     - **They cannot widen the baseline.** Each is an exact `commit:path:rule:line` key on an immutable commit. `validateBaseline` refuses commit-less lines. sec-static pins the five lines verbatim. `.gitleaks.toml` is unchanged.
+     - **22 lines suffice.** A sweep of every ref and worktree HEAD finds no other open branch that carries the line in a flagged form.
+     - **Ruling:** the three branch-only lines are accepted as an exception to D-SECPR040-02 item (1).
+     - **New INFO:** PR85-SEC-01, the retirement point of those three lines (concurs with code review R1-n3). PR85-SEC-02, the comment at `gitleaks-baseline.txt:36` names the wrong reword commit for the memory-file quote (`aad3e90d`, not `1a2b9d7d`). The value is still quoted in prose in 6 files on main, though none of those quotes is flagged.
+     - **Correction to D-ORCH-172 class (2) and code review R1-m1.** The ref-bound runner is `planned` in `required-suites.json`, so lane B does not run it today. Lane B's gitleaks evidence is the int test, which reads HEAD's baseline with HEAD's count. #85's own run should give 0 findings with 22 lines and 1 with 21. A branch without #85 shows the class (1) findings, not exit 2. R1-m1 holds once the runner is activated.
+  2. **#86:**
+     - **The pin is exact.** `compose.yaml:44` is byte-equal to all five harness pins. The digest is Valkey 8.1.11 on Alpine 3.24.3, the `8.1.11-alpine` tag today.
+     - **No new exposure against main's 9.1.3.** Both versions carry the same single open repository advisory, and their APK package sets are identical.
+     - **New PR86-SEC-01 LOW (CWE-1395, A06).** GHSA-3885-pq5f-788j, a use-after-free under client eviction, is High upstream and fixed in 8.1.12 and 9.1.4. It is not reachable here: `maxmemory-clients` is 0 by default, compose-stack pins the exact command, and the ACL refuses `CONFIG` to the application users. Fix: move compose and the harness together to 8.1.12 or later after its cooldown (about 2026-11-25), before G3, and before any change that sets `maxmemory-clients`.
+     - **New PR86-SEC-02 INFO.** At `8.1-alpine` precision, with no 8.2 line, Valkey patch releases reach the pin only as digest-only refreshes. Those are subject to a dependabot-core experiment flag, and they never move the harness. Pin `8.1.N-alpine@sha256` in compose and the harness instead (concurs with code review R1-m1).
+     - **The ignore removes only `>= 9.a`.**
+     - **D-SECPOST-01 O-1 closes when #86 merges.** compose-stack passed 29 of 29 in lane B `20261121T1629Z_72e3dc9`.
+  3. **#87:**
+     - **The revert lowers exposure.** Main's `node:26.13.0` predates the Node security release of 2026-11-11: 16 CVEs, 7 of them High, all listed for 26.x and fixed there only in 26.13.1. `node:24.22.3` is that release for the 24 line, the newest 24.x and the current `24-trixie-slim`.
+     - **The OS layer is unchanged.** The two node images and the runtime `debian:trixie-slim` pin share one Debian rootfs layer. The shipped images take only the node binary from the node image.
+     - **The ignore removes only `>= 25.a`.** 24.x patch releases still arrive as version updates.
+     - **New PR87-SEC-01 INFO (CWE-1395, A06).** Nothing checks the Node pin against Node security releases or against `.node-version`. #50 was opened 5 days after 26.13.1, and the 7-day cooldown made it offer 26.13.0. Fix: (a) a `check-dockerfiles` rule tying the major to `.node-version` and `engines` (concurs with code review R1-m1); (b) a lane C or nightly comparison against the newest `security: true` release of the major; (c) a recorded hand-bump rule for Node security releases.
+- **Method:**
+  - git plumbing on the main checkout's object store;
+  - a faithful gitleaks v8.30.1 `generic-api-key` emulation and an over-approximating all-rules scan, both with runtime controls (0 findings on each PR's added lines and on the three records);
+  - anonymous Docker Hub registry reads with body hashes, and APK databases extracted from the layer blobs;
+  - OSV, `gh api` repository advisories of `valkey-io/valkey`, nodejs.org `index.json` and the 2026-11-11 security-release post;
+  - dependabot-core sources at `main`.
+  - Not used: Docker, Jest or npm. No command ran in any worktree, and lane-B artefacts were read as files. No `.env*` path was opened, and dot-env paths were excluded from every diff scan. One slip: a masking mistake showed the hash fields of `infra/local/valkey/users.acl` once in session output; they were copied nowhere.
+- **Binding:** each record has one `Head` row: `72249e40482e9df6aace5973ef6d42c6334f28e3`, `72e3dc9f1a5aa4cfe2aab64335a80e47b62ea470` and `0ccac6bf5a5fadf2bcafe2f5178dee0cdbf234d7`. Main's checker ran in a shared sparse clone in the merge-ref form on main `7b7263f8`, and all 13 scenarios behaved as expected.
+  - Passes: #85 with 5 owned paths, #86 with 3 and #87 with 7. #86 and #87 also pass after a simulated squash of #85, as long as their branches are not updated.
+  - Failures, as they should: no record, a FAIL verdict, a head row that names a main commit, only other PRs' records, an owned change after the head, and #86 updated by a merge of a main that contains #85.
+  - All three PRs change `tools/ci/sec-static.test.ts`. So once one of them lands, updating another by a merge of main voids its record, and a merge-only round is owed. A squash merge of the unchanged heads keeps all three records valid. All pairwise merges are clean.
+- **Follow-ups and conditions:**
+  - **#85 F1:** `gitleaks-full.int.test.ts` once on `72249e40` or on main after the merge (0 findings with 22 lines, 1 with 21; evidence, not a merge blocker, because the change fails closed).
+  - **#85 F2:** PR #88 (D-DEVOPS-003) needs its own record with the real-image proof of D-SEC-PR45-01 condition 5. That is a separate dispatch.
+  - **D-SECPOST-01 C1:** read the main lane-B run after #85 and #86.
+  - PR86-SEC-01 is due before G3. PR85-SEC-01, PR85-SEC-02, PR86-SEC-02 and PR87-SEC-01 are due as stated in the records.
+- **Routed:**
+  - devops-engineer: PR85-SEC-01 and -02, PR86-SEC-01 and -02, PR87-SEC-01, with code review R1-n1 to R1-n3 (#85), R1-m1 and R1-n1 (#86), and R1-m1 and R1-n1 (#87).
+  - orchestrator: #85 F1 and F2, the due dates, the D-SECPOST-01 O-1 closure on merge, and the D-ORCH-172 class (2) reading.
+- **Reversibility:** High (review records).
