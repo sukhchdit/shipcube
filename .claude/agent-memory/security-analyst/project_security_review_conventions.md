@@ -228,14 +228,20 @@ Findings use the CLAUDE.md §11 scale with CWE and OWASP Top 10:2021 codes (thre
 - **A faithful gitleaks emulation (TASK-040 r3, v8.30.1).** Validated: on the TASK-040 old range it reproduced exactly lane B's 3 real findings; the per-line emulator gave 15 false hits. What makes it match:
   - each hunk's ADDED lines form one fragment, so a match can span lines;
   - the generic rule's second allowlist uses `regexTarget = "match"`: `key[_.-]?id` etc. are tested against the full match, not the secret. Testing the secret only is what made the old emulator over-report;
-  - the `generic-*` digit check;
+  - **NO digit check.** v8.30.1 reports digit-less generic secrets. TASK-051 (2026-11-21): the real image flagged the backticked `child=parent` (entropy 3.58) after "key columns,". The emulator with a digit check missed it. Without the check it reproduced the real image 18/18 over a 610-commit ancestry: the 17-line baseline plus that one. Older bullets above that say "digit check" are wrong;
+  - named groups `(?P<x>` must be rewritten to `(?<x>` (jwt-base64), otherwise that rule silently drops out;
   - stopwords on the lower-cased secret;
   - the repo `.gitleaks.toml` from main for commit-bound tables.
+
+  Script: `scratchpad/t051/probes/gl-nodigit.mjs` (session-scoped). Its source was `t040sec3/probes/gl-faithful.mjs` of another session, and the pinned config is `gitleaks.toml`. A full-ancestry run takes about 47 s.
 
   Run it as `git log -p -U0 --diff-merges=first-parent --text` per range. Self-scan a record by committing it into a throwaway `git init` repo. Lane A of a PR scans `merge-base..head` with the base config only; it never reads `tools/quality/gitleaks-baseline.txt`.
 - **Stored or replayed responses (TASK-040).** Check which parts are authenticated, not only the body. Express 5 `res.json` keeps a `Content-Type` that was already set, so a stored header can turn a JSON replay into `text/html`. The API process sets no `nosniff` or CSP on route responses. Probe it with the real store over the branch's in-memory delegate plus a real Express server, and tamper only the clear columns. When a coordinator moves the head mid-round, bind to the final head if the delta is small: prove the merge is a pure union (merge-commit tree == `git merge-tree` of its parents), then review the delta.
 
 - **Lint-control reviews: first check `PROTECTED_RULES` in `tools/lint/check-suppressions.mjs` (TASK-080).** An unprotected rule is one `eslint-disable-next-line <rule> -- TASK-nnn` away from off, and the checker's own message steers authors there. Probe it with a scratch `git init` repo and `check-suppressions.mjs --root <repo> --json`, with a protected-rule control.
+  - **Protecting the rule is not enough; check which rules hold its inputs (TASK-080 r2, PR080-SEC-06).** An import-confinement rule that skips non-static specifiers or `import x = require('…')` is only as strong as the rule that forces the static ESM form. Here that was `static-module-specifier` and `no-require-imports`, both unprotected.
+    - TS 6 under `nodenext`/ESM ACCEPTS `import x = require()` and emits a `createRequire` load. Prove such acceptance with `ts.createProgram` before rating.
+    - Probe each residual form with an inline disable of the holding rule, under the whole config and through the suppression checker.
 - **Scope-shadow probes (typescript-eslint scope manager versus TypeScript).** Each of these binds a watched global for the scope manager, while TypeScript resolves the value to the global and the emitted code calls the real one:
   - `import type { X as Date }`;
   - a type-only `namespace Date {}`;

@@ -81,6 +81,7 @@
 - [P5 TASK-295 effect override](project_p5_task295.md) — PR #79 r1 @5edc54f5 (89d0b769) + MO r2 @a1b0ba76 (2b5ab645) PASS_W_F-U; LOW 01 premise test; index race
 - [P5 TASK-043 outbox](project_p5_task043.md) — r1 @da996002 (feb00326) + r2 @93f9faa0 (86ec0678) PASS_W_F-U; 01/03/04 closed; 08 INFO + R3-m2 due TASK-049; C4-1/C4-3 open
 - [P5 TASK-040 idempotency 040-A](project_p5_task040.md) — r1 @3dc1e225, r2 @e96bd979, r3 supersede @2abd665f v2 (c481471c) PASS_W_F-U; LOWs due 040-B PR1
-- [P5 TASK-080 margin + pricing config](project_p5_task080.md) — r1 @4a0faee3 PASS_W_COND (91a05546); LOW 01 purity unprotected, INFO 02-04, 05 C9 red; delta owed
+- [P5 TASK-080 margin + pricing config](project_p5_task080.md) — r2 @3d3a7775 PASS_W_COND (f44c4aed); 01-05 closed; INFO 06 import=require/computed import(); C2, C4 open
 
 - [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit
+- [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb PASS_W_COND (5749097f, unpushed); LOW 01-03, INFO 04/05; SEC-TC-79..81; gitleaks has NO digit check

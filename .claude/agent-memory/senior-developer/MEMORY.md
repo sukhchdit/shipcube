@@ -55,3 +55,5 @@
 - [TASK-051 guest claim](feedback_task051_guest_claim.md) — shared probe modules in prisma/tests/harness, suite placement for pending SEC-TC, sibling self-match trap
 - [TASK-042 i18n](feedback_task042_i18n.md) — i18next usedLng-on-miss, JSON import attributes, isolateModules+React, lint-lock checker as lint step
 - [TASK-045 pagination](feedback_task045_pagination.md) — apps/api int tests can't import prisma harness; .binding lint, app.* literal lint, stray tsc emits, shared $ref
+- [TASK-080 fc1](feedback_task080_fc1.md) — lane B log in .orch/laneb-queue, background lock wait, C9 IN-list pin, canonical JSON oracle, escape mangling
+- [TASK-034 rehearsal](feedback_task034_rehearsal.md) — scratchpad Write refusal, require-await fakes, lintRepository-only rules, open-loop probe must yield
