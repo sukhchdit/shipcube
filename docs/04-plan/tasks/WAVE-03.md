@@ -752,7 +752,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-OPS-003, NFR-SEC-002 |
-| Spikes / security / decisions | D-005, D-006, SEC-P3-25, D-TASK034-04, D-TASK034-05, D-SD-012 |
+| Spikes / security / decisions | D-005, D-006, SEC-P3-25, D-TASK034-04, D-TASK034-05, D-SD-012, D-ARCH-235, D-ARCH-236, D-ARCH-238, D-SD-014 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-015, TASK-014, TASK-280 |
@@ -769,6 +769,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - Dry run on a test tag in a fork-safe mode: guard rejects a SHA without a green lane C release-candidate run; promoted images start from GHCR and pass the smoke test (NFR-OPS-003)
 - RESTORE-REHEARSAL AND PREVIOUS-IMAGE JOBS (D-TASK034-04, D-TASK034-05; TASK-034 code review round 1 m4; D-SD-012): (1) the restore-rehearsal CI job of NT-REC-003-a and NT-REC-001-a: a fresh Compose stack from the candidate images is seeded, the marker stream writes one row per second into the throwaway rehearsal schema while npm run db:backup runs (data-model 8.6 step 1), the backup is restored into a second fresh stack, tools/db/verify-restore.ts (TASK-034) runs, and the restored api answers /health/ready with 200; the observed data-loss window is reported as informational; it runs in lane C release-candidate, which the guard of this task requires green, and in lane B gate; (2) the image-level NT-AVAIL-003-b probe: the previous api image (the last release tag, or the previous main image in GHCR before the first tag) runs against the schema the candidate migrated, under the 20 rps k6 probe of the TASK-280 harness, with 0 % errors, in lane C release-candidate and on lane B pr runs that change prisma/migrations; until it exists the database-level probe of TASK-034 is the evidence; TASK-116 and TASK-147 add their checks to the job later
+- RESTORE TARGET (D-ARCH-235, D-ARCH-236; data-model 8.6 as amended 2026-11-21): the restore-rehearsal job never passes --same-cluster; it fails unless restore-report.json has target.sameCluster false and manifest.json has an empty loadTimeCode; the second stack has its own role passwords, and no password of the first stack is given to it
 
 **DoD notes**
 - Workflow and tooling changes verified on their own PR; tooling invoked from the base ref; minute usage measured and recorded.

@@ -11212,3 +11212,9 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   2. Hosted CI when billing returns.
   3. After #88 lands, each task PR needs a fresh push, because lane A reads `.gitleaks.toml` from the event's `base.sha` (PR45-SEC-02 pattern). TASK-044 pushes `c33e5e92` first.
 - **Reversibility:** High (review record).
+
+### D-SD-014 · 2026-11-21 · senior-developer · Plan fold: the TASK-119 card line of D-ARCH-238 ("Owners outside the cycle", senior-developer item) (plan regenerated: 0 errors, 0 warnings; IDs, waves, batches, titles and branches unchanged)
+- **TASK-119 (card `release`):** acceptance gains the RESTORE TARGET line of D-ARCH-238, read verbatim from the entry by script: the restore-rehearsal job never passes `--same-cluster`, fails unless `restore-report.json` has `target.sameCluster` false and `manifest.json` an empty `loadTimeCode`, and gives the second stack its own role passwords. The refs gain D-ARCH-235, D-ARCH-236, D-ARCH-238 and D-SD-014.
+- **Regenerated:** `task-map.csv` (the TASK-119 refs column only) and `tasks/WAVE-03.md`. No brief exists for TASK-119.
+- **Context:** TASK-034 fix cycle 3 (fix head `1bac00b1`) builds the switch, the report field and the manifest field this line checks.
+- **Reversibility:** High.
