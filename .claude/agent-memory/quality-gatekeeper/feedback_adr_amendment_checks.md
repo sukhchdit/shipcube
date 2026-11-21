@@ -1,11 +1,11 @@
 ---
 name: adr-amendment-verification-heuristics
-description: Fifteen checks that found real gaps when verifying an ADR amendment under CLAUDE.md §5 (D-QG-001 to D-QG-007); apply them to every later amendment verification
+description: Seventeen checks that found real gaps when verifying an ADR amendment under CLAUDE.md §5 (D-QG-001 to D-QG-008); apply them to every later amendment verification
 metadata:
   type: feedback
 ---
 
-When verifying an ADR amendment, do these fifteen checks beyond reading the amended ADR.
+When verifying an ADR amendment, do these seventeen checks beyond reading the amended ADR.
 
 1. **Find the other Accepted text the amendment makes an exception to.** The architect adds dated pointers inside the ADR being amended, but a rule stated in a different ADR (or the threat model row, or the brief) is often left without one. D-QG-002: ADR-0004 am. 2 named a T-83 exception while ADR-0005 am. 11 item 17 ("binding", no queue call in a tenant transaction) had no note. D-QG-001: brief §3.2 and CLAUDE.md §2.
 2. **Grep the code for universal claims** ("every advisory lock is transaction-level", "the only hatch", "no caller produces"). D-QG-002: `tools/db/bootstrap.ts` held a session-level lock the new key registry omitted.
@@ -26,6 +26,11 @@ When verifying an ADR amendment, do these fifteen checks beyond reading the amen
 13. **Find the column behind every "persisted X" the amendment rests on.** D-QG-007: "the id of an event is the sequence number of a persisted result" had no column in data-model §3.10, and one event type had no row at all. Grep `data-model.md` for the table and read its column list.
 14. **List the branches a rule defines and match each to a named proof.** D-QG-007: three cut reasons (`deadline`, `end_grace`, `buffer_limit`), proofs for two; the unproven one was the one an alert was built on. A script over the proofs section finds it.
 15. **When a change makes something end sooner, ask what was waiting behind it.** D-QG-007: streams ended within 1 s of SIGTERM, so `afterCommit.drain()` ran about 1 s after it and aborted the carrier fan-out whose results the redirected readers were told to wait for. Read the shutdown sequence in the code, not the ADR.
+
+16. **An argument from an average rate is a claim about paced traffic; probe a burst.** D-QG-008: "120 are in flight only when each request takes more than a second on average" (6,000 a minute = 100 a second). 300 valid requests at once gave 179 refusals, because the admission is synchronous at the store reply and a release needs an event-loop turn. A branch row already pinned it at a small limit; grep the branch tests for the opposite of the sentence.
+17. **For a rule of the form "X and Y are one synchronous step", insert a wait and see which committed row fails.** D-QG-008: a 2 ms wait between the store reply and the admission broke the bound (7 entries at limit 5) and passed H1 to H5. `setImmediate` is the wrong mutant with a microtask fake: it cannot interleave with a timer. Run a control mutant first to prove mutants are picked up.
+
+Also read the security record's last round for findings that postdate the amendment commit (D-QG-008: PR041-SEC-16 and a developer decision in a commit body, D-TASK041-20, were premises of sentences in the Accepted text). "At the architect's next touch" is a routing without a date.
 
 Also apply the amendment's own argument to its siblings (D-QG-007: "an unpersisted event that takes last-plus-one moves the resume point" was ruled for `error` and equally true of `carrier_error`).
 
