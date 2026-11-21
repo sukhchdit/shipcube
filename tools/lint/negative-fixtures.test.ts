@@ -177,9 +177,22 @@ const SHARED_ROOT_LOGGING: readonly Violation[] = SHARED_ROOT_CASES.map(([title,
   BOUNDARIES,
   SHARED_ROOT_MESSAGE,
 ]);
+/**
+ * packages/pricing has a second control on the specifier arm (PR076-SEC-07, TASK-080): platform/pricing-purity refuses
+ * every `@platform/shared/<subpath>` import, so that fixture reports both rules; both messages name the specifier.
+ */
+const sharedLoggingSpecifierCase = (importer: string, dir: string): Violation => {
+  const [title, file] = sharedLoggingCase(
+    `${importer} imports @platform/shared/logging (package specifier)`,
+    `${dir}/bad-logging-specifier.ts`,
+  );
+  return dir === 'packages/pricing/src'
+    ? [title, file, [BOUNDARIES, PRICING_PURITY], '@platform/shared/logging']
+    : [title, file, BOUNDARIES, SHARED_LOGGING_MESSAGE];
+};
 const SHARED_LOGGING: readonly Violation[] = [
   ...SHARED_LOGGING_IMPORTERS.flatMap(([importer, dir]) => [
-    sharedLoggingCase(`${importer} imports @platform/shared/logging (package specifier)`, `${dir}/bad-logging-specifier.ts`),
+    sharedLoggingSpecifierCase(importer, dir),
     sharedLoggingCase(`${importer} imports packages/shared/src/logging (resolved file)`, `${dir}/bad-logging-resolved.ts`),
   ]),
   sharedLoggingCase('apps/web build configuration (vite.config.ts) imports @platform/shared/logging', 'apps/web/vite.config.ts'),
@@ -337,6 +350,13 @@ const RULES: readonly Violation[] = [
       ['[R2-n2] a string-named import specifier { "uuidv7" as id }', 'bad-shared-string-name-import', '@platform/shared uuidv7'],
       ['[R2-n2] a string-named re-export { "uuidv7" as id } from', 'bad-shared-string-name-export', '@platform/shared uuidv7'],
       ['[R2-n1] navigator (locale and environment)', 'bad-navigator', 'navigator.language'],
+      [
+        '[PR076-SEC-07] a @platform/shared subpath (queues: retryDelayMs defaults to Math.random)',
+        'bad-shared-subpath',
+        '@platform/shared/queues (a subpath; pricing imports the @platform/shared root only)',
+      ],
+      ['[PR076-SEC-07] declare const Date shadowing the global', 'bad-declare-date', 'declare Date'],
+      ['[PR076-SEC-07] a declare global block', 'bad-declare-global', 'declare global'],
     ] as const
   ).map(([title, name, what]): Violation => [
     `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,

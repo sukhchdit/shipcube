@@ -18,8 +18,16 @@
  *    re-export, `import()` or `require()` (the ADR-0003 boundaries allow-list is the second control);
  *  - the clock and randomness that the allow-listed `@platform/shared` root exports (`uuidv7`, `uuidV7Timestamp`), by
  *    name, and any namespace, default, `export *` or `import()` of `@platform/shared` (which would carry them);
+ *  - any value import of a `@platform/shared/<subpath>` (PR076-SEC-07; TASK-080): pricing needs the root only, and a
+ *    subpath is outside the root's name check (`@platform/shared/queues` exports `retryDelayMs`, whose default random
+ *    source is `Math.random`);
  *  - relative specifiers into a `tests/`, `test/` or `__tests__/` folder or a `*.test.*` module: test helpers are
  *    outside this rule, so production code never imports them.
+ *
+ * Ambient shadowing (PR076-SEC-07; TASK-080): `declare const Date` (or `process`, `Math`, any watched global), a
+ * `declare` function, class, enum or namespace of such a name, and any `declare global` block are reported. They
+ * create a module-scope binding, so the global-scope pass would not see the references, while at run time those
+ * references are still the real globals.
  *
  * Not reported (they read no clock): `value instanceof Date` and type queries such as `typeof Date.now` (R2-n3).
  *
@@ -33,6 +41,8 @@ const ALWAYS_IMPURE = new Set(['process', 'performance', 'crypto', 'navigator', 
 const GLOBAL_OBJECTS = new Set(['globalThis', 'self', 'window', 'global']);
 const DATE_STATIC_ALLOWED = new Set(['UTC', 'parse']);
 const SHARED_ROOT = '@platform/shared';
+/** Globals whose ambient re-declaration would hide a reference from the global-scope pass (PR076-SEC-07). */
+const WATCHED_GLOBALS = new Set([...ALWAYS_IMPURE, 'Date', 'Math']);
 /**
  * `@platform/shared` exports that read the clock or randomness (`ids/uuidv7.ts`: `uuid` v7). Pinned by
  * tools/lint/pricing-purity-shared.test.ts against the modules the shared root re-exports (code review R2-n6).
@@ -194,6 +204,8 @@ export default {
       } else if (specifier === SHARED_ROOT) {
         if (wholeModule) report(node, `${SHARED_ROOT} (whole module)`);
         for (const name of names) if (IMPURE_SHARED_EXPORTS.has(name)) report(node, `${SHARED_ROOT} ${name}`);
+      } else if (specifier.startsWith(`${SHARED_ROOT}/`)) {
+        report(node, `${specifier} (a subpath; pricing imports the ${SHARED_ROOT} root only)`);
       } else if (specifier.startsWith('.') && TEST_SPECIFIER.test(specifier)) {
         context.report({ node, messageId: 'testImport', data: { what: specifier } });
       }
@@ -201,6 +213,15 @@ export default {
 
     /** @param {{ importKind?: string; exportKind?: string }} node */
     const typeOnly = (node) => node.importKind === 'type' || node.exportKind === 'type';
+
+    /**
+     * Reports an ambient declaration named like a watched global.
+     * @param {{ id?: { type: string; name?: string } | null }} node
+     */
+    const checkAmbient = (node) => {
+      const name = node.id?.type === 'Identifier' ? node.id.name : undefined;
+      if (name !== undefined && WATCHED_GLOBALS.has(name)) report(/** @type {never} */ (node), `declare ${name}`);
+    };
 
     return {
       ImportDeclaration(node) {
@@ -231,6 +252,13 @@ export default {
       },
       CallExpression(node) {
         if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkSource(node, node.arguments[0], true, []);
+      },
+      'VariableDeclaration[declare=true] > VariableDeclarator': checkAmbient,
+      'ClassDeclaration[declare=true], TSEnumDeclaration[declare=true], TSDeclareFunction': checkAmbient,
+      /** @param {{ kind?: string; global?: boolean; declare?: boolean; id?: { type: string; name?: string } }} node */
+      TSModuleDeclaration(node) {
+        if (node.kind === 'global' || node.global === true) report(/** @type {never} */ (node), 'declare global');
+        else if (node.declare === true) checkAmbient(node);
       },
       'Program:exit'(node) {
         const globalScope = context.sourceCode.getScope(node);

@@ -1,9 +1,20 @@
 // Public entry point of @platform/pricing. Pure pricing engine (ADR-0015).
 // Exports are added by the tasks that implement this package.
 export { validatedBillableWeight } from './billable-weight.js';
+export { SAMPLE_PRICING_CONFIG, SAMPLE_PRICING_CONFIG_SHA256, SAMPLE_PRICING_CONFIG_VERSION } from './config/sample.js';
 export { PRICING_STEPS, price, runPricing } from './engine.js';
 export { PRICING_ERROR_CODES, PricingError, isPricingError, type PricingErrorCode } from './errors.js';
 export { BASE_FREIGHT_CODE, BASE_FREIGHT_LABEL_KEY, baseFreightStep } from './lines/base-freight.js';
+export {
+  DEFAULT_MARGIN_PRIORITY,
+  MARGIN_CODE,
+  MARGIN_LABEL_KEY,
+  compareMarginRules,
+  marginRuleMatches,
+  marginRules,
+  marginStep,
+  selectMarginRule,
+} from './lines/margin.js';
 export { applyRate, rateRatio, type Rate } from './rounding.js';
 export {
   EMPTY_STATE,
@@ -27,6 +38,7 @@ export {
   type ExplanationEntry,
   type ExplanationInput,
   type LineSource,
+  type MarginRule,
   type PriceTotals,
   type PricingConfigSnapshot,
   type PricingExplanation,
