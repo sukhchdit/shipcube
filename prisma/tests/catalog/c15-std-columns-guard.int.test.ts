@@ -209,8 +209,17 @@ describe('catalog C15: standard-columns guard (D-ARCH-091; PR26-SEC-03)', () => 
       expect(await rows(client, AFTER_GUARD_SQL)).toEqual([]);
       // TASK-037 applied the guard to the first runtime-writable STD tables (the organisations and identity manifests);
       // TASK-039 added job_executions (the worker manifest, the first SYSTEM table in scope). A committed-state pin: a
-      // task that adds a guarded table extends it, beside its manifest entry.
-      expect(scope).toEqual(['invitations', 'job_executions', 'membership_roles', 'memberships', 'organisations', 'users']);
+      // task that adds a guarded table extends it, beside its manifest entry. TASK-040 added idempotency_keys (the
+      // idempotency manifest).
+      expect(scope).toEqual([
+        'idempotency_keys',
+        'invitations',
+        'job_executions',
+        'membership_roles',
+        'memberships',
+        'organisations',
+        'users',
+      ]);
       expect(READ_ONLY.length + AUDIT_TABLES.length).toBeGreaterThan(0);
     } finally {
       await client.end();

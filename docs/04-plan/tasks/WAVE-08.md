@@ -39,7 +39,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-014 (M0 Should) Feature-flag evaluation and audited changes |
 | REQs | REQ-PLAT-020, REQ-PLAT-021 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-191 |
+| Spikes / security / decisions | D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-029, TASK-039 |
@@ -54,6 +54,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-014 scenarios
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createFeatureFlag, updateFeatureFlag (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listFeatureFlags sorted by updated_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-014-01 … AT-US-014-06: all 6 scenarios of US-014, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -115,6 +116,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - data-model §9.2 / ADR-0008 am. 2 item 3 (D-ARCH-060, PR8-SEC-09): a post-migrate reconciler run as SYSTEM_JOB digests permissions/roles/role_permissions as read from the database, compares with the last audited digest in reference_dataset_versions(dataset = authz_matrix, version, content_sha256), writes one CONFIG_CHANGE audit entry per changed version (role, old -> new permission set; the first run back-fills the baseline empty -> current) and writes nothing when unchanged (AT-US-073-04); it also fails the seed on catalogue <-> database drift; no migration ever inserts into audit_entries; if this task is cut, the G3 report names the guard tests and CODEOWNERS as the residual controls
 - PR8-SEC-09 conditions 1-3 (verified at this task security review): the first CONFIG_CHANGE entry covers every version applied before the reconciler existed (old set ∅ → the current grants of v1 and any later version); the mechanism is the SYSTEM_JOB reconciler, never a migration INSERT into audit_entries; if this task is cut, T-107 residual controls (guard tests, CODEOWNERS from TASK-007) are recorded in the G3 residual-risk list
 - D-ARCH-075 (PR13-SEC-04 / PR13-SEC-08; data-model §3.5/§4.4/§9.2 as amended 2026-11-13): the reconciler needs NO write on reference_dataset_versions (platform_app holds SELECT only) — it derives the last audited digest from the latest CONFIG_CHANGE entry for authz_matrix in audit_entries, so down.sql has no digest row to drop and a down -> up cannot produce a second baseline; the dataset name authz_matrix stays in RESERVED_DATASET_NAMES; the reconciler is GENERALISED to every audited dataset: for each reference_dataset_versions row it compares (dataset, dataset_version, content_sha256) with the last audited digest and writes one CONFIG_CHANGE per changed version (seed-originated changes are audited here because the seed runs as the migrator, which holds no audit privilege); an expand migration adds drift_restored_rows bigint NOT NULL DEFAULT 0 and last_drift_restored_at timestamptz Y to reference_dataset_versions, the seed increments them on a drift restore and the reconciler audits a changed counter as CONFIG_CHANGE reason drift-restored; wiring passes a pg.Client, never a pool (PR #13 n3); security-analyst confirms the boundary at review
+- PRICING CONFIGURATION IS AN AUDITED DATASET (D-SECPR080-01 routing; TASK-080 security record PR-0081 section 8): the reconciler writes durable CONFIG_CHANGE entries for every audited dataset, not only authz_matrix; pricing_config_versions (TASK-080, audited: true) is the first of them; until this task merges the seed path records reference_dataset_versions and logs only, by design (the migrator gains no audit privilege); test: a changed published pricing configuration version yields one CONFIG_CHANGE entry and a re-run yields none
 - AT-US-073-01 … AT-US-073-04: all 4 scenarios of US-073, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -393,6 +395,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-164 and US-259 scenarios
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: saveQuote, deleteSavedQuote (optional) (D-SD-007)
+- saveQuote claims a guest quote through the claim repository of TASK-146 (the one statement) in the claim context of D-ARCH-213; it writes no claim statement of its own
 - AT-US-164-01 … AT-US-164-10: all 10 scenarios of US-164, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-259-01 … AT-US-259-07: all 7 scenarios of US-259, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -483,8 +486,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-165 scenarios
 - SEC-TC-53 (amended): two mints -> two tokens, first 404; CREATE + UPDATE audit; 11th mint/hour -> 429; three byte-identical 404 bodies
-- quote_shares AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10): the owner-bound pair; ux_quote_shares__org_quote_active and ux_quote_shares__guest_quote_active replace ux_quote_shares__quote_active; ux_quote_shares__share_token_hash is an entry of TENANT_UNIQUE_EXCEPTIONS with its reason; the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23503
+- quote_shares AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10): the owner-bound pair; ux_quote_shares__org_quote_active and ux_quote_shares__guest_quote_active replace ux_quote_shares__quote_active; ux_quote_shares__share_token_hash is an entry of TENANT_UNIQUE_EXCEPTIONS with its reason; the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23001 fk_quote_shares__guest_token_hash_quote_id on PostgreSQL 18 (D-ARCH-211)
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: revokeQuoteShare (optional) (D-SD-007)
+- DUPLICATE CASE ON THE REAL TABLE (QG-051-C1 (b); D-ARCH-215; rulings section 8.12): on quote_shares as platform_app a second active share of the same quote is refused with 23505 on the index of its owner, ux_quote_shares__guest_quote_active for a guest row and ux_quote_shares__org_quote_active for an organisation row, and the first active share is accepted (cases S3 and S4 of rulings section 2.7); every relation this task adds states onDelete: Restrict and onUpdate: Restrict
 - AT-US-165-01 … AT-US-165-12: all 12 scenarios of US-165, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1128,7 +1132,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004, D-SECPR041B-01, D-SECPR041B-02, PR041-SEC-16, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1146,6 +1150,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
 - SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
+- AUTHENTICATION SLOT OUTCOME (PR041-SEC-16 (a) LOW, CWE-772; D-SECPR041B-02; D-ORCH-159; code review n8 widened by D-SECPR041B-01): the authentication slot reports its outcome only by calling next once, throwing or rejecting, and never writes the response; one api row per refused shape: failed count +1, held count back to 0; every refused presented credential is a 4xx AppError (here: a failed or missing carrier signature, 401)
+- BOUNDED SLOT LATENCY (D-SECPR041B-01 security addition (b) to ADR-0016 amendment 13 item 6; D-SD-012): if this authenticator does I/O (for example a session or key lookup after verification), the BOUNDED SLOT LATENCY line of TASK-055 applies: it settles within a bounded time when the store or database does not answer, with a test; an authenticator without I/O states so in its PR
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1218,7 +1224,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-262 (M1 Should) Address book create, edit, delete and search<br>US-263 (M1 Should) Default sender address |
 | REQs | REQ-ACCT-008, REQ-ACCT-009 |
 | NFRs | NFR-PERF-006 |
-| Spikes / security / decisions | D-PLAN-006, D-ARCH-191 |
+| Spikes / security / decisions | D-PLAN-006, D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-100, TASK-159 |
@@ -1233,6 +1239,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-262 and US-263 scenarios; US-175 address-book selection scenario now runs
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createAddressBookEntry, replaceAddressBookEntry, deleteAddressBookEntry (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listAddressBookEntries sorted by label and updated_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-262-01 … AT-US-262-12: all 12 scenarios of US-262, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-263-01 … AT-US-263-08: all 8 scenarios of US-263, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

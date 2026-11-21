@@ -20,12 +20,12 @@ Version 1.1 · 2026-11-14 · owner qa-lead · generated from `docs/01-requiremen
 | Suite | Scenarios | Lane |
 |---|---|---|
 | `e2e` | 241 | B |
-| `api` | 204 | B |
+| `api` | 205 | B |
 | `integration` | 180 | B |
 | `unit` | 131 | A |
 | `audit-generator` | 122 | B+A* |
 | `identity-session` | 107 | B |
-| `rbac-matrix` | 79 | B+A* |
+| `rbac-matrix` | 78 | B+A* |
 | `carrier-contract` | 53 | A |
 | `jobs-resilience` | 42 | B |
 | `carrier-resilience` | 42 | B |
@@ -789,7 +789,7 @@ Version 1.1 · 2026-11-14 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-293-12 | US-293 | Guard is disabled with a quota of zero | `carrier-resilience` | B | yes |
 | AT-US-293-13 | US-293 | Counter resets at 00:00 UTC | `carrier-resilience` | B | yes |
 | AT-US-293-14 | US-293 | Usage is exposed as a gauge | `carrier-resilience` | B | yes |
-| AT-US-293-15 | US-293 | Redis unavailable falls back to per-instance counting | `carrier-resilience` | B | yes |
+| AT-US-293-15 | US-293 | Redis unavailable: anonymous fan-out is refused | `carrier-resilience` | B | yes |
 
 ## EPIC-07 ([stories/EPIC-07-pricing-engine.md](../../01-requirements/stories/EPIC-07-pricing-engine.md))
 
@@ -1640,8 +1640,8 @@ Version 1.1 · 2026-11-14 · owner qa-lead · generated from `docs/01-requiremen
 | AT-US-042-03 | US-042 (DC) | Fatal error | `api` | B | yes |
 | AT-US-042-04 | US-042 (DC) | Heartbeat | `api` | B | yes |
 | AT-US-042-05 | US-042 (DC) | Maximum duration | `api` | B | yes |
-| AT-US-042-06 | US-042 (DC) | Client abort cancels upstream work | `api` | B | yes |
-| AT-US-042-07 | US-042 (DC) | Unauthenticated stream | `rbac-matrix` | B+A* | yes |
+| AT-US-042-06 | US-042 (DC) | Client abort releases the stream | `api` | B | yes |
+| AT-US-042-07 | US-042 (DC) | Unauthenticated stream | `api` | B | yes |
 | AT-US-042-08 | US-042 (DC) | Events contain no personal data | `api` | B | yes |
 | AT-US-043-01 | US-043 | Headers present on API and both Nginx images (outline: one test per Examples row, suffix -<row>) | `headers` | B | yes |
 | AT-US-043-02 | US-043 | CSP content | `headers` | B | yes |

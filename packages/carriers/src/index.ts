@@ -122,6 +122,7 @@ export {
   mappingKey,
   MAX_MAPPING_KEY_LENGTH,
 } from './normalise/mappings.js';
+export { carrierDecimalToMoney, type CarrierAmountContext } from './normalise/money.js';
 export {
   type CarrierFailure,
   type CarrierSurcharge,

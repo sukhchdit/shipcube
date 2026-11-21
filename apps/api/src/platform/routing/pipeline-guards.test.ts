@@ -10,7 +10,12 @@ import type { Express, NextFunction, Request, Response } from 'express';
 
 import { createApp } from '../../app.js';
 import type { TenantContext, TenantTxRunner } from '../db/index.js';
-import { RequestContextError, tenantContextOf, executeSlot } from '../tx/execute.js';
+import { createBodyCipher } from '../idempotency/body-cipher.js';
+import { IdempotencyRouteError } from '../idempotency/idempotency.js';
+import { createIdempotencyStore } from '../idempotency/store.js';
+import { SILENT_IDEMPOTENCY_LOG, TEST_BODY_KEY, TEST_NETWORK_KEY } from '../idempotency/tests/memory-keys.js';
+import { DEFAULT_RATE_LIMIT_SETTINGS } from '../rate-limit/tests/settings.js';
+import { IdempotencyNotWiredError, RequestContextError, tenantContextOf, executeSlot } from '../tx/execute.js';
 import { defineRoute, type Principal, type RouteDescriptor, type RouteHandler, type RouteSpec } from './define-route.js';
 import {
   bootFailureOf,
@@ -117,8 +122,28 @@ describe('[PR32-SEC-03] slot stubs refuse at mount what they cannot honour (cond
     expect(() => appWith([route], { ...defaultPipelineSlots({ tenantTx: runner }), execute })).not.toThrow();
   });
 
-  it.each(['required', 'optional'] as const)('the idempotency stub refuses idempotency %s, naming TASK-040', (mode) => {
-    expect(() => appWith([tenantRoute({ idempotency: mode })])).toThrow(/idempotency slot stub cannot honour idempotency .* TASK-040/);
+  it.each(['required', 'optional'] as const)(
+    '[TASK-040] idempotency %s without a key store is refused at mount; with one it mounts',
+    (mode) => {
+      expect(() => appWith([tenantRoute({ idempotency: mode })])).toThrow(IdempotencyNotWiredError);
+      expect(() => appWith([tenantRoute({ idempotency: mode })])).toThrow(
+        /createThing declares an idempotency mode, but the tx slot has no idempotency store/,
+      );
+      const idempotency = createIdempotencyStore({
+        cipher: createBodyCipher(TEST_BODY_KEY),
+        networkKey: TEST_NETWORK_KEY,
+        log: SILENT_IDEMPOTENCY_LOG,
+      });
+      expect(() => appWith([tenantRoute({ idempotency: mode })], defaultPipelineSlots({ tenantTx: runner, idempotency }))).not.toThrow();
+    },
+  );
+
+  it('[TASK-040] an idempotent mode on a safe method or on a transaction none route is refused at mount', () => {
+    expect(() => appWith([tenantRoute({ idempotency: 'optional', method: 'get' })])).toThrow(IdempotencyRouteError);
+    expect(() => appWith([tenantRoute({ idempotency: 'optional', method: 'get' })])).toThrow(/optional on the safe method GET/);
+    expect(() => appWith([tenantRoute({ idempotency: 'required', transaction: 'none', tenancy: 'public' })])).toThrow(
+      /needs the tenant transaction/,
+    );
   });
 
   it.each(['auth', 'email-send'] as const)('the rate-limit stub refuses class %s, naming TASK-041', (rateLimit) => {
@@ -199,7 +224,13 @@ describe('[PR #32 m2] [PR32-SEC-05 (a)/(b)] composition invariants live in creat
       handler: () => ({ status: 204 }),
     });
     const compose = (apiMode: 'test' | 'live') => () =>
-      createApp({ health: [], modules: [{ name: 'w', routes: [webhook] }], logger: silent, apiMode });
+      createApp({
+        health: [],
+        modules: [{ name: 'w', routes: [webhook] }],
+        logger: silent,
+        apiMode,
+        rateLimit: { settings: DEFAULT_RATE_LIMIT_SETTINGS },
+      });
     expect(compose('test')).not.toThrow();
     expect(compose('live')).toThrow(RouteBindingError);
   });

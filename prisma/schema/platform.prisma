@@ -22,6 +22,40 @@ model ReferenceDatasetVersion {
   @@map("reference_dataset_versions")
 }
 
+/// HTTP idempotency keys (ADR-0014 §HTTP idempotency and amendments 1, 4; REQ-API-009..011, DR-A20; data-model §3.5,
+/// §6.2; TASK-040). SYSTEM class, module `idempotency` (tools/db/table-classes/idempotency.json): read and written only
+/// by apps/api/src/platform/idempotency/** through `systemDelegates(tx)` (PR19-SEC-01, D-ARCH-080). `responseBody` is
+/// AES-256-GCM ciphertext under IDEMPOTENCY_BODY_KEY (`responseBodyKeyId`; AAD binds hex(scope_hash) and the key id).
+/// Hard-delete allow-listed (5xx/429 outcomes, expired keys). Kept in the migration SQL: the CHECKs
+/// `ck_idempotency_keys__version`, `__scope_hash`, `__method`, `__key`, `__fingerprint`, `__status`, `__response_status`,
+/// `__completed`, `__body_key`, `__body_key_id` and the standard-columns guard trigger.
+model IdempotencyKey {
+  id                String   @id(map: "pk_idempotency_keys") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy         String   @map("created_by") @db.Uuid
+  updatedBy         String   @map("updated_by") @db.Uuid
+  version           Int      @default(1)
+  scopeHash         Bytes    @map("scope_hash")
+  scopeOrgId        String?  @map("scope_org_id") @db.Uuid
+  actorId           String?  @map("actor_id") @db.Uuid
+  method            String
+  path              String
+  idemKey           String   @map("idem_key")
+  fingerprint       Bytes
+  status            String
+  leaseUntil        DateTime @map("lease_until") @db.Timestamptz(6)
+  responseStatus    Int?     @map("response_status") @db.SmallInt
+  responseHeaders   Json?    @map("response_headers")
+  responseBody      Bytes?   @map("response_body")
+  responseBodyKeyId String?  @map("response_body_key_id")
+  expiresAt         DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([scopeHash], map: "ux_idempotency_keys__scope_hash")
+  @@index([expiresAt], map: "ix_idempotency_keys__expires_at")
+  @@map("idempotency_keys")
+}
+
 /// Idempotency ledger of job effects (ADR-0013 §4, REQ-PLAT-014; data-model §3.5, D-ARCH-171). SYSTEM class, module `worker`
 /// (tools/db/table-classes/worker.json): reached only through the worker's SYSTEM accessor. One row per completed job,
 /// inserted in the effect's transaction (`createMany` with `skipDuplicates`), never updated. Kept in the migration SQL:

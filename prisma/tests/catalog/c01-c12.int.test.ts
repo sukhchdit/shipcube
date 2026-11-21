@@ -301,6 +301,11 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_audit_entries__source_app: ['admin', 'api', 'web', 'worker'],
   ck_audit_pii_vault__classification: ['PERSONAL', 'SENSITIVE_PERSONAL'],
   ck_data_subjects__kind: ['CONTACT', 'USER'],
+  // HTTP idempotency keys (TASK-040; data-model §6.2), pinned from the data model like the lists above. The api module's
+  // IDEMPOTENT_METHODS and IDEMPOTENCY_KEY_STATUSES are compared with the migration text by
+  // apps/api/src/platform/idempotency/enum-checks.test.ts, which may import them (prisma/tests may not).
+  ck_idempotency_keys__method: ['DELETE', 'PATCH', 'POST', 'PUT'],
+  ck_idempotency_keys__status: ['COMPLETED', 'IN_PROGRESS'],
   // Organisations and identity (TASK-037; data-model §1.7, §3.1, §3.2), pinned from the data model like the audit lists.
   // The organisations module's ORG_TYPES and WRITABLE_MEMBERSHIP_STATUSES (+ the reserved INVITED, D-ARCH-123) are
   // compared with the migration text by apps/api/src/modules/organisations/tests/organisations.test.ts, which may import
@@ -310,6 +315,9 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_memberships__status: ['ACTIVE', 'INVITED', 'REMOVED', 'SUSPENDED'],
   ck_organisations__default_locale: ['en', 'es', 'fr'],
   ck_organisations__type: ['BUSINESS_CUSTOMER', 'INDIVIDUAL', 'OPERATOR', 'PARTNER'],
+  // TASK-080 (data-model §1.7 reference_source, §3.9; D-TASK080-14): the pricing configuration version sources. OPERATOR
+  // is reserved for the M2 pricing admin; ISO does not apply to a pricing version.
+  ck_pricing_config_versions__source: ['OPERATOR', 'SAMPLE', 'SEED'],
   // Not an enum but an IN list all the same: exactly the two reserved actors of §1.6 are system users (PR26-SEC-04).
   ck_users__is_system: [SYSTEM_ACTOR, '00000000-0000-7000-8000-000000000002'],
   ck_users__locale: ['en', 'es', 'fr'],

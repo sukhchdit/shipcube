@@ -23,13 +23,14 @@
  *    admission bulkhead, the pool or a statement / lock timeout: a second transaction would only add load to what just
  *    failed (R1-m4); the tx slot also skips it when the failure is the client's disconnect and bounds the wait.
  *  - DENIED: a 403 AUTHZ_DENIED gets one PERMISSION_DENIED entry with the required permission, in its own transaction
- *    (REQ-AUDIT-010, REQ-RBAC-007); a failure to write it answers that failure (500 / 503), never a silent 403.
+ *    (REQ-AUDIT-010, REQ-RBAC-007); a failure to write it answers that failure (500 / 503), never a silent 403. The
+ *    authorise slot meters denials per actor (T-39) and hands `denied` a closed {@link DenialMark}.
  * Every entry carries personal values (the IP, the user agent), so a capture without a tokeniser refuses, at MOUNT
  * time, every audited route and every route that can answer 403 (R1-m1, PR56-SEC-08 condition 2; TASK-028 wires it).
  * No external I/O here (T-83 whole-file root); every write goes through the writer composed from the validated
  * configuration (writer.ts, DB_AUDIT_LOCK_TIMEOUT_MS).
  */
-import type { AuditSqlPort, AuditWriter } from '@platform/audit';
+import type { AuditSqlPort, AuditValue, AuditWriter } from '@platform/audit';
 import type { Config } from '@platform/config';
 import { AppError } from '@platform/shared';
 
@@ -44,6 +45,42 @@ import {
 import { SlotNotImplementedError } from '../routing/slot.js';
 import { compileAudit, type CompiledAudit, entryFor, failedOutcomeApplies, type UserAgentParser } from './descriptor-runtime.js';
 import { auditWriterFromConfig, type AuditWriterDeps } from './writer.js';
+
+/**
+ * What the authorise slot's denial budget decided for one PERMISSION_DENIED entry (T-39, D-SECT39-01 item 2): a closed
+ * typed mark, never free-form details. `capture.denied` maps it to the closed `details` set: every denial carries
+ * `required_permission`; the crossing denial adds `aggregated: true`, `threshold`, `window_seconds` and
+ * `window_ends_at` (no count); a window-opening denial adds `suppressed_in_previous_window` when it claimed a carry
+ * of at least 1.
+ */
+export type DenialMark =
+  | { readonly kind: 'individual'; readonly suppressed?: number }
+  | {
+      readonly kind: 'aggregated';
+      readonly threshold: number;
+      readonly windowSeconds: number;
+      /** RFC 3339 UTC, rounded up to the second. */
+      readonly windowEndsAt: string;
+    };
+
+const INDIVIDUAL: DenialMark = Object.freeze({ kind: 'individual' });
+
+/** The closed `details` keys of one denial entry (D-SECT39-01 item 2); a malformed mark adds nothing beyond the permission. */
+function denialDetails(required: string, mark: DenialMark): Readonly<Record<string, AuditValue>> {
+  if (mark.kind === 'aggregated') {
+    return {
+      required_permission: required,
+      aggregated: true,
+      threshold: mark.threshold,
+      window_seconds: mark.windowSeconds,
+      window_ends_at: mark.windowEndsAt,
+    };
+  }
+  const { suppressed } = mark;
+  return suppressed !== undefined && Number.isSafeInteger(suppressed) && suppressed >= 1 && suppressed <= 2 ** 31 - 1
+    ? { required_permission: required, suppressed_in_previous_window: suppressed }
+    : { required_permission: required };
+}
 
 export type AuditHook = (ctx: RouteContext, result: RouteResult) => Promise<void>;
 
@@ -70,8 +107,11 @@ export interface AuditCapture {
    * be written (no tokeniser in the composition), so the route is refused instead of answering 500 per request.
    */
   mountDenials(route: RouteDescriptor): void;
-  /** A 403 AUTHZ_DENIED: one PERMISSION_DENIED entry, outcome DENIED, in its own transaction (rejects when unwritten). */
-  denied(request: RouteRequestContext, tenant: TenantContext): Promise<void>;
+  /**
+   * A 403 AUTHZ_DENIED: one PERMISSION_DENIED entry, outcome DENIED, in its own transaction (rejects when unwritten).
+   * `mark` is the denial budget's decision (default: an ordinary individual entry).
+   */
+  denied(request: RouteRequestContext, tenant: TenantContext, mark?: DenialMark): Promise<void>;
 }
 
 /** The capture's log seam (the platform logger satisfies it): class-only fields, never a value of the request. */
@@ -217,7 +257,7 @@ export function createAuditCapture(options: AuditCaptureOptions): AuditCapture {
     requireTokeniser(route, 'PERMISSION_DENIED entries');
   }
 
-  async function denied(request: RouteRequestContext, tenant: TenantContext): Promise<void> {
+  async function denied(request: RouteRequestContext, tenant: TenantContext, mark: DenialMark = INDIVIDUAL): Promise<void> {
     const { route } = request;
     const required = route.permissionAuthenticated ?? route.permission;
     const compiled = { route, entityName: route.audit.entity ?? 'request', mode: 'write', entityId: () => null } as const;
@@ -229,7 +269,7 @@ export function createAuditCapture(options: AuditCaptureOptions): AuditCapture {
         result: undefined,
         action: 'PERMISSION_DENIED',
         outcome: 'DENIED',
-        details: { required_permission: required },
+        details: denialDetails(required, mark),
         parseUserAgent,
       }),
     );

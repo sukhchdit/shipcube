@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "lane": "B",
+  "profile": "pr",
+  "git_sha": "39cac6e5f86d0f50332770e7bdac819b893a958a",
+  "git_dirty": false,
+  "build_clean": true,
+  "stamp": "20261121T0607Z",
+  "generated_at": "2026-11-21T06:29:50Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300 (win32)",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
+    "cores": 16,
+    "ram_gb": 31.7,
+    "docker_version": "29.8.0",
+    "node_version": "v24.22.3",
+    "npm_version": "11.19.1"
+  },
+  "lockfile_sha256": "ca709fad756ace224117c699bfb6c7aa6db39fd20e6cd56a37da4567d4861d35",
+  "manifest_sha256": "2406edad0d5d6862ba14391209b25dce08e444da89469c1db2c4fe5d151c5bc3",
+  "testcontainers_images": [
+    {
+      "image": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+    },
+    {
+      "image": "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a",
+      "digest": "sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+    }
+  ],
+  "env_overrides": [],
+  "suites": [
+    {
+      "name": "api",
+      "status": "passed",
+      "tests": 179,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 18.8,
+      "report": "api.junit.xml",
+      "report_sha256": "feb072f6e5f846b3839e162e178863be69ad8ace727e5eb3a9e2541ba5fbd2d1"
+    },
+    {
+      "name": "catalog-c1-c14",
+      "status": "passed",
+      "tests": 121,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 53.8,
+      "report": "catalog-c1-c14.junit.xml",
+      "report_sha256": "7c3f3d78bd741cfb81976b8839ef9789577066cdec610c1d1340d94dc4d485c5"
+    },
+    {
+      "name": "integration",
+      "status": "passed",
+      "tests": 483,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 896,
+      "report": "integration.junit.xml",
+      "report_sha256": "a4f12efea3aea5599a66d36c1b3562774a67af30cd4110134b5421d8ac9d7714"
+    },
+    {
+      "name": "migrations",
+      "status": "passed",
+      "tests": 30,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 126.4,
+      "report": "migrations.junit.xml",
+      "report_sha256": "272d752c3a16235a3504b8ea4313bae39117c71d4cb0e350249f88f3a1cb2c71"
+    },
+    {
+      "name": "rls-cross-tenant",
+      "status": "passed",
+      "tests": 162,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 20,
+      "report": "rls-cross-tenant.junit.xml",
+      "report_sha256": "3fea286e4bb9a23781e6359a11f2647a064756c59dca50d808f236e3ade69c69"
+    },
+    {
+      "name": "unit",
+      "status": "passed",
+      "tests": 8295,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "duration_s": 235.6,
+      "report": "unit.junit.xml",
+      "report_sha256": "537e0c1a8bd9f85985e1c523076c467597a4dbcad799fca1e671b637699a295b"
+    }
+  ],
+  "attachments": [
+    {
+      "file": "coverage-summary.json",
+      "sha256": "de5b5ab50bdec935d89ae5993460c9ecbb4274aa3a1d4131bd97ca11310a35fc"
+    }
+  ],
+  "coverage": {
+    "line": 99.48,
+    "branch": 97.3,
+    "per_package": {
+      "apps/admin": {
+        "line": 93.85,
+        "branch": 98.48
+      },
+      "apps/api": {
+        "line": 99.48,
+        "branch": 97.33
+      },
+      "apps/web": {
+        "line": 96.04,
+        "branch": 96.81
+      },
+      "apps/worker": {
+        "line": 99.23,
+        "branch": 93.79
+      },
+      "packages/audit": {
+        "line": 100,
+        "branch": 99.76
+      },
+      "packages/authz": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/carriers": {
+        "line": 99.92,
+        "branch": 97.82
+      },
+      "packages/config": {
+        "line": 99.91,
+        "branch": 96.89
+      },
+      "packages/pricing": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/shared": {
+        "line": 99.3,
+        "branch": 95.34
+      },
+      "packages/ui": {
+        "line": 100,
+        "branch": 100
+      },
+      "prisma": {
+        "line": 99.14,
+        "branch": 96.31
+      }
+    }
+  },
+  "jest_args": [
+    "api: -i --testTimeout=30000",
+    "catalog-c1-c14: -i --testTimeout=30000",
+    "integration: -i --testTimeout=30000",
+    "migrations: -i --testTimeout=30000",
+    "rls-cross-tenant: -i --testTimeout=30000"
+  ],
+  "verdict": "PASS",
+  "invalid_reasons": []
+}

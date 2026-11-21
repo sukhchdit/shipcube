@@ -86,7 +86,8 @@ describe('securityEventSinkFrom', () => {
       'audit_mutation_rejected',
       'audit_partition_squatted',
     ];
-    expect([...emitted].sort()).toEqual([...RUNTIME_SECURITY_EVENTS].sort());
+    // rate_limit_store_unavailable is the rate-limit store's event (TASK-041), not a database runtime event.
+    expect([...emitted].sort()).toEqual(RUNTIME_SECURITY_EVENTS.filter((event) => event !== 'rate_limit_store_unavailable').sort());
     const levels: string[] = [];
     const sink = securityEventSinkFrom({
       warn: () => levels.push('warn'),

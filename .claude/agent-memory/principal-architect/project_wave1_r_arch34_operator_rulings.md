@@ -18,7 +18,7 @@ D-ARCH-162..167 closed the two D-SD-002 dispatch gates (TASK-051 `guestclaim`, T
 - ~~data-model §8.3 wording for the rule-10 call sites and the lone carriage return.~~ Done 2026-11-20 (D-ARCH-172).
 - M2 staff management (EPIC-B-207) needs an ADR-0005 amendment: a runtime writer of `operator_staff_grants` gated by `app_is_operator()`, and grant removal at offboarding.
 - M3 partner design owns the PARTNER-organisation backstop (PR65-SEC-04 (b)).
-- If lane B of TASK-051 on PostgreSQL 18 differs from the probe tables (rulings §2.7, §3.5), the task comes back to me.
+- ~~If lane B of TASK-051 on PostgreSQL 18 differs from the probe tables (rulings §2.7, §3.5), the task comes back to me.~~ It did, 2026-11-21: C2 and C6 answer `23001` on 18. Ruled as D-ARCH-211, with five more review items; see [[wave1-task051-review-rulings]].
 
 **How to apply:** when a later task adds a reference into `quotes` or `quote_options` it is rule T1 and costs an `(org_id, id)` index on the parent (about 30 GB on `quote_options` at Y5 without retention): ask for the expected size. A new GUEST_CAPABLE child must also join the one-statement claim.
 

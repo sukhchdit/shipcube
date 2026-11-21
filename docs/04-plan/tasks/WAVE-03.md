@@ -2,9 +2,9 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M0** · Priority band: **Must non-DC**
 
-Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 73.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **27** (S 7 / M 20; opus 13 / sonnet 14; demo-critical 0) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 70.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** 110 of the 113 M0 Must stories complete and US-040, US-061 and US-062 partial (D-PM-068, D-PM-078; the `v0.1.0-m0` dossier names the six open route-level scenarios of US-061 and US-062 and the two stream scenarios of US-040, AT-US-040-15 and -16); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
+**Exit check:** 109 of the 113 M0 Must stories complete and US-040, US-061, US-062 and US-080 partial (D-PM-068, D-PM-078, D-PM-087; the `v0.1.0-m0` dossier names the six open route-level scenarios of US-061 and US-062, the two stream scenarios of US-040, AT-US-040-15 and -16, and the four HTTP halves of US-080, AT-US-080-04 to -07); part 044-B of TASK-044 on main and US-042 complete (D-PM-089); M0 demo journey green on 3 engines x 2 viewports; lane B `gate`-equivalent run; lane C `release-candidate` run green on the checkpoint SHA.
 
 **Stories completed in this wave (22):** US-019, US-021, US-022, US-039, US-041, US-043, US-045, US-046, US-047, US-069, US-079, US-089, US-093, US-102, US-105, US-113, US-120, US-123, US-125, US-204, US-205, US-292.
 
@@ -19,8 +19,8 @@ Tasks: **28** (S 7 / M 21; opus 13 / sonnet 15; demo-critical 0) in **7** batche
 | 3.3 | TASK-103 Progressive delay and account lockout<br>TASK-104 Permission-denied audit and cross-tenant 404<br>TASK-105 Saga compensation on permanent failure and saga fault-matrix generator<br>TASK-106 Accessibility gate | identity-core<br>api-authz<br>mod-orders-saga<br>e2e-a11y |
 | 3.4 | TASK-107 Unverified-account expiry<br>TASK-108 Input hardening<br>TASK-109 createShipment retry, definitive rejection and ambiguous outcome handling<br>TASK-110 Pseudo-locale overflow tests and logical CSS | identity-core<br>api-input<br>mod-orders-saga<br>i18n-pseudo |
 | 3.5 | TASK-111 Security headers, HSTS and hash-based Content-Security-Policy<br>TASK-112 Static safeguards<br>TASK-113 SSRF-safe outbound HTTP client and security-event catalogue<br>TASK-114 Fail-closed sensitive reads and downloads | api-headers, infra-nginx<br>lint<br>api-egress<br>api-audit-mw |
-| 3.6 | TASK-115 Data representation rules<br>TASK-116 Chain verification job, hourly ECDSA-signed anchors and health degradation<br>TASK-117 Password-reset screens and delay/lockout messages<br>TASK-118 Query-plan registry and N+1 guard | api-repr<br>worker-audit-maint<br>web-auth<br>tests-perf-db |
-| 3.7 | TASK-119 Release workflow<br>TASK-120 k6 rate-shopping SSE profiles<br>TASK-121 M0 exit-demo journeys<br>TASK-281 ZAP baseline configuration and rules file | ci-workflows<br>tests-load<br>e2e-demo<br>security-dast |
+| 3.6 | TASK-115 Data representation rules<br>TASK-116 Chain verification job, hourly ECDSA-signed anchors and health degradation<br>TASK-117 Password-reset screens and delay/lockout messages<br>TASK-118 Query-plan registry and N+1 guard | api-repr<br>worker-audit-maint, db-tools-backup<br>web-auth<br>tests-perf-db |
+| 3.7 | TASK-119 Release workflow<br>TASK-121 M0 exit-demo journeys<br>TASK-281 ZAP baseline configuration and rules file | ci-workflows<br>e2e-demo<br>security-dast |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
 
@@ -64,7 +64,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-039 (M0 Must) ETags and optimistic concurrency |
 | REQs | REQ-API-012, REQ-API-013 |
 | NFRs | NFR-DATA-003 |
-| Spikes / security / decisions | D-ARCH-193, D-QG-003, D-SD-007, D-ARCH-202, D-PM-083, D-QG-004, D-SD-010 |
+| Spikes / security / decisions | D-ARCH-193, D-QG-003, D-SD-007, D-ARCH-202, D-PM-083, D-QG-004, D-SD-010, D-ARCH-217, D-ORCH-150, PR045-SEC-07, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-036 |
@@ -84,6 +84,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - ORDER AROUND THE IDEMPOTENCY CLAIM (ADR-0014 amendment 7; ADR-0016 item 7 as amended; D-ARCH-193): step 7b checks only that If-Match is present and well formed (428, 400) and never reads a row; the comparison with the row version is the conditional write inside the handler transaction; tests: a PATCH that committed, retried with the same Idempotency-Key and its original If-Match, answers the stored 200 with Idempotent-Replayed true and not 412; a new execution with a stale If-Match answers 412 and the same key replays that 412; part 040-B of TASK-040 is on main before this task is dispatched
 - VERSION CHECK BEFORE CALL (ADR-0003 amendment 2026-11-20 rules (i) and (l); ADR-0014 amendment 13; D-ARCH-202; D-PM-083; QG-040-C2): a route that requires If-Match and declares call declares where load returns the id and the version; the tx slot compares them with the expected value of step 7b after load and before call and answers 412 CONCURRENCY_CONFLICT with the current ETag; defineRoute refuses such a route without the declaration; the conditional write of the handler stays the deciding check; tests: a stale If-Match on an operation with a call phase answers 412 and the call was not made; a version that changes during call answers 412 from the conditional write, the call ran once and WARN api.call_without_commit is logged with the operation id and the correlation id and no value; the route-metadata test pins every operation that declares call with its class (read, inert, reachable) and fails on an unlisted one; this task declares the version source on every If-Match operation that is mounted when it merges; files gain apps/api/src/platform/tx/execute.ts, apps/api/src/platform/routing/define-route.ts and tests/generated/route-metadata.ts
 - RETROFIT (D-ARCH-202 sequencing; ADR-0003 amendment 2026-11-20 rules (i) and (l), owner lines; D-QG-004 QG-040-C8; D-SD-010): this task stays in batch 3.1, after the tasks that mount an If-Match or call operation before it, and retrofits those operations; IF-MATCH: updateMe (TASK-062, batch 1.7; no call: step 7b now answers 428 and 400, and the conditional write of its handler gets the expected version) and checkoutOrder (TASK-092, batch 2.5; If-Match with call: this task declares where load returns the order id and version, so a stale request is answered 412 before the intent is created); CALL TABLE rows: registerUser (TASK-049) and loginUser (TASK-052) class read, checkoutOrder class inert and confirmPayment class reachable (TASK-092, whose fault tests the rows cite; the Mock gateway authorises inside call as a simulated adapter, D-ARCH-205); tests: per retrofitted If-Match operation, a missing If-Match answers 428 and a stale one 412, and on checkoutOrder the Mock gateway records no call; any other operation with If-Match or call that is on main when this task merges is retrofitted the same way and named in the PR body; an operation of this list that is not on main when this task merges declares its own source and row (the IF-MATCH UNTIL TASK-096 and CALL CLASS lines of its card); the module files touched are route declarations only, and the orchestrator grants their module locks at dispatch; no tag is cut before this task merges (v0.1.0-m0 follows Wave 3)
+- LOCK ORDER WITH TASK-044 PART 044-B (D-ARCH-217): this task and part 044-B both edit execute.ts and define-route.ts and are never in flight together; part 044-B goes first when both are dispatchable; this task leaves send(), completeStream, the stream signals and the cut logging of ADR-0003 rules (m) to (q) as it finds them; step 7b applies to no stream operation (neither takes If-Match)
+- LIST CEILING CHECKED AT DECLARATION (TASK-045 code review R1-n3; PR045-SEC-07 module half, INFO, CWE-770; D-ORCH-150; D-SECPR045-02; this task is the next holder of define-route.ts after TASK-044 part 044-B, whose scope is fixed by the TASK-044 rulings): a list spec that declares the reference ceiling on a route that is not public, or the audit ceiling (200) on a route that is not an audit list (tag audit and a path under /audit/, as the contract checker already requires), is refused when the route is declared or mounted, not per request with a 500; unit rows for both refusals and their controls
 - AT-US-039-01 … AT-US-039-07: all 7 scenarios of US-039, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -158,7 +160,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-021 (M0 Must) Password reset |
 | REQs | REQ-AUTH-011, REQ-AUTH-012 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37 |
+| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37, D-PM-088, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-059, TASK-086 |
@@ -173,6 +175,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-021 API scenarios
 - SEC-TC-47 (reset part): a successful reset sets email_verified_at
 - EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
+- STORE OUTAGE CASE (REQ-SEC-006; D-PM-088 card line 4; D-SD-012): the service of requestPasswordReset consumes emailSendRules (the per-address rule of the email-send class) with onStoreFailure fallback; api test through the mounted requestPasswordReset route with the store failing: the request that exceeds the per-address limit of the email-send class on one instance answers 429 RATE_LIMITED; if the route is ruled to have no per-address rule, the PR says so and this line is void
 - AT-US-021-01 … AT-US-021-07: all 7 scenarios of US-021, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -231,6 +234,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-125 scenarios (Mock passes the full suite)
 - RATE RESPONSE RULES (ADR-0010 amendment 12 item 1; D-ARCH-168): per adapter, noServiceReason is set only when quotes is empty, and it is never AUTH_FAILED, RATE_LIMITED, TIMEOUT, CARRIER_UNAVAILABLE, CARRIER_BUSY, CAPABILITY_NOT_SUPPORTED or CARRIER_UNKNOWN_ERROR (a failed call throws)
 - LABEL CONTRACT CASE (TASK-075 code review R3-m1; PR075-SEC-14; D-SECPR075-03): an adapter returns raw { format, content } and the guard builds the LabelDocument; a case where createShipment returns a bad label ends with the label dropped (carrier.label.refused, recoverLabel path), never thrown; the real PDF and ZPL fixtures of every adapter pass createLabelDocument and the sniffers
+- EXPLANATION ENTRIES STAY OPERATOR-SIDE (D-SECPR080-01 routing; TASK-080 security record PR-0081 section 8): the explanation entries of PricingResult (rule key, rate, priority) are classified INT, so a customer-facing response carries the charge lines only, unless a ruling says otherwise; the task that serialises PricingResult into a quote response asserts that no explanation field reaches it
 - AT-US-125-01 … AT-US-125-05: all 5 scenarios of US-125, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -409,7 +413,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-045 (M0 Must) Input hardening: unknown fields, body size, content types, timeouts |
 | REQs | REQ-SEC-007, REQ-SEC-015 |
 | NFRs | NFR-SEC-009, NFR-SEC-011 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ARCH-219, D-PM-089, D-ARCH-227, D-SECPR041B-01, PR041-SEC-11, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-036, TASK-020, TASK-278 |
@@ -422,6 +426,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-045 scenarios
+- REQUEST TIMEOUT AND EVENT STREAMS (ADR-0016 amendment 14 item 3; D-ARCH-219; US-045: an event-stream route is exempt): the 30 s request timer covers a request until its response starts; once the tx slot has started a stream, the stream deadline of the slot is its only bound, and the timer neither answers nor resets it; test: a stream fixture that started 2 s after the request arrived still gets its error event at 30 s of stream time and a clean end
+- US-045 STEPS OF D-PM-089 (REQ-SEC-015 as amended): [AT-US-045-05] has two stream halves: a stream that has started is not ended by the request timeout and runs to its own 30 s cap (the test of the REQUEST TIMEOUT AND EVENT STREAMS line), and a request to an event-stream route whose handler has not started the stream after 30 s gets 503 SERVICE_UNAVAILABLE like any other request; the timer does not treat a route differently by its kind
+- PART 044-B FIRST (D-PM-089 routing to senior-developer; D-SD-012): the stream rows of this task run on the default pipeline, which gives a stream more than 20 s only with the stream deadline and the drain signal of TASK-044 part 044-B; dispatch this task after part 044-B is on main, or build it stacked on the approved part 044-B head (D-ORCH-150) and merge after it; no test raises the call deadline to pass
+- REQUEST TIMEOUT AND THE STEP-0 HOLD (ADR-0016 amendment 13 item 6; R-ARCH-36 (d)): the 30 s request timeout also ends a request whose body stalls, and until this task the bound is the Node default of 300 s; test: a credentialed request that sends its headers and never completes its body is ended at the timeout, its in-flight unit is released, and a following credentialed request of the address is served
+- DECLARED-OVERSIZE BODY (D-SECPR041B-01 security addition (a) to ADR-0016 amendment 13 item 6; PR041-SEC-11 LOW): the request timeout runs from the arrival of the request, and a credentialed request that declares a Content-Length above the body limit and sends no body is ended by it like a stalled body (body-parser answers 413 only after the request ends), with its in-flight unit released; test row beside the stalled-body row
 - AT-US-045-01 … AT-US-045-07: all 7 scenarios of US-045, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -650,11 +659,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-093 (M0 Must) Chain verification job and health degradation |
 | REQs | REQ-AUDIT-013 |
 | NFRs | NFR-AUDIT-003 |
-| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18, PR12-SEC-04, PR12-SEC-05, D-TASK012-02, D-ARCH-076, D-ARCH-077, D-ARCH-079, PR30-SEC-06, D-ARCH-093, D-ARCH-094, PR30-SEC-03, D-SEC-PR30-02, D-ARCH-096, D-SEC-TM-01 |
+| Spikes / security / decisions | SEC-COND-03, SPK-08, R-ARCH-18, PR12-SEC-04, PR12-SEC-05, D-TASK012-02, D-ARCH-076, D-ARCH-077, D-ARCH-079, PR30-SEC-06, D-ARCH-093, D-ARCH-094, PR30-SEC-03, D-SEC-PR30-02, D-ARCH-096, D-SEC-TM-01, D-TASK034-04, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | S |
 | Depends on | TASK-030, TASK-090, TASK-039 |
-| Batch · locks | 3.6 · worker-audit-maint |
+| Batch · locks | 3.6 · worker-audit-maint, db-tools-backup |
 | Branch | `feat/TASK-116-chain-verification-job-hourly-ecdsa` |
 | Priority | Must |
 
@@ -673,6 +682,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - SPK-08 §8.1 PORT-THEN-DELETE (PR #12 code review M3; D-TASK012-02 (1); due at this task merge, batch 3.6, and in any case before G3): this PR ports prisma/tests/spikes/spk08-anchor.int.test.ts (SEC-TC-44 (a)-(c), ANCHOR-02/06/07 incl. the >= 11-anchor ORDER-BY regression of AF-1, plus the PR12-SEC-05 b variants) into its verifier integration suite and the golden vectors into a packages/audit unit test, and prisma/tests/spikes/spk08/anchor-prototype.ts (headsDigest, anchorHash, derToP1363, sinkLine JCS, verifier steps) into product code in packages/audit with unit tests, then DELETES both files in the SAME commit as the port
 - ANCHOR SINK CONDITIONS (PR #30 code review R1-m6, security PR30-SEC-06; ADR-0021 am. 2; data-model §5.2 amendment of 2026-11-13; D-ARCH-093, D-ARCH-094): (1) the sink is built from its OWN secret references and the audit-anchors bucket as Pick<ObjectStorage, putIfAbsent | head | get> (no put, no delete) and exposed as a worker-only anchorSink member of RuntimeServices — never from the documents RuntimeServices.storage, which PR #30 or the first documents consumer (TASK-147) exposes for documents only; a composition test asserts that the anchor credential keys and bucket differ from storage (values may coincide in Compose); (2) THIS task owns the putIfAbsent retry semantics, not the port: the sink line is a pure function of the audit_anchors row, so a retry re-sends identical bytes; created:true is done; created:false — the normal result of a retry whose first attempt succeeded and whose response was lost (412 on If-None-Match: *), or of a concurrent writer — asks the sink wrapper isWritten(key, digest), which decides from bytes the store vouches for and NEVER from the metadata claim (ADR-0021 am. 2 item 3 as replaced 2026-11-13, D-ARCH-096; PR #30 security r2 R2.5, D-SEC-PR30-02): head().checksumSha256 (the SHA-256 the store verified when the object was written through the port, lowercase hex) is compared with the digest of the line this run just built; when it is absent (an object not written through the port, or a composite checksum that the adapter drops) get() is called and the sha256 the adapter RECOMPUTED over the bytes is compared; head().sha256 is the metadata claim of whoever wrote the object and is never read; equal is success; different, absent after the 412, or get() throwing INTEGRITY_MISMATCH or TOO_LARGE is ANCHOR_SINK_MISMATCH (alert, never an overwrite, never retried as transient); UNAVAILABLE from either call is retried inside the sink window; the writer passes the digest of its line as sha256 to putIfAbsent so that the store verifies it on receipt; the wrapper that anchor.ts receives has exactly putIfAbsent and isWritten(key, digest) and the one that verify.ts receives has exactly read(key) returning bytes (the verifier keeps its byte-exact table/sink comparison, A-1 and A-6) — no head and no hash-returning member is reachable from either file, enforced by a type-level test and by a grep test that neither file reads the sha256 of a head result; loopback unit tests with a store that applies the first PUT, drops its response and answers 412 to the retry (created:false, both requests carry If-None-Match: *) and then the branches: checksum equal, checksum different, checksum absent with get() equal and different, an object written with the SDK default CRC32 (checksumSha256 undefined, get fallback), and a PRE-SEEDED attacker object whose metadata claims the digest of the line while the bytes differ — the RustFS contract case of R2.5 (head().sha256 equals, head().checksumSha256 does not, get() throws INTEGRITY_MISMATCH) ends in ANCHOR_SINK_MISMATCH with the foreign bytes untouched; (3) AWS answers a concurrent conditional write with 409 ConditionalRequestConflict (RustFS cannot produce it, R-ARCH-05): it is retryable with jittered backoff inside the 15-minute sink retry window, never success and never created:false without the head comparison — unit rows with a fake store returning 409 then 200 and 409 then 412 (the adapter maps 409 ConditionalRequestConflict and 400 RequestTimeout to UNAVAILABLE, BadDigest to INTEGRITY_MISMATCH and ExpiredToken to ACCESS_DENIED — landed in PR #30, head 5f45a8b, code review r2 error-map probe and security r2 R2.3 row 4, merge pending; ACCESS_DENIED, INTEGRITY_MISMATCH and INVALID_ARGUMENT are not retried and fail the run closed with an alert; ADR-0021 am. 2 item 4 as replaced, D-ARCH-096); (4) the hourly tripwire also asserts to_regprocedure(platform.audit_ddl_guard()) IS NOT NULL (R2-n3 detection until the next guard version exempts by evtfoid); (5) the worker IAM wording of ADR-0021 am. 2 (PutObject plus GetObject and ListBucket on anchors/, no delete, no bypass) is carried by COND-G4-PROD, no code; (6) FAIL-CLOSED CREDENTIAL PAIR (ADR-0021 am. 2 item 6, D-ARCH-096; PR #30 code review r2 flag 3, security r2 R2.7): when AUDIT_ANCHOR_SINK is an s3: URL its two secret references AUDIT_ANCHOR_SINK_ACCESS_KEY_ID_REF and AUDIT_ANCHOR_SINK_SECRET_ACCESS_KEY_REF (worker only; added to the packages/config schema, the key register, .env.example and compose.env by this task) must both resolve or both be unset; exactly one is an AnchorSinkConfigError that names the two keys and never a value, thrown by the worker composition BEFORE any client, pool or queue is created; the pair is one more row of the CREDENTIAL_PAIRS table of the TASK-014 configuration guard (exit 78, reason storage.credentialPair), so that the worker exits 78 at configuration load and the composition throw is defence in depth; unset anchor references NEVER fall back to the STORAGE_* references (a composition test that sets only the STORAGE pair asserts that the s3: sink then refuses to start); in staging and production both anchor references are refused by the same hardened-environment rule (the IAM task role is the identity, ADR-0021 am. 2 item 1) and the anchor bucket must differ from STORAGE_BUCKET_DOCUMENTS; the file: sink of Compose and local needs no credentials, so the rule applies to the s3: form that the integration tests run against RustFS and that M5 uses
 - SEC-TC-69, SEC-TC-70 and SEC-TC-71 (proposed IDs, D-SEC-TM-01; qa-lead adopts them through required_cases_pending with checkpoint G3 and may fold 70 into 69): the anchor comparison cases, the pre-seeded attacker object on the pinned RustFS included, carry [SEC-TC-69]; the sink error-class cases (409 ConditionalRequestConflict, 400 RequestTimeout, ExpiredToken, BadDigest) carry [SEC-TC-70]; the credential-pair and bucket-separation cases carry [SEC-TC-71]
+- RESTORE REHEARSAL, AUDIT CHAIN (D-TASK034-04; TASK-034 code review round 1 m4; D-SD-012): tools/db/verify-restore.ts (TASK-034) runs the chain verifier of this task on the restored database and checks the anchors of the anchor sink against it: the restored chain verifies and its anchored heads match; a negative control (one entry changed in the scratch restore) fails; [NT-REC-003-a] in the title; the restore-rehearsal job of TASK-119 runs it
 - AT-US-093-01 … AT-US-093-05: all 5 scenarios of US-093, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -742,10 +752,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-OPS-003, NFR-SEC-002 |
-| Spikes / security / decisions | D-005, D-006, SEC-P3-25 |
+| Spikes / security / decisions | D-005, D-006, SEC-P3-25, D-TASK034-04, D-TASK034-05, D-SD-012 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
-| Depends on | TASK-015, TASK-014 |
+| Depends on | TASK-015, TASK-014, TASK-280 |
 | Batch · locks | 3.7 · ci-workflows |
 | Branch | `feat/TASK-119-release-workflow-ghcr-promotion-trivy` |
 | Priority | Enabler |
@@ -758,34 +768,10 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - Dry run on a test tag in a fork-safe mode: guard rejects a SHA without a green lane C release-candidate run; promoted images start from GHCR and pass the smoke test (NFR-OPS-003)
+- RESTORE-REHEARSAL AND PREVIOUS-IMAGE JOBS (D-TASK034-04, D-TASK034-05; TASK-034 code review round 1 m4; D-SD-012): (1) the restore-rehearsal CI job of NT-REC-003-a and NT-REC-001-a: a fresh Compose stack from the candidate images is seeded, the marker stream writes one row per second into the throwaway rehearsal schema while npm run db:backup runs (data-model 8.6 step 1), the backup is restored into a second fresh stack, tools/db/verify-restore.ts (TASK-034) runs, and the restored api answers /health/ready with 200; the observed data-loss window is reported as informational; it runs in lane C release-candidate, which the guard of this task requires green, and in lane B gate; (2) the image-level NT-AVAIL-003-b probe: the previous api image (the last release tag, or the previous main image in GHCR before the first tag) runs against the schema the candidate migrated, under the 20 rps k6 probe of the TASK-280 harness, with 0 % errors, in lane C release-candidate and on lane B pr runs that change prisma/migrations; until it exists the database-level probe of TASK-034 is the evidence; TASK-116 and TASK-147 add their checks to the job later
 
 **DoD notes**
 - Workflow and tooling changes verified on their own PR; tooling invoked from the base ref; minute usage measured and recorded.
-- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
-
-### TASK-120 — k6 rate-shopping SSE profiles (first result, complete, hung carrier)
-
-| Field | Value |
-|---|---|
-| Stories (completes) | — |
-| REQs | — (enabler; see refs) |
-| NFRs | NFR-PERF-002, NFR-PERF-003, NFR-PERF-007 |
-| Spikes / security / decisions | — |
-| Specialist · model | performance-engineer · sonnet (escalate to opus from fix cycle 2) |
-| Complexity | M |
-| Depends on | TASK-091, TASK-280 |
-| Batch · locks | 3.7 · tests-load |
-| Branch | `feat/TASK-120-k6-rate-shopping-sse-profiles` |
-| Priority | Enabler |
-
-**Files / modules**
-- tests/load/scenarios/quote-sse.js (on the k6 harness)
-
-**Acceptance tests to write**
-- NFR-PERF-002 first result <= 1.5 s p95 and NFR-PERF-003 complete <= 5 s on the reference host; evidence under docs/05-quality/performance/runs/
-
-**DoD notes**
-- k6/Lighthouse scripts committed; host spec and results as machine-generated evidence under `docs/05-quality/performance/runs/`; thresholds taken from NFR.md.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-121 — M0 exit-demo journeys (Playwright + API): sign-in both apps, guest quote, mock booking, audit viewer, generators
