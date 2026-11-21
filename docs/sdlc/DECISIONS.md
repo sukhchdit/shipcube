@@ -10393,3 +10393,43 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Fix:** devops-engineer, branch `chore/main-red-gitleaks-valkey-baseline`: the exact extra fingerprints added to the baseline with security notes; compose back on the harness digest and a Dependabot `ignore` for Valkey majors. PR left ready for the user (CI billing-blocked). Every lane-B run of a branch merged with main stays red on these 3 cases until it lands; such runs are read as "PASS except PR080-SEC-07/O-1" only if the failures are exactly these.
 - **D-SECPOST-01** (post-merge security review of #80–#84) = PASS_WITH_CONDITIONS; its C1 is the main lane-B run, which will also show these 3 failures.
 - **Reversibility:** High.
+
+### D-SECPR034-01 · 2026-11-21 · security-analyst · TASK-034 security round 1 (backup/restore rehearsal, rule R, zero-downtime probe; diff `530629f4..3ee36f01`, 39 owned paths; PR5-SEC-14, PR11-SEC-11 d, PR293-SEC-04, D-ARCH-172 rule 14, D-TASK034-12) = PASS_WITH_CONDITIONS at `3ee36f01` (record `docs/05-quality/security/PR-pending-TASK-034-security-review.md`, committed on main; to be renamed `PR-<NNNN>-TASK-034-security-review.md` once the PR exists, D-ORCH-136/138)
+- **Trigger:** D-ORCH-164 and D-ORCH-169: security round 1 is owed on `3ee36f01`. Code review round 2 is APPROVED_WITH_NITS (D-CRPR034-01), and it asks for the `tolerantRead` fuzz and the ruling on D-TASK034-12. Before finalising I read D-CRPR034-01, D-ORCH-169 and D-SECPOST-01 (POST-SEC-04 is routed to TASK-034).
+- **Decision:** 0 Critical, 0 High.
+  1. **Closed:**
+     - PR5-SEC-14 (the type plus a run-time refusal before any client; `resetTarget` returns the validated URL).
+     - PR11-SEC-11 d. D-TASK034-12 is accepted: after the open, the path is re-resolved, checked under the root again, and must name the descriptor's device and inode. The remaining race needs write access to the read-only `/run/secrets` mount.
+     - PR293-SEC-04 (a) for rule 10. A differential fuzz over 60,000 bodies finds 0 fallback misses among 20,562 write-bearing ones; a comment-blanking mutant misses 646. `tolerantRead` is linear (4n/n ratios at most 5.1 over 10 adversarial families).
+     - PR293-SEC-04 (b), kept fail closed.
+     - D-ARCH-172 rule 14.
+     - Code review R1-n2.
+     - A live rule-10 bypass on main that needs no E-string. `EXECUTE 'SELECT 1; -- c<LF>UPDATE …'` lints clean on `530629f4`, and PostgreSQL runs the UPDATE; the head reports it.
+  2. **New PR034-SEC-01 MEDIUM (CWE-250, CWE-269; A04).** `db:verify-restore` loads rows as the cluster superuser, so PostgreSQL evaluates table CHECKs, domain CHECKs and STORED generated expressions as that superuser. `pg_dump` places a validated CHECK inside `CREATE TABLE`, so the CHECK is present during the load.
+     - A migration routine that escalates only when `current_user` is a superuser lints clean on base and head, in 4 variants (`ALTER ROLE … SUPERUSER`, `GRANT pg_execute_server_program`, `COPY … TO PROGRAM`, a `pg_authid` read).
+     - On PostgreSQL, the migrator's own writes leave it NOSUPERUSER, and a superuser load makes it SUPERUSER. Proven for all three call sites.
+     - The restore also targets the live cluster (the brief's scope note) instead of the fresh stack of data-model §8.6 step 4, and no D-TASK034 entry records that change. On the live cluster, `00-roles.sql` re-sets cluster-wide passwords and role attributes from the operator's environment.
+     - Rating: High impact (the migrator-to-superuser boundary) × Low likelihood (a malicious migration that passes the security review, or a stolen migrator credential, followed by a rehearsal) = MEDIUM. Today the tools run only on a developer's own stack.
+     - Fix: (1) a lint rule (CHECK, domain CHECK and generated expressions call no migration-defined routine) plus a C15 catalog case (`pg_depend` from `pg_constraint` and generated `pg_attrdef` to non-`pg_catalog` routines, expected 0 rows; proven on PGlite: 3 planted hits, 0 on the built-in control); (2) restore isolation per §8.6 step 4, or a recorded same-cluster deviation.
+  3. **New LOW:**
+     - PR034-SEC-02 (CWE-276): `platform.dump` and the run folder are created without `mode` (`0o600`/`0o700` recommended).
+     - PR034-SEC-03 (CWE-532): `maskValues` lets `DETAIL: Failing row contains (…)`, `RAISE` values and escaped-quote debug lines through into the deploy-failure detail. That detail goes to stderr and to `restore-report.json`, and 4 of 5 shapes leak a sentinel. An allow-list form is recommended.
+     - PR034-SEC-04 (CWE-354): the bare alias `t` in `tableFingerprintSql` becomes a column reference on a table with a column `t`, so the checksum then ignores the other columns. Use `(t.*)::text`.
+     - PR034-SEC-05 (CWE-184): a range type's `subtype_diff` (IMMUTABLE wrapper, volatile writer) writes during a GiST build, and it lints clean on base and head. It is the sibling of D-ARCH-172; refuse `CREATE TYPE … AS RANGE` in rule 14.
+  4. **New INFO:**
+     - PR034-SEC-06: the R1-M2 E-string decoding is unreachable in the lint path. `ESCAPE_STRING_MARK` ends in U+2063, so `E` reads as an identifier character. Rule 16 keeps every such shape fail closed.
+     - PR034-SEC-07: rule R records are unsigned claims. Accepted until M5, with a security-round check of the `restore-report.json` totals and manifest digest for every data-changing migration PR.
+     - PR034-SEC-08: the Prisma child processes inherit `DATABASE_BOOTSTRAP_URL` and the role passwords; an allow-listed environment is recommended.
+  5. **Concurred:** D-TASK034-01, -03 (except PR034-SEC-04), -06, -07, -09, -10, -13, -14; D-ORCH-160 (C4 as a harness-only proof); code review R2-m1 and R2-n2.
+- **Method:** Node 24 probes on `git archive` extracts of `tools/db` at `3ee36f01` and, as the positive control, `530629f4`; PGlite 0.4.3 (PostgreSQL 17.5) for PostgreSQL behaviour, including `pg_dump` from pglite-tools; a gitleaks v8.30.1 git-mode emulation over the diff (0 findings in 6,210 added lines, with runtime controls firing). No Docker and no Jest. I ran `git status`, `git log` and `git fetch` once in `../Shipqube-TASK-034` at the start; nothing else ran there. `.env*` was not opened.
+- **Binding:** the `Head` row names `3ee36f010e91cdceaba257991bb6e7025700a7a4`. Main's checker, run in a shared sparse clone with the record as `PR-9999-…`, passes with 39 owned paths. The controls fail as they should: no record, a FAIL verdict, and a head row naming `9c40d31e` (owned paths changed after it).
+- **Conditions:**
+  - C1 (tracked): principal-architect rules on the PR034-SEC-01 isolation. The source control (the lint rule and C15) lands before `restore-rehearsal` is activated, before any rehearsal on non-synthetic data, and at the latest before G3. The preferred carrier is this PR's next fix cycle.
+  - C2: a security delta round on the fix head (R2-m1 will change it).
+  - C3: commit the lane-B evidence; then a merge-only round on the merge with main, because `package.json` is owned and changed on both sides; then lane B on the merge, hosted CI when billing allows, the rename and the merge-ref check.
+- **Routed:**
+  - principal-architect: the C1 ruling and C15; PR034-SEC-05 as the D-ARCH-172 follow-up; the T-81 / RR-05 text.
+  - senior-developer: TASK-034 fix cycle 3 with R2-m1, carrying PR034-SEC-02 to -06 and -08 (recommended), and SEC-01 item 1 if the architect so rules.
+  - qa-lead: `restore-rehearsal` activation waits for C1.
+  - orchestrator: C2, C3, the C1 carrier, and the PR034-SEC-07 checklist item.
+- **Reversibility:** High (a review record).
