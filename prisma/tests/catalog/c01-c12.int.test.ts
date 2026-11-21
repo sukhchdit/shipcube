@@ -301,6 +301,11 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_audit_entries__source_app: ['admin', 'api', 'web', 'worker'],
   ck_audit_pii_vault__classification: ['PERSONAL', 'SENSITIVE_PERSONAL'],
   ck_data_subjects__kind: ['CONTACT', 'USER'],
+  // HTTP idempotency keys (TASK-040; data-model §6.2), pinned from the data model like the lists above. The api module's
+  // IDEMPOTENT_METHODS and IDEMPOTENCY_KEY_STATUSES are compared with the migration text by
+  // apps/api/src/platform/idempotency/enum-checks.test.ts, which may import them (prisma/tests may not).
+  ck_idempotency_keys__method: ['DELETE', 'PATCH', 'POST', 'PUT'],
+  ck_idempotency_keys__status: ['COMPLETED', 'IN_PROGRESS'],
   // Organisations and identity (TASK-037; data-model §1.7, §3.1, §3.2), pinned from the data model like the audit lists.
   // The organisations module's ORG_TYPES and WRITABLE_MEMBERSHIP_STATUSES (+ the reserved INVITED, D-ARCH-123) are
   // compared with the migration text by apps/api/src/modules/organisations/tests/organisations.test.ts, which may import

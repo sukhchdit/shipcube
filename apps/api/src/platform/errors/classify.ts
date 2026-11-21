@@ -68,9 +68,16 @@ function retryAfterOf(value: unknown): number | undefined {
     : undefined;
 }
 
-/** An AppError keeps `Retry-After` only on a 503 (a retryable outage), never on a client error. */
+/**
+ * The client errors whose contract carries `Retry-After` (TASK-040: api/README §5 "Conflicts", 409
+ * IDEMPOTENCY_IN_PROGRESS with `Retry-After: 1`). Exact codes, so no other client error can grow the header.
+ */
+const CLIENT_RETRY_AFTER_CODES: ReadonlySet<unknown> = new Set<ErrorCode>(['IDEMPOTENCY_IN_PROGRESS']);
+
+/** An AppError keeps `Retry-After` on a 503 (a retryable outage) and on the listed client errors, never otherwise. */
 function classifyAppError(value: AppError): Classified {
-  const retryAfter = ownDataProperty(value, 'status') === 503 ? retryAfterOf(value) : undefined;
+  const keeps = ownDataProperty(value, 'status') === 503 || CLIENT_RETRY_AFTER_CODES.has(ownDataProperty(value, 'code'));
+  const retryAfter = keeps ? retryAfterOf(value) : undefined;
   return retryAfter === undefined ? { kind: 'app', error: value } : { kind: 'app', error: value, retryAfterSeconds: retryAfter };
 }
 
