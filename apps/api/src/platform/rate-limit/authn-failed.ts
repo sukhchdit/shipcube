@@ -20,6 +20,12 @@
  *   known (after the spend, when there is one) the wrapper releases it, whether or not the client is still there, so a
  *   parallel burst is bounded by the budget too. A request whose unit the close already released (its client left
  *   between step 0 and the slot) is not authenticated and goes no further (D-TASK041-20).
+ * - A slot that ends without an outcome is ended by the wrapper (change C-4, D-ARCH-230, PR041-SEC-16): when it answered
+ *   the client itself the unit is released, nothing is spent and nothing more is called; when nothing was answered the
+ *   wrapper reports an error through its own outcome path (500, no spend, the unit released). Either case writes the
+ *   error line `api.authn_slot_unreported` at most once a minute per operation and instance. Nothing about the
+ *   response releases an entered unit: neither its close nor its `finish` (a request timer may answer while the slot
+ *   still runs).
  */
 import { isAppError, presentedKinds } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
@@ -47,11 +53,55 @@ export function presentsDeclaredCredential(auth: readonly string[], headers: Req
 const isThenable = (value: unknown): value is PromiseLike<unknown> =>
   typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function';
 
-/** Wraps `slot` so that its refusals spend the failed-authentication budget of the client IP. */
-export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit): RouteSlot {
+/** The error line of a slot that ended without an outcome (C-4): an application log line, not a security event. */
+export const SLOT_UNREPORTED_EVENT = 'api.authn_slot_unreported';
+
+/** The error the wrapper reports for a slot that ended without an outcome and answered nothing (500, no spend). */
+export const SLOT_UNREPORTED_MESSAGE = 'The authentication slot ended without an outcome';
+
+/** How often the error line may be written per operation and instance (the pattern of `createOutageReporter`). */
+export const SLOT_UNREPORTED_INTERVAL_MS = 60_000;
+
+/** The logger seam of the wrapper (the app logger satisfies it): the one error line, scalar fields chosen by code. */
+export interface AuthnSlotLog {
+  error(event: string, fields?: Readonly<Record<string, string | number>>): void;
+}
+
+export interface AuthnFailedBudgetOptions {
+  readonly log: AuthnSlotLog;
+  /** The clock of the once-a-minute rule of the error line (tests); default `Date.now`. */
+  readonly now?: () => number;
+}
+
+/**
+ * Wraps `slot` so that its refusals spend the failed-authentication budget of the client IP.
+ *
+ * The contract of the slot (ADR-0016 amendment 13 item 6, Release; D-ARCH-230): an outcome is `next` called once (with
+ * or without an error), a synchronous throw or a rejection of the promise it returns. An authenticator never starts or
+ * ends the response (setting a header is allowed). A slot that has not reported when it returns returns a promise that
+ * stays pending until it reports; a slot that returns no promise may report later from a callback, and the wrapper
+ * waits for it while nothing has been answered. A slot that ends without an outcome (its promise fulfils, or it
+ * returns no promise after answering the client itself) is ended here, as the module comment describes.
+ */
+export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit, options: AuthnFailedBudgetOptions): RouteSlot {
+  const now = options.now ?? Date.now;
+  // When the error line was last written, per operation of this app (one wrapper per createApp, so per instance). The
+  // keys are the operation ids of the mounted routes: a fixed set.
+  const lineWrittenAt = new Map<string, number>();
   return (route) => {
     const inner = slot(route);
     const declared: readonly string[] = route.auth;
+    const writeLine = (res: Response): void => {
+      const at = now();
+      const previous = lineWrittenAt.get(route.operationId);
+      if (previous !== undefined && at - previous < SLOT_UNREPORTED_INTERVAL_MS) return;
+      lineWrittenAt.set(route.operationId, at);
+      // The status the slot (or whatever answered) wrote; absent when nothing was written. No request data.
+      options.log.error(SLOT_UNREPORTED_EVENT, {
+        operation_id: route.operationId,
+        ...(res.headersSent ? { status: res.statusCode } : {}),
+      });
+    };
     return function authenticate(req: Request, res: Response, next: NextFunction): void {
       // From here only the outcome releases the unit (D-ARCH-226). A unit the close already released means the client
       // left after admission: the response is closed and nobody waits for it, so the slot is not entered at all, else
@@ -83,12 +133,30 @@ export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit): Route
             next(error);
           });
       };
+      // The slot ended without an outcome (C-4). It answered the client itself: the unit is released, nothing is
+      // spent and nothing more is called (a later report is dropped). Nothing was answered: the wrapper reports an
+      // error through its own outcome path, so the problem handler answers 500, nothing is spent, the unit is released.
+      const endedWithoutOutcome = (): void => {
+        if (settled) return;
+        writeLine(res);
+        if (res.headersSent) {
+          settled = true;
+          kit.inFlight.release(res);
+          return;
+        }
+        done(new Error(SLOT_UNREPORTED_MESSAGE));
+      };
       // A synchronous throw and a rejected promise of the slot are refusals too: Express would pass them on past
       // the wrapper. A promise rejected with a falsy value is an error, as the Express 5 router makes it (R1-m1); a
-      // falsy synchronous throw is one too (stricter than the router, which would continue the request).
+      // falsy synchronous throw is one too (stricter than the router, which would continue the request). A promise
+      // that fulfils before an outcome, and a plain return after the slot answered the client, end the slot.
       try {
         const result: unknown = inner(req, res, done);
-        if (isThenable(result)) result.then(undefined, (error: unknown) => done(error || new Error('Rejected promise')));
+        if (isThenable(result)) {
+          result.then(endedWithoutOutcome, (error: unknown) => done(error || new Error('Rejected promise')));
+        } else if (res.headersSent) {
+          endedWithoutOutcome();
+        }
       } catch (error) {
         done(error || new Error('Thrown falsy value'));
       }

@@ -11,9 +11,24 @@ import type { NextFunction, Request, Response } from 'express';
 import { bootFailureOf } from '../routing/pipeline.js';
 import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
-import { AUTHN_FAILED_EVENT_CLASS, presentsDeclaredCredential, spendsAuthnBudget, withAuthnFailedBudget } from './authn-failed.js';
+import {
+  AUTHN_FAILED_EVENT_CLASS,
+  type AuthnFailedBudgetOptions,
+  presentsDeclaredCredential,
+  SLOT_UNREPORTED_EVENT,
+  SLOT_UNREPORTED_INTERVAL_MS,
+  SLOT_UNREPORTED_MESSAGE,
+  spendsAuthnBudget,
+  withAuthnFailedBudget,
+} from './authn-failed.js';
 import { createRateLimitKit } from './kit.js';
-import { refreshCookieRoutePaths, RefreshCookiePathError, selectsCredentialedRule, type StepZeroOptions } from './limits.js';
+import {
+  type RateLimitKit,
+  refreshCookieRoutePaths,
+  RefreshCookiePathError,
+  selectsCredentialedRule,
+  type StepZeroOptions,
+} from './limits.js';
 import { DEFAULT_RATE_LIMIT_SETTINGS } from './tests/settings.js';
 
 describe('[E4] [E2] what spends one unit', () => {
@@ -116,13 +131,15 @@ describe('[B1] the wrapper around the authentication slot', () => {
       { settings: { ...DEFAULT_RATE_LIMIT_SETTINGS, RATE_LIMIT_PUBLIC_PER_MIN: 2 } },
       { emit: (event, fields) => void events.push([event, fields ?? {}]) },
     );
-    return { composed, events };
+    // These slots all report an outcome: the error line of C-4 is never written (its rows are in the next block).
+    const options: AuthnFailedBudgetOptions = { log: { error: () => undefined } };
+    return { composed, events, options };
   }
 
   /** Runs the wrapped slot once and resolves with what it passed on. */
   const run = (slot: RouteSlot, k: ReturnType<typeof kit>, req = request(), res = response) =>
     new Promise<unknown>((resolve) => {
-      withAuthnFailedBudget(slot, k.composed)(route)(req, res, ((error?: unknown) => resolve(error)) as NextFunction);
+      withAuthnFailedBudget(slot, k.composed, k.options)(route)(req, res, ((error?: unknown) => resolve(error)) as NextFunction);
     });
 
   const refusing: RouteSlot = () => (_req, _res, next) => next(new AppError('AUTH_REQUIRED'));
@@ -153,7 +170,7 @@ describe('[B1] the wrapper around the authentication slot', () => {
       next(new AppError('AUTH_REQUIRED'));
     };
     await new Promise<void>((resolve) => {
-      withAuthnFailedBudget(twice, k.composed)(route)(request(), response, (() => {
+      withAuthnFailedBudget(twice, k.composed, k.options)(route)(request(), response, (() => {
         passed += 1;
         resolve();
       }) as NextFunction);
@@ -205,7 +222,7 @@ describe('[B1] the wrapper around the authentication slot', () => {
       const holder = {} as Response;
       expect(k.composed.inFlight.admit(ip, 0, 2, holder)).toBe(true);
       await new Promise<void>((resolve) => {
-        withAuthnFailedBudget(slot, observed)(route)(request(), holder, (() => {
+        withAuthnFailedBudget(slot, observed, k.options)(route)(request(), holder, (() => {
           heldAtNext.push(k.composed.inFlight.held(ip));
           resolve();
         }) as NextFunction);
@@ -244,7 +261,7 @@ describe('[B1] the wrapper around the authentication slot', () => {
       entered += 1;
       next();
     };
-    withAuthnFailedBudget(counting, k.composed)(route)(request(), gone, (() => {
+    withAuthnFailedBudget(counting, k.composed, k.options)(route)(request(), gone, (() => {
       passed += 1;
     }) as NextFunction);
     await new Promise((resolve) => setImmediate(resolve));
@@ -264,5 +281,194 @@ describe('[B1] the wrapper around the authentication slot', () => {
     expect(await run(refusing, k)).toMatchObject({ code: 'AUTH_REQUIRED' });
     // Only the last request spent: the limit of 2 is not reached yet.
     expect(k.events).toEqual([]);
+  });
+});
+
+describe('[C-4] [D-ARCH-230] a slot that ends without an outcome is ended by the wrapper (ADR-0016 am. 13 item 6, Release)', () => {
+  const IP = '203.0.113.7';
+  const route = fixtureRoute({ operationId: 'getProfile', path: '/me', auth: 'session', handler: () => ({ status: 200 }) });
+  const request = () => ({ headers: { authorization: 'Bearer junk' }, ip: IP }) as unknown as Request;
+  const later = () => new Promise((resolve) => setTimeout(resolve, 1));
+  /** Lets every pending callback and spend land. */
+  const drained = () => new Promise((resolve) => setTimeout(resolve, 5));
+  /** What a slot that answers the client itself leaves on the response: the wrapper reads `headersSent` and the status. */
+  const answer = (res: Response, status: number): void => void Object.assign(res, { headersSent: true, statusCode: status });
+
+  /** A kit with every release of a unit and every spend recorded, and the error lines of the wrapper. */
+  function observed() {
+    const lines: [string, Readonly<Record<string, unknown>>][] = [];
+    const clock = { now: 0 };
+    const options: AuthnFailedBudgetOptions = {
+      log: { error: (event, fields) => void lines.push([event, fields ?? {}]) },
+      now: () => clock.now,
+    };
+    const base = createRateLimitKit(
+      { settings: { ...DEFAULT_RATE_LIMIT_SETTINGS, RATE_LIMIT_PUBLIC_PER_MIN: 100 } },
+      { emit: () => undefined },
+    );
+    const releases: object[] = [];
+    let spends = 0;
+    const composed: RateLimitKit = {
+      ...base,
+      inFlight: {
+        ...base.inFlight,
+        release: (holder) => {
+          releases.push(holder);
+          base.inFlight.release(holder);
+        },
+      },
+      limiter: {
+        ...base.limiter,
+        spend: (...args: Parameters<RateLimitKit['limiter']['spend']>) => {
+          spends += 1;
+          return base.limiter.spend(...args);
+        },
+      },
+    };
+    // One wrapper per slot, as createApp composes one per app: the once-a-minute rule of the error line lives in it.
+    const wrappers = new Map<RouteSlot, RouteSlot>();
+    const wrapped = (slot: RouteSlot): RouteSlot => {
+      const existing = wrappers.get(slot);
+      if (existing !== undefined) return existing;
+      const created = withAuthnFailedBudget(slot, composed, options);
+      wrappers.set(slot, created);
+      return created;
+    };
+    /** Admits a fresh holder, enters the wrapped slot once and records every value passed on. */
+    const enter = (slot: RouteSlot, of = route) => {
+      const res = {} as Response;
+      expect(base.inFlight.admit(IP, 0, 100, res)).toBe(true);
+      const passed: unknown[] = [];
+      wrapped(slot)(of)(request(), res, ((error?: unknown) => void passed.push(error)) as NextFunction);
+      return { res, passed, released: () => releases.filter((holder) => holder === res).length };
+    };
+    return { lines, clock, enter, spends: () => spends, held: () => base.inFlight.held(IP) };
+  }
+
+  it('[H10] a conforming slot writes no error line and releases its unit exactly once', async () => {
+    const o = observed();
+    const conforming: Readonly<Record<string, RouteSlot>> = {
+      accepts: () => (_req, _res, next) => next(),
+      'accepts (async)': () => async (_req, _res, next) => {
+        await later();
+        next();
+      },
+      refuses: () => (_req, _res, next) => next(new AppError('AUTH_REQUIRED')),
+      'refuses (async)': () => async (_req, _res, next) => {
+        await later();
+        next(new AppError('AUTH_REQUIRED'));
+      },
+      'expired token': () => (_req, _res, next) => next(new AppError('ACCESS_TOKEN_EXPIRED')),
+      throws: () => () => {
+        throw new AppError('AUTH_REQUIRED');
+      },
+      rejects: () => async () => {
+        await later();
+        throw new AppError('AUTH_REQUIRED');
+      },
+      'reports twice': () => (_req, _res, next) => {
+        next();
+        next(new AppError('AUTH_REQUIRED'));
+      },
+      'reports from a callback': () => (_req, _res, next) => {
+        setTimeout(() => next(new AppError('AUTH_REQUIRED')), 1);
+      },
+    };
+    for (const [shape, slot] of Object.entries(conforming)) {
+      const entered = o.enter(slot);
+      await drained();
+      expect({ shape, passed: entered.passed.length, released: entered.released() }).toEqual({ shape, passed: 1, released: 1 });
+    }
+    expect(o.held()).toBe(0);
+    expect(o.lines).toEqual([]);
+    // The refusals that present a declared credential spent (refuses, refuses async, throws, rejects, the callback).
+    expect(o.spends()).toBe(5);
+  });
+
+  it.each(['plain', 'async'] as const)(
+    '[H7] a %s slot that answered the client itself and reports nothing: the unit is released, nothing is spent, nothing more is called',
+    async (shape) => {
+      const o = observed();
+      const answers: RouteSlot =
+        shape === 'plain'
+          ? () => (_req, res) => answer(res, 401)
+          : () => async (_req, res) => {
+              await later();
+              answer(res, 401);
+            };
+      const first = o.enter(answers);
+      const second = o.enter(answers);
+      await drained();
+      expect([first.passed, second.passed, first.released(), second.released()]).toEqual([[], [], 1, 1]);
+      expect([o.held(), o.spends()]).toEqual([0, 0]);
+      // Once a minute per operation: the second slot of the same minute writes no second line.
+      expect(o.lines).toEqual([[SLOT_UNREPORTED_EVENT, { operation_id: 'getProfile', status: 401 }]]);
+    },
+  );
+
+  it('[H8] an async slot that ends without reporting or answering is ended with an error (the 500 path): no spend, the unit released once', async () => {
+    const o = observed();
+    const silent: RouteSlot = () => async () => {
+      await later();
+    };
+    const entered = o.enter(silent);
+    await drained();
+    expect(entered.passed.map((error) => (error as Error).message)).toEqual([SLOT_UNREPORTED_MESSAGE]);
+    // Not an AppError: the problem handler answers it 500 INTERNAL_ERROR, and it is no refused credential.
+    expect(spendsAuthnBudget(entered.passed[0])).toBe(false);
+    expect([entered.released(), o.held(), o.spends()]).toEqual([1, 0, 0]);
+    expect(o.lines).toEqual([[SLOT_UNREPORTED_EVENT, { operation_id: 'getProfile' }]]);
+  });
+
+  it('[C-4] a report that arrives after an async slot fulfilled is outside the contract and is dropped: the request was answered 500', async () => {
+    const o = observed();
+    const reportsLate: RouteSlot = () => async (_req, _res, next) => {
+      await later();
+      setTimeout(() => next(new AppError('AUTH_REQUIRED')), 1);
+    };
+    const entered = o.enter(reportsLate);
+    await drained();
+    await drained();
+    expect(entered.passed.map((error) => (error as Error).message)).toEqual([SLOT_UNREPORTED_MESSAGE]);
+    expect([entered.released(), o.spends()]).toEqual([1, 0]);
+  });
+
+  it('[C-4] a plain slot that returns without an outcome and answered nothing is waited for: it reports from a callback', async () => {
+    const o = observed();
+    const reports: NextFunction[] = [];
+    const deferred: RouteSlot = () => (_req, _res, next) => void reports.push(next);
+    const entered = o.enter(deferred);
+    await drained();
+    expect([entered.passed.length, entered.released(), o.held()]).toEqual([0, 0, 1]);
+    for (const report of reports) report(new AppError('AUTH_REQUIRED'));
+    await drained();
+    expect(entered.passed).toEqual([expect.objectContaining({ code: 'AUTH_REQUIRED' })]);
+    expect([entered.released(), o.held(), o.spends()]).toEqual([1, 0, 1]);
+    expect(o.lines).toEqual([]);
+  });
+
+  it('[C-4] the error line is written at most once a minute per operation and instance, with no request data', async () => {
+    const o = observed();
+    const silent: RouteSlot = () => async () => {
+      await later();
+    };
+    const other = fixtureRoute({ operationId: 'listAddresses', path: '/addresses', auth: 'session', handler: () => ({ status: 200 }) });
+    for (const [at, of] of [
+      [0, route],
+      [1_000, route],
+      [SLOT_UNREPORTED_INTERVAL_MS - 1, route],
+      [SLOT_UNREPORTED_INTERVAL_MS - 1, other],
+      [SLOT_UNREPORTED_INTERVAL_MS, route],
+    ] as const) {
+      o.clock.now = at;
+      o.enter(silent, of);
+      await drained();
+    }
+    expect(o.lines).toEqual([
+      [SLOT_UNREPORTED_EVENT, { operation_id: 'getProfile' }],
+      [SLOT_UNREPORTED_EVENT, { operation_id: 'listAddresses' }],
+      [SLOT_UNREPORTED_EVENT, { operation_id: 'getProfile' }],
+    ]);
+    expect(o.held()).toBe(0);
   });
 });

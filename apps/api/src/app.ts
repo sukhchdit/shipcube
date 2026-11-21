@@ -203,8 +203,10 @@ export function createApp(deps: AppDependencies): Express {
   const kit = deps.rateLimit === undefined ? undefined : createRateLimitKit(deps.rateLimit, events);
   const composed = deps.pipeline ?? defaultSlots(deps, afterCommit, logger, kit, events);
   // Every refusal of the authentication slot in effect (default, seam or replaced pipeline) spends the IP's
-  // failed-authentication budget; no authenticator calls the limiter (ADR-0016 am. 12 item 4).
-  const slots = kit === undefined ? composed : { ...composed, authenticate: withAuthnFailedBudget(composed.authenticate, kit) };
+  // failed-authentication budget; no authenticator calls the limiter (ADR-0016 am. 12 item 4). The logger takes the
+  // error line of a slot that ends without an outcome (api.authn_slot_unreported; D-ARCH-230).
+  const slots =
+    kit === undefined ? composed : { ...composed, authenticate: withAuthnFailedBudget(composed.authenticate, kit, { log: logger }) };
 
   app.set('trust proxy', deps.trustProxyHops ?? 0);
 

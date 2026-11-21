@@ -222,6 +222,8 @@ describe('[T-39] [D-SECT39-01 item 6] [PR48-SEC-06] startApi composes the real l
     const { composed, valkey } = await start();
     expect(composed.rateLimit?.valkey).toBe(valkey);
     expect(composed.rateLimit?.settings.AUTHZ_DENIAL_BUDGET_PER_MIN).toBe(BUDGET);
+    // [R3-n3] Nothing else: the test seams of the kit (inFlight, breakerClock, counter) are never passed in production.
+    expect(Object.keys(composed.rateLimit ?? {}).sort()).toEqual(['settings', 'valkey']);
     expect(composed.trustProxyHops).toBe(1);
     expect('authenticate' in composed).toBe(false);
   });

@@ -22,9 +22,9 @@ export interface RateLimitDependencies {
   readonly valkey?: ScriptClient | undefined;
   /** The refusal counter (tests read it); default a fresh one. The export owner is TASK-214. */
   readonly counter?: RateLimitCounter | undefined;
-  /** The in-flight ledger (tests read it); default a fresh one per kit. */
+  /** Test seam: the in-flight ledger (tests read it); default a fresh one per kit. startApi never passes it. */
   readonly inFlight?: InFlightLedger | undefined;
-  /** The clock of the store breaker (tests freeze its cool-down); default `Date.now`. */
+  /** Test seam: the clock of the store breaker (tests freeze its cool-down); default `Date.now`. startApi never passes it. */
   readonly breakerClock?: (() => number) | undefined;
 }
 

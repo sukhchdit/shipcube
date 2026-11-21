@@ -8,6 +8,7 @@
  */
 import type { Server } from 'node:http';
 import { type AddressInfo, connect, type Socket } from 'node:net';
+import { gzipSync } from 'node:zlib';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { AppError, presentedKinds } from '@platform/shared';
@@ -744,5 +745,158 @@ describe('[R1-m2] [K3] the wrapper is composed around a replaced pipeline too', 
     expect(await junkBearers(app, IP_A, 1)).toEqual([401]);
     expect(h.seam.entered).toBe(1);
     expect(h.valkey.value(failedKey(IP_A))).toBe(1);
+  });
+});
+
+describe('[C-4] [D-ARCH-230] [PR041-SEC-16] a slot that ends without an outcome is ended by the wrapper (ADR-0016 am. 13 item 6, Release)', () => {
+  const after = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const unreportedLines = (h: Harness) => h.logged.filter(([event]) => event === 'api.authn_slot_unreported');
+  const validBearer = (app: ReturnType<typeof createApp>) =>
+    request(app).get('/api/v1/me').set(fromIp(IP_A)).set('Authorization', 'Bearer valid');
+
+  /** Accepts `Bearer valid`; answers any other bearer itself with 401 and reports nothing (outside the contract). */
+  const answersItself = (req: Request, res: Response, next: NextFunction): void => {
+    if (req.get('authorization') === 'Bearer valid') {
+      setPrincipal(res, session);
+      next();
+      return;
+    }
+    res.status(401).json({ code: 'AUTH_REQUIRED' });
+  };
+
+  it.each(['plain', 'async'] as const)(
+    '[H7] a %s seam that answers junk bearers itself: after five the ledger holds 0, a valid credential is served, nothing is spent, one error line',
+    async (shape) => {
+      const h = harness();
+      const slot: RouteSlot =
+        shape === 'plain'
+          ? () => answersItself
+          : () => async (req: Request, res: Response, next: NextFunction) => {
+              await after(1);
+              answersItself(req, res, next);
+            };
+      const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: slot });
+      expect(await junkBearers(app, IP_A, 5)).toEqual([401, 401, 401, 401, 401]);
+      expect(h.inFlight.held(KEY_A)).toBe(0);
+      expect((await validBearer(app)).status).toBe(200);
+      expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+      expect(unreportedLines(h)).toEqual([['api.authn_slot_unreported', { operation_id: 'getProfile', status: 401 }]]);
+    },
+  );
+
+  it('[H8] an async seam that ends without reporting or answering: every request is 500 INTERNAL_ERROR, nothing is held or spent, also when the clients leave first', async () => {
+    const h = harness();
+    let entered = 0;
+    let delayMs = 1;
+    const silent: RouteSlot = () => async (req: Request, res: Response, next: NextFunction) => {
+      entered += 1;
+      await after(delayMs);
+      if (req.get('authorization') !== 'Bearer valid') return;
+      setPrincipal(res, session);
+      next();
+    };
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: silent });
+    for (let call = 0; call < 8; call += 1) {
+      const reply = await request(app).get('/api/v1/me').set(fromIp(IP_A)).set('Authorization', 'Bearer junk');
+      expect([reply.status, (reply.body as { code?: unknown }).code]).toEqual([500, 'INTERNAL_ERROR']);
+    }
+    expect(h.inFlight.held(KEY_A)).toBe(0);
+    // Five raw clients that leave about 40 ms after sending, while the seam still runs (80 ms): the 500 goes to a closed
+    // socket, so neither the close (the unit was entered) nor a `finish` releases anything; the wrapper does.
+    delayMs = 80;
+    const { server, port } = await listening(app);
+    try {
+      const clients = Array.from({ length: 5 }, (_, probe) => rawClient(port, junkBearerHead(`silent-${String(probe)}`)));
+      await until(() => entered === 13);
+      await after(40);
+      for (const client of clients) client.socket.destroy();
+      await until(() => h.inFlight.held(KEY_A) === 0, 5_000);
+      expect((await validBearer(app)).status).toBe(200);
+      expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+      expect(h.counter.snapshot()).toEqual({});
+      expect(unreportedLines(h)).toEqual([['api.authn_slot_unreported', { operation_id: 'getProfile' }]]);
+    } finally {
+      await closeLoopbackServer(server);
+    }
+  });
+
+  it('[H9] an answer from a timer while the slot runs releases nothing: 5 entries, 5 spends, the second five are 429 with Retry-After 1', async () => {
+    const h = harness();
+    let entered = 0;
+    const timed: RouteSlot = () => async (_req: Request, res: Response) => {
+      entered += 1;
+      // A stand-in for the request timer of TASK-108: it answers 503 while the authentication still runs.
+      setTimeout(() => {
+        if (!res.headersSent) res.status(503).json({ code: 'SERVICE_UNAVAILABLE' });
+      }, 60);
+      await after(400);
+      throw new AppError('AUTH_REQUIRED');
+    };
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: timed });
+    const first = parallelBearers(app, IP_A, 5);
+    await after(200);
+    const second = await parallelBearers(app, IP_A, 5);
+    expect((await first).map((reply) => reply.status)).toEqual([503, 503, 503, 503, 503]);
+    for (const reply of second) expect([reply.status, reply.headers['retry-after']]).toEqual([429, '1']);
+    await until(() => h.inFlight.held(KEY_A) === 0 && h.valkey.value(failedKey(IP_A)) === 5);
+    expect(entered).toBe(5);
+    expect(unreportedLines(h)).toEqual([]);
+  });
+});
+
+describe('[PR041-SEC-15] [R3-n2] [D-TASK041-20] a client that leaves while its gzip body is inflated', () => {
+  it('reaches the wrapper with its unit already released: the authenticator is entered 0 times, nothing is held or spent', async () => {
+    const h = harness();
+    const ledger = createInFlightLedger();
+    const enters: boolean[] = [];
+    const counted: InFlightLedger = {
+      ...ledger,
+      enter: (holder) => {
+        const entered = ledger.enter(holder);
+        enters.push(entered);
+        return entered;
+      },
+    };
+    const app = h.app(
+      {},
+      {
+        rateLimit: {
+          settings: { ...DEFAULT_RATE_LIMIT_SETTINGS, RATE_LIMIT_PUBLIC_PER_MIN: 5 },
+          valkey: h.valkey,
+          counter: h.counter,
+          inFlight: counted,
+        },
+      },
+    );
+    // A complete body that inflates to about 900 kB (under the 1 MB limit) while the client is already gone.
+    const body = gzipSync(JSON.stringify({ pad: 'a'.repeat(900_000) }));
+    const { server, port } = await listening(app);
+    try {
+      for (let probe = 0; probe < 10; probe += 1) {
+        const socket = connect(port, '127.0.0.1');
+        socket.on('error', () => undefined);
+        const head = [
+          'POST /api/v1/webhooks/mock HTTP/1.1',
+          'Host: 127.0.0.1',
+          `X-Forwarded-For: ${IP_A}`,
+          'X-Mock-Signature: junk',
+          'Content-Type: application/json',
+          'Content-Encoding: gzip',
+          `Content-Length: ${String(body.length)}`,
+        ];
+        socket.write(`${head.join('\r\n')}\r\n\r\n`);
+        socket.write(body, () => socket.destroy());
+        await until(() => enters.length === probe + 1);
+      }
+      // Every request reached the wrapper after the close had released its unit (the guard was exercised each time).
+      expect(enters).toEqual(Array.from({ length: 10 }, () => false));
+      expect(h.seam.entered).toBe(0);
+      expect(ledger.held(KEY_A)).toBe(0);
+      expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+      const served = await request(app).post('/api/v1/webhooks/mock').set(fromIp(IP_A)).set('X-Mock-Signature', 'valid').send({});
+      expect(served.status).toBe(204);
+    } finally {
+      await closeLoopbackServer(server);
+    }
   });
 });
