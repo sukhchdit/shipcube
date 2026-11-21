@@ -9384,3 +9384,99 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - The briefs of built tasks are not regenerated. TASK-044 part 044-B, part 045-C and TASK-298 get their briefs at dispatch.
   - For principal-architect: the C4, C6 and C7 texts, which replace the gatekeeper text on the cards; the R1-m1 ruling; the NT-REC-003-a cell; the n7 line in `platform.md`.
 - **Reversibility:** High (plan text; nothing built).
+
+### D-QG-008 · 2026-11-21 · quality-gatekeeper · Verification of ADR-0016 amendment 13 item 6, the in-flight hold and residual R-ARCH-36 (d), with its dated pointers in items 2 and 4 and in amendment 12 item 11 (CLAUDE.md §5; routed by D-ARCH-225 to D-ARCH-227; merge condition of TASK-041 part 041-B) = PASS_WITH_CONDITIONS, conditions QG-041B-C1 to QG-041B-C6
+- **Trigger:** D-ARCH-225 to D-ARCH-227 (`f8794de2`) add a rule to an Accepted ADR and widen when a valid credential is refused. D-ORCH-160 dispatched this verification. It is merge condition (1) of D-ORCH-159 for part 041-B. This is not a phase gate.
+- **Judged at:** the amendment commit `f8794de2`, read on main `2ecf9ebb`, which holds the fold D-SD-012 (`2f6a89d5`). The code is read by SHA at `12b8a10a` (`feat/TASK-041-part-b-rate-limit-rulings-rev2`).
+- **Method.**
+  - **Read in full:** item 6 and amendments 12 and 13; rulings revision 3 (§4 B1, §6 lines 15 to 19, §9); risks.md 1.31 R-ARCH-36; D-ARCH-225 to D-ARCH-227; code review rounds 2 and 3; security rounds 1 and 2 (D-SECPR041B-01, -02); D-ORCH-157 to D-ORCH-160; D-SD-012.
+  - **Read in the code at `12b8a10a`:** `in-flight.ts`, `authn-failed.ts`, `limits.ts`, `limiter.ts`, `counter.ts`, `kit.ts`, `store.ts`, the mount order of `app.ts`, the `authenticate.ts` stub, `valkey/client.ts`, the H rows of `authn-failed.api.test.ts` and H6 of `rate-limit.int.test.ts`.
+  - **Read in the requirements at HEAD:** REQ-SEC-005, REQ-SEC-006, REQ-SEC-015, NFR-SEC-005, PRD §9 R-16, A-112; platform.md §5.4; the SEC-005 cell of nfr-strategy.md.
+  - **Run by me, on the host, no Docker:**
+    - Probe QG-P1: a script in my scratchpad imports the compiled `ipLimiter`, `withAuthnFailedBudget` and `createRateLimitKit` from `apps/api/dist` of the part-B worktree (clean, at `12b8a10a`; nothing written there) into an Express app, with the kit's in-memory store and raw loopback sockets, Node 24.22.3.
+    - Jest in a `git archive 12b8a10a` extract in my scratchpad: the unit and api projects over `platform/rate-limit/`, `start-api` and `runtime-seams`. **9 suites, 202 of 202 pass** at the head. One control mutant (`admit(0)`) fails 2 rows, so mutants are picked up.
+    - Probe QG-P2 and mutant QG-M2 (below).
+  - **Not run:** Docker, lane B, H6, lint, typecheck, the whole unit and api projects.
+- **Decision: PASS_WITH_CONDITIONS.** The rule of item 6 is verified: the admission, the release, the answer, the label, the bound on one instance and the bound across instances. It agrees with amendments 12 and 13 and with the code at `12b8a10a`, and no Accepted text is contradicted, so no superseding ADR is needed. Six conditions follow. One sentence of the cost is wrong and I measured the contrary (QG-041B-C1). The Accepted text is behind the code and the security record in four places (QG-041B-C2). The product position that item 6 cites does not exist yet (QG-041B-C3).
+- **Checked myself:**
+
+  | Claim of item 6 | Result |
+  |---|---|
+  | Step 0 admits only while `settled + held < limit`; check and hold are one synchronous step after the store reply; no store call is added | **Holds.** `in-flight.ts` `admit`; `limiter.ts` `gated()` runs after the last `await` on the healthy path and on the outage path; one `hitAndPeek` script reads both keys |
+  | Release: the outcome releases, after the spend when the slot refused; the close releases only a unit that never entered the slot | **Holds as built** (`enter`, `releaseUnentered`, `release`; `authn-failed.ts` enters before the slot). The code has one more rule that the text does not have: D-TASK041-20 (QG-041B-C2 (a)) |
+  | Answer: 429 `RATE_LIMITED`, `Retry-After: 1`, the budget reading with nothing remaining, before routing and authentication, no spend, no event | **Holds.** `gateRefusal(gate, 1)` with `first: false`; `ipLimiter` is mounted before the CORS preflight, the body parser and the routes. H1 and H4 assert the code, the headers and the empty event list |
+  | Label `step0-authn-inflight`; a client that left before step 0 answered is counted under neither label | **Holds.** The label reads the `held` flag of the decision, not `Retry-After`. H4 asserts the exact snapshot |
+  | The bound on one instance rests on replies in call order, "which one connection gives" | **Holds as built:** one ioredis `Redis` client (`valkey/client.ts`), no cluster. The proof against a real Valkey (H6) has not run (QG-041B-C5) |
+  | 3 to 12 API tasks; 360 to 1,440 a minute; 0.6 s of a core; 24 reads a second | **Holds** (platform.md §5.4: 3 / 12; 1,440 × 400 µs = 0.58 s; 1,440 / 60 = 24). Observation 1 |
+  | "120 are in flight on one instance only when each takes more than a second on average" | **Does not hold** (probe QG-P1; QG-041B-C1) |
+  | "This is the lock of item 2, on one instance and for a second at a time" | **Holds only for a slot that reports its outcome.** PR041-SEC-16: a slot that writes the answer itself keeps its unit until restart (QG-041B-C2 (b)) |
+  | "product-manager confirms that PRD §9 R-16 covers this form of the lock" | **Not given.** R-16 and A-112 at HEAD name refused credentials only. No D-PM entry follows D-PM-089 (QG-041B-C3) |
+  | H1 to H5 exist and pass | **Holds.** Exact assertions (`toBe(5)` entries, ledger 0, the label snapshot). Green in my run |
+  | Each case of the Release paragraph has a row | **Two of three.** No route (H3) and a client that left during its body (H3) have rows. "A refused body" has none (QG-041B-C5 (c)) |
+  | Card lines 15 to 19 are on their cards | **Holds** since D-SD-012: a script finds each quoted line verbatim in `plan-data.mjs` (line 16 twice). PR041-SEC-16 (a), the declared-oversize body and the bounded slot latency are on their cards too |
+  | "Applied in" equals the commit | **Holds.** `f8794de2` changes ADR-0016, risks.md, the rulings file and this file, plus the architect's memory |
+
+- **Finding: a burst of valid credentials fills the hold; no slow request is needed (QG-P1).** One address, one instance, the default limit of 120. Every bearer is accepted, so nothing is spent. 4 of 4 runs agree:
+
+  | Load | Authenticator | Answers |
+  |---|---|---|
+  | 300 at once | synchronous, the shape of the TASK-020 stub | 300 × 200 |
+  | 300 at once | one ES256 verification (WebCrypto) | **121 × 200, 179 × 429 with `Retry-After: 1`**; 179 under `step0-authn-inflight`; no event; ledger 0 afterwards |
+  | 300 at once | a lookup of 5 ms | 279 to 284 × 200, **16 to 21 × 429** |
+  | 100 at once (control) | either | 100 × 200 |
+  | 300 paced at 100 a second, the average of the ceiling (control) | either | 300 × 200 |
+
+  - **Why.** The admission is synchronous at the store reply. A release needs the authentication outcome, which is at least one turn of the event loop away for any real authenticator. So an instance refuses whatever exceeds `limit − settled` among the credentialed requests of an address that it reads before the first outcome. How long one authentication takes does not enter.
+  - **The branch pins the same thing.** `authn-failed.api.test.ts:613`: 30 parallel valid bearers, limit 5, a 20 ms slot, every answer that is not 200 is a 429 with `Retry-After: 1`.
+  - **What stands.** Paced traffic at the ceiling is not touched. The bound is not affected. The answer is retryable. Nothing is refused before TASK-052, because the production slot is synchronous today.
+  - **What rests on the sentence.** The ruling on the cost (D-ARCH-225 "Why the cost is acceptable"), the Cost text of R-ARCH-36 (d), the rating text of PR041-SEC-11 ("non-malicious triggers need more than a second of average time"), and product-manager's sentence still to come. Trigger (iv) and the alert of card line 18 fire on one honest burst as they are worded.
+  - **A burst this ADR creates itself.** Amendment 14 item 4 ends every stream within 1 s of a stop, and the clients reconnect. Whether the streams of one address can exceed the room of an instance is the architect's to assess.
+  - **Limits of the probe.** The kit's in-memory store, not a Valkey. Loopback sockets opened before the burst. By reading, a store client that delivers replies in batches admits no more.
+- **The four questions of the dispatch:**
+  1. **Consistency with amendments 12 and 13: consistent.** The pointers in amendment 13 items 2 and 4 and the letter (d) in amendment 12 item 11 are present and say what item 6 says. Three places still state the old rule without a pointer (QG-041B-C2 (f)).
+  2. **Testability.** H1 to H5: proven on the host. H6 is not run, and by reading it proves less than item 6 needs (code review R3-n1, which I confirm). The rule "one synchronous step after the store reply" has no committed row that fails by design:
+     - Mutant QG-M2 puts a 2 ms wait between the store reply and the admission. In my probe row QG-P2 (150 junk bearers, one a millisecond, slot 20 ms, limit 5, so arrivals continue while the spends land) the authenticator is entered **7 times** in 4 of 4 runs; the head gives 5 in 4 of 4.
+     - QG-M2 passes the 29 rows of `authn-failed.api.test.ts`, H1 to H5 among them, in 3 of 3 runs alone.
+     - In one run of the whole selection under two workers, both H2 rows and one unrelated row (AT-US-040-02, the unauthenticated budget) failed with QG-M2. I did not examine why. I read it as a host slow enough to stretch H2's arrivals past its 400 ms slot, which is not a designed kill.
+     - H6 as written would pass it too, by reading: its second wave is sent after the five spends, so every peek reads 5.
+  3. **Security's additions (a) and (b): fold them, with a date, and not as a condition of the merge by themselves.** The code is right without them, and D-SD-012 put both on cards. They are premises of the Accepted text: "no timer" is true only for bounded authenticators, and the 30 s of TASK-108 bounds a held unit only if it runs from arrival. "At the architect's next touch" (D-ORCH-158) has no date. The date is the dispatch of TASK-052. QG-041B-C1 needs a touch of item 6 before the merge, so one touch can carry all of it.
+  4. **PR041-SEC-16 belongs in item 6, in "Release", with a pointer from amendment 12 item 4.** Three reasons:
+     - Item 6 releases an entered unit by "the outcome of the authentication slot" and does not say what an outcome is. The code says it: `next` once, a throw or a rejection.
+     - Two Accepted sentences are true only under that contract: "for a second at a time" (item 6), and "no authenticator calls the limiter, so none can forget" (amendment 12 item 4). A slot that writes the answer itself spends nothing and locks the address on that instance until restart (security probe PH).
+     - The only detector is the gauge of TASK-214, which is Wave 7. The authenticators are Waves 1, 2, 6 and 8. Until then the card rows of D-SD-012 are the control, so the contract must be Accepted text and not a card line alone.
+     - Remedy (b), a release at `finish`, is the architect's to rule. I ask for a recorded ruling either way.
+- **Conditions:**
+  - **QG-041B-C1 · principal-architect · before part 041-B merges.** The cost of residual (d) is restated in item 6 ("When honest traffic meets it"), in the Cost text of R-ARCH-36 (d) and in a D-ARCH entry.
+    - (a) The hold is a bound on concurrency: an instance refuses what exceeds `limit − settled` among the credentialed requests of an address that it reads before the first authentication outcome, whatever one authentication takes. The "more than a second on average" sentence goes or is limited to paced traffic.
+    - (b) Trigger (iv) and the alert of card line 18 are reworded so that they say what one honest burst does, or the text says that such a burst reopens the design.
+    - (c) The stop of amendment 14 item 4 is assessed as a source of such bursts.
+    - The ruling on the cost may stand, change, or go to a design on file. Either way it is new Accepted text and I verify it in one closing entry with QG-041B-C2.
+  - **QG-041B-C2 · principal-architect · before TASK-052 is dispatched; expected in the same touch as QG-041B-C1.** Item 6 "Release" is completed:
+    - (a) D-TASK041-20: a request whose unit the close released does not enter the slot and goes no further. The bound on one instance rests on it (security probe PG: 20 to 31 entries at limit 5 without it), and it is in a commit body only.
+    - (b) PR041-SEC-16: what an outcome is, that an authenticator never writes the response, and a ruling on remedy (b). Amendment 12 item 4 gets a pointer.
+    - (c) Security's (b): "no timer" rests on a bounded slot latency for every authenticator that does I/O.
+    - (d) Security's (a): a declared `Content-Length` above the limit with no body holds a unit; the timeout of TASK-108 runs from the arrival of the request.
+    - (e) Once part 041-B is merged, the sentences "the fix head `83a85739` releases at every close" and "counts all three under `step0-authn-failed`", and "Open at the fix head" in R-ARCH-36 (d), say that fix cycle 2 closed both (code review round 3, D-SECPR041B-02).
+    - (f) Pointers to item 6: amendment 12 item 4 (the bullet "Step 0 reads the budget"), the SEC-005 cell of nfr-strategy.md, and platform.md §5.4, whose statelessness paragraph says that rate-limit counters live in the store.
+  - **QG-041B-C3 · product-manager · before part 041-B merges, after QG-041B-C1.** A D-PM entry on the hold in its corrected form. It is merge condition (6) of D-ORCH-159; this says what it must cover:
+    - (a) Acceptance, or not, that credentialed requests with valid credentials are answered 429 for a second when more than the room of an instance arrive together, with no refused credential and nothing slow. The sentence goes into PRD §9 R-16 and A-112. A-112 says today that ten users at 600 a minute share an address "before the ceiling is felt".
+    - (b) A reading of NFR-SEC-005 and the REQ-SEC-005 note against item 6: "shared across replicas" against `N × limit` for a parallel burst, and the pass line "no 429 at the limit" against a 429 below every limit the NFR lists.
+    - (c) If the position is "not accepted", it returns to principal-architect.
+  - **QG-041B-C4 · security-analyst · in the merge-only round of part 041-B.** The rating of PR041-SEC-11 is confirmed or changed with the burst case of QG-041B-C1, because its text rests on the sentence that is wrong. A rating above LOW is trigger (vi). Before G3, as already routed: threat model R-13, T-11, T-39 and T-93 with item 6 (the open half of QG-041-C4), and a check of the text of QG-041B-C2.
+  - **QG-041B-C5 · senior-developer (rows), qa-lead (lane B).**
+    - (a) **Before part 041-B merges:** H6 green in lane B on the merge head against a real Valkey. It is condition C2 of the security record and C4 of the code review; I restate it because the bound on one instance has no proof on a real store until then.
+    - (b) **With the PARALLEL BURST rows of TASK-052 at the latest, as a card line at the next fold:** one committed row in which arrivals continue while the spends land (the QG-P2 shape, or a store fake that delivers a peek and a later spend together), so that a wait between the store reply and the admission fails a test. R3-n1 gets the same owner and date; D-SD-012 does not carry it.
+    - (c) **With the declared-oversize row of TASK-108:** a row for "a refused body" (malformed JSON or 413 with a credential: the unit is released and the slot is not entered).
+    - A change to a rate-limit file of part 041-B before the merge needs the security delta round that the record already requires, so (b) and (c) are not asked of this pull request.
+  - **QG-041B-C6 · senior-developer (card line, next fold), performance-engineer (measurement, before G3).** Item 6 says the hold time of the real pipeline is not measured, and D-ARCH-225 names TASK-280 as where it would show; no card has it. One line for the P6 load run: the refusals under `step0-authn-inflight` and the time from step 0 to the authentication outcome are recorded, with the limits the run used. The same fold places the lines that QG-041B-C1 and QG-041B-C2 produce.
+- **Observations (no condition):**
+  1. The acceptance of the bound uses 1,440 a minute. The same paragraph allows two colours and a window boundary, which gives 5,760 in a minute: 96 lookups a second against the 100 of residual (a), and 2.3 s of a core. It is inside, by four.
+  2. Card line 19 lets the client retry every method "from step 0". A client cannot tell which stage refused: step 0 and step 5 answer the same code, and a spent window can also have `Retry-After: 1`. The client rule should hold for any `RATE_LIMITED` answer, or api/README §7 should say that such an answer never follows a side effect (api-designer, with TASK-065).
+  3. Trigger (iv) excludes a load test, and D-ARCH-225 names TASK-280 as a place where the cost side reopens. QG-041B-C6 needs one reading of the two.
+  4. The ledger exposes `held(key)` only. The gauge of card line 18, summed over addresses, needs an accessor in `in-flight.ts` under the `api-ratelimit` lock.
+  5. R-ARCH-36 (d) lists five reopening triggers; item 6 has six. Trigger (v) is missing from the register row.
+- **Part 041-B merge, from this gate:** the verification that D-ARCH-225 names is given by this entry. It holds the merge through QG-041B-C1, -C3, -C4 and -C5 (a). QG-041B-C2 holds the dispatch of TASK-052. QG-041B-C5 (b) and (c) and QG-041B-C6 are due as stated, before G3 at the latest.
+- **Conditions of D-QG-001:** not judged here. Seen while reading: the §5.2 text and the C-3 sentence are in api/README §7 at `12b8a10a` (QG-041-C1, second half); D-PM-088 exists (QG-041-C2, second half); D-SECPR041B-01 item 1 gives the concurrence of QG-041-C4, and its threat-model half is open until G3.
+- **Not verified:** the reply order of a real Valkey client; a real authenticator; what the Compose `edge`, the ALB or CloudFront do with a burst, a disconnect or a slow body; the 400 µs figure; the cause of the H2 failure under QG-M2.
+- **No evidence note:** as for D-QG-001 to D-QG-007, this entry is the record. The next entry of this series is D-QG-009.
+- **Reversibility:** High (a verification record).
