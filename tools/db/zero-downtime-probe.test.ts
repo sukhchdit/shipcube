@@ -11,6 +11,7 @@ import {
   READABLE_COLUMNS_SQL,
   bindParams,
   catalogReadWorkload,
+  failureOf,
   main,
   parseWorkload,
   percentile,
@@ -105,7 +106,7 @@ describe('runZeroDowntimeProbe', () => {
     expect(report.verdict).toBe('fail');
     expect(report.failures).toBeGreaterThan(0);
     expect(report.phases.warmup.failures).toBe(0);
-    expect(report.samples[0]).toEqual({ operation: 'read t', phase: 'during', code: '42703', message: 'column "a" does not exist' });
+    expect(report.samples[0]).toEqual({ operation: 'read t', phase: 'during', code: '42703', message: 'column "…" does not exist' });
     expect(report.samples.length).toBeLessThanOrEqual(20);
   });
 
@@ -284,6 +285,8 @@ describe('db:zero-downtime-probe main', () => {
     DATABASE_URL: 'postgresql://platform_app@127.0.0.1:5432/platform',
     DATABASE_MIGRATOR_URL: 'postgresql://platform_migrator@127.0.0.1:5432/platform',
     SHADOW_DATABASE_URL: 'postgresql://platform_migrator@127.0.0.1:5432/shadow',
+    DATABASE_BOOTSTRAP_URL: 'postgresql://postgres@127.0.0.1:5432/platform',
+    BOOTSTRAP_MIGRATOR_PASSWORD: 'm'.repeat(32),
   });
 
   function deps(options: { deployFails?: boolean; queryFails?: boolean; idleError?: boolean } = {}) {
@@ -339,6 +342,9 @@ describe('db:zero-downtime-probe main', () => {
     expect(run.queries[0]).toBe(READABLE_COLUMNS_SQL);
     expect(run.queries).toContain('SELECT "a" FROM "public"."t" LIMIT 1');
     expect(run.deployEnv()).not.toHaveProperty('SHADOW_DATABASE_URL');
+    // PR034-SEC-08: an allow-list; neither the superuser URL, the app URL nor a role password reaches the Prisma child.
+    for (const name of ['DATABASE_BOOTSTRAP_URL', 'DATABASE_URL', 'BOOTSTRAP_MIGRATOR_PASSWORD'])
+      expect(run.deployEnv()).not.toHaveProperty(name);
     expect(run.deployEnv()?.['DATABASE_MIGRATOR_URL']).toBe(env()['DATABASE_MIGRATOR_URL']);
     expect(JSON.parse(run.files.get('r.json') ?? '{}')).toMatchObject({ verdict: 'pass' });
     expect(run.lines[0]).toMatch(
@@ -385,5 +391,21 @@ describe('db:zero-downtime-probe main', () => {
     expect(seen).toHaveLength(1);
     const end = jest.spyOn(pool, 'end');
     return pool.end().then(() => expect(end).toHaveBeenCalled());
+  });
+});
+
+describe('failureOf (PR034-SEC-03)', () => {
+  it('[PR034-SEC-03] keeps the code and masks quoted values and parenthesised groups; a PL/pgSQL RAISE (class P0) keeps its code only', () => {
+    const error = (message: string, code?: string) => Object.assign(new Error(message), code === undefined ? {} : { code });
+    expect(failureOf(error('new row for relation "t" violates check constraint "c" (1, s3cr3t)', '23514'))).toEqual({
+      code: '23514',
+      message: 'new row for relation "…" violates check constraint "…" (…)',
+    });
+    expect(failureOf(error('refusing row s3cr3t', 'P0001'))).toEqual({ code: 'P0001', message: 'message withheld (PL/pgSQL RAISE)' });
+    expect(failureOf(error('connect ECONNREFUSED 127.0.0.1:5432', 'ECONNREFUSED'))).toEqual({
+      code: 'ECONNREFUSED',
+      message: 'connect ECONNREFUSED 127.0.0.1:5432',
+    });
+    expect(failureOf('x').code).toBe('ERROR');
   });
 });

@@ -3,15 +3,25 @@
  * manifest, the files it writes and the CLI's refusals. The PostgreSQL 18 run is
  * prisma/tests/migrations/backup-restore.int.test.ts.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { BACKUP_DEPENDENCIES, BACKUP_FILES, main, runBackup, schemaSnapshot, type BackupDependencies } from './backup.js';
+import { LOAD_TIME_CODE_SQL, type LoadTimeCodeRow } from './load-time-code.js';
 import type { ArchiveTool } from './pg-archive.js';
-import { MIGRATION_TABLE_SQL, SEQUENCES_SQL, TABLES_SQL, manifestSha256, parseManifest, sha256Hex } from './rehearsal-manifest.js';
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE, privateFiles, type PrivateFs } from './private-files.js';
+import {
+  CLUSTER_IDENTIFIER_SQL,
+  MIGRATION_TABLE_SQL,
+  SEQUENCES_SQL,
+  TABLES_SQL,
+  manifestSha256,
+  parseManifest,
+  sha256Hex,
+} from './rehearsal-manifest.js';
 import { defaultRunDir, type ClosableSession } from './rehearsal-cli.js';
 
 /** Yields once, as a real database or process call would. */
@@ -27,7 +37,16 @@ const folder = () => {
   return join(work, `run-${String(folders)}`);
 };
 
-function fakes(options: { failDump?: boolean } = {}) {
+/** A C17 finding of the gate case: a CHECK that calls a migration routine (D-ARCH-236). */
+const PLANTED: LoadTimeCodeRow = {
+  kind: 'table check',
+  object: 'public.a ck_a__probe',
+  via: 'call',
+  reference: 'public.zz_record(integer)',
+  reason: 'not built in',
+};
+
+function fakes(options: { failDump?: boolean; loadTime?: readonly LoadTimeCodeRow[] } = {}) {
   const statements: string[] = [];
   const events: string[] = [];
   let ended = false;
@@ -41,6 +60,8 @@ function fakes(options: { failDump?: boolean } = {}) {
       if (sql === TABLES_SQL) return [{ schema: 'public', name: 'a' }] as T[];
       if (sql.includes('AS rows')) return [{ rows: '2', checksum: '42' }] as T[];
       if (sql === MIGRATION_TABLE_SQL) return [{ present: false }] as T[];
+      if (sql === CLUSTER_IDENTIFIER_SQL) return [{ system_identifier: '7300000000000000001' }] as T[];
+      if (sql === LOAD_TIME_CODE_SQL) return [...(options.loadTime ?? [])] as T[];
       return [];
     },
     async end() {
@@ -88,6 +109,8 @@ describe('runBackup', () => {
       'SELECT n.nspname',
       'SELECT pg_catalog.count(*)::pg_catalog.text',
       "SELECT pg_catalog.current_setting('server_version_num')",
+      'SELECT system_identifier::pg_catalog.text', // D-ARCH-235: the source cluster, in the snapshot transaction
+      'WITH site', // D-ARCH-236: the C17 query, in the snapshot transaction
       "SELECT pg_catalog.to_regclass('public._prisma_migrations')",
       'COMMIT',
     ]);
@@ -99,6 +122,8 @@ describe('runBackup', () => {
       migrationHead: null,
       tables: [{ table: 'public.a', rows: '2', checksum: '42' }],
       sequences: [{ sequence: 'public.s', lastValue: '7' }],
+      cluster: { systemIdentifier: '7300000000000000001' },
+      loadTimeCode: [],
     });
     expect(result.schema).toBe('CREATE TABLE public.a (id integer)'); // normalised: comments, psql meta-commands and ; dropped
     expect(result.manifest.schemaSha256).toBe(sha256Hex(result.schema));
@@ -132,6 +157,54 @@ describe('runBackup', () => {
     ).rejects.toThrow(/plain lower-case/);
     expect(run.statements).toEqual([]);
   });
+});
+
+describe('owner-only artefacts (PR034-SEC-02)', () => {
+  it('[PR034-SEC-02] creates the folder 0o700 and writes manifest.json and schema.sql 0o600, exclusively (platform-independent)', async () => {
+    const calls: string[] = [];
+    const fs: PrivateFs = {
+      platform: 'linux',
+      mkdirSync: (path, options) => {
+        calls.push(`mkdir ${path} ${options.mode.toString(8)} ${String(options.recursive)}`);
+        mkdirSync(path, { recursive: true });
+      },
+      chmodSync: (path, mode) => calls.push(`chmod ${path} ${mode.toString(8)}`),
+      writeFileSync: (path, data, options) => {
+        calls.push(`write ${path} ${options.flag} ${options.mode.toString(8)}`);
+        writeFileSync(path, data, { flag: options.flag });
+      },
+      createWriteStream: () => {
+        throw new Error('not used by runBackup');
+      },
+    };
+    const run = fakes();
+    const outDir = folder();
+    await runBackup({
+      database: 'platform',
+      outDir,
+      connect: () => Promise.resolve(run.session),
+      archive: run.archive,
+      files: privateFiles(fs),
+    });
+    expect(calls).toEqual([
+      `mkdir ${outDir} 700 true`,
+      `chmod ${outDir} 700`, // an existing empty folder keeps its old mode otherwise
+      `write ${join(outDir, BACKUP_FILES.schema)} wx 600`,
+      `write ${join(outDir, BACKUP_FILES.manifest)} wx 600`,
+    ]);
+  });
+
+  (process.platform === 'win32' ? it.skip : it)(
+    '[PR034-SEC-02] POSIX: the folder, the manifest and the schema are not readable by group or others',
+    async () => {
+      const run = fakes();
+      const outDir = folder();
+      await runBackup({ database: 'platform', outDir, connect: () => Promise.resolve(run.session), archive: run.archive });
+      expect(statSync(outDir).mode & 0o777).toBe(PRIVATE_DIR_MODE);
+      for (const file of [BACKUP_FILES.manifest, BACKUP_FILES.schema])
+        expect(statSync(join(outDir, file)).mode & 0o777).toBe(PRIVATE_FILE_MODE);
+    },
+  );
 });
 
 describe('schemaSnapshot', () => {
@@ -180,6 +253,27 @@ describe('db:backup main', () => {
     expect(seen).toEqual({ url, archive: { service: 'db', user: 'postgres' } });
     expect(errors).toEqual([]);
     expect(lines[0]).toMatch(/^\[db:backup\] platform: 1 tables, 2 rows, migration head null; manifest sha256 [0-9a-f]{64}; written to /);
+  });
+
+  it('[D-ARCH-236] the load-time gate: with a C17 finding main prints one line with the count and the objects and returns 1; the archive, the manifest (with the finding) and the schema stay written', async () => {
+    const run = fakes({ loadTime: [PLANTED] });
+    const lines: string[] = [];
+    const errors: string[] = [];
+    const outDir = folder();
+    expect(
+      await main(['--out', outDir], { DATABASE_BOOTSTRAP_URL: 'postgresql://postgres@127.0.0.1:5432/platform' }, deps(run, lines, errors)),
+    ).toBe(1);
+    expect(lines).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(
+      /^\[db:backup\] load-time gate: 1 load-time finding\(s\): table check public\.a ck_a__probe: public\.zz_record\(integer\) \(not built in\)\. A restore would run this code as the loading superuser, so db:verify-restore refuses this backup \(written to .+\): remove the objects with a migration and take a new backup; never edit the manifest/,
+    );
+    expect(readdirSync(outDir).sort()).toEqual([BACKUP_FILES.manifest, BACKUP_FILES.archive, BACKUP_FILES.schema].sort());
+    const manifest = parseManifest(JSON.parse(readFileSync(join(outDir, BACKUP_FILES.manifest), 'utf8')) as unknown);
+    expect(manifest.loadTimeCode).toEqual([
+      { kind: 'table check', object: 'public.a ck_a__probe', reference: 'public.zz_record(integer)', reason: 'not built in' },
+    ]);
+    expect(run.statements).toContain('COMMIT');
   });
 
   it('refuses a remote or missing URL and an unknown flag with one line, before connecting', async () => {

@@ -5,7 +5,9 @@
  */
 import { describe, expect, it } from '@jest/globals';
 
+import { LOAD_TIME_CODE_SQL, type LoadTimeCodeRow } from './load-time-code.js';
 import {
+  CLUSTER_IDENTIFIER_SQL,
   FOREIGN_KEYS_SQL,
   MANIFEST_FORMAT,
   MANIFEST_SESSION_SETTINGS,
@@ -19,8 +21,10 @@ import {
   canonicalJson,
   captureManifest,
   captureSequences,
+  clusterIdentifier,
   compareManifests,
   findOrphans,
+  loadTimeSummary,
   manifestSha256,
   manifestTotals,
   orphanCountSql,
@@ -60,6 +64,8 @@ const manifest = (overrides: Partial<BackupManifest> = {}): BackupManifest => ({
     { table: 'public.b', rows: '0', checksum: '0' },
   ],
   sequences: [{ sequence: 'public.a_id_seq', lastValue: '3' }],
+  cluster: { systemIdentifier: '7300000000000000001' },
+  loadTimeCode: [],
   ...overrides,
 });
 
@@ -79,7 +85,9 @@ describe('generated SQL', () => {
   it('fingerprints one table with ONLY, an order-independent 60-bit SHA-256 sum and quoted names', () => {
     const sql = tableFingerprintSql('public', 'odd"name');
     expect(sql).toContain('FROM ONLY "public"."odd""name" AS t');
-    expect(sql).toContain("pg_catalog.sha256(pg_catalog.convert_to(t::pg_catalog.text, 'UTF8'))");
+    // PR034-SEC-04: the whole row as `(t.*)`; a bare `t` would be a column named t where one exists.
+    expect(sql).toContain("pg_catalog.sha256(pg_catalog.convert_to((t.*)::pg_catalog.text, 'UTF8'))");
+    expect(sql).not.toMatch(/convert_to\(t::/);
     expect(sql).toContain('::pg_catalog.bit(60)::pg_catalog.int8');
     expect(sql).toMatch(/^SELECT pg_catalog\.count\(\*\)::pg_catalog\.text AS rows, COALESCE\(pg_catalog\.sum\(/);
   });
@@ -110,8 +118,17 @@ describe('generated SQL', () => {
 });
 
 describe('capture', () => {
-  const catalog = (migrations: boolean) =>
+  const LOAD_TIME_ROW: LoadTimeCodeRow = {
+    kind: 'table check',
+    object: 'public.a ck_a',
+    via: 'call',
+    reference: 'public.w(integer)',
+    reason: 'not built in',
+  };
+  const catalog = (migrations: boolean, loadTime: readonly LoadTimeCodeRow[] = []) =>
     fakeSession((sql) => {
+      if (sql === CLUSTER_IDENTIFIER_SQL) return [{ system_identifier: '7300000000000000001' }];
+      if (sql === LOAD_TIME_CODE_SQL) return [...loadTime];
       if (sql === TABLES_SQL)
         return [
           { schema: 'public', name: 'a' },
@@ -151,11 +168,40 @@ describe('capture', () => {
         { table: 'audit.b', rows: '0', checksum: '0' },
       ],
       sequences,
+      cluster: { systemIdentifier: '7300000000000000001' },
+      loadTimeCode: [],
     });
+    // The gate query and the cluster query run on the manifest's own session, so in the snapshot of the dump.
+    expect(session.statements).toEqual(expect.arrayContaining([CLUSTER_IDENTIFIER_SQL, LOAD_TIME_CODE_SQL]));
+  });
+
+  it('[D-ARCH-236] records the C17 findings of the database as loadTimeCode (names only, without the via column)', async () => {
+    const captured = await captureManifest(catalog(true, [LOAD_TIME_ROW]), {
+      database: 'platform',
+      takenAt: 'T',
+      schema: '',
+      sequences: [],
+    });
+    expect(captured.loadTimeCode).toEqual([
+      { kind: 'table check', object: 'public.a ck_a', reference: 'public.w(integer)', reason: 'not built in' },
+    ]);
+    expect(loadTimeSummary(captured.loadTimeCode)).toBe(
+      '1 load-time finding(s): table check public.a ck_a: public.w(integer) (not built in)',
+    );
+    const many = Array.from({ length: 7 }, (_, index) => ({ ...LOAD_TIME_ROW, object: `public.a ck_${String(index)}` }));
+    expect(loadTimeSummary(many)).toMatch(/^7 load-time finding\(s\): .*ck_4: .*; \+2 more$/);
+  });
+
+  it('[D-ARCH-235] reads the cluster identifier, and refuses a session that returns none (fail closed)', async () => {
+    expect(await clusterIdentifier(catalog(true))).toBe('7300000000000000001');
+    await expect(clusterIdentifier(fakeSession(() => []))).rejects.toThrow(/returned no system identifier/);
+    await expect(clusterIdentifier(fakeSession(() => [{ system_identifier: 'x' }]))).rejects.toThrow(RehearsalError);
   });
 
   it('has a null head without _prisma_migrations (a bootstrapped-only database) and an empty version when unreadable', async () => {
-    const session = fakeSession((sql) => (sql === MIGRATION_TABLE_SQL ? [{ present: false }] : []));
+    const session = fakeSession((sql) =>
+      sql === MIGRATION_TABLE_SQL ? [{ present: false }] : sql === CLUSTER_IDENTIFIER_SQL ? [{ system_identifier: '1' }] : [],
+    );
     const captured = await captureManifest(session, { database: 'd', takenAt: 'T', schema: '', sequences: [] });
     expect(captured.migrationHead).toBeNull();
     expect(captured.serverVersionNum).toBe('');
@@ -220,6 +266,14 @@ describe('compareManifests (the restore against its source)', () => {
     ).toEqual(['table public.a: row checksum differs (3 rows)']);
   });
 
+  it('[D-ARCH-236] flags load-time code in the restored database; the cluster identifier is not compared', () => {
+    const finding = { kind: 'domain check', object: 'public.d ck_d', reference: 'random()', reason: 'not immutable' };
+    expect(compareManifests(manifest(), manifest({ loadTimeCode: [finding] }))).toEqual([
+      'load-time code in the restored database: 1 load-time finding(s): domain check public.d ck_d: random() (not immutable)',
+    ]);
+    expect(compareManifests(manifest(), manifest({ cluster: { systemIdentifier: '42' } }))).toEqual([]);
+  });
+
   it('flags a schema or migration-head difference', () => {
     expect(compareManifests(manifest(), manifest({ schemaSha256: sha256Hex('other'), migrationHead: null }))).toEqual([
       'schema: the normalised schema dump differs from the source',
@@ -263,6 +317,11 @@ describe('digest and file boundary', () => {
       [{ ...manifest(), tables: [null] }, /field tables\[0\]/],
       [{ ...manifest(), sequences: {} }, /field sequences/],
       [{ ...manifest(), sequences: [{ sequence: 's', lastValue: 'x' }] }, /field sequences\[0\]/],
+      // D-ARCH-235 / D-ARCH-236: a manifest without the cluster or the load-time field is refused (no old shape released).
+      [{ ...manifest(), cluster: undefined }, /field cluster/],
+      [{ ...manifest(), cluster: { systemIdentifier: '-1' } }, /field cluster/],
+      [{ ...manifest(), loadTimeCode: undefined }, /field loadTimeCode/],
+      [{ ...manifest(), loadTimeCode: [{ kind: 'table check', object: 'x', reference: 'y' }] }, /field loadTimeCode\[0\]/],
     ];
     for (const [raw, message] of bad) expect(() => parseManifest(raw)).toThrow(message);
   });

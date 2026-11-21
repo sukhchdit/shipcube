@@ -134,5 +134,22 @@ export function pgSession(client: pg.Client | pg.PoolClient): ClosableSession {
   };
 }
 
+/**
+ * The variables a Prisma child process of the rehearsal tools inherits (PR034-SEC-08): the operating system and runtime
+ * basics, nothing else. The child gets `DATABASE_MIGRATOR_URL` set by the caller; `DATABASE_BOOTSTRAP_URL`,
+ * `DATABASE_URL`, `SHADOW_DATABASE_URL`, the `BOOTSTRAP_*` role passwords and every other variable stay out. The pinned
+ * wrapper (tools/deps/prisma-cli.mjs) sets the engine variables itself and drops NODE_OPTIONS.
+ */
+const CHILD_ENV_ALLOWED =
+  /^(?:PATH|PATHEXT|SYSTEMROOT|SYSTEMDRIVE|WINDIR|COMSPEC|OS|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|HOME|HOMEDRIVE|HOMEPATH|USERPROFILE|USERNAME|USER|LOGNAME|APPDATA|LOCALAPPDATA|PROGRAMDATA|TEMP|TMP|TMPDIR|LANG|LANGUAGE|LC_[A-Z]+|TZ|TERM|NO_COLOR|FORCE_COLOR|CI|NODE_ENV|NODE_EXTRA_CA_CERTS)$/i;
+
+export function prismaChildEnvironment(env: NodeJS.ProcessEnv, migratorUrl: string): NodeJS.ProcessEnv {
+  const child: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && CHILD_ENV_ALLOWED.test(name)) child[name] = value;
+  }
+  return { ...child, DATABASE_MIGRATOR_URL: migratorUrl };
+}
+
 /** The message of any thrown value, for a one-line CLI report. */
 export const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));

@@ -21,6 +21,7 @@ import {
   lintBootstrap,
   lintMigrations,
   lintRepository,
+  loadTimeClauseProblems,
   lockTimeoutMs,
   loneCarriageReturnLines,
   main,
@@ -837,6 +838,7 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
       ['20261114000500_create_rule', '14'],
       ['20261114000700_create_cast', '14'],
       ['20261114000800_create_aggregate', '14'],
+      ['20261114000900_create_range_type', '14'],
     ]);
   });
 
@@ -844,6 +846,43 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
     const findings = lintCase('refused-objects').filter((finding) => /create_(?:cast|aggregate)/.test(finding.file));
     expect(findings).toHaveLength(2);
     for (const finding of findings) expect(finding.message).toMatch(/CREATE CAST and CREATE AGGREGATE are refused in prisma\/migrations/);
+  });
+
+  it('[D-ARCH-237] [PR034-SEC-05] rule 14: CREATE TYPE … AS RANGE is refused outright (its subtype_diff is called without being named), with the message naming it; a plain CREATE TYPE is not', () => {
+    const findings = lintCase('refused-objects').filter((finding) => /create_range_type/.test(finding.file));
+    expect(findings.map((finding) => finding.rule)).toEqual(['14']);
+    expect(findings[0]?.message).toMatch(
+      /CREATE TYPE … AS RANGE, CREATE CAST and CREATE AGGREGATE are refused in prisma\/migrations .*D-ARCH-237/,
+    );
+    expect(findings[0]?.message).toContain('"create type public.fixture_span as range (subtype = integer)"');
+  });
+
+  it('[D-ARCH-236] [PR034-SEC-01] rule 21: a migration routine in a table CHECK, the P1b NOT VALID + VALIDATE shape, a domain CHECK, a STORED generated column and a partition key; query_to_xml in a CHECK; a platform routine no migration creates; built-in CHECKs, DEFAULT platform.app_org_id() and a policy WITH CHECK stay clean (load-time-code)', () => {
+    const findings = lintCase('load-time-code');
+    expect(byMigration(findings)).toEqual([
+      ['20261121000000_check_in_create_table', '21'],
+      ['20261121000100_check_added_not_valid', '21'],
+      ['20261121000200_domain_check', '21'],
+      ['20261121000300_generated_column', '21'],
+      ['20261121000400_partition_key', '21'],
+      ['20261121000500_query_to_xml', '21'],
+      ['20261121000600_platform_routine', '21'],
+      // Control: the policy is no load-time clause; rule 9 refuses it as a policy the renderer does not emit.
+      ['20261121000800_policy_with_check', '9'],
+    ]);
+    const PREFIX = '^load-time expression: the ';
+    const SUFFIX =
+      '; a restore evaluates it as the loading superuser, so it may call IMMUTABLE pg_catalog routines only \\(PR034-SEC-01, D-ARCH-236\\): "';
+    const OWN = 'calls public\\.fixture_check, a routine of this or an earlier migration';
+    expect(findings.filter((finding) => finding.rule === '21').map((finding) => finding.message)).toEqual([
+      expect.stringMatching(new RegExp(`${PREFIX}CHECK clause ${OWN}${SUFFIX}create table public\\.fixture_items \\(id integer`)),
+      expect.stringMatching(new RegExp(`${PREFIX}CHECK clause ${OWN}${SUFFIX}alter table public\\.fixture_items add constraint`)),
+      expect.stringMatching(new RegExp(`${PREFIX}CHECK clause ${OWN}${SUFFIX}create domain`)),
+      expect.stringMatching(new RegExp(`${PREFIX}GENERATED ALWAYS AS clause ${OWN}${SUFFIX}`)),
+      expect.stringMatching(new RegExp(`${PREFIX}PARTITION BY LIST clause ${OWN}${SUFFIX}`)),
+      expect.stringMatching(new RegExp(`${PREFIX}CHECK clause calls query_to_xml, a built-in that runs a query string${SUFFIX}`)),
+      expect.stringMatching(new RegExp(`${PREFIX}CHECK clause calls platform\\.fixture_unknown, a routine outside pg_catalog${SUFFIX}`)),
+    ]);
   });
 
   it('[PR11-SEC-14] rule 16: EXECUTE in a function or procedure body off DYNAMIC_SQL_ALLOW_LIST fails; EXECUTE FUNCTION, GRANT/REVOKE EXECUTE, the word in a message and DO bodies are clean', () => {
@@ -1438,6 +1477,125 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     expect(routineBodyChangesData("BEGIN EXECUTE E'SELECT 1; -- note\\012DELETE FROM public.fixture_items'; END")).toBe(true);
     // Control: the DML inside the comment of the dynamic SQL is no statement.
     expect(routineBodyChangesData("BEGIN EXECUTE 'SELECT 1 -- DELETE FROM public.fixture_items\n'; END")).toBe(false);
+  });
+
+  it('[PR034-SEC-06] shape X4 through lintMigrations: an E-string line-break escape before the DML of an EXECUTE is decoded in the lint path (rule 10), and rule 16 still refuses the escape string', () => {
+    const x4 = lintTexts('sec06-x4', ["DO $$ BEGIN EXECUTE E'SELECT 1; -- note\\nDELETE FROM public.fixture_items'; END $$;"]);
+    expect(ruleOf(x4)).toEqual([
+      [0, 'migration.sql', '10'],
+      [0, 'migration.sql', '16'],
+    ]);
+    // The octal form of the same escape, and a routine body (the call-site half reads the same text).
+    const octal = lintTexts('sec06-x4-octal', ["DO $$ BEGIN EXECUTE E'SELECT 1; -- note\\012DELETE FROM public.fixture_items'; END $$;"]);
+    expect(ruleOf(octal).map(([, , rule]) => rule)).toEqual(['10', '16']);
+    const routine = lintTexts('sec06-x4-routine', [
+      "CREATE FUNCTION public.fixture_x4() RETURNS void LANGUAGE plpgsql AS $$ BEGIN EXECUTE E'SELECT 1; -- n\\nDELETE FROM public.fixture_items'; END $$;\nSELECT public.fixture_x4();",
+    ]);
+    expect(ruleOf(routine).filter(([, , rule]) => rule === '10')).toEqual([[0, 'migration.sql', '10']]);
+    // Control: without the line-break escape the DML stays inside the comment (rule 16 only).
+    const control = lintTexts('sec06-x4-control', ["DO $$ BEGIN EXECUTE E'SELECT 1; -- note DELETE FROM public.fixture_items'; END $$;"]);
+    expect(ruleOf(control)).toEqual([[0, 'migration.sql', '16']]);
+  });
+
+  /** `[index, file, rule]` of the rule-21 findings only. */
+  const rule21 = (findings: readonly (readonly [number, string | undefined, string, string])[]) =>
+    ruleOf(findings).filter(([, , rule]) => rule === '21');
+  const CHECK_ROUTINE = 'CREATE FUNCTION public.fixture_check(integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT true $$;';
+
+  it.each([
+    [
+      'an unqualified call of a migration routine',
+      `${CHECK_ROUTINE}\nCREATE TABLE public.fixture_items (id integer CHECK (fixture_check(id)));`,
+    ],
+    [
+      'a routine named inside a string literal of the clause',
+      "CREATE TABLE public.fixture_items (id integer CHECK (pg_catalog.length('select public.fixture_w(1)') > 0));",
+    ],
+    ['an operator of another schema', 'CREATE TABLE public.fixture_items (id integer CHECK (id OPERATOR(public.===) 1));'],
+    [
+      'query_to_xmlschema, quoted',
+      `CREATE TABLE public.fixture_items (id integer CHECK ("query_to_xmlschema"('select 1', true, false, '') IS NOT NULL));`,
+    ],
+    [
+      'a domain CHECK added by ALTER DOMAIN',
+      'ALTER DOMAIN public.fixture_code ADD CONSTRAINT ck_fixture_code_w CHECK (public.fixture_w(VALUE));',
+    ],
+    [
+      'SET EXPRESSION AS',
+      "SET lock_timeout = '3s';\nALTER TABLE public.fixture_items ALTER COLUMN flag SET EXPRESSION AS (public.fixture_w(id));",
+    ],
+    [
+      'ADD COLUMN … GENERATED ALWAYS AS … STORED',
+      "SET lock_timeout = '3s';\nALTER TABLE public.fixture_items ADD COLUMN flag boolean GENERATED ALWAYS AS (public.fixture_w(id)) STORED;",
+    ],
+    [
+      'a PARTITION BY HASH key after literals that hold parentheses',
+      "CREATE TABLE public.fixture_events (id integer CHECK (pg_catalog.length('(') > 0 AND pg_catalog.length(')') > 0), note text DEFAULT ')(') PARTITION BY HASH ((public.fixture_w(id)));",
+    ],
+    [
+      'a CHECK after a comment and a quoted identifier holding parentheses',
+      'CREATE TABLE public.fixture_items ("a(" integer, /* ( */ CONSTRAINT ck CHECK (public.fixture_w("a(")));',
+    ],
+  ])('[D-ARCH-236] rule 21: %s is refused', (label, migration) => {
+    expect(rule21(lintTexts(`r21-${label.replace(/[^a-z]+/gi, '-')}`, [migration]))).toEqual([[0, 'migration.sql', '21']]);
+  });
+
+  it('[D-ARCH-236] rule 21: a clause whose closing parenthesis cannot be found is refused (fail closed, item d)', () => {
+    const findings = lintTexts('r21-open', ['CREATE TABLE public.fixture_items (id integer CHECK ((id > 0);']);
+    expect(rule21(findings)).toEqual([[0, 'migration.sql', '21']]);
+    expect(findings.find(([, , rule]) => rule === '21')?.[3]).toMatch(
+      /^load-time expression: the CHECK clause has no closing parenthesis the linter can find \(fail closed\)/,
+    );
+  });
+
+  it('[D-ARCH-236] rule 21 controls: an identity column, a column DEFAULT, a policy, an index expression, a trigger, a plain partition key, a check_option setting and the word in a literal are no load-time clauses', () => {
+    const migration = [
+      CHECK_ROUTINE,
+      "CREATE TABLE public.fixture_items (id integer GENERATED ALWAYS AS IDENTITY, org_id uuid DEFAULT platform.app_org_id(), note text DEFAULT 'check (public.fixture_check(1))', CONSTRAINT ck_fixture_items__note CHECK (pg_catalog.octet_length(note) <= 10 AND note IS DISTINCT FROM 'x'));",
+      'CREATE TABLE public.fixture_events (id integer NOT NULL, month date NOT NULL) PARTITION BY RANGE (month);',
+    ].join('\n');
+    expect(rule21(lintTexts('r21-controls', [migration]))).toEqual([]);
+  });
+
+  it('[D-ARCH-236] rule 21 in down.sql: a load-time clause that calls a routine of the migrations, or one down.sql creates, is refused there too', () => {
+    const earlier = `${CHECK_ROUTINE}\nSELECT 1;`;
+    const down = 'CREATE TABLE IF NOT EXISTS public.fixture_items (id integer CHECK (fixture_check(id)));\n';
+    expect(rule21(lintTexts('r21-down', [earlier], 'no', down))).toEqual([[0, 'down.sql', '21']]);
+    const own = `${CHECK_ROUTINE.replace('fixture_check', 'fixture_down_only')}\nCREATE TABLE IF NOT EXISTS public.fixture_items (id integer CHECK (fixture_down_only(id)));\n`;
+    expect(rule21(lintTexts('r21-down-own', ['SELECT 1;'], 'no', own))).toEqual([[0, 'down.sql', '21']]);
+    expect(
+      rule21(
+        lintTexts(
+          'r21-down-control',
+          ['SELECT 1;'],
+          'no',
+          'CREATE TABLE IF NOT EXISTS public.fixture_items (id integer CHECK (id > 0));\n',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it('[D-ARCH-236] rule 21 scales linearly: time(4n) / time(n) < 8 on one long clause with nested parentheses, and on many clauses in one statement', () => {
+    const nested = (n: number) =>
+      `CREATE TABLE public.fixture_items (id integer CHECK (${'(pg_catalog.abs('.repeat(n)}id${'))'.repeat(n)} >= 0));`;
+    const many = (n: number) =>
+      `CREATE TABLE public.fixture_items (id integer${" CHECK (check (pg_catalog.length('(') > 0 AND (id > 0)))".repeat(n)});`;
+    const fastest = (text: string) =>
+      Math.min(
+        ...[0, 1, 2].map(() => {
+          const started = performance.now();
+          expect(loadTimeClauseProblems(text, [])).toEqual([]);
+          return performance.now() - started;
+        }),
+      );
+    for (const [statement, n] of [
+      [nested, 5_000],
+      [many, 2_000],
+    ] as const) {
+      const small = fastest(statement(n));
+      const large = fastest(statement(4 * n));
+      expect(large / Math.max(small, 1)).toBeLessThan(8);
+    }
   });
 
   it('[PR293-SEC-04] (a) the fallback reading stays linear: time(4n) / time(n) < 8 on unlexable text full of quotes, semicolons and comments', () => {

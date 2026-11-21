@@ -9,7 +9,17 @@ import type pg from 'pg';
 
 import { REPO_ROOT } from './lint-migrations.js';
 import { RehearsalError } from './rehearsal-manifest.js';
-import { defaultRunDir, integerFlag, localDatabaseUrl, messageOf, parseFlags, pgSession, utcStamp, withDatabase } from './rehearsal-cli.js';
+import {
+  defaultRunDir,
+  integerFlag,
+  localDatabaseUrl,
+  messageOf,
+  parseFlags,
+  pgSession,
+  prismaChildEnvironment,
+  utcStamp,
+  withDatabase,
+} from './rehearsal-cli.js';
 
 const SPEC = { values: ['out', 'rate'], switches: ['keep'] };
 
@@ -100,5 +110,38 @@ describe('artefacts and sessions', () => {
   it('reports any thrown value as one line', () => {
     expect(messageOf(new Error('x'))).toBe('x');
     expect(messageOf('y')).toBe('y');
+  });
+});
+
+describe('prismaChildEnvironment (PR034-SEC-08)', () => {
+  it('[PR034-SEC-08] passes the OS and runtime basics and the given migrator URL only: no superuser URL, role password, shadow URL, NODE_OPTIONS or other variable', () => {
+    const env: NodeJS.ProcessEnv = {
+      Path: 'C:/bin',
+      SystemRoot: 'C:/Windows',
+      HOME: '/home/u',
+      TEMP: '/tmp',
+      LC_ALL: 'C',
+      NODE_EXTRA_CA_CERTS: '/ca.pem',
+      NODE_OPTIONS: '--require x',
+      NODE_AUTH_TOKEN: 'npm-token',
+      DATABASE_BOOTSTRAP_URL: 'postgresql://postgres:pw@127.0.0.1/platform',
+      DATABASE_URL: 'postgresql://app:pw@127.0.0.1/platform',
+      DATABASE_MIGRATOR_URL: 'postgresql://m:pw@127.0.0.1/platform',
+      SHADOW_DATABASE_URL: 'postgresql://m:pw@127.0.0.1/shadow',
+      BOOTSTRAP_MIGRATOR_PASSWORD: 'm-secret',
+      BOOTSTRAP_APP_PASSWORD_FILE: '/run/secrets/app',
+      AWS_SECRET_ACCESS_KEY: 'k',
+      PRISMA_SCHEMA_ENGINE_BINARY: '/planted',
+      UNDEFINED: undefined,
+    };
+    expect(prismaChildEnvironment(env, 'postgresql://m:pw@127.0.0.1/rehearsal_x')).toEqual({
+      Path: 'C:/bin',
+      SystemRoot: 'C:/Windows',
+      HOME: '/home/u',
+      TEMP: '/tmp',
+      LC_ALL: 'C',
+      NODE_EXTRA_CA_CERTS: '/ca.pem',
+      DATABASE_MIGRATOR_URL: 'postgresql://m:pw@127.0.0.1/rehearsal_x',
+    });
   });
 });

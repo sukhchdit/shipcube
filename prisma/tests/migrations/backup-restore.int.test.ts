@@ -9,8 +9,14 @@
  * sequences. The scratch database gets only the database-level 00-roles.sql before pg_restore.
  *
  * The last describe drives the CLI entry points themselves (C4 harness proof, D-ORCH-160; D-TASK034-14).
+ *
+ * Restore target (D-ARCH-235): these cases restore inside the one Testcontainers cluster, so they pass `sameCluster`
+ * (the CLI's `--same-cluster`); one case without it is refused before any database is created, and one CLI case restores
+ * into a second, fresh cluster with its own role passwords and reports `target.sameCluster` false (D-TASK034-18). The
+ * load-time gate (D-ARCH-236) has its own case: a CHECK that calls a writing routine stops db:backup (exit 1, the
+ * constraint in the manifest) and db:verify-restore (exit 1, nothing created, nothing written as the bootstrap role).
  */
-import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -22,7 +28,7 @@ import { connectPrivileged, reapplyDatabaseLevel } from '../../../tools/db/boots
 import { lintRehearsals } from '../../../tools/db/lint-migrations.js';
 import { composeArchiveTool, errorSummary, runProcess, type ArchiveTool, type ProcessRunner } from '../../../tools/db/pg-archive.js';
 import { pgSession, type ArchiveTarget, type ClosableSession } from '../../../tools/db/rehearsal-cli.js';
-import { findOrphans, manifestTotals, parseManifest } from '../../../tools/db/rehearsal-manifest.js';
+import { findOrphans, manifestTotals, parseManifest, sha256Hex, tableFingerprintSql } from '../../../tools/db/rehearsal-manifest.js';
 import { RECORD_FILE } from '../../../tools/db/rehearsal-record.js';
 import { listMigrations } from '../../../tools/db/up-down-up.js';
 import {
@@ -37,7 +43,7 @@ import {
 } from '../../../tools/db/verify-restore.js';
 import { PRISMA_TREE_LOCK, withFileLock } from '../../../tools/test-support/fs-lock.js';
 import { findRepoRoot, runNode } from '../../../tools/test-support/process.js';
-import { PlatformPostgres, SUPERUSER } from '../harness/postgres.js';
+import { MIGRATOR, PlatformPostgres, SUPERUSER } from '../harness/postgres.js';
 
 const repoRoot = findRepoRoot();
 const repositoryMigrations = join(repoRoot, 'prisma', 'migrations');
@@ -131,6 +137,7 @@ function verifyOptions(backup: BackupResult, scratch: string, archive: string, k
     scratch: () => session(scratch),
     prepareScratch: () => reapplyDatabaseLevel({ connection: db.bootstrapConnection(scratch), passwords: db.passwords }),
     migrateStatus: () => db.prisma(scratch, ['migrate', 'status']),
+    sameCluster: true, // one Testcontainers cluster: the stated exception of D-ARCH-235
     keepScratch: keep,
   };
 }
@@ -187,6 +194,36 @@ describe('backup and restore rehearsal (NFR-REC-003; NT-REC-003-a partial: datab
     expect(report.totals.tables).toBe(backup.manifest.tables.length);
     expect(report.restoredManifestSha256).not.toBe(report.source.manifestSha256); // the database name and time differ
     expect(await databaseExists('rehearsal_ok')).toBe(true);
+  }, 300_000);
+
+  it('[D-ARCH-235] the restore target: without sameCluster the cluster that was backed up is refused, and no database is created', async () => {
+    const options = { ...verifyOptions(backup, 'rehearsal_same_refused', archive, false), sameCluster: false };
+    await expect(runVerifyRestore(options)).rejects.toThrow(
+      /^the restore target is the cluster that was backed up \(same system_identifier\)/,
+    );
+    expect(await databaseExists('rehearsal_same_refused')).toBe(false);
+    expect(backup.manifest.cluster.systemIdentifier).toMatch(/^\d{1,20}$/);
+    expect(backup.manifest.loadTimeCode).toEqual([]); // the migrated schema passes the load-time gate
+  }, 300_000);
+
+  it('[PR034-SEC-04] the row fingerprint reads the whole row even when a column is named t', async () => {
+    await superuserRun(source, [
+      'CREATE TABLE public.zz_rehearsal_alias (id integer PRIMARY KEY, t text, secret text)',
+      "INSERT INTO public.zz_rehearsal_alias VALUES (1, 'same', 'a')",
+    ]);
+    const checksum = async (): Promise<string> => {
+      const client = await session(source);
+      try {
+        const [row] = await client.query<{ checksum: string }>(tableFingerprintSql('public', 'zz_rehearsal_alias'));
+        return row?.checksum ?? '';
+      } finally {
+        await client.end();
+      }
+    };
+    const before = await checksum();
+    await superuserRun(source, ["UPDATE public.zz_rehearsal_alias SET secret = 'b' WHERE id = 1"]);
+    expect(await checksum()).not.toBe(before);
+    await superuserRun(source, ['DROP TABLE public.zz_rehearsal_alias']);
   }, 300_000);
 
   it('[NT-REC-003-a] (partial) negative controls on the restored database: a deleted row, a changed row and an orphan each fail the verification', async () => {
@@ -283,12 +320,13 @@ describe('backup and restore rehearsal (NFR-REC-003; NT-REC-003-a partial: datab
     // streams, and a tail of the joined text held the banner alone).
     expect(behind.migrateStatus.pending).toEqual([name]);
     expect(behind.migrateStatus.failed).toEqual([]);
-    expect(behind.migrateStatus.detail).toMatch(/^exit 1: pending 29991231000000_rehearsal_probe \| /);
+    expect(behind.migrateStatus.detail).toMatch(/^exit 1: pending 29991231000000_rehearsal_probe(?: \| |$)/);
     expect(() => writeRehearsalRecord(root, name, backup.manifest, behind)).toThrow(/no rehearsal record is written/);
 
     const report = await runVerifyRestore({
       ...verifyOptions(backup, 'rehearsal_record', archive, true),
       migrateDeploy: () => db.prisma('rehearsal_record', ['migrate', 'deploy'], rehearsal),
+      rehearsedMigration: name,
       migrateStatus: () => db.prisma('rehearsal_record', ['migrate', 'status'], rehearsal),
     });
     expect(report.differences).toEqual([]); // compared before the deploy, on the data as backed up
@@ -303,9 +341,13 @@ describe('backup and restore rehearsal (NFR-REC-003; NT-REC-003-a partial: datab
     }
     await superuserRun('postgres', ['DROP DATABASE rehearsal_record WITH (FORCE)']);
 
+    // R2-m1: the report carries the checksum Prisma stored at the deploy; it is the SHA-256 of the file's bytes, and the
+    // record binds exactly it.
+    expect(report.rehearsed).toEqual({ migration: name, checksum: sha256Hex(readFileSync(join(root, name, 'migration.sql'))) });
     writeRehearsalRecord(root, name, backup.manifest, report);
     expect(JSON.parse(readFileSync(join(root, name, RECORD_FILE), 'utf8'))).toMatchObject({
       migration: name,
+      migrationSha256: report.rehearsed?.checksum,
       verification: { verdict: 'pass', deployed: true },
     });
     expect(lintRehearsals(root)).toEqual([]);
@@ -367,11 +409,15 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
   const calls: { prefix: string[]; command: string[] }[] = [];
   let source: string;
 
-  const harnessRunner: ProcessRunner = (request) => {
-    const exec = request.args.indexOf('exec');
-    calls.push({ prefix: request.args.slice(0, exec + 3), command: request.args.slice(exec + 3) });
-    return runProcess({ ...request, args: ['exec', '-i', db.container.getId(), ...request.args.slice(exec + 3)] });
-  };
+  /** The runner for the Compose prefix of `cluster` (the first harness cluster unless given). */
+  const runnerFor =
+    (cluster: () => PlatformPostgres): ProcessRunner =>
+    (request) => {
+      const exec = request.args.indexOf('exec');
+      calls.push({ prefix: request.args.slice(0, exec + 3), command: request.args.slice(exec + 3) });
+      return runProcess({ ...request, args: ['exec', '-i', cluster().container.getId(), ...request.args.slice(exec + 3)] });
+    };
+  const harnessRunner: ProcessRunner = runnerFor(() => db);
 
   interface Sink {
     lines: string[];
@@ -384,25 +430,25 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
     archive: (target: ArchiveTarget) => composeArchiveTool({ ...target, run: harnessRunner }),
     ...write(sink),
   });
-  const verifyDeps = (sink: Sink) => ({
+  const verifyDeps = (sink: Sink, run: ProcessRunner = harnessRunner) => ({
     ...VERIFY_RESTORE_DEPENDENCIES,
-    archive: (target: ArchiveTarget) => composeArchiveTool({ ...target, run: harnessRunner }),
+    archive: (target: ArchiveTarget) => composeArchiveTool({ ...target, run }),
     migrateStatus: (env: NodeJS.ProcessEnv) => withFileLock(PRISMA_TREE_LOCK, () => VERIFY_RESTORE_DEPENDENCIES.migrateStatus(env)),
     ...write(sink),
   });
 
-  /** The process environment without any database or bootstrap variable, plus the harness URLs and role passwords. */
-  const cliEnv = (database: string): NodeJS.ProcessEnv => {
+  /** The process environment without any database or bootstrap variable, plus one cluster's URLs and role passwords. */
+  const cliEnv = (database: string, cluster: PlatformPostgres = db): NodeJS.ProcessEnv => {
     const env: NodeJS.ProcessEnv = {};
     for (const [name, value] of Object.entries(process.env)) {
       if (!/^(DATABASE_|SHADOW_DATABASE_|BOOTSTRAP_)/.test(name)) env[name] = value;
     }
     return {
       ...env,
-      DATABASE_BOOTSTRAP_URL: db.bootstrapConnection(database).connectionString,
-      DATABASE_MIGRATOR_URL: db.migratorUrl(database),
-      BOOTSTRAP_MIGRATOR_PASSWORD: db.passwords.migrator,
-      BOOTSTRAP_APP_PASSWORD: db.passwords.app,
+      DATABASE_BOOTSTRAP_URL: cluster.bootstrapConnection(database).connectionString,
+      DATABASE_MIGRATOR_URL: cluster.migratorUrl(database),
+      BOOTSTRAP_MIGRATOR_PASSWORD: cluster.passwords.migrator,
+      BOOTSTRAP_APP_PASSWORD: cluster.passwords.app,
     };
   };
   const secrets = (): string[] => [
@@ -482,7 +528,7 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
     const calledBefore = calls.length;
     const sink = newSink();
     const code = await verifyMain(
-      ['--backup', outDir, '--scratch', 'rehearsal_cli', '--project', PROJECT],
+      ['--backup', outDir, '--scratch', 'rehearsal_cli', '--project', PROJECT, '--same-cluster'],
       cliEnv(source),
       verifyDeps(sink),
     );
@@ -494,6 +540,7 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
     expect(report).toMatchObject({
       format: REPORT_FORMAT,
       verdict: 'pass',
+      target: { sameCluster: true },
       scratchDatabase: 'rehearsal_cli',
       scratchKept: false,
       totals,
@@ -502,9 +549,10 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
       schemaDiff: { onlyBefore: [], onlyAfter: [] },
       migrateDeploy: null,
       migrateStatus: { ok: true, detail: 'up to date', pending: [], failed: [] },
+      rehearsed: null,
     });
     expect(sink.lines).toEqual([
-      `[db:verify-restore] PASS: ${String(totals.tables)} tables, ${totals.rows} rows, restore ${String(report.restoreMs)} ms; report ${REPORT_FILE} in the backup folder`,
+      `[db:verify-restore] PASS: ${String(totals.tables)} tables, ${totals.rows} rows, restore ${String(report.restoreMs)} ms; same cluster (--same-cluster); report ${REPORT_FILE} in the backup folder`,
     ]);
     const restore = calls.slice(calledBefore).find((call) => call.command[4] === 'pg_restore');
     expect(restore?.prefix).toEqual(['compose', '-p', PROJECT, 'exec', '-T', 'postgres']);
@@ -530,7 +578,11 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
     const archive = readFileSync(join(outDir, 'platform.dump'));
     writeFileSync(join(truncated, 'platform.dump'), archive.subarray(0, Math.floor(archive.length / 2)));
     const sink = newSink();
-    const code = await verifyMain(['--backup', truncated, '--scratch', 'rehearsal_cli_cut'], cliEnv(source), verifyDeps(sink));
+    const code = await verifyMain(
+      ['--backup', truncated, '--scratch', 'rehearsal_cli_cut', '--same-cluster'],
+      cliEnv(source),
+      verifyDeps(sink),
+    );
     expect(code).toBe(1);
     expect(sink.lines).toEqual([]);
     expect(sink.errors).toHaveLength(1);
@@ -540,6 +592,108 @@ describe('db:backup and db:verify-restore CLI entry points (C4 harness proof)', 
     const refused = newSink();
     expect(await verifyMain(['--backup', outDir, '--bogus'], cliEnv(source), verifyDeps(refused))).toBe(1);
     expect(refused.errors).toEqual(['[db:verify-restore] unknown flag --bogus']);
+  }, 300_000);
+
+  it('[D-ARCH-235] db:verify-restore main into a second, fresh cluster with its own role passwords: no --same-cluster, target.sameCluster false, totals equal the manifest (the shape of the TASK-119 job)', async () => {
+    const second = await PlatformPostgres.start();
+    try {
+      const sink = newSink();
+      const env = cliEnv('postgres', second); // the second stack's URLs and passwords only
+      const code = await verifyMain(
+        ['--backup', outDir, '--scratch', 'rehearsal_fresh'],
+        env,
+        verifyDeps(
+          sink,
+          runnerFor(() => second),
+        ),
+      );
+      expect(sink.errors).toEqual([]);
+      expect(code).toBe(0);
+      const manifest = parseManifest(JSON.parse(readFileSync(join(outDir, 'manifest.json'), 'utf8')) as unknown);
+      const report = JSON.parse(readFileSync(join(outDir, REPORT_FILE), 'utf8')) as Record<string, unknown>;
+      expect(report).toMatchObject({
+        verdict: 'pass',
+        target: { sameCluster: false },
+        totals: manifestTotals(manifest),
+        differences: [],
+        orphans: [],
+      });
+      for (const secret of [db.passwords.migrator, db.passwords.app]) expect(Object.values(env)).not.toContain(secret);
+      // The same switch on the second cluster is refused: it is not the cluster that was backed up.
+      const refused = newSink();
+      expect(
+        await verifyMain(
+          ['--backup', outDir, '--scratch', 'rehearsal_fresh_2', '--same-cluster'],
+          env,
+          verifyDeps(
+            refused,
+            runnerFor(() => second),
+          ),
+        ),
+      ).toBe(1);
+      expect(refused.errors).toEqual([
+        expect.stringMatching(
+          /^\[db:verify-restore\] --same-cluster was given, but the restore target is not the cluster that was backed up/,
+        ),
+      ]);
+    } finally {
+      await second.stop();
+    }
+  }, 600_000);
+
+  it('[D-ARCH-236] [PR034-SEC-01] the load-time gate: a CHECK that calls a writing routine (NOT VALID, then VALIDATE, as the migrator) stops db:backup (exit 1, that constraint in the manifest) and db:verify-restore (exit 1); no scratch database, no row written as the bootstrap role, the migrator is no superuser', async () => {
+    const gated = await sourceWithFixture();
+    await superuserRun(gated, [
+      `SET ROLE ${MIGRATOR}`,
+      'CREATE TABLE public.zz_gate_side (who text NOT NULL)',
+      'CREATE FUNCTION public.zz_gate_record(integer) RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN INSERT INTO public.zz_gate_side VALUES (current_user); RETURN true; END $$',
+      'CREATE TABLE public.zz_gate (n integer)',
+      'INSERT INTO public.zz_gate VALUES (1)',
+      "SET lock_timeout = '3s'",
+      'ALTER TABLE public.zz_gate ADD CONSTRAINT ck_zz_gate__record CHECK (public.zz_gate_record(n)) NOT VALID',
+      'ALTER TABLE public.zz_gate VALIDATE CONSTRAINT ck_zz_gate__record',
+      'RESET ROLE',
+    ]);
+    const gateDir = join(work, 'cli-backup-gate');
+    const backupSink = newSink();
+    expect(await backupMain(['--out', gateDir], cliEnv(gated), backupDeps(backupSink))).toBe(1);
+    expect(backupSink.lines).toEqual([]);
+    expect(backupSink.errors).toEqual([
+      expect.stringMatching(
+        /^\[db:backup\] load-time gate: 1 load-time finding\(s\): table check public\.zz_gate ck_zz_gate__record: public\.zz_gate_record\(integer\) \(not built in\)\. /,
+      ),
+    ]);
+    expect(readdirSync(gateDir).sort()).toEqual(['manifest.json', 'platform.dump', 'schema.sql']);
+    const manifest = parseManifest(JSON.parse(readFileSync(join(gateDir, 'manifest.json'), 'utf8')) as unknown);
+    expect(manifest.loadTimeCode).toEqual([
+      {
+        kind: 'table check',
+        object: 'public.zz_gate ck_zz_gate__record',
+        reference: 'public.zz_gate_record(integer)',
+        reason: 'not built in',
+      },
+    ]);
+    for (const argv of [[], ['--same-cluster']]) {
+      const verifySink = newSink();
+      expect(await verifyMain(['--backup', gateDir, '--scratch', 'rehearsal_gate', ...argv], cliEnv(gated), verifyDeps(verifySink))).toBe(
+        1,
+      );
+      expect(verifySink.errors).toEqual([
+        expect.stringMatching(/^\[db:verify-restore\] the load-time gate refuses this backup: 1 load-time finding\(s\)/),
+      ]);
+      expect(existsSync(join(gateDir, REPORT_FILE))).toBe(false);
+    }
+    expect(await databaseExists('rehearsal_gate')).toBe(false);
+    const client = await db.superuser(gated);
+    try {
+      // The VALIDATE ran the routine as its owner, the migrator; nothing ran as the bootstrap superuser.
+      expect((await client.query<{ who: string }>('SELECT who FROM public.zz_gate_side ORDER BY who')).rows).toEqual([{ who: MIGRATOR }]);
+      expect(
+        (await client.query<{ rolsuper: boolean }>('SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = $1', [MIGRATOR])).rows,
+      ).toEqual([{ rolsuper: false }]);
+    } finally {
+      await client.end();
+    }
   }, 300_000);
 
   it('the npm script entries (`tsx tools/db/<tool>.ts`) start main and set the exit code, with one stderr line and no value', () => {

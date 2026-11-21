@@ -17,8 +17,9 @@
  * (`[{ "name", "kind": "read" | "write", "sql", "params": ["{{uuid}}", "{{seq}}", …] }]`).
  *
  * The §8.7 job of NT-AVAIL-003-b (the previous api image, i.e. the last release tag or, before the first tag, the
- * previous `main` image, under a 20 rps k6 probe) is not built: no task owns it yet. Until it is, this database-level
- * probe is PARTIAL evidence for NT-AVAIL-003-b (D-TASK034-05, premise corrected by D-TASK034-11; code review R1-m4).
+ * previous `main` image, under a 20 rps k6 probe) is not built yet; TASK-119 owns it (D-SD-012). Until it is, this
+ * database-level probe is PARTIAL evidence for NT-AVAIL-003-b (D-TASK034-05, premise corrected by D-TASK034-11; code
+ * review R1-m4).
  * An error of an idle pooled client (a backend terminated during the migration) counts as a failure (R1-n5).
  *
  * CLI: DATABASE_URL (the probe role, normally platform_app) and DATABASE_MIGRATOR_URL, both loopback or a Unix socket
@@ -36,7 +37,8 @@ import pg from 'pg';
 
 import { REPO_ROOT } from './lint-migrations.js';
 import { RehearsalError, qualifiedName, type SqlSession } from './rehearsal-manifest.js';
-import { integerFlag, localDatabaseUrl, messageOf, parseFlags } from './rehearsal-cli.js';
+import { maskValues } from './prisma-outcome.js';
+import { integerFlag, localDatabaseUrl, messageOf, parseFlags, prismaChildEnvironment } from './rehearsal-cli.js';
 import { quoteIdentifier } from './sql-text.js';
 
 export const PROBE_REPORT_FORMAT = 'platform.zero-downtime-probe/v1';
@@ -115,12 +117,16 @@ export function percentile(sorted: readonly number[], fraction: number): number 
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))] as number;
 }
 
-const failureOf = (error: unknown): { code: string; message: string } => {
-  const code = (error as { code?: unknown } | null)?.code;
-  return {
-    code: typeof code === 'string' && /^[0-9A-Z]{5}$|^E[A-Z]{2,15}$/.test(code) ? code : 'ERROR',
-    message: messageOf(error).replace(/\s+/g, ' ').slice(0, MESSAGE_LIMIT),
-  };
+/**
+ * A failure sample: the SQLSTATE (or Node error code) and the message with every quoted fragment and parenthesised group
+ * masked (PR034-SEC-03). A PL/pgSQL `RAISE` (class P0) keeps its code only: its text is the author's and may carry any
+ * value.
+ */
+export const failureOf = (error: unknown): { code: string; message: string } => {
+  const raw = (error as { code?: unknown } | null)?.code;
+  const code = typeof raw === 'string' && /^[0-9A-Z]{5}$|^E[A-Z]{2,15}$/.test(raw) ? raw : 'ERROR';
+  if (code.startsWith('P0')) return { code, message: 'message withheld (PL/pgSQL RAISE)' };
+  return { code, message: maskValues(messageOf(error).replace(/\s+/g, ' ')).slice(0, MESSAGE_LIMIT) };
 };
 
 /** Runs the probe; never rejects for a failing request or migration (both are in the report). */
@@ -374,8 +380,7 @@ export async function main(
       });
       const workloadFile = flags.values.get('workload');
       const extra = workloadFile === undefined ? [] : parseWorkload(JSON.parse(deps.readFile(workloadFile)) as unknown);
-      const deployEnv = { ...env };
-      delete deployEnv['SHADOW_DATABASE_URL'];
+      const deployEnv = prismaChildEnvironment(env, migrator.url); // PR034-SEC-08: an allow-list, not the whole environment
       const report = await runZeroDowntimeProbe({
         operations: [...reads, ...extra],
         execute: async (operation, params) => {

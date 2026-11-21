@@ -56,7 +56,8 @@
  *       ALTER DEFAULT PRIVILEGES, GRANT/REVOKE ... ON SCHEMA (PR11-SEC-15 d); CREATE OPERATOR [CLASS | FAMILY]
  *       (PR24-SEC-02), CREATE [OR REPLACE] RULE (PR11-SEC-15 e), CREATE CAST and CREATE [OR REPLACE] AGGREGATE
  *       (D-ARCH-172, TASK-034: a writer used as a cast or an aggregate support function is a call rule 10 cannot
- *       see) are refused outright
+ *       see) and CREATE TYPE … AS RANGE (D-ARCH-237, PR034-SEC-05: its `subtype_diff` is called at every GiST build and
+ *       insert without being named) are refused outright
  *   15  GRANT/REVOKE on a function after its `OWNER TO platform_definer` in the same file; CREATE FUNCTION ...
  *       SECURITY DEFINER outside a `SET [SESSION] ROLE platform_definer; ... RESET ROLE;` block (the only accepted
  *       form, PR11-SEC-07); any `ALTER … OWNER TO platform_definer` (D-ARCH-071 (2) b); a file that ends with a
@@ -77,6 +78,17 @@
  *       clause; a different predicate is "partial-index predicate changed: review required" (D-ARCH-077, SPK-08)
  *   20  `standard_conforming_strings` or `backslash_quote` named anywhere (SET, set_config, routine SET clauses,
  *       ALTER … SET; bodies and dynamic SQL included), in both lanes (PR43-SEC-06 a)
+ *   21  load-time expressions (PR034-SEC-01, D-ARCH-236): in a CHECK, GENERATED ALWAYS AS, PARTITION BY RANGE | LIST |
+ *       HASH or SET EXPRESSION AS clause of CREATE | ALTER TABLE or CREATE | ALTER DOMAIN (migration.sql and down.sql),
+ *       (a) a call of any routine of this or an earlier migration (the rule-10 registry, writing or not), (b) a routine
+ *       or OPERATOR(…) qualified with a schema other than pg_catalog, (c) query_to_xml, query_to_xmlschema,
+ *       query_to_xml_and_xmlschema, ts_stat or ts_rewrite, (d) a clause whose closing parenthesis cannot be found with
+ *       literals blanked (fail closed). A restore evaluates these expressions as the loading superuser. The clause is
+ *       delimited by parenthesis depth; a string literal in it is read as rule 10 reads one (a name in it counts).
+ *       Not load-time clauses: a column DEFAULT, a policy's USING / WITH CHECK, an index, a trigger, GENERATED … AS
+ *       IDENTITY. Limits: an unqualified call that the search path resolves to a routine of an extension or of the
+ *       bootstrap lane, and a built-in outside list (c) that is not IMMUTABLE (`set_config`, `ts::date`), are not seen;
+ *       catalog test C17 and the load-time gate of db:backup / db:verify-restore are the boundary (tools/db/load-time-code.ts)
  *   L   a file (migration.sql, down.sql, a bootstrap file) that does not split into statements is reported and not
  *       linted further (fail closed; PR43-SEC-03, PR43-SEC-11): it does not lex, ends inside a `BEGIN ATOMIC` block,
  *       has anything but `;` after the END of a routine body, or a body `;` inside parentheses (sql-text.ts
@@ -88,7 +100,7 @@
  *   R   a `data-changing: yes` migration without a fresh, passed backup/restore rehearsal record (`rehearsal.json` in its
  *       directory, written by tools/db/verify-restore.ts; CLAUDE.md §5, §8.6; TASK-034). Run by lintRepository (the CLI
  *       and lane A) through lintRehearsals, not by lintMigrations, so the fixture cases are unchanged
- * Rules 2-11, 14-19 and R apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
+ * Rules 2-11, 14-19, 21 and R apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
  *
  * Stated limits (text rules cannot be complete over dynamic SQL; PR #11 review R2-n2, PR11-SEC-14/15/17): a setter
  * whose name and key are both built by `format()` or keyword-split concatenation, `EXECUTE` of a computed or table-read
@@ -107,7 +119,8 @@
  * an earlier migration file, also after RENAME TO / SET SCHEMA); it still does not see a writing routine of the
  * bootstrap lane, a write reached only through `EXECUTE` of a string built at run time, a call through a computed name,
  * or attribute notation (PR293-SEC-01 row 3, pinned by a test). A cast function or an aggregate support function
- * (rows 4 and 5) cannot occur, because rule 14 refuses CREATE CAST and CREATE AGGREGATE (D-ARCH-172). Rule 10 reads
+ * (rows 4 and 5) cannot occur, because rule 14 refuses CREATE CAST and CREATE AGGREGATE (D-ARCH-172), nor can a range
+ * type's `subtype_diff` (rule 14 refuses CREATE TYPE … AS RANGE, D-ARCH-237). Rule 10 reads
  * every string literal of a DO or routine body as dynamic SQL, so prose such as `RAISE NOTICE 'in update mode'` is a
  * finding too (fail closed; PR293-SEC-04 b, kept by TASK-034). The outcome controls are the
  * catalog suite (C5 grants incl. PUBLIC, C1
@@ -127,6 +140,7 @@ import { sha256Hex } from './rehearsal-manifest.js';
 import { RECORD_FILE, migrationNames, rehearsalProblems } from './rehearsal-record.js';
 import { RenderRlsError, renderRls } from './render-rls.js';
 import {
+  ESCAPE_STRING_MARK,
   SqlLexError,
   type Token,
   containsEscapeString,
@@ -557,9 +571,18 @@ const BOOTSTRAP_ONLY = [
  * redirects comparisons or whole queries to code that no policy template or catalog test reviews (PR24-SEC-02 class
  * fix and PR11-SEC-15 e, lint halves). A cast or an aggregate runs a routine through syntax that names no routine
  * (`x::type`, `a(…)` calling its SFUNC or FINALFUNC), so rule 10's call site cannot follow a writer there (D-ARCH-172,
- * D-TASK293-10, PR293-SEC-01 rows 4 and 5; TASK-034). No table, index or policy of the data model needs either.
+ * D-TASK293-10, PR293-SEC-01 rows 4 and 5; TASK-034). A range type names its `subtype_diff` (and `canonical`) routine
+ * without a call, and PostgreSQL calls it at every GiST build and insert, so an IMMUTABLE wrapper around a writer
+ * changes data in a migration declared `data-changing: no` (D-ARCH-237, PR034-SEC-05; its catalog half is C17 (b)). No
+ * table, index or policy of the data model needs any of them (`valid_during` is the built-in `tstzrange`).
  */
-const REFUSED_OBJECTS = [/^create operator\b/, /^create (?:or replace )?rule\b/, /^create cast\b/, /^create (?:or replace )?aggregate\b/];
+const REFUSED_OBJECTS = [
+  /^create operator\b/,
+  /^create (?:or replace )?rule\b/,
+  /^create cast\b/,
+  /^create (?:or replace )?aggregate\b/,
+  /^create type\b[^;]*\bas range\b/,
+];
 /**
  * Rule 15 (PR11-SEC-15 b): `set_config('role' | 'session_authorization', …)` in any case, with the setter or the key
  * quoted, at any quoting depth of dynamic SQL (`''role''`), matched on the body-expanded text with strings kept.
@@ -815,9 +838,17 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
 const OPEN_FOR = 'open [a-z_\\u0080-\\uFFFF][a-z0-9_$\\u0080-\\uFFFF]*(?: no)?(?: scroll)? for';
 const doBodyChangesData = bodyDataChanging(`begin|then|else|loop|execute|in|${OPEN_FOR}`);
 
+/**
+ * The statement text that rule 10 reads (`sqlText` with strings kept, bodies expanded), without ESCAPE_STRING_MARK.
+ * The mark ends in U+2063, which the tokenizer counts as an identifier character, so a marked `E'…'` would lex as an
+ * identifier followed by a plain string and its line-break escapes would never be decoded (PR034-SEC-06). Rule 16
+ * reads the marked text and stays the control for every escape string (D-TASK034-13 as corrected by D-TASK034-16).
+ */
+const bodyText = (statement: string): string => sqlText(statement, true).replaceAll(ESCAPE_STRING_MARK, ' ');
+
 /** True when `statement` is a DO block whose body changes data (rule 10). */
 function doBlockChangesData(statement: string): boolean {
-  return /^do\b/.test(codeOnly(statement)) && doBodyChangesData(sqlText(statement, true));
+  return /^do\b/.test(codeOnly(statement)) && doBodyChangesData(bodyText(statement));
 }
 
 /**
@@ -953,6 +984,20 @@ export class RoutineRegistry {
     return undefined;
   }
 
+  /**
+   * A routine of the registry (label) that one of `calls` names, writing or not (rule 21 (a), D-ARCH-236): an
+   * unqualified definition or call matches every schema, as for rule 10.
+   */
+  definedRoutine(calls: readonly RoutineName[]): string | undefined {
+    const byName = new Map<string, RoutineFacts[]>();
+    for (const routine of this.routines.values()) byName.set(routine.name, [...(byName.get(routine.name) ?? []), routine]);
+    for (const call of calls) {
+      const routine = byName.get(call.name)?.find((candidate) => sameRoutine(candidate, call));
+      if (routine !== undefined) return routineLabel(routine);
+    }
+    return undefined;
+  }
+
   /** Writing routines: those with a rule-10 form, then (breadth first over callers) those calling one. Cached. */
   private writingRoutines(): RoutineFacts[] {
     if (this.writing !== undefined) return this.writing;
@@ -979,7 +1024,7 @@ export class RoutineRegistry {
  */
 function writingRoutineCall(statement: string, registry: RoutineRegistry): string | undefined {
   const maskedText = masked(statement);
-  const expanded = sqlText(statement, true);
+  const expanded = bodyText(statement);
   const text = normalise(expanded);
   if (ROUTINE_DEFINITION.test(maskedText)) {
     const name = DEFINED_NAME.exec(maskedText);
@@ -1003,6 +1048,100 @@ function writingRoutineCall(statement: string, registry: RoutineRegistry): strin
   const writer = registry.calledWriter(namedCalls(text));
   return writer === undefined ? undefined : `call of ${writer}, a routine of this or an earlier migration whose body changes data`;
 }
+
+/** Rule 21: the statements whose clauses PostgreSQL evaluates as the role that writes a row (masked text). */
+const LOAD_TIME_STATEMENT =
+  /^(?:create (?:(?:global |local )?(?:temporary|temp) |unlogged )?table|alter table|create domain|alter domain)\b/;
+/**
+ * Rule 21: the keyword of a load-time clause and its opening parenthesis, in code lowercased (ASCII only, so offsets
+ * stay those of the statement) with every literal, quoted identifier and comment blanked to spaces of the same length.
+ * `GENERATED … AS IDENTITY` has no parenthesis after `as`, so it is no clause.
+ */
+const LOAD_TIME_KEYWORD =
+  /(?<![a-z0-9_$\u0080-￿])(check|generated\s+always\s+as|partition\s+by\s+(?:range|list|hash)|set\s+expression\s+as)\s*\(/g;
+const OPERATOR_SCHEMA = new RegExp(`\\boperator ?\\( ?(${CALL_IDENT}) ?\\.`, 'g');
+const QUERY_STRING_BUILTIN = /(?<![a-z0-9_$])"?(query_to_xml_and_xmlschema|query_to_xmlschema|query_to_xml|ts_stat|ts_rewrite)"? ?\(/;
+
+/** The statement with every non-code token blanked to spaces and ASCII letters lowercased: same length, same offsets. */
+function blankedCode(tokens: readonly Token[]): string {
+  return tokens
+    .map((token) => (token.kind === 'code' ? token.text.replace(/[A-Z]/g, (ch) => ch.toLowerCase()) : ' '.repeat(token.text.length)))
+    .join('');
+}
+
+/** The offset of the parenthesis that closes the one at `open` in `blanked`, or -1. */
+function closingParenthesis(blanked: string, open: number): number {
+  let depth = 0;
+  for (let at = open; at < blanked.length; at += 1) {
+    if (blanked[at] === '(') depth += 1;
+    else if (blanked[at] === ')') {
+      depth -= 1;
+      if (depth === 0) return at;
+    }
+  }
+  return -1;
+}
+
+/** What rule 21 refuses in one load-time clause (normalised, strings kept), or undefined. */
+function loadTimeClauseProblem(clauseText: string, registries: readonly RoutineRegistry[]): string | undefined {
+  const calls = namedCalls(clauseText);
+  for (const registry of registries) {
+    const routine = registry.definedRoutine(calls);
+    if (routine !== undefined) return `calls ${routine}, a routine of this or an earlier migration`;
+  }
+  const qualified = calls.find((call) => call.schema !== null && call.schema !== 'pg_catalog');
+  if (qualified !== undefined) return `calls ${routineLabel(qualified)}, a routine outside pg_catalog`;
+  for (const match of clauseText.matchAll(OPERATOR_SCHEMA)) {
+    const schema = identifierValue(match[1] as string);
+    if (schema !== 'pg_catalog') return `uses an operator of schema ${schema}, outside pg_catalog`;
+  }
+  const builtin = QUERY_STRING_BUILTIN.exec(clauseText);
+  if (builtin !== null) return `calls ${builtin[1] as string}, a built-in that runs a query string`;
+  return undefined;
+}
+
+/**
+ * Rule 21 (PR034-SEC-01, D-ARCH-236; data-model §8.3): the problems of the load-time clauses of one statement. A restore
+ * loads every row as the bootstrap superuser, and PostgreSQL evaluates a table or domain CHECK, a generated-column
+ * expression and a partition-key expression as the role that writes the row. Each clause is delimited by parenthesis
+ * depth on the statement with literals, quoted identifiers and comments blanked, and the scan resumes after it, so the
+ * cost is linear in the statement. One problem per clause; an undelimited clause ends the scan (fail closed).
+ */
+export function loadTimeClauseProblems(statement: string, registries: readonly RoutineRegistry[]): string[] {
+  if (!LOAD_TIME_STATEMENT.test(masked(statement))) return [];
+  let tokens: Token[];
+  try {
+    tokens = tokenize(statement);
+  } catch {
+    return []; // rule L reports a statement that does not lex
+  }
+  const blanked = blankedCode(tokens);
+  const problems: string[] = [];
+  const keyword = new RegExp(LOAD_TIME_KEYWORD.source, 'g');
+  for (let match = keyword.exec(blanked); match !== null; match = keyword.exec(blanked)) {
+    const kind = (match[1] as string).replace(/\s+/g, ' ').toUpperCase();
+    const open = match.index + match[0].length - 1;
+    const close = closingParenthesis(blanked, open);
+    if (close < 0) {
+      problems.push(`the ${kind} clause has no closing parenthesis the linter can find (fail closed)`);
+      break;
+    }
+    let clauseText: string;
+    try {
+      clauseText = normalise(bodyText(statement.slice(open, close + 1)));
+    } catch {
+      problems.push(`the ${kind} clause cannot be read (fail closed)`);
+      break;
+    }
+    const problem = loadTimeClauseProblem(clauseText, registries);
+    if (problem !== undefined) problems.push(`the ${kind} clause ${problem}`);
+    keyword.lastIndex = close + 1;
+  }
+  return problems;
+}
+
+const loadTimeMessage = (problem: string, statement: string): string =>
+  `load-time expression: ${problem}; a restore evaluates it as the loading superuser, so it may call IMMUTABLE pg_catalog routines only (PR034-SEC-01, D-ARCH-236): "${normalise(statement).slice(0, 80)}"`;
 
 const LITERAL_MARK = '';
 /**
@@ -1236,7 +1375,7 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
     if (REFUSED_OBJECTS.some((pattern) => pattern.test(text))) {
       add(
         '14',
-        `CREATE OPERATOR [CLASS | FAMILY], CREATE RULE, CREATE CAST and CREATE AGGREGATE are refused in prisma/migrations (they re-route queries, comparisons and calls outside the reviewed functions; PR24-SEC-02, PR11-SEC-15 e, D-ARCH-172): ${preview(index)}`,
+        `CREATE OPERATOR [CLASS | FAMILY], CREATE RULE, CREATE TYPE … AS RANGE, CREATE CAST and CREATE AGGREGATE are refused in prisma/migrations (they re-route queries, comparisons and calls outside the reviewed functions; PR24-SEC-02, PR11-SEC-15 e, D-ARCH-172, D-ARCH-237): ${preview(index)}`,
       );
     }
 
@@ -1515,12 +1654,17 @@ export function lintMigrationDir(dir: string, label: string = dir, options: Migr
   if (!existsSync(join(dir, 'down.sql'))) add('1', 'down.sql is missing (every migration ships one, §8.4)', join(label, 'down.sql'));
   const sql = readFileSync(migrationFile, 'utf8');
   const statements = lexedStatements(sql, (message) => add('L', message));
-  if (statements !== undefined) lintMigrationSql(sql, statements, add, options);
+  const history = options.history ?? emptyHistory();
+  if (statements !== undefined) lintMigrationSql(sql, statements, add, { ...options, history });
   if (existsSync(join(dir, 'down.sql'))) {
     const released = RULE_17_RELEASED.has(basename(dir));
-    lintDownSql(readFileSync(join(dir, 'down.sql'), 'utf8'), (rule, message) => {
-      if (!(released && rule === '17')) add(rule, message, join(label, 'down.sql'));
-    });
+    lintDownSql(
+      readFileSync(join(dir, 'down.sql'), 'utf8'),
+      (rule, message) => {
+        if (!(released && rule === '17')) add(rule, message, join(label, 'down.sql'));
+      },
+      history.routines,
+    );
   }
   return findings;
 }
@@ -1605,6 +1749,7 @@ function lintMigrationSql(sql: string, statements: readonly string[], add: Add, 
     const control = transactionControl(statement);
     if (control !== undefined) add('11', control);
     if (namesEscapeSetting(statement)) add('20', escapeSettingMessage(`"${preview}"`));
+    for (const problem of loadTimeClauseProblems(statement, [history.routines])) add('21', loadTimeMessage(problem, statement));
   }
   lintTask016Rules(statements, add, options.tableClasses ?? loadTableClasses(), history);
 }
@@ -1620,9 +1765,15 @@ export const RULE_17_RELEASED: ReadonlySet<string> = new Set([
   '20261112030000_reference_dataset_versions',
 ]);
 
-/** The down.sql pass: rule 11 (c) transaction control and rule 17 DROP … IF EXISTS. */
-function lintDownSql(sql: string, add: Add): void {
+/**
+ * The down.sql pass: rule 11 (c) transaction control, rule 17 DROP … IF EXISTS and rule 21 (load-time expressions; the
+ * routines of the migrations so far and those down.sql itself creates count for (a)).
+ */
+function lintDownSql(sql: string, add: Add, routines: RoutineRegistry): void {
+  const own = new RoutineRegistry();
   for (const statement of lexedStatements(sql, (message) => add('L', message)) ?? []) {
+    writingRoutineCall(statement, own); // records the routines down.sql creates (rule 10 does not apply to down.sql)
+    for (const problem of loadTimeClauseProblems(statement, [routines, own])) add('21', loadTimeMessage(problem, statement));
     const control = transactionControl(statement);
     if (control !== undefined) add('11', control);
     if (dropWithoutIfExists(statement)) {

@@ -10,12 +10,18 @@
  * Row text depends on session settings (time zone, date, interval and float output), so `MANIFEST_SESSION_SETTINGS`
  * pins them in every session that fingerprints. Messages name tables and counts only, never row content.
  *
+ * The manifest also carries the load-time gate (data-model §8.6 second amendment; D-ARCH-236): `loadTimeCode`, the
+ * findings of catalog query C17 in the same snapshot (tools/db/load-time-code.ts), and `cluster.systemIdentifier`, the
+ * source cluster's `pg_control_system()` identifier, which db:verify-restore compares with the restore target's
+ * (D-ARCH-235). Neither changes the format name: no manifest of the earlier shape was released.
+ *
  * Foreign-key integrity is checked with generated anti-joins (`orphanCountSql`): restored validated constraints are not
  * re-checked by PostgreSQL. Each check uses the constraint's own equality operators (`conpfeqop`), so it resolves under
  * the pinned `pg_catalog, pg_temp` search path for every column type.
  */
 import { createHash } from 'node:crypto';
 
+import { LOAD_TIME_CODE_SQL, describeFinding, loadTimeCodeFindings, type LoadTimeCodeRow, type LoadTimeFinding } from './load-time-code.js';
 import { quoteIdentifier } from './sql-text.js';
 
 export const MANIFEST_FORMAT = 'platform.backup-manifest/v1';
@@ -50,6 +56,13 @@ export interface BackupManifest {
   readonly schemaSha256: string;
   readonly tables: readonly TableFingerprint[];
   readonly sequences: readonly SequenceState[];
+  /** The cluster the manifest was taken on (D-ARCH-235): `system_identifier` of `pg_control_system()`, decimal text. */
+  readonly cluster: { readonly systemIdentifier: string };
+  /**
+   * Load-time code of the database (C17 findings, D-ARCH-236): expressions a restore would evaluate as the loading
+   * superuser that call something other than an IMMUTABLE pg_catalog routine. Empty for a database the gate lets through.
+   */
+  readonly loadTimeCode: readonly LoadTimeFinding[];
 }
 
 /**
@@ -81,6 +94,9 @@ export const SEQUENCES_SQL = `SELECT schemaname AS schema, sequencename AS name,
  ORDER BY schemaname COLLATE "C", sequencename COLLATE "C"`;
 
 export const SERVER_VERSION_SQL = `SELECT pg_catalog.current_setting('server_version_num') AS version`;
+
+/** The cluster's identity (D-ARCH-235): equal for the cluster and any physical copy of it, different for another. */
+export const CLUSTER_IDENTIFIER_SQL = `SELECT system_identifier::pg_catalog.text AS system_identifier FROM pg_catalog.pg_control_system()`;
 
 export const MIGRATION_TABLE_SQL = `SELECT pg_catalog.to_regclass('public._prisma_migrations') IS NOT NULL AS present`;
 export const MIGRATION_HEAD_SQL = `SELECT migration_name FROM public._prisma_migrations
@@ -116,11 +132,12 @@ export class RehearsalError extends Error {
 export const qualifiedName = (schema: string, name: string): string => `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`;
 
 /**
- * Row count and order-independent checksum of one table (ONLY: a partition is fingerprinted as its own table).
+ * Row count and order-independent checksum of one table (ONLY: a partition is fingerprinted as its own table). The row is
+ * `(t.*)`, an unambiguous whole-row reference: a bare `t` would name a column called `t` first (PR034-SEC-04).
  * COALESCE is SQL syntax, not a pg_catalog function, so it stays unqualified (lane B 20261121T0630Z: 42883).
  */
 export function tableFingerprintSql(schema: string, name: string): string {
-  const rowHash = `('x' OPERATOR(pg_catalog.||) pg_catalog.substr(pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(t::pg_catalog.text, 'UTF8')), 'hex'), 1, 15))::pg_catalog.bit(60)::pg_catalog.int8`;
+  const rowHash = `('x' OPERATOR(pg_catalog.||) pg_catalog.substr(pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to((t.*)::pg_catalog.text, 'UTF8')), 'hex'), 1, 15))::pg_catalog.bit(60)::pg_catalog.int8`;
   return `SELECT pg_catalog.count(*)::pg_catalog.text AS rows, COALESCE(pg_catalog.sum(${rowHash}), 0)::pg_catalog.text AS checksum FROM ONLY ${qualifiedName(schema, name)} AS t`;
 }
 
@@ -231,6 +248,8 @@ export async function captureManifest(session: SqlSession, inputs: ManifestInput
     tables.push({ table: `${schema}.${name}`, rows: row?.rows ?? '0', checksum: row?.checksum ?? '0' });
   }
   const [version] = await session.query<{ version: string }>(SERVER_VERSION_SQL);
+  const systemIdentifier = await clusterIdentifier(session);
+  const loadTimeCode = loadTimeCodeFindings(await session.query<LoadTimeCodeRow>(LOAD_TIME_CODE_SQL));
   const [migrations] = await session.query<{ present: boolean }>(MIGRATION_TABLE_SQL);
   const head = migrations?.present === true ? await session.query<{ migration_name: string }>(MIGRATION_HEAD_SQL) : [];
   return {
@@ -242,7 +261,28 @@ export async function captureManifest(session: SqlSession, inputs: ManifestInput
     schemaSha256: sha256Hex(inputs.schema),
     tables,
     sequences: [...inputs.sequences],
+    cluster: { systemIdentifier },
+    loadTimeCode,
   };
+}
+
+/** A `system_identifier` as text: an unsigned 64-bit integer. */
+const SYSTEM_IDENTIFIER = /^\d{1,20}$/;
+
+/** The `system_identifier` of the session's cluster, decimal text (D-ARCH-235). */
+export async function clusterIdentifier(session: SqlSession): Promise<string> {
+  const [row] = await session.query<{ system_identifier: string }>(CLUSTER_IDENTIFIER_SQL);
+  if (row === undefined || !SYSTEM_IDENTIFIER.test(row.system_identifier)) {
+    throw new RehearsalError('pg_control_system() returned no system identifier');
+  }
+  return row.system_identifier;
+}
+
+/** The one-line form of a manifest's load-time findings: the count and the objects with their routines (names only). */
+export function loadTimeSummary(findings: readonly LoadTimeFinding[], shown = 5): string {
+  const listed = findings.slice(0, shown).map(describeFinding).join('; ');
+  const more = findings.length > shown ? `; +${String(findings.length - shown)} more` : '';
+  return `${String(findings.length)} load-time finding(s): ${listed}${more}`;
 }
 
 export const sha256Hex = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
@@ -281,6 +321,8 @@ export function compareManifests(expected: BackupManifest, actual: BackupManifes
     else if (restored.checksum !== table.checksum) differences.push(`table ${table.table}: row checksum differs (${table.rows} rows)`);
   }
   for (const extra of restoredTables.keys()) differences.push(`table ${extra}: not in the source manifest`);
+  // The restored database is fingerprinted with the C17 query too (D-ARCH-236 item 3); the cluster is not compared.
+  if (actual.loadTimeCode.length > 0) differences.push(`load-time code in the restored database: ${loadTimeSummary(actual.loadTimeCode)}`);
   const restoredSequences = new Map(actual.sequences.map((sequence) => [sequence.sequence, sequence.lastValue]));
   for (const sequence of expected.sequences) {
     if (!restoredSequences.has(sequence.sequence)) {
@@ -335,6 +377,27 @@ export function parseManifest(raw: unknown): BackupManifest {
       !(entry['lastValue'] === null || isDecimal(entry['lastValue']))
     ) {
       bad(`sequences[${String(index)}]`);
+    }
+  });
+  const cluster = value['cluster'] as Record<string, unknown> | null | undefined;
+  if (
+    cluster === null ||
+    typeof cluster !== 'object' ||
+    !isText(cluster['systemIdentifier']) ||
+    !SYSTEM_IDENTIFIER.test(cluster['systemIdentifier'])
+  ) {
+    bad('cluster');
+  }
+  const loadTimeCode = value['loadTimeCode'];
+  if (!Array.isArray(loadTimeCode)) return bad('loadTimeCode');
+  loadTimeCode.forEach((finding: unknown, index) => {
+    const entry = finding as Record<string, unknown> | null;
+    if (
+      entry === null ||
+      typeof entry !== 'object' ||
+      !(['kind', 'object', 'reference', 'reason'] as const).every((field) => isText(entry[field]))
+    ) {
+      bad(`loadTimeCode[${String(index)}]`);
     }
   });
   return raw as BackupManifest;

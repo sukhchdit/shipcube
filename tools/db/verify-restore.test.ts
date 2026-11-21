@@ -12,8 +12,10 @@ import { afterAll, describe, expect, it } from '@jest/globals';
 
 import { BACKUP_FILES } from './backup.js';
 import { REPO_ROOT } from './lint-migrations.js';
+import { LOAD_TIME_CODE_SQL, type LoadTimeCodeRow } from './load-time-code.js';
 import type { ArchiveTool } from './pg-archive.js';
 import {
+  CLUSTER_IDENTIFIER_SQL,
   FOREIGN_KEYS_SQL,
   MIGRATION_HEAD_SQL,
   MIGRATION_TABLE_SQL,
@@ -28,6 +30,7 @@ import { RECORD_FILE, rehearsalProblems } from './rehearsal-record.js';
 import { sha256Hex } from './rehearsal-manifest.js';
 import { normaliseSchemaDump, type PrismaRun } from './up-down-up.js';
 import {
+  APPLIED_CHECKSUM_SQL,
   REPORT_FILE,
   VERIFY_RESTORE_DEPENDENCIES,
   main,
@@ -68,7 +71,28 @@ interface DatabaseState {
   rows: string;
   orphans: string;
   head: string | null;
+  /** `system_identifier` of the fake's cluster (default: the source cluster, SOURCE_CLUSTER). */
+  cluster?: string;
+  /** `_prisma_migrations.checksum` of the rehearsed migration after the deploy (R2-m1); no row when undefined. */
+  checksum?: string;
+  /** Rows of the C17 query (D-ARCH-236). */
+  loadTime?: readonly LoadTimeCodeRow[];
 }
+
+/** The cluster the source manifests are taken on, and the second, fresh cluster a restore goes to (D-ARCH-235). */
+const SOURCE_CLUSTER = '7300000000000000001';
+const TARGET_CLUSTER = '7300000000000000002';
+/** The migration.sql text of the data-changing migration these tests rehearse, and Prisma's checksum of it. */
+const MIGRATION_TEXT = '-- migration-kind: migrate\n-- data-changing: yes\n-- reversible: yes\nSELECT 1;\n';
+const CHECKSUM = sha256Hex(MIGRATION_TEXT);
+/** A C17 finding: a CHECK that calls a migration routine. */
+const PLANTED: LoadTimeCodeRow = {
+  kind: 'table check',
+  object: 'public.a ck_a__probe',
+  via: 'call',
+  reference: 'public.zz_record(integer)',
+  reason: 'not built in',
+};
 
 /** A session over one fake database; every statement is recorded. */
 function database(state: DatabaseState, log: string[]): ClosableSession {
@@ -99,6 +123,9 @@ function database(state: DatabaseState, log: string[]): ClosableSession {
         }
         if (sql.includes('AS orphans')) return [{ orphans: state.orphans }];
         if (sql.startsWith('SELECT 1 FROM pg_catalog.pg_database')) return log.includes('EXISTS') ? [{}] : [];
+        if (sql === CLUSTER_IDENTIFIER_SQL) return [{ system_identifier: state.cluster ?? SOURCE_CLUSTER }];
+        if (sql === LOAD_TIME_CODE_SQL) return [...(state.loadTime ?? [])];
+        if (sql === APPLIED_CHECKSUM_SQL) return state.checksum === undefined ? [] : [{ checksum: state.checksum }];
         return [];
       };
       return rows() as T[];
@@ -144,8 +171,8 @@ function setup(restored: DatabaseState, overrides: Partial<VerifyRestoreOptions>
     scratchDatabase: 'rehearsal_t1',
     archivePath: '/backup/platform.dump',
     archive,
-    admin: () => Promise.resolve(database(restored, admin)),
-    scratch: () => Promise.resolve(database(restored, scratch)),
+    admin: () => Promise.resolve(database({ cluster: TARGET_CLUSTER, ...restored }, admin)),
+    scratch: () => Promise.resolve(database({ cluster: TARGET_CLUSTER, ...restored }, scratch)),
     prepareScratch: async () => {
       await tick();
       steps.push('00-roles.sql');
@@ -170,6 +197,7 @@ describe('runVerifyRestore', () => {
     const run = setup({ rows: '3', orphans: '0', head: HEAD });
     const report = await runVerifyRestore(await run.options());
     expect(run.admin.filter((sql) => sql !== 'end')).toEqual([
+      CLUSTER_IDENTIFIER_SQL, // D-ARCH-235: the target is read before CREATE DATABASE
       'SELECT 1 FROM pg_catalog.pg_database WHERE datname = $1',
       'CREATE DATABASE "rehearsal_t1" TEMPLATE template0',
       'DROP DATABASE IF EXISTS "rehearsal_t1" WITH (FORCE)',
@@ -177,6 +205,7 @@ describe('runVerifyRestore', () => {
     expect(run.steps).toEqual(['00-roles.sql', 'restore rehearsal_t1 /backup/platform.dump', 'schema rehearsal_t1', 'migrate status']);
     expect(report).toMatchObject({
       verdict: 'pass',
+      target: { sameCluster: false },
       scratchDatabase: 'rehearsal_t1',
       scratchKept: false,
       restoreMs: 250,
@@ -201,7 +230,7 @@ describe('runVerifyRestore', () => {
     expect(report.orphans).toEqual([{ constraint: 'fk', table: 'public.b', orphans: '4' }]);
     expect(report.migrateStatus).toEqual({
       ok: false,
-      detail: 'exit 1: Following migration have not yet been applied: | x',
+      detail: 'exit 1: no recognised output', // PR034-SEC-03: no free text of the output is kept
       pending: [], // `x` is not a migration name
       failed: [],
     });
@@ -246,8 +275,7 @@ describe('runVerifyRestore', () => {
     expect(without.migrateDeploy).toBeNull();
     expect(without.migrateStatus).toEqual({
       ok: false,
-      detail:
-        'exit 1: pending 20261121000000_backfill | 8 migrations found in prisma/migrations | Following migration have not yet been applied: | 20261121000000_backfill',
+      detail: 'exit 1: pending 20261121000000_backfill',
       pending: ['20261121000000_backfill'],
       failed: [],
     });
@@ -283,7 +311,7 @@ describe('runVerifyRestore', () => {
     expect(report.verdict).toBe('fail');
     expect(report.migrateDeploy).toEqual({
       ok: false,
-      detail: 'exit 1: Error: P3018 A migration failed to apply.',
+      detail: 'exit 1: P3018',
       pending: [],
       failed: [],
     });
@@ -308,9 +336,72 @@ describe('runVerifyRestore', () => {
       const report = await runVerifyRestore(await run.options());
       expect(report.verdict).toBe('fail');
       expect(report.migrateStatus.pending).toEqual(['20261121000000_backfill']);
-      expect(report.migrateStatus.detail).toMatch(/^exit 1: pending 20261121000000_backfill \| /);
+      expect(report.migrateStatus.detail).toBe('exit 1: pending 20261121000000_backfill');
       expect(report.migrateStatus.detail).not.toMatch(/Loaded Prisma config/);
     }
+  });
+
+  it('[D-ARCH-236] the load-time gate: a manifest with a C17 finding is refused before the admin session runs anything, so no database is created', async () => {
+    const run = setup({ rows: '3', orphans: '0', head: HEAD });
+    const options = await run.options();
+    const manifest = {
+      ...options.manifest,
+      loadTimeCode: [
+        { kind: 'table check', object: 'public.a ck_a__probe', reference: 'public.zz_record(integer)', reason: 'not built in' },
+      ],
+    };
+    await expect(runVerifyRestore({ ...options, manifest })).rejects.toThrow(
+      /^the load-time gate refuses this backup: 1 load-time finding\(s\): table check public\.a ck_a__probe: public\.zz_record\(integer\) \(not built in\)\. A restore would run this code as the loading superuser: remove the objects with a migration and take a new backup; never edit the manifest/,
+    );
+    expect(run.admin).toEqual([]);
+    expect(run.steps).toEqual([]);
+    // Also with --same-cluster: the gate holds in both forms.
+    await expect(runVerifyRestore({ ...options, manifest, sameCluster: true })).rejects.toThrow(/load-time gate refuses/);
+    expect(run.admin).toEqual([]);
+  });
+
+  it('[D-ARCH-235] the restore target: the backed-up cluster is refused without --same-cluster, before CREATE DATABASE; the switch on another cluster is refused too', async () => {
+    const same = setup({ rows: '3', orphans: '0', head: HEAD, cluster: SOURCE_CLUSTER });
+    await expect(runVerifyRestore(await same.options())).rejects.toThrow(
+      /^the restore target is the cluster that was backed up \(same system_identifier\): restore into a second, fresh stack \(data-model 8\.6 step 4\), or pass --same-cluster on your own Compose stack with synthetic data only/,
+    );
+    expect(same.admin.filter((sql) => sql !== 'end')).toEqual([CLUSTER_IDENTIFIER_SQL]);
+    const wrong = setup({ rows: '3', orphans: '0', head: HEAD });
+    await expect(runVerifyRestore({ ...(await wrong.options()), sameCluster: true })).rejects.toThrow(
+      /^--same-cluster was given, but the restore target is not the cluster that was backed up \(another system_identifier\): drop --same-cluster/,
+    );
+    expect(wrong.admin.filter((sql) => sql !== 'end')).toEqual([CLUSTER_IDENTIFIER_SQL]);
+    expect(wrong.steps).toEqual([]);
+  });
+
+  it('[D-ARCH-235] the stated exception: --same-cluster on the backed-up cluster restores, and the report says so (target.sameCluster)', async () => {
+    const same = setup({ rows: '3', orphans: '0', head: HEAD, cluster: SOURCE_CLUSTER }, { sameCluster: true });
+    const report = await runVerifyRestore(await same.options());
+    expect(report).toMatchObject({ verdict: 'pass', target: { sameCluster: true } });
+    expect(same.admin).toContain('CREATE DATABASE "rehearsal_t1" TEMPLATE template0');
+  });
+
+  it('[TASK-034 R2-m1] after a successful deploy the report carries the checksum Prisma stored for the rehearsed migration; none without a deploy or after a failed one', async () => {
+    const deployed = setup(
+      { rows: '3', orphans: '0', head: HEAD, checksum: CHECKSUM },
+      { migrateDeploy: () => Promise.resolve(APPLIED), rehearsedMigration: '20261121000000_backfill' },
+    );
+    const report = await runVerifyRestore(await deployed.options());
+    expect(report.rehearsed).toEqual({ migration: '20261121000000_backfill', checksum: CHECKSUM });
+    expect(deployed.scratch).toContain(APPLIED_CHECKSUM_SQL);
+    const failed = setup(
+      { rows: '3', orphans: '0', head: HEAD, checksum: CHECKSUM },
+      {
+        migrateDeploy: () => Promise.resolve({ status: 1, stdout: '', stderr: 'Error: P3018' }),
+        rehearsedMigration: '20261121000000_backfill',
+      },
+    );
+    expect((await runVerifyRestore(await failed.options())).rehearsed).toBeNull();
+    const noRow = setup(
+      { rows: '3', orphans: '0', head: HEAD },
+      { migrateDeploy: () => Promise.resolve(APPLIED), rehearsedMigration: '20261121000000_backfill' },
+    );
+    expect((await runVerifyRestore(await noRow.options())).rehearsed).toEqual({ migration: '20261121000000_backfill', checksum: null });
   });
 
   it('reports a capped schema diff when the source schema text differs', async () => {
@@ -341,11 +432,38 @@ describe('writeRehearsalRecord (rule R input)', () => {
     }
     return dir;
   };
-  /** A passed report of a run that deployed the migration on the restored data (D-TASK034-09). */
-  const passed = async (): Promise<RestoreReport> => {
-    const run = setup({ rows: '3', orphans: '0', head: HEAD }, { migrateDeploy: () => Promise.resolve(APPLIED) });
+  /** A passed report of a run that deployed the migration on the restored data (D-TASK034-09), with Prisma's checksum. */
+  const passed = async (checksum: string = CHECKSUM): Promise<RestoreReport> => {
+    const run = setup(
+      { rows: '3', orphans: '0', head: HEAD, checksum },
+      { migrateDeploy: () => Promise.resolve(APPLIED), rehearsedMigration: MIGRATION },
+    );
     return runVerifyRestore(await run.options());
   };
+
+  it('[TASK-034 R2-m1] binds the record to the deployed bytes: migration.sql changed between the deploy and the write is refused, and so is a report without the checksum', async () => {
+    const dir = root();
+    const manifest = await sourceManifest();
+    const report = await passed(); // the deploy fake ran on the bytes of MIGRATION_TEXT
+    writeFileSync(join(dir, MIGRATION, 'migration.sql'), `${MIGRATION_TEXT}UPDATE public.a SET id = id;\n`); // an edit during the run
+    expect(() => writeRehearsalRecord(dir, MIGRATION, manifest, report)).toThrow(
+      /^migration\.sql changed during the rehearsal \(its SHA-256 differs from the checksum Prisma recorded at the deploy\): no rehearsal record is written/,
+    );
+    expect(existsSync(join(dir, MIGRATION, RECORD_FILE))).toBe(false);
+    const unbound = root();
+    expect(() => writeRehearsalRecord(unbound, MIGRATION, manifest, { ...report, rehearsed: null })).toThrow(
+      /the report holds no deployed checksum for 20261121000000_backfill/,
+    );
+    expect(() =>
+      writeRehearsalRecord(unbound, MIGRATION, manifest, { ...report, rehearsed: { migration: MIGRATION, checksum: null } }),
+    ).toThrow(/no deployed checksum/);
+    expect(() =>
+      writeRehearsalRecord(unbound, MIGRATION, manifest, { ...report, rehearsed: { migration: HEAD, checksum: CHECKSUM } }),
+    ).toThrow(/no deployed checksum/);
+    // Control: the unchanged file is accepted, and the record's digest is the deployed checksum.
+    const path = writeRehearsalRecord(unbound, MIGRATION, manifest, report);
+    expect((JSON.parse(readFileSync(path, 'utf8')) as { migrationSha256: string }).migrationSha256).toBe(report.rehearsed?.checksum);
+  });
 
   it('[TASK-034 R1-M1] refuses a passed report whose run did not deploy the migration', async () => {
     const run = setup({ rows: '3', orphans: '0', head: HEAD });
@@ -399,6 +517,7 @@ describe('writeRehearsalRecord (rule R input)', () => {
     );
     const manifest = { ...(await sourceManifest()), migrationHead: null };
     expect(writeRehearsalRecord(dir, MIGRATION, manifest, await passed())).toBe(join(dir, MIGRATION, RECORD_FILE));
+    expect(readFileSync(join(dir, MIGRATION, 'migration.sql'), 'utf8')).toBe(MIGRATION_TEXT);
   });
 });
 
@@ -460,7 +579,7 @@ describe('db:verify-restore main', () => {
       connect: async (url) => {
         await tick();
         sink.urls.push(url);
-        return database(restored, []);
+        return database({ cluster: TARGET_CLUSTER, checksum: CHECKSUM, ...restored }, []);
       },
       archive: (target) => {
         sink.archiveTarget = target;
@@ -502,11 +621,19 @@ describe('db:verify-restore main', () => {
     ]);
     expect(sink.statusEnv?.['DATABASE_MIGRATOR_URL']).toBe('postgresql://platform_migrator@127.0.0.1:5432/rehearsal_20261121t100500z');
     expect(sink.statusEnv).not.toHaveProperty('SHADOW_DATABASE_URL');
+    // PR034-SEC-08: the Prisma child sees an allow-list: no superuser URL, no role password.
+    for (const name of ['DATABASE_BOOTSTRAP_URL', 'BOOTSTRAP_MIGRATOR_PASSWORD', 'BOOTSTRAP_APP_PASSWORD'])
+      expect(sink.statusEnv).not.toHaveProperty(name);
     expect(sink.lines).toHaveLength(1);
     expect(sink.lines[0]).toMatch(
       /^\[db:verify-restore\] PASS: 1 tables, 3 rows, restore \d+ ms; report restore-report\.json in the backup folder$/,
     );
-    expect(JSON.parse(readFileSync(join(dir, REPORT_FILE), 'utf8'))).toMatchObject({ verdict: 'pass', migrateDeploy: null });
+    expect(JSON.parse(readFileSync(join(dir, REPORT_FILE), 'utf8'))).toMatchObject({
+      verdict: 'pass',
+      target: { sameCluster: false },
+      migrateDeploy: null,
+      rehearsed: null,
+    });
     expect(sink.urls).not.toContain('migrate deploy'); // no --migration: nothing is deployed
     expect(sink.archiveTarget).toEqual({ service: 'postgres', user: 'postgres' });
   });
@@ -529,6 +656,7 @@ describe('db:verify-restore main', () => {
     ]);
     expect(sink.deployEnv?.['DATABASE_MIGRATOR_URL']).toBe('postgresql://platform_migrator@127.0.0.1:5432/rehearsal_cli');
     expect(sink.deployEnv).not.toHaveProperty('SHADOW_DATABASE_URL');
+    expect(sink.deployEnv).not.toHaveProperty('DATABASE_BOOTSTRAP_URL');
     expect(sink.archiveTarget).toEqual({ service: 'postgres', user: 'postgres', project: 'shipqube' });
     expect(sink.lines[0]).toMatch(/; 20261121000000_backfill deployed on the restored data; report restore-report\.json/);
     expect(sink.lines.at(-1)).toBe(`[db:verify-restore] wrote ${RECORD_FILE} for 20261121000000_backfill`);
@@ -548,8 +676,68 @@ describe('db:verify-restore main', () => {
       }),
     );
     expect(code).toBe(1);
-    expect(sink.errors[0]).toMatch(/: migrate deploy: exit 1: Error: P3018; migrate status: exit 1: .*have not yet been applied/);
+    expect(sink.errors[0]).toMatch(/: migrate deploy: exit 1: P3018; migrate status: exit 1: pending 20261121000000_backfill$/);
     expect(existsSync(join(migrations, '20261121000000_backfill', RECORD_FILE))).toBe(false);
+  });
+
+  it('[TASK-034 R2-m1] a record the writer refuses is a FAIL line and exit 1, never a PASS line first', async () => {
+    const migrations = cliMigrations();
+    const sink = newSink();
+    const code = await main(
+      ['--backup', await backupDir(), '--migration', '20261121000000_backfill'],
+      env(),
+      deps({ rows: '3', orphans: '0', head: HEAD, checksum: 'f'.repeat(64) }, sink, migrations, { pending: true }),
+    );
+    expect(code).toBe(1);
+    expect(sink.lines).toEqual([]);
+    expect(sink.errors).toEqual([
+      expect.stringMatching(
+        /^\[db:verify-restore\] FAIL \(1 tables, 3 rows, restore \d+ ms\): the verification passed, but no rehearsal\.json was written: migration\.sql changed during the rehearsal/,
+      ),
+    ]);
+    expect(existsSync(join(migrations, '20261121000000_backfill', RECORD_FILE))).toBe(false);
+  });
+
+  it('[D-ARCH-235] --same-cluster is a switch of the CLI: refused on another cluster, accepted on the backed-up one and named in the PASS line and the report', async () => {
+    const wrong = newSink();
+    expect(await main(['--backup', await backupDir(), '--same-cluster'], env(), deps({ rows: '3', orphans: '0', head: HEAD }, wrong))).toBe(
+      1,
+    );
+    expect(wrong.errors).toEqual([
+      expect.stringMatching(
+        /^\[db:verify-restore\] --same-cluster was given, but the restore target is not the cluster that was backed up/,
+      ),
+    ]);
+    const refused = newSink();
+    expect(
+      await main(['--backup', await backupDir()], env(), deps({ rows: '3', orphans: '0', head: HEAD, cluster: SOURCE_CLUSTER }, refused)),
+    ).toBe(1);
+    expect(refused.errors).toEqual([expect.stringMatching(/^\[db:verify-restore\] the restore target is the cluster that was backed up/)]);
+    expect(refused.urls).toEqual(['postgresql://postgres@127.0.0.1:5432/postgres']); // the admin session only: nothing created
+    const dir = await backupDir();
+    const same = newSink();
+    expect(
+      await main(['--backup', dir, '--same-cluster'], env(), deps({ rows: '3', orphans: '0', head: HEAD, cluster: SOURCE_CLUSTER }, same)),
+    ).toBe(0);
+    expect(same.lines).toEqual([
+      expect.stringMatching(/; same cluster \(--same-cluster\); report restore-report\.json in the backup folder$/),
+    ]);
+    expect(JSON.parse(readFileSync(join(dir, REPORT_FILE), 'utf8'))).toMatchObject({ verdict: 'pass', target: { sameCluster: true } });
+  });
+
+  it('[D-ARCH-236] a backup folder whose manifest has a load-time finding is refused before any database work, in both forms', async () => {
+    for (const argv of [[], ['--same-cluster']]) {
+      const sink = newSink();
+      const dir = await backupDir({ rows: '3', orphans: '0', head: HEAD, loadTime: [PLANTED] });
+      expect(await main(['--backup', dir, ...argv], env(), deps({ rows: '3', orphans: '0', head: HEAD }, sink))).toBe(1);
+      expect(sink.errors).toEqual([
+        expect.stringMatching(
+          /^\[db:verify-restore\] the load-time gate refuses this backup: 1 load-time finding\(s\): table check public\.a ck_a__probe/,
+        ),
+      ]);
+      expect(sink.urls).toEqual([]);
+      expect(existsSync(join(dir, REPORT_FILE))).toBe(false);
+    }
   });
 
   it('[NT-REC-003-a] exit 1 with the reasons on a failed verification, and no record', async () => {

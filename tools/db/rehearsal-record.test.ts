@@ -31,6 +31,8 @@ const manifest = (migrationHead: string | null = PREVIOUS): BackupManifest => ({
   schemaSha256: sha256Hex(''),
   tables: [],
   sequences: [],
+  cluster: { systemIdentifier: '7300000000000000001' },
+  loadTimeCode: [],
 });
 
 const record = (head: string | null = PREVIOUS, sql: string = SQL) =>

@@ -3,7 +3,7 @@
  * argument lists, the name checks that keep `--dbname` a plain name, the masked error line and the process runner
  * (run here with Node itself; the pg_dump/pg_restore run is prisma/tests/migrations/backup-restore.int.test.ts).
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
@@ -105,7 +105,7 @@ describe('composeArchiveTool', () => {
     expect(checkSnapshotId(SNAPSHOT)).toBe(SNAPSHOT);
   });
 
-  it('turns a failure into one masked line: exit code or timeout, the first error line, quoted values replaced', async () => {
+  it('[PR034-SEC-03] turns a failure into one masked line: exit code or timeout, the first error line without the server message, quoted values and groups replaced', async () => {
     const failing = composeArchiveTool({
       run: recorder({
         code: 1,
@@ -114,7 +114,15 @@ describe('composeArchiveTool', () => {
       }).run,
     });
     await expect(failing.restore({ database: 'x', archive: 'f' })).rejects.toThrow(
-      /^pg_restore exited with 1: pg_restore: error: COPY failed for table "…": ERROR: invalid input '…'$/,
+      /^pg_restore exited with 1: pg_restore: error: COPY failed for table "…": ERROR: …$/,
+    );
+    // PR034-SEC-03: a RAISE during COPY carries an unquoted value; the server message is dropped, groups are masked.
+    expect(errorSummary('pg_restore: error: COPY failed for table "t": ERROR:  refusing row s3cr3t\nDETAIL: x')).toBe(
+      'pg_restore: error: COPY failed for table "…": ERROR: …',
+    );
+    expect(errorSummary('pg_dump: error: query failed (row (1, s3cr3t)) at x')).toBe('pg_dump: error: query failed (…) at x');
+    expect(errorSummary('pg_restore: error: could not read input file: end of file')).toBe(
+      'pg_restore: error: could not read input file: end of file',
     );
     const slow = composeArchiveTool({ timeoutMs: 5, run: recorder({ code: null, timedOut: true, stderr: '' }).run });
     await expect(slow.dumpSchema({ database: 'x' })).rejects.toThrow(/^pg_dump --schema-only timed out after 30005 ms: no error line$/);
@@ -147,6 +155,15 @@ describe('runProcess (no shell, bounded, never rejects)', () => {
     expect(again.code).toBeNull();
     expect(again.stderr).toMatch(/could not write the output file \(EEXIST\)/);
   });
+
+  (process.platform === 'win32' ? it.skip : it)(
+    '[PR034-SEC-02] POSIX: the archive file the runner creates is readable by its owner only (0o600)',
+    async () => {
+      const output = join(work, 'private.dump');
+      expect((await node("process.stdout.write('rows')", { stdoutFile: output })).code).toBe(0);
+      expect(statSync(output).mode & 0o077).toBe(0);
+    },
+  );
 
   it('kills a process at the timeout and reports it', async () => {
     const result = await node('setTimeout(() => {}, 60000)', { timeoutMs: 200 });

@@ -7,13 +7,16 @@
  *
  * Every argument is passed as an array element (never through a shell). Database names are checked against
  * `DATABASE_NAME` first, because `pg_dump --dbname` treats a value with `=` or a URI prefix as a connection string.
- * Error messages carry the exit code and the tool's first error line with every quoted fragment masked (a COPY or a
- * constraint error can quote row data), never the full stderr.
+ * Error messages carry the exit code and the tool's first error line without the server's message text, with every
+ * quoted fragment and parenthesised group masked (a COPY, a constraint error or a RAISE can carry row data;
+ * PR034-SEC-03), never the full stderr. The archive is created owner-only, `0o600` (PR034-SEC-02).
  */
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import type { Writable } from 'node:stream';
 
+import { PRIVATE_FILES } from './private-files.js';
+import { maskValues } from './prisma-outcome.js';
 import { RehearsalError } from './rehearsal-manifest.js';
 
 export interface ArchiveTool {
@@ -42,15 +45,22 @@ export function checkSnapshotId(snapshot: string): string {
   return snapshot;
 }
 
-/** The first `pg_dump:`/`pg_restore:` error line, quoted fragments masked, at most 200 characters. */
+/** The start of a server message inside a client tool's line (`… could not execute query: ERROR:  …`). */
+const SERVER_MESSAGE = /\b(?:ERROR|FATAL|PANIC):\s*/;
+
+/**
+ * The first `pg_dump:`/`pg_restore:` error line, at most 200 characters (PR034-SEC-03). The server's message text is
+ * dropped (`ERROR: …`): a `RAISE` during COPY carries whatever value its author put there, unquoted. The rest of the line
+ * has every quoted fragment and parenthesised group masked (`maskValues`), and the DETAIL / CONTEXT lines that follow are
+ * never read.
+ */
 export function errorSummary(stderr: string): string {
   const line = stderr.split(/\r?\n/).find((candidate) => /\berror:/i.test(candidate));
   if (line === undefined) return 'no error line';
-  return line
-    .trim()
-    .replace(/"[^"]*"/g, '"…"')
-    .replace(/'[^']*'/g, "'…'")
-    .slice(0, 200);
+  const server = SERVER_MESSAGE.exec(line);
+  const clientPart = server === null ? line : line.slice(0, server.index);
+  const kept = maskValues(clientPart.trim());
+  return (server === null ? kept : `${kept}${kept === '' ? '' : ' '}${server[0].trim()} …`).slice(0, 200);
 }
 
 export interface ProcessRequest {
@@ -77,9 +87,9 @@ export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 const DEFAULT_CAPTURE = 64 * 1024 * 1024;
 const STDERR_CAPTURE = 256 * 1024;
 
-/** Opens the stdout file (`wx`: a backup is never written over another). */
+/** Opens the stdout file (`wx`: a backup is never written over another; `0o600`: owner only, PR034-SEC-02). */
 export type SinkFactory = (path: string) => Writable;
-const newFileSink: SinkFactory = (path) => createWriteStream(path, { flags: 'wx' });
+const newFileSink: SinkFactory = (path) => PRIVATE_FILES.openSink(path);
 
 /**
  * A process runner without a shell, with a hard timeout and bounded capture; never rejects. With `stdoutFile` it settles

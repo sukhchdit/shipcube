@@ -105,7 +105,7 @@ async function probeTable(): Promise<string> {
 }
 
 // NT-AVAIL-003-b is covered here PARTIALLY: a database-level probe, not the previous api image under k6 (D-TASK034-05 as
-// corrected by D-TASK034-11; TASK-034 code review R1-m4). The image-level job has no owner task yet.
+// corrected by D-TASK034-11; TASK-034 code review R1-m4). The image-level job is TASK-119's (D-SD-012).
 describe('zero-downtime probe (NFR-AVAIL-003; NT-AVAIL-003-b partial: database level)', () => {
   it('[NT-AVAIL-003-b] (partial) continuous reads and writes across an expand migration (nullable column, concurrent index, new table) have 0 errors', async () => {
     const database = await probeTable();
