@@ -9526,3 +9526,28 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - The fix-cycle push voided round 1's binding, as planned (simulation C4).
   - Round 2 binds `3b56ab54`. An owned edit after it, or a main merge that carries PR #80's `problem-handler.ts`, needs a new round.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-161 · 2026-11-21 · sdlc-orchestrator (session B) · PR #80, #49 and #50 merged outside this session; #81 and #82 re-merged with main; the queue is re-planned
+- **External merges (14:28:54Z, not by this session; the merger is unknown, possibly the user or peer session shipqube-32):**
+  - #80 TASK-040 040-A became `763800f3`. Dependabot #49 (compose images) and #50 (docker images) also landed.
+  - Hosted CI still fails on billing (run 44915358412), so these merges were made without a passing lane A. The next lane-B runs on main-derived heads are the first check of the combined tree; a merge-to-main lane-A run is owed once billing returns.
+  - The orchestrator merged origin/main into its local docs commits (`a47d6966`) and pushed.
+- **Re-merged by the coordinator at the user's request** (unions, pushed):
+  - #81 TASK-080 is now `2805c809`. The conflict in `prisma/sql/grants.manifest` keeps both blocks in migration order. Typecheck is clean; tools/db, pricing and config units 802/802.
+  - #82 TASK-041 041-A is now `22f69a82`. The conflict in the imports of `pipeline-guards.test.ts` keeps main's import plus `DEFAULT_RATE_LIMIT_SETTINGS`. Typecheck, ESLint and Prettier are clean; units 1,148 with the one known `abc` sentinel failure.
+  - The old lane-B evidence (`0614a90`, `3d3a777`) no longer binds to these heads.
+  - **Owed per PR before merge:**
+    - fresh lane B on the new head, with the evidence committed;
+    - a merge-only security round (both unions touch owned paths: `grants.manifest`; the `routing` test is under `apps/api/src/platform`);
+    - a merge-ref check.
+- **#83 TASK-051 (`57e8ad62`):** GitHub reports it mergeable, but main now changes files #83 also changes (`grants.manifest`, `grants-manifest.test.ts`, `registry.ts`, `tenant-db.real-client.test.ts`, the C9 lists). P1 therefore requires a union with main, then lane B and a merge-only security round.
+- **Stacked parts:**
+  - TASK-040 040-B PR 1 (`a4aadd2e`) now does the D-ORCH-158 procedure onto `763800f3`: conflicts resolved to the stacked blobs, the raw-diff equality proof, lane B, and merge-only code and security rounds. Its review conditions (the lease ruling, the migration re-time) still apply.
+  - TASK-041 041-B moves onto `22f69a82` once #82 merges, or onto `22f69a82` now as the new predecessor head.
+- **TASK-044 044-A:** the PR #80 union (code review R1-m4: delete the unused `appError` in `problem-handler.ts`, lint the union) is now due. The queued lane-B run on the pre-union `cbd590db` was cancelled before it started, so lane B runs once on the union head.
+- **Queue after the batch in flight:**
+  1. unions on #83, TASK-044, TASK-040B and TASK-045 (if it overlaps main);
+  2. lane B on the #82, #81 and #83 heads, then the stacked and feature heads;
+  3. merge-only security rounds;
+  4. merges stay blocked while Actions refuses jobs.
+- **Reversibility:** High.
