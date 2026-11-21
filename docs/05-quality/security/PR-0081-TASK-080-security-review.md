@@ -386,3 +386,124 @@ Lane A, also required once the PR exists: `negative-fixtures` (6 new rows), `pri
 | Field | Value |
 |---|---|
 | Verdict | PASS_WITH_CONDITIONS. No Critical, High or Medium finding. PR080-SEC-01..05 are closed (05 in code; its proof on lane B is C2). New: INFO PR080-SEC-06, routed with a validated patch. Open conditions: C2 (lane B on PostgreSQL 18) and C4 (rename); C3 stands for later owned-path changes and union merges |
+
+---
+
+## Round 3: merge-only review of the union with main `763800f3` (PR #80), 2026-11-21
+
+| Field | Value |
+|---|---|
+| PR | #81, branch `feat/TASK-080-default-margin-pricing-as-itemised`. Since round 2: `a5935281` (lane-B evidence `20261121T0450Z_3d3a777`, PASS, D-ORCH-149) and `2805c809`, the coordinator's merge of `origin/main` `763800f3` (PR #80, TASK-040 part 040-A); first parent `a5935281`, second parent `763800f3` (D-ORCH-161). The user squash-merged the PR as `339b29d6` while this round was being written (D-ORCH-162), so this round is also the post-merge review of the #81 union that D-ORCH-162 (b) asks for |
+| Head | 2805c8090736c2c6e251be7dc8216392fffb6b6e |
+| Merge base with main | `763800f3` after the union (round 2: `e245e6e6`). Main's tip was `3308474b` when the union was pushed and `cbdbd98e` when this round was written |
+| Owned paths changed | 27 (main's checker, `--base 763800f3 --head 2805c809`). The list is identical to `--base e245e6e6 --head a5935281`, and to round 2's 27 |
+| Lane A / lane B evidence | Lane B PASS at `3d3a7775` (C2 met, D-ORCH-149). None at the union head. Hosted CI is refused (billing, D-ORCH-146). D-ORCH-162 (a) replaces both with one lane-B run on main `3c4d9a6d` |
+| Binding items checked | D-ORCH-161, D-ORCH-162, D-ORCH-163; round-2 conditions C2 to C4; main's `tools/ci/check-security-owned-paths.mjs` and `.github/CODEOWNERS` at `3308474b` |
+| Reviewer / date | security-analyst, 2026-11-21, round 3 (merge-only). Method: git plumbing on the main checkout's object store, single-process Node 24 scripts, a `--shared` sparse clone for the binding, and the gitleaks v8.30.1 emulation. No Docker, npm, Jest, ESLint or type-check. No `git archive` extract was needed. Nothing ran in any worktree. No commit of this PR's range touches a `.env*` path. One slip is disclosed in R3.5 |
+
+### R3.1 Summary
+
+The union is pure, apart from the one named conflict. The conflict resolution is the union of both sides. The PR's change against main is the round-2 change, line for line. One new LOW finding, PR080-SEC-07, comes from main's text, not from this PR.
+
+- **Union.** `git merge-tree --write-tree a5935281 763800f3` gives tree `d4cd6ff0` with one conflict, `prisma/sql/grants.manifest`. The head's tree `41241200` differs from it in that path only.
+  - Three-way compare against `e245e6e6`: 57 branch-only paths carry the branch blob, 170 main-only paths carry main's blob, and 3,347 untouched paths are unchanged. There are 0 violations.
+  - Four paths changed on both sides: `grants.manifest` (the conflict), and three that git merged without a conflict, each equal to the merge-tree blob: `packages/shared/src/classification/registry.ts`, `prisma/tests/catalog/c01-c12.int.test.ts` and `tools/db/grants-manifest.test.ts`.
+- **The PR's delta is unchanged.** `763800f3..2805c809` names the same 61 paths as the pre-merge `e245e6e6..a5935281`.
+  - 57 paths have the same status, modes, old blob and new blob.
+  - For the 4 two-sided paths, the +/- line multisets of the PR's delta are equal before and after the merge: `registry.ts` +11, `grants.manifest` +4, `c01-c12.int.test.ts` +3, and `grants-manifest.test.ts` +3/−1.
+  - What the merge brought equals main's delta line for line (+20, +8, +5, +5). Control: in each of the 4 paths, the PR's delta differs from main's.
+  - What the merge brought (`a5935281..2805c809`) names exactly main's 174 paths.
+- **The conflict resolution.** It keeps main's block first: TASK-040's `idempotency_keys` comment and its SELECT, INSERT, UPDATE and DELETE grants. The PR's block follows: its comment and `platform_app SELECT public.pricing_config_versions`. Then comes the `job_executions` block. That is migration order (`20261120100000` before `20261121000000`). The PR's grant is still SELECT only, and main's four grants are unchanged.
+- **Main's change does not reach this PR's controls.**
+  - Between `a5935281` and `2805c809`, nothing changed under `tools/eslint-rules`, `tools/lint`, `eslint.config.mjs`, `packages/pricing`, `tests/fixtures/lint`, `packages/shared/src/index.ts`, `packages/shared/src/money` or `packages/carriers`. Nothing changed in the migration, `prisma/seed`, `pricing.prisma` or `table-classes/pricing.json` either. Every input of round 2's P1 (the 49-case purity matrix), P2 (the 31 fixtures and 11 sources) and P3 (the suppression policy) is blob-identical, so those results carry over. I did not re-run them.
+  - **Catalog.** C9's `ENUM_CHECKS` holds both new entries. C15's committed scope pin is main's, which adds `idempotency_keys`. `pricing_config_versions` stays outside that scope, because `platform_app` can only SELECT it, as at `3d3a7775` where lane B passed. C11 must hold for the functions of both migrations. The union's catalog run belongs to the D-ORCH-162 (a) lane B.
+- **Gitleaks.** One hit in the range, from main's text: PR080-SEC-07 (R3.2). The branch's own commits have 0.
+- **Binding.** Simulated with main's checker, 12 of 12 scenarios as expected (R3.4).
+- **Post-merge.** The squash `339b29d6` (parent `3308474b`) has tree `d05da50e`, which equals `git merge-tree --write-tree --merge-base=763800f3 3308474b 2805c809`.
+  - Its delta names the same 61 paths, with the head's 61 new blobs. What landed on main is what this round reviewed.
+  - At `4ba683ad`, 57 of the 61 paths still carry the head's blob. #83 (`a93a6113`) later changed the other four: `registry.ts`, `grants.manifest`, `prisma/tests/rls/tenant-db.real-client.test.ts` and `grants-manifest.test.ts`. Every line this PR added or removed is still in place, with one exception: #83 extended the `it(…)` title in `grants-manifest.test.ts` with its own clause, and TASK-080's wording inside it is unchanged.
+
+### R3.2 New finding
+
+| ID | Title | Severity | CWE | OWASP | File:line | Owner / due |
+|---|---|---|---|---|---|---|
+| PR080-SEC-07 | Main's D-ORCH-147 entry quotes a `generic-api-key` false positive. Every merge of main into a branch based before `d7585e78` adds it again, and main's history holds two fingerprints outside the gitleaks-full baseline | LOW | CWE-693 (protection mechanism failure, fail-closed direction) | A05:2021 | `docs/sdlc/DECISIONS.md:7697` (the D-ORCH-147 triage bullet, at `d7585e78` and in main's tree); history only: `.claude/agent-memory/security-analyst/project_p5_task051.md:23` at `ed156913` | Orchestrator (a); devops-engineer with a security record (b); each affected branch (c). Due before the D-ORCH-162 (a) evidence is accepted, and before the next union of a branch based before `d7585e78` |
+
+**Description.**
+- **This PR's range.** The emulated scan finds one hit: `2805c8090736c2c6e251be7dc8216392fffb6b6e:docs/sdlc/DECISIONS.md:generic-api-key:7697`.
+  - The emulation uses the v8.30.1 default rules and main's `.gitleaks.toml`, with first-parent diffs and no digit check. It is the emulator that reproduced lane B's 18 real findings in TASK-051.
+  - The line is not PR text. The merge's first-parent diff brings main's D-ORCH-147 entry, and its triage bullet quotes the doc-comment phrase that lane B flagged in TASK-051 (`b34f954e`, `tenant-keys.ts:75`).
+  - The rule matches that phrase the same way in both places. The phrase is not repeated here (PR13-SEC-11).
+- **Main's history.** An emulated gitleaks-full of `4ba683ad`'s ancestry (699 commits, 1,624,787 added lines) gives 19 fingerprints: exactly the 17 of `tools/quality/gitleaks-baseline.txt`, plus two more.
+  - `d7585e78786e01bf772609d44f1f923203e58c5e:docs/sdlc/DECISIONS.md:generic-api-key:7697`.
+  - `ed156913c734f0bc18945e7e7172fc4666331ad2:.claude/agent-memory/security-analyst/project_p5_task051.md:generic-api-key:23`. This is a security-analyst memory note (mine) that quoted the same phrase. `aad3e90d` reworded it, so the tree is clean, but the commit stays in history.
+
+**Exploitability and impact.** No credential is involved, and the gate fails closed. These are predictions from the emulation; the real image did not run.
+1. Lane B gitleaks-full (the ancestry of the gate SHA, against the 17-line baseline, `BASELINE_COUNT = 17` in `tools/quality/gitleaks-full.mjs:43`) fails on every head that contains `d7585e78`. That includes main `3c4d9a6d`, the D-ORCH-162 (a) run (queued, D-ORCH-167), and the queued TASK-044 union `33262314`.
+2. Lane A (the PR range) fails on any PR whose range holds a merge commit that brings the line. That is a branch based before `d7585e78` that merges a main which still has the line.
+   - The TASK-044 union merge `c33e5e92` already gives the same fingerprint at line 7697.
+   - `2805c809` and `22f69a82` are outside main's ancestry after the squash merges, so they matter only for a re-run of the closed PRs' checks.
+
+The risk is procedural: a hurried fix that widens the allowlist (path-only or rule-only), or a triage habit that waves through the next real hit. LOW, as for PR25-SEC-01.
+
+**Remediation.**
+- **(a) Orchestrator.** In one docs commit on main, reword the D-ORCH-147 triage bullet so that it loses the keyword, separator and backticked-token shape. D-SECPR051-01 gave the same instruction for the code comment. Do this before the next union of a branch based before `d7585e78`. TASK-044's union `33262314` is unpushed, so redoing it after the reword keeps its PR range clean; otherwise it needs (c).
+- **(b) devops-engineer, with a security record.** In its own PR, add the two history fingerprints above to `tools/quality/gitleaks-baseline.txt` and set `BASELINE_COUNT` to 19. Update the pin in `tools/ci/sec-static.test.ts` ("exactly the 17 recorded fingerprints") in the same PR. D-SEC-PR45-01 says history hits on main are baseline-only. Show a real-image gitleaks-full on main before and after.
+- **(c) A branch whose pushed PR range already holds such a merge commit.** Either a D-SEC-PR45-01 commit-bound `.gitleaks.toml` entry for that merge commit (one commit, `DECISIONS.md`, `generic-api-key`, an anchored line with a constrained value class), or a supersede (the D-SECPR040-02 route).
+- **Until (b) lands.** In a lane B log, triaging these two history fingerprints, and a branch's own union-merge fingerprint at `DECISIONS.md:7697`, as PR080-SEC-07 is an acceptable recorded triage. Any other fingerprint is not.
+
+**Verification.**
+- After (b), the emulation and the real image over main's ancestry report only baseline entries (19 of 19).
+- After (a), a probe merge of a branch based before `d7585e78` with the reworded main has 0 hits in its first-parent diff.
+
+### R3.3 Findings at `2805c809`
+
+| ID | State |
+|---|---|
+| PR080-SEC-01..05 | Closed (round 2). Every blob is unchanged |
+| PR080-SEC-06 (INFO) | Open, unchanged: due with the next change to `pricing-purity.mjs`, before US-141. The rule file did not change, so no new fixture applies |
+| PR080-SEC-07 (LOW) | New (R3.2) |
+
+### R3.4 Record binding and simulation
+
+- **The binding.** This round's `Head` row names `2805c809`. The round-2 row (`3d3a7775`) was voided by the union, which changed three owned paths of this PR after it: `grants.manifest`, `c01-c12.int.test.ts` and `grants-manifest.test.ts`. Round 2's C3 predicted this.
+  - The record has three `Head` rows, one per round, and its last `Verdict` row is this round's.
+  - The PR is merged, so no further `pull_request` event will run the check. The simulation documents the binding as of main `3308474b`.
+
+**Simulation.** Main's real checker ran in a `--shared` sparse clone (`.github`, `docs/05-quality/security`, `tools/ci`). Scenario commits were built with plumbing on `3308474b`. Each merge ref is the `git merge-tree` of the scenario main with the scenario head, committed with both parents and checked out detached. Flags: `--pr 81` and `--base 763800f3` unless a row says otherwise.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 Merge ref, rounds 1 to 3 on main | pass | pass (`2805c809`); 27 owned, the same list as the pre-merge range |
+| S1b The same with `--base` set to the record commit | pass | pass (`2805c809`) |
+| S2 Control: the record as on main before this round | fail | fail (`missing`; `3d3a777` voided by the three union paths) |
+| S3 Control: no record | fail | fail (`missing`) |
+| S4 Control: a later `FAIL` verdict row | fail | fail (`missing`, verdict `FAIL`) |
+| S5 Control: this round's `Head` row names the old head `a5935281` | fail | fail (`missing`; voided by the three union paths) |
+| S6 Control: this round's `Head` row names main's `763800f3` | fail | fail (`missing`; not a commit of the PR) |
+| S7 Control: the owned `pricing-purity.mjs` changed after the head | fail | fail (`missing`) |
+| S8 Control: a later main merge that changes `grants.manifest` | fail | fail (`missing`; `2805c80` voided by `grants.manifest`) |
+| S9 A lane-B evidence commit after the head | pass | pass (`2805c809`) |
+| S10 A later docs-only main merge into the branch | pass | pass (`2805c809`) |
+| S11 An unowned path (`packages/pricing/src/index.ts`) changed after the head | pass | pass (`2805c809`) |
+
+12 of 12 as expected.
+
+### R3.5 Conditions, routes and a disclosure
+
+- **C2 (lane B on PostgreSQL 18).** Met at `3d3a7775` (D-ORCH-149). For the union, D-ORCH-162 (a) replaces it with lane B on main `3c4d9a6d`. That run must cover:
+  - round 1 §7 and R2.6;
+  - C9 with both entries;
+  - C11 for the trigger functions of both migrations;
+  - C15's scope pin.
+
+  Its gitleaks-full is expected to report PR080-SEC-07's two history fingerprints (R3.2, triage rule).
+- **C3.** Closed for `2805c809` by this round. With the PR merged, a later change to these paths needs its own PR and round. TASK-051's union already went through #83 that way.
+- **C4 (rename and merge ref).** Closed (`35daad8c`, D-ORCH-149).
+- **PR080-SEC-07.** Items (a) to (c) as routed in R3.2.
+- **For D-SECPOST-01 (the #84 review).** #84 bumps `eslint` to 10.15.0, `typescript-eslint` to 8.72.2 and `eslint-plugin-boundaries` to 7.4.3. These packages run `pricing-purity` and the pricing allow-list. Either re-run round 2's P1 matrix and P2 fixtures on main after `npm ci`, or rely on lane B's `negative-fixtures` and lint on `3c4d9a6d`.
+- **Disclosure.** I emulated gitleaks-full over `4ba683ad`'s whole ancestry, and the TASK-044 union commit `c33e5e92` for item 2. Those `git log -p` streams included the historic diff hunks of `.env.example`: 6 commits of the ancestry, and `c33e5e92`'s first-parent diff. The scanner held them in memory only. It printed and stored no line, and reported no fingerprint in them. I never opened, extracted or named the file in a command. No scan in this PR's own range touched a dot-env path. Future whole-ancestry scans should feed such commits through a pathspec file that lists only their other paths.
+
+| Field | Value |
+|---|---|
+| Verdict | PASS_WITH_FOLLOW-UPS. Round 3 (merge-only) at `2805c809`: 0 Critical, 0 High, 0 Medium. The merge of `763800f3` is a pure union. Its one conflict, `grants.manifest`, keeps both blocks in migration order, and the PR's delta against main equals its pre-merge delta (57 identical paths, 4 line-multiset-equal). The 27 owned paths are unchanged. Binding simulated, 12 of 12. The squash `339b29d6` equals the head applied to `3308474b`, and the change survives #83 and #84 on main. Carried over: PR080-SEC-06 INFO. New: PR080-SEC-07 LOW, main's D-ORCH-147 text, which fails gitleaks-full on every head after `d7585e78` and re-enters through union merges; routed (a) to (c). Follow-ups: D-ORCH-162 (a) lane B on `3c4d9a6d` for the union's catalog and the R2.6 cases, with the PR080-SEC-07 triage |

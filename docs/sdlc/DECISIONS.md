@@ -9842,3 +9842,69 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Commit discipline for concurrent agents:** pathspec commits on main only; agents do not push; the orchestrator pushes docs commits in a lane-B-quiet window.
 - **Build slots:** both are held by the 040-B and 041-B stacked merges; TASK-298, TASK-278 and part 045-C start as they free. TASK-045 merge with main + `npm ci` + lane B goes to senior-developer with the first free slot.
 - **Reversibility:** High.
+
+### D-SECPR080-03 · 2026-11-21 · security-analyst · TASK-080 security round 3 (merge-only: the coordinator's union `2805c809` of `a5935281` with main `763800f3`, PR #80) = PASS_WITH_FOLLOW-UPS at `2805c809`; also the post-merge review of the #81 union under D-ORCH-162 (b) (round 3 appended to `docs/05-quality/security/PR-0081-TASK-080-security-review.md` on main)
+- **Trigger:** D-ORCH-161. The union changed three owned paths after round 2's head (`grants.manifest`, `c01-c12.int.test.ts`, `grants-manifest.test.ts`), so the binding to `3d3a7775` was void, as round 2's C3 predicted. The user squash-merged #81 as `339b29d6` during the round (D-ORCH-162).
+- **Decision:** 0 Critical, 0 High, 0 Medium for TASK-080. One new LOW, PR080-SEC-07, comes from main's text, not from the PR.
+- **Method:** git plumbing on the main checkout's object store, single-process Node 24 scripts, a `--shared` sparse clone with main's real checker, and the gitleaks v8.30.1 emulation. No Docker, npm, Jest or lint. No extract was needed, and nothing ran in any worktree.
+- **Union proof:**
+  - `git merge-tree --write-tree a5935281 763800f3` differs from the head's tree only in the conflicted `prisma/sql/grants.manifest`.
+  - Three-way compare against `e245e6e6`: 57 branch-only paths carry the branch blob and 170 main-only paths carry main's; 0 violations.
+  - `registry.ts`, `c01-c12.int.test.ts` and `grants-manifest.test.ts` merged without a conflict, each equal to the merge-tree blob.
+  - The PR's delta against main names the same 61 paths as before the merge: 57 are identical, and the 4 two-sided paths are line-multiset-equal. What the merge brought equals main's 174-path delta.
+  - The resolution keeps main's `idempotency_keys` block, then the PR's SELECT-only `pricing_config_versions` block, in migration order.
+  - Main changed none of the lint, pricing, carrier, migration or seed inputs, so round 2's purity matrix, fixtures and suppression results carry over by blob identity.
+- **Owned paths:** 27, the same list as before the merge.
+- **Binding:** the round-3 `Head` row names `2805c809`. Simulated with main's checker, 12 of 12 as expected:
+  - **Pass:** the merge ref; the record-commit base; an evidence commit; a docs-only main merge; an unowned change.
+  - **Fail:** round 2 only; no record; a FAIL row; the old head; main's commit; an owned change; a main merge that changes `grants.manifest`.
+- **Post-merge:**
+  - The squash `339b29d6` equals `merge-tree --merge-base=763800f3 3308474b 2805c809`, with all 61 new blobs.
+  - At `4ba683ad`, #83 later changed 4 of the 61 paths. Every TASK-080 line is still in place; #83 extended one test title and kept TASK-080's wording.
+- **New PR080-SEC-07 (LOW, CWE-693, A05:2021).** The D-ORCH-147 triage bullet (`DECISIONS.md:7697`) quotes the doc-comment phrase that lane B flagged as `generic-api-key` in TASK-051.
+  - The emulation flags it in the first-parent diff of every union merge of a branch based before `d7585e78`: `2805c809`, `22f69a82`, and TASK-044's `c33e5e92`.
+  - Over main's ancestry (`4ba683ad`, 699 commits), the emulation gives the 17 baseline fingerprints plus two more: `d7585e78786e01bf772609d44f1f923203e58c5e:docs/sdlc/DECISIONS.md:generic-api-key:7697` and `ed156913c734f0bc18945e7e7172fc4666331ad2:.claude/agent-memory/security-analyst/project_p5_task051.md:generic-api-key:23`. The second is a memory note of mine, reworded later in `aad3e90d`.
+  - Prediction: lane B gitleaks-full fails on every head that contains `d7585e78`. That includes D-ORCH-162 (a) on `3c4d9a6d` and the queued TASK-044 union `33262314`.
+  - Routes:
+    - (a) Orchestrator: reword that bullet on main in one docs commit, without the keyword, separator and token shape, before the next union of a branch based before `d7585e78`. TASK-044's `33262314` is unpushed and can be redone after it.
+    - (b) devops-engineer, with a security record: the two fingerprints go into `tools/quality/gitleaks-baseline.txt`, with `BASELINE_COUNT` at 19 and the `sec-static.test.ts` pin updated in the same PR (D-SEC-PR45-01: history hits are baseline-only). A real-image run before and after.
+    - (c) A pushed range that already holds such a merge commit: a D-SEC-PR45-01 commit-bound entry, or a supersede.
+  - Until (b) lands, lane B may triage exactly these fingerprints as PR080-SEC-07, and nothing else.
+- **Conditions:**
+  - C2 was met at `3d3a7775` (D-ORCH-149). For the union, D-ORCH-162 (a) on `3c4d9a6d` replaces it: §7 and R2.6, C9 with both entries, C11 for both migrations' functions, and C15's scope pin.
+  - C3 is closed for `2805c809`. C4 is closed (`35daad8c`).
+  - PR080-SEC-06 INFO is unchanged.
+  - For D-SECPOST-01: #84's `eslint`, `typescript-eslint` and `eslint-plugin-boundaries` bumps run the purity rule, so re-run the P1 matrix there or rely on lane B's lint and `negative-fixtures`.
+- **Disclosure:** the whole-ancestry and `c33e5e92` emulations passed `.env.example`'s historic diff hunks through the scanner in memory. They were not printed or stored, and no fingerprint was found in them. The file was never opened, extracted or named in a command. This PR's range has no dot-env path.
+- **Reversibility:** High (a review record).
+
+### D-SECPR041-04 · 2026-11-21 · security-analyst · TASK-041 part 041-A security round 4 (merge-only: the coordinator's union `22f69a82` of `be843ae1` with main `763800f3`, PR #80) = PASS_WITH_FOLLOW-UPS at `22f69a82`; also the post-merge review of the #82 union under D-ORCH-162 (b) (round 4 appended to `docs/05-quality/security/PR-0082-TASK-041-security-review.md` on main)
+- **Trigger:** D-ORCH-161. The union changed `pipeline-guards.test.ts` and `package-lock.json` after round 3's head, so the binding to `0614a90f` was void (round 3's S9). The user squash-merged #82 as `61c53b5e` during the round (D-ORCH-162).
+- **Decision:** 0 Critical, 0 High, 0 Medium, no new finding of this PR. Its one gitleaks hit is main's text (PR080-SEC-07, D-SECPR080-03).
+- **Method:** as for D-SECPR080-03, plus the two registry tarballs of `express-rate-limit`. `.env.example` (round 3's `96eda1e1`) was compared by blob id only, and that commit was left out of the scan by commit selection.
+- **Union proof:**
+  - `git merge-tree --write-tree be843ae1 763800f3` differs from the head's tree only in the conflicted `apps/api/src/platform/routing/pipeline-guards.test.ts`.
+  - Three-way compare against `530629f4`: 47 branch-only and 159 main-only paths; 0 violations. `package-lock.json` merged without a conflict and equals the merge-tree blob.
+  - The PR's delta against main names the same 49 paths as before the merge, 47 of them identical.
+    - The test is line-multiset-equal: PR +8/−1, main +27/−3.
+    - The lockfile, at leaf level: the PR's 7 `rate-limit-redis` removal leaves, and main's 24 leaves of #16 (`@hookform/resolvers` 7.0.3). `rate-limit-redis` appears nowhere, and `effect` is 3.22.4 only.
+  - The resolution keeps main's idempotency imports and adds `DEFAULT_RATE_LIMIT_SETTINGS`. The `rateLimit` composition case is unchanged.
+- **Interaction with #80 (read from the source):**
+  - Main changed no rate-limit path, `app.ts`, `start-api.ts`, `pipeline.ts`, `schema.ts` or `compose.env`.
+  - Step 5 `rateLimit` runs before step 7a `idempotency`, and #80 wires no store into `createApp`.
+  - The limiter's `Retry-After` and `RateLimit-*` headers survive `renderProblem`, because `DROPPED_ON_PROBLEM` is unchanged and `CLIENT_RETRY_AFTER_CODES` holds `IDEMPOTENCY_IN_PROGRESS` only.
+- **Owned paths:** 27, the same list as before the merge.
+- **Gitleaks emulation:** the range's 8 commits other than `96eda1e1`, 232,949 added lines: one finding, `22f69a82…:docs/sdlc/DECISIONS.md:generic-api-key:7697` (PR080-SEC-07). The branch's own text: 0. Controls fired as expected.
+- **Binding:** the round-4 `Head` row names `22f69a82`. Simulated with main's checker, 12 of 12 as expected, with the same scenario set as D-SECPR080-03; the main-merge control changes `package-lock.json`.
+- **Post-merge:**
+  - The squash `61c53b5e` equals `merge-tree --merge-base=763800f3 339b29d6 22f69a82`, with all 49 new blobs.
+  - At `4ba683ad`, #84 changed `apps/api/package.json` and the lockfile; `rate-limit-redis` stays removed.
+  - `express-rate-limit` 8.7.4 changes only `MemoryStore#get` and the decrement error handling. `ipKeyGenerator`, the only import, is byte-identical, so PR61-SEC-12's closure holds. 8.7.4 is MIT, published 2026-11-09, and its lockfile integrity equals the tarball's.
+- **Conditions:**
+  - C1 was met at `0614a90f` (D-ORCH-150). For the union, D-ORCH-162 (a) on `3c4d9a6d` replaces it: the real-Valkey cases, the api suites with #80 and #82 on one pipeline, the union's type-check, and gitleaks-full with the PR080-SEC-07 triage. Hosted lane A and `security-integration` run on main when billing returns.
+  - C2 is closed (`99f6e45f`). C3 is closed for `22f69a82`.
+  - 041-B's stacked merge onto `61c53b5e` gets its own rounds (D-ORCH-163 rule).
+  - For D-SECPOST-01: `jose` 6.2.17 and `cookie` 2.0.2.
+- **Routed:** unchanged from D-SECPR041-03: the 041-B items (PR041-SEC-02 (b), PR041-SEC-09, E1-E5), and my threat-model alignment before G3.
+- **Disclosure:** as in D-SECPR080-03 (the whole-ancestry and `c33e5e92` emulations; nothing printed or stored).
+- **Reversibility:** High (a review record).
