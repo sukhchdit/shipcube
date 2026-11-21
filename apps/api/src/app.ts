@@ -24,7 +24,10 @@ import { jsonBodyParser } from './platform/http/json-body.js';
 import { requestLogContext } from './platform/logging/correlation.js';
 import { requestLogger, routePrefix, type AccessLogFields } from './platform/logging/request-logger.js';
 import { createDocsRouter, DOCS_PATH, type DocsOptions } from './platform/openapi/serve.js';
-import { ipLimiter } from './platform/rate-limit/limits.js';
+import { createRateLimitKit, denialOutageReporter, type RateLimitDependencies } from './platform/rate-limit/kit.js';
+import { createRouteRateLimit, ipLimiter, type RateLimitKit } from './platform/rate-limit/limits.js';
+import { createRateLimitCounter } from './platform/rate-limit/counter.js';
+import { securityEventSinkFrom } from './platform/logging/security-events.js';
 import type { RouteDescriptor } from './platform/routing/define-route.js';
 import {
   assertPipelineReady,
@@ -50,6 +53,8 @@ export interface ModuleRegistration {
 export interface AppLogger extends ErrorLogger {
   info(event: string, fields?: AccessLogFields): void;
   debug(event: string, fields?: AccessLogFields): void;
+  /** Optional (test loggers): the security events of the rate limiter fall back to `error` without it. */
+  warn?(event: string, fields?: AccessLogFields): void;
 }
 
 export interface AppDependencies {
@@ -105,6 +110,20 @@ export interface AppDependencies {
    * @internal
    */
   readonly authenticate?: RouteSlot;
+  /**
+   * Hops of reverse proxy trusted for the client IP (`TRUST_PROXY_HOPS`; the local edge proxy is one hop, CloudFront +
+   * ALB two): Express sets `trust proxy` from it, so `req.ip` (the step-0 limiter key and the audit entry IP) is the first
+   * untrusted hop, never a forged leading X-Forwarded-For address (EC-A12, AT-US-087-04). Default 0: no proxy trusted.
+   */
+  readonly trustProxyHops?: number;
+  /**
+   * The rate limiters (TASK-041): the configuration and the process's Valkey client. startApi always passes it; absent
+   * (test compositions, the RBAC matrix app: the seam that keeps the generated matrix below the per-IP budget) the
+   * step-0 limiter passes through and the step-5 slot is the TASK-020 stub. A `live` composition without it is refused
+   * at boot (RateLimitMissingError, PR041-SEC-08). The denial budget (T-39) does not depend on
+   * it: the pipeline builds one whenever it builds the audit capture.
+   */
+  readonly rateLimit?: RateLimitDependencies;
 }
 
 /**
@@ -120,15 +139,36 @@ export class AuthenticateSeamError extends Error {
   }
 }
 
+/** A live composition without the rate limiters (PR041-SEC-08): the pass-through step-0 limiter is a test seam only. */
+export class RateLimitMissingError extends Error {
+  constructor() {
+    super('a live composition needs the rate limiters (AppDependencies.rateLimit); their absence is a test seam');
+    this.name = 'RateLimitMissingError';
+  }
+}
+
 function assertBootable(deps: AppDependencies, routes: readonly RouteDescriptor[]): void {
   if (deps.authenticate !== undefined && deps.apiMode === 'live') throw new AuthenticateSeamError();
+  if (deps.rateLimit === undefined && deps.apiMode === 'live') throw new RateLimitMissingError();
   if (deps.pipeline === undefined) assertPipelineReady(routes, deps.tenantTx);
   assertRouteBindings(routes, { production: deps.apiMode === 'live' });
 }
 
 /** The production slots over these dependencies (the capture gets the audit config and the privacy dependencies). */
-function defaultSlots(deps: AppDependencies, afterCommit: AfterCommitQueue, logger: AppLogger): PipelineSlots {
+function defaultSlots(
+  deps: AppDependencies,
+  afterCommit: AfterCommitQueue,
+  logger: AppLogger,
+  kit: RateLimitKit | undefined,
+  events: ReturnType<typeof securityEventSinkFrom>,
+): PipelineSlots {
   const slots = defaultPipelineSlots({
+    ...(kit === undefined ? {} : { rateLimit: createRouteRateLimit(kit) }),
+    valkey: deps.rateLimit?.valkey,
+    ...(deps.rateLimit === undefined ? {} : { authzDenialBudgetPerMin: deps.rateLimit.settings.AUTHZ_DENIAL_BUDGET_PER_MIN }),
+    denialCounter: kit?.counter ?? createRateLimitCounter(),
+    denialLog: { warn: (event, fields) => (logger.warn ?? logger.error).call(logger, event, fields) },
+    onStoreUnavailable: denialOutageReporter(events),
     tenantTx: deps.tenantTx,
     afterCommit,
     ...(deps.auditConfig === undefined
@@ -148,12 +188,19 @@ export function createApp(deps: AppDependencies): Express {
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
   const afterCommit = deps.afterCommit ?? createAfterCommitQueue(logger);
-  const slots = deps.pipeline ?? defaultSlots(deps, afterCommit, logger);
+  const events = securityEventSinkFrom({
+    warn: (event, fields) => (logger.warn ?? logger.error).call(logger, event, fields),
+    error: (event, fields) => logger.error(event, fields),
+  });
+  const kit = deps.rateLimit === undefined ? undefined : createRateLimitKit(deps.rateLimit, events);
+  const slots = deps.pipeline ?? defaultSlots(deps, afterCommit, logger, kit, events);
+
+  app.set('trust proxy', deps.trustProxyHops ?? 0);
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));
   app.disable('x-powered-by');
-  app.use(ipLimiter());
+  app.use(ipLimiter(kit, API_PREFIX));
   app.use(corsPreflight());
   app.use(jsonBodyParser(deps.bodyLimit === undefined ? {} : { limit: deps.bodyLimit }));
 

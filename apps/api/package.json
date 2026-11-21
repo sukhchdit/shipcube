@@ -52,7 +52,6 @@
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
-    "rate-limit-redis": "^6.0.2",
     "stripe": "^23.1.0",
     "swagger-ui-dist": "^5.34.1",
     "uuid": "^14.0.3"

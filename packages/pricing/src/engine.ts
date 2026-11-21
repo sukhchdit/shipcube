@@ -8,8 +8,8 @@
  * is fixed by construction, so the same input serialises to byte-identical JSON in any process, at any time
  * (AT-US-138-01).
  *
- * Evaluation runs the steps of `PRICING_STEPS` in the DR-B07 order. This task lands the first one, the base freight
- * line; the margin (US-140), discount, floor, fuel, surcharge, cover, tax and FX steps join the list in their own
+ * Evaluation runs the steps of `PRICING_STEPS` in the DR-B07 order: the base freight line (TASK-076), then the margin
+ * line (US-140, TASK-080); the discount, floor, fuel, surcharge, cover, tax and FX steps join the list in their own
  * tasks, each built with the `state.ts` helpers that enforce the line invariants.
  */
 import { add, assertCurrencyCode, isMoney, isNegative, type Money, MoneyError, negate, sum } from '@platform/shared';
@@ -17,6 +17,7 @@ import { add, assertCurrencyCode, isMoney, isNegative, type Money, MoneyError, n
 import { validatedBillableWeight } from './billable-weight.js';
 import { PricingError } from './errors.js';
 import { baseFreightStep } from './lines/base-freight.js';
+import { marginStep } from './lines/margin.js';
 import { chargeLine, checkedState, EMPTY_STATE, explanationEntry, rejectedCandidateCount, warnings } from './state.js';
 import {
   type ChargeLine,
@@ -32,7 +33,7 @@ import {
 const ISO_UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 
 /** The evaluation order (DR-B07). Later tasks insert their steps here. */
-export const PRICING_STEPS: readonly PricingStep[] = Object.freeze([baseFreightStep]);
+export const PRICING_STEPS: readonly PricingStep[] = Object.freeze([baseFreightStep, marginStep]);
 
 const DISCOUNT_SOURCES: ReadonlySet<string> = new Set(['DISCOUNT', 'COUPON']);
 

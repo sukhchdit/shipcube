@@ -6,7 +6,7 @@ import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 const entry = (name: string, extra: Partial<TableClassEntry> = {}): TableClassEntry => ({ module: 'm', name, class: 'TENANT', ...extra });
 
 describe('grant manifest (data-model §4.4, C5)', () => {
-  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), the TASK-039 insert-only job_executions, SELECT only on the TASK-051 operator_staff_grants, and agrees with the table classes', () => {
+  it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue, reference_dataset_versions and the TASK-080 pricing_config_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), the TASK-039 insert-only job_executions, SELECT only on the TASK-051 operator_staff_grants, and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
       // TASK-040: idempotency_keys, SYSTEM hard-delete allow-list (SELECT, INSERT, UPDATE, DELETE).
@@ -42,6 +42,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app SELECT public.operator_staff_grants *',
       'platform_app SELECT public.organisations *',
       'platform_app SELECT public.permissions *',
+      'platform_app SELECT public.pricing_config_versions *',
       'platform_app SELECT public.reference_dataset_versions *',
       'platform_app SELECT public.role_permissions *',
       'platform_app SELECT public.roles *',
@@ -156,6 +157,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'bootstrap_migrations',
       'operator_staff_grants', // TASK-051 (D-ARCH-165): written by the provisioning lane as platform_migrator only
       'permissions',
+      'pricing_config_versions',
       'reference_dataset_versions',
       'role_permissions',
       'roles',
