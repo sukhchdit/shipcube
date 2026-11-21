@@ -9802,3 +9802,20 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Main post-merge run:** `20261121T1512Z_3c4d9a6` was INVALID because `--base origin/main` at HEAD = main selects nothing. It was re-queued with `--base a3c0b1af` (main before #49/#50/#80), so the run covers #80–#84 (`run-live70.sh`).
 - **Process note for the next session:** a post-merge regression run on main needs an explicit pre-merge `--base`.
 - **Reversibility:** High.
+
+### D-ORCH-165 · 2026-11-21 · sdlc-orchestrator (session B) · Architect ruled QG-041B-C1/C2 (D-ARCH-228..231): honest bursts accepted, release contract C-4 for 041-B fix cycle 3
+- **Rulings** (`e306a60f`):
+  - The in-flight hold stays as designed, restated as a per-instance concurrency bound.
+  - The claim "only when slow" is withdrawn by name.
+  - Two alerts replace one.
+  - A single client retry rule (TASK-065).
+  - Security's "release at finish" is declined (a request-timer case would double the entries). Release contract C-4 is ruled instead: the wrapper ends a slot that ends without an outcome. Tests H7–H10 come with it.
+  - Card lines 20–26 for the next fold.
+- **Next:**
+  - fix cycle 3 on 041-B (C-4, H7–H10), after its stacked merge lands;
+  - code review round 4 and a security delta round, which also takes QG-041B-C4;
+  - product-manager D-PM for QG-041B-C3 with the verbatim texts of D-ARCH-231;
+  - gatekeeper closing entry for QG-041B-C1/C2;
+  - api-designer §7 sentences riding the TASK-041 PR;
+  - the PR040-SEC-10 lease ruling for 040-B (dispatched now, the architect is free).
+- **Reversibility:** High.
