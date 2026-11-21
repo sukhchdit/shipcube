@@ -36,6 +36,7 @@ import { connectPrivileged, readRolePasswords, reapplyDatabaseLevel } from './bo
 import { BACKUP_FILES, schemaSnapshot } from './backup.js';
 import { REPO_ROOT, parseHeader } from './lint-migrations.js';
 import { checkDatabaseName, composeArchiveTool, type ArchiveTool } from './pg-archive.js';
+import { deployOutcome, statusOutcome, type MigrateOutcome } from './prisma-outcome.js';
 import {
   RehearsalError,
   applySessionSettings,
@@ -69,12 +70,6 @@ export const REPORT_FILE = 'restore-report.json';
 /** Schema diff lines kept in a report (each side). */
 const DIFF_LINES = 20;
 
-/** The outcome of one Prisma CLI step: `ok`, else the exit code and the last output lines. */
-export interface StepOutcome {
-  readonly ok: boolean;
-  readonly detail: string;
-}
-
 export interface RestoreCheck {
   readonly verdict: 'pass' | 'fail';
   readonly restoredManifest: BackupManifest;
@@ -82,8 +77,8 @@ export interface RestoreCheck {
   readonly orphans: readonly OrphanFinding[];
   readonly schemaDiff: SnapshotDiff;
   /** `prisma migrate deploy` of the rehearsed migration; null without one. */
-  readonly migrateDeploy: StepOutcome | null;
-  readonly migrateStatus: StepOutcome;
+  readonly migrateDeploy: MigrateOutcome | null;
+  readonly migrateStatus: MigrateOutcome;
 }
 
 export interface VerifyRestoredOptions {
@@ -103,11 +98,6 @@ export interface VerifyRestoredOptions {
   readonly migrateStatus: () => Promise<PrismaRun>;
   readonly now?: () => Date;
 }
-
-const UP_TO_DATE = /Database schema is up to date/;
-
-const failureDetail = (run: PrismaRun): string =>
-  `exit ${String(run.status)}: ${`${run.stdout}\n${run.stderr}`.trim().split(/\r?\n/).slice(-3).join(' | ').slice(0, 300)}`;
 
 /**
  * Step 3: compares a restored database with its backup manifest (the session stays open; the caller ends it). The
@@ -130,16 +120,15 @@ export async function verifyRestoredDatabase(options: VerifyRestoredOptions): Pr
   const orphans = await findOrphans(session);
   const fullDiff = options.sourceSchema === undefined ? { onlyBefore: [], onlyAfter: [] } : diffSnapshots(options.sourceSchema, schema);
   const schemaDiff = { onlyBefore: fullDiff.onlyBefore.slice(0, DIFF_LINES), onlyAfter: fullDiff.onlyAfter.slice(0, DIFF_LINES) };
-  let migrateDeploy: StepOutcome | null = null;
+  let migrateDeploy: MigrateOutcome | null = null;
   if (options.migrateDeploy !== undefined) {
-    const deploy = await options.migrateDeploy();
-    migrateDeploy = deploy.status === 0 ? { ok: true, detail: 'applied' } : { ok: false, detail: failureDetail(deploy) };
+    migrateDeploy = deployOutcome(await options.migrateDeploy());
   }
-  // After a failed deploy the history is pending or failed: the status is still taken, for the report.
-  const status = await options.migrateStatus();
-  const ok = status.status === 0 && UP_TO_DATE.test(status.stdout);
-  const migrateStatus = ok ? { ok, detail: 'up to date' } : { ok, detail: failureDetail(status) };
-  const verdict = differences.length === 0 && orphans.length === 0 && (migrateDeploy?.ok ?? true) && ok ? 'pass' : 'fail';
+  // After a failed deploy the history is pending or failed: the status is still taken, for the report. Both streams
+  // are read and the pending / failed names are parsed (prisma-outcome.ts; D-TASK034-14).
+  const migrateStatus = statusOutcome(await options.migrateStatus());
+  const passed = differences.length === 0 && orphans.length === 0 && (migrateDeploy?.ok ?? true) && migrateStatus.ok;
+  const verdict = passed ? 'pass' : 'fail';
   return { verdict, restoredManifest, differences, orphans, schemaDiff, migrateDeploy, migrateStatus };
 }
 
@@ -182,8 +171,8 @@ export interface RestoreReport {
   readonly differences: readonly string[];
   readonly orphans: readonly OrphanFinding[];
   readonly schemaDiff: SnapshotDiff;
-  readonly migrateDeploy: StepOutcome | null;
-  readonly migrateStatus: StepOutcome;
+  readonly migrateDeploy: MigrateOutcome | null;
+  readonly migrateStatus: MigrateOutcome;
 }
 
 async function withSession<T>(open: () => Promise<ClosableSession>, work: (session: ClosableSession) => Promise<T>): Promise<T> {

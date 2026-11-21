@@ -199,7 +199,12 @@ describe('runVerifyRestore', () => {
     expect(report.verdict).toBe('fail');
     expect(report.differences).toEqual(['table public.a: 3 rows expected, 2 restored']);
     expect(report.orphans).toEqual([{ constraint: 'fk', table: 'public.b', orphans: '4' }]);
-    expect(report.migrateStatus).toEqual({ ok: false, detail: 'exit 1: Following migration have not yet been applied: | x' });
+    expect(report.migrateStatus).toEqual({
+      ok: false,
+      detail: 'exit 1: Following migration have not yet been applied: | x',
+      pending: [], // `x` is not a migration name
+      failed: [],
+    });
     expect(run.admin).toContain('DROP DATABASE IF EXISTS "rehearsal_t1" WITH (FORCE)');
   });
 
@@ -241,7 +246,10 @@ describe('runVerifyRestore', () => {
     expect(without.migrateDeploy).toBeNull();
     expect(without.migrateStatus).toEqual({
       ok: false,
-      detail: 'exit 1: 8 migrations found in prisma/migrations | Following migration have not yet been applied: | 20261121000000_backfill',
+      detail:
+        'exit 1: pending 20261121000000_backfill | 8 migrations found in prisma/migrations | Following migration have not yet been applied: | 20261121000000_backfill',
+      pending: ['20261121000000_backfill'],
+      failed: [],
     });
     const rehearsed = setup(
       { rows: '3', orphans: '0', head: HEAD },
@@ -273,8 +281,36 @@ describe('runVerifyRestore', () => {
     );
     const report = await runVerifyRestore(await run.options());
     expect(report.verdict).toBe('fail');
-    expect(report.migrateDeploy).toEqual({ ok: false, detail: 'exit 1: Error: P3018 A migration failed to apply.' });
+    expect(report.migrateDeploy).toEqual({
+      ok: false,
+      detail: 'exit 1: Error: P3018 A migration failed to apply.',
+      pending: [],
+      failed: [],
+    });
     expect(report.migrateStatus.ok).toBe(true);
+  });
+
+  it('[TASK-034 fc2] the real status runner reads both streams: the pending name is reported whether Prisma prints it on stdout or stderr (lane B 20261121T0711Z)', async () => {
+    const banner =
+      'Loaded Prisma config from prisma\\tests\\fixtures\\rehearsal\\prisma.config.ts.\n\nPrisma schema loaded from prisma\\schema.\n';
+    const behindText = `${BEHIND.stdout}\nTo apply migrations in development run prisma migrate dev.\nTo apply migrations in production run prisma migrate deploy.\n`;
+    const layouts = [
+      { stdout: behindText, stderr: banner },
+      { stdout: banner, stderr: behindText },
+      { stdout: '', stderr: `${banner}${behindText}` },
+    ];
+    for (const layout of layouts) {
+      const fake = (() => ({ status: 1, ...layout })) as unknown as typeof spawnSync;
+      const run = setup(
+        { rows: '3', orphans: '0', head: HEAD },
+        { migrateStatus: () => Promise.resolve(prismaStatus({ DATABASE_MIGRATOR_URL: 'postgresql://m@127.0.0.1/rehearsal_t1' }, fake)) },
+      );
+      const report = await runVerifyRestore(await run.options());
+      expect(report.verdict).toBe('fail');
+      expect(report.migrateStatus.pending).toEqual(['20261121000000_backfill']);
+      expect(report.migrateStatus.detail).toMatch(/^exit 1: pending 20261121000000_backfill \| /);
+      expect(report.migrateStatus.detail).not.toMatch(/Loaded Prisma config/);
+    }
   });
 
   it('reports a capped schema diff when the source schema text differs', async () => {

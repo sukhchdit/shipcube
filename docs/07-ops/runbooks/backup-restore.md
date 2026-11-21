@@ -73,8 +73,10 @@ A later merge cannot make a released record stale. A merged migration folder is 
 - `table …: N rows expected, M restored` or `row checksum differs`: the archive and the database disagree. Check that the backup step finished, and that nothing wrote to the scratch database (`--keep` leaves it in place for inspection).
 - `orphan(s) for <constraint>`: the restored data breaks a foreign key. Restored constraints are not re-validated by PostgreSQL. Investigate the source before you run the migration.
 - `schema: the normalised schema dump differs`: `restore-report.json` lists up to 20 differing statements on each side. A role or grant missing from `00-roles.sql` shows up here.
-- `migrate deploy: …`: the migration failed on the restored data. That is the failure the rehearsal exists to catch. Fix the migration.
-- `migrate status: exit 1: … have not yet been applied`: the restored history is behind the migrations folder. Without `--migration`, back up at the newest migration. With it, check that no other migration follows yours.
+- `migrate deploy: exit 1: failed <name> | …`: the migration failed on the restored data. That is the failure the rehearsal exists to catch. Fix the migration.
+- `migrate status: exit 1: pending <name> | …`: the restored history is behind the migrations folder. Without `--migration`, back up at the newest migration. With it, check that no other migration follows yours.
+
+In `restore-report.json`, `migrateDeploy` and `migrateStatus` list the migration names Prisma reported as `pending` and `failed`. The tool reads both of Prisma's output streams. The `detail` text masks quoted values, because a database error can quote row data.
 
 **A failed rehearsal blocks the data-changing migration (CLAUDE.md §5).** Do not commit a hand-written record.
 
