@@ -186,6 +186,26 @@ export const CLASSIFICATION_REGISTRY: ClassificationRegistry = Object.freeze({
   bootstrap_migrations: table({ file_name: INT, sha256: INT, applied_at: INT, applied_by: INT }),
   // data-model §3.4: who a vault value belongs to (a user or a contact row id), never the value itself.
   data_subjects: table({ ...STD, kind: INT, ref_id: INT, erased_at: INT }),
+  // TASK-040 (data-model §3.5, §6.2): the HTTP idempotency store. response_body is the one PER column a SYSTEM table
+  // may hold (C10 exception): AES-256-GCM ciphertext of the caller's own response, kept 24 h; the rest are hashes,
+  // identifiers and bookkeeping (idem_key is a client-chosen opaque value, a UUIDv4 by recommendation).
+  idempotency_keys: table({
+    ...STD,
+    scope_hash: INT,
+    scope_org_id: INT,
+    actor_id: INT,
+    method: INT,
+    path: INT,
+    idem_key: INT,
+    fingerprint: INT,
+    status: INT,
+    lease_until: INT,
+    response_status: INT,
+    response_headers: INT,
+    response_body: PER,
+    response_body_key_id: INT,
+    expires_at: INT,
+  }),
   // data-model §3.2 (TASK-037): the whole pending state of an invitation (D-ARCH-123). The invitee address is PER; the
   // SHA-256 of the one-time invitation token is SEC (a credential verifier, never logged or audited in clear).
   invitations: table({

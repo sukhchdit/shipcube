@@ -6,7 +6,7 @@
 // AppError carrying `retryAfterSeconds` (the tx slot's request deadline, PR #44 R1-M1) gets `Retry-After` too.
 import { randomUUID } from 'node:crypto';
 
-import { AppError, ERROR_CATALOGUE, type ErrorCode, presentsCredential } from '@platform/shared';
+import { AppError, ERROR_CATALOGUE, presentsCredential } from '@platform/shared';
 import type { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
 import { requestContextOf } from '../context/request-context.js';
@@ -17,9 +17,10 @@ import {
   PRIVATE_CACHE_CONTROL,
   routeDescriptorOf,
 } from '../routing/route-state.js';
-import { classifyThrown, thrownClassName, type Classified } from './classify.js';
+import { thrownClassName } from './classify.js';
 import { markErrorResponse } from './error-response.js';
-import { buildProblem, DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
+import { DEFAULT_PROBLEM_TYPE_BASE, GENERIC_SERVER_DETAIL, instanceOf, PROBLEM_CONTENT_TYPE } from './problem.js';
+import { isRenderedProblem, renderProblem } from './rendered-problem.js';
 
 /** Scalar log fields chosen by code (CLAUDE.md §9); structurally compatible with platform/runtime RuntimeLog. */
 export type ErrorLogFields = Readonly<Record<string, string | number | boolean>>;
@@ -39,18 +40,6 @@ export interface ProblemHandlerOptions {
   readonly typeBase?: string;
   /** Correlation ID when the context middleware did not run (it always runs in createApp). */
   readonly fallbackCorrelationId?: () => string;
-}
-
-function codeOf(classified: Classified): ErrorCode {
-  switch (classified.kind) {
-    case 'app':
-      return classified.error.code;
-    case 'framework':
-    case 'db':
-      return classified.code;
-    case 'unexpected':
-      return 'INTERNAL_ERROR';
-  }
 }
 
 /**
@@ -110,16 +99,14 @@ export function problemHandler(options: ProblemHandlerOptions): ErrorRequestHand
   return (thrown: unknown, req: Request, res: Response, next: NextFunction): void => {
     const correlationId = requestContextOf(res)?.correlationId ?? (options.fallbackCorrelationId ?? randomUUID)();
     try {
-      const classified = classifyThrown(thrown);
-      const code = codeOf(classified);
+      // A document already rendered once (an idempotent 4xx, stored before it is sent; TASK-040, D-ARCH-195): sent as is.
+      if (isRenderedProblem(thrown) && !res.headersSent) {
+        markErrorResponse(res, { code: thrown.code, status: thrown.status });
+        sendProblem(req, res, thrown.status, thrown.body);
+        return;
+      }
+      const { classified, code, problem } = renderProblem(thrown, { correlationId, url: req.originalUrl, typeBase: options.typeBase });
       const appError = classified.kind === 'app' ? classified.error : undefined;
-      const problem = buildProblem({
-        code,
-        correlationId,
-        url: req.originalUrl,
-        ...(appError === undefined ? {} : { detail: appError.detail, errors: appError.errors }),
-        ...(options.typeBase === undefined ? {} : { typeBase: options.typeBase }),
-      });
 
       if (problem.status >= 500 || res.headersSent) {
         options.logger.error(
