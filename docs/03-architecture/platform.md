@@ -650,7 +650,7 @@ During a rollout, the step controller sets `DisableScaleIn` on the stable colour
 
 **Statelessness, pooling and load levelling:**
 
-- The API keeps no in-process session or file state. Rate-limit counters, the revocation set and the flag cache live in Redis (REQ-SEC-005, REQ-PLAT-020). Files stream to S3. ALB stickiness is off.
+- The API keeps no in-process session or file state. Rate-limit counters, the revocation set and the flag cache live in Redis (REQ-SEC-005, REQ-PLAT-020). Files stream to S3. ALB stickiness is off. *Amended 2026-11-21 (ADR-0016 amendment 13 item 6; D-ARCH-225, D-ARCH-228):* one piece of rate-limit state is kept per instance and in memory by design: the ledger of the credentialed requests of an address that are in authentication on that instance. It lives only as long as those requests, needs no agreement between instances and is lost with the process without harm. Its price is that the failed-authentication budget bounds a parallel burst per instance, `N × limit` across `N` instances (R-ARCH-36 (d)).
 - The SSE quote stream must resume on any replica from persisted results (`Last-Event-ID`). That is a contract item for api-designer (OI-14).
 - **DB pooling:** one `pg` Pool per process through `@prisma/adapter-pg`. `DB_POOL_MAX` is api 10 and worker 5. Budget: Σ(tasks × pool) ≤ 0.8 × `max_connections` − reserved. Transaction-local `set_config(…, true)` (ADR-0005) is compatible with RDS Proxy transaction pooling, which is the 100× option.
 - **Redis connections:** BullMQ uses about 2 connections per Worker per queue, so about 20 per worker task. That is far below ElastiCache limits.
