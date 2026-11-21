@@ -7581,3 +7581,38 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **qa-lead's story commit** is `61b4bda7` on `docs/stories-d-pm-085-086`. The orchestrator shortened its subject to 96 characters for commitlint. It stays held until part 040-A merges.
 - **TASK-041:** still waiting on the user's `.env.example` commit and push. Slot 1 stays blocked.
 - **Reversibility:** High.
+
+### D-SECPR043-03 · 2026-11-21 · security-analyst · TASK-043 security round 3 (delta `93f9faa0..3ba1eb53`: merges `fe266fd1`, `02d7130b` and `65dff945` of main, the tripwire `16c686ee`, the retitle `35bfb1b4`, fix cycle 3 `3ba1eb53`; pre-push) = PASS_WITH_FOLLOW-UPS at code head `3ba1eb53` (round appended to `docs/05-quality/security/PR-pending-TASK-043-security-review.md` on main; rename per D-ORCH-136/138 unchanged)
+- **Decision:** nothing Critical, High or Medium is open. Code review R3-C2 and R4-C2 are answered.
+  - **Method.** Single-process Node 24 probes on a `git archive 3ba1eb53` extract, with only `joi` 18.3.2 junctioned in: the head walk, two scratch mutants carrying the remediations, and the head tripwire's own functions over planted rows and the real tree. Merge purity, main's owned-path checker and classifier, and a record simulation. No npm, Jest, ESLint, Docker or PostgreSQL, and no command in any worktree.
+- **The merges are pure.** For all three, the merge tree equals `git merge-tree --write-tree` of its parents. Main brought documents and agent notes only. The merge with main `673d9771` is clean.
+- **Owned paths.** 27 against main, the same as in round 2. The delta changes none of them (checker: `not-required`). The classifier selects `security-integration` (21 paths).
+- **Closed:**
+  - **PR043-SEC-08 (R3-m1).** The walk refuses `whens`, `ordered`, `externals`, `default`, `failover`, `custom` and inverted patterns; every pattern must refuse the probe set; `base64` is allowed only under `*_enc` keys. Every R2.3 and R3-m1 shape is refused, and the controls are accepted.
+  - **PR043-SEC-02, tripwire arm (R3-m2).** The general rule: a relative specifier into a `test`, `tests` or `__tests__` folder, any `@platform/<pkg>/testing`, back quotes. The 6 planted controls are found, and the head tree (255 sources) has 0 offenders. The lint arm stays on the R4-C3 card.
+- **Rulings on code review round 4 (`81bdc81e`):**
+  - **R4-m1 becomes PR043-SEC-09 (LOW, CWE-625), widened.** The probe set does not decide anchoring. A regex with no `$` or no `^`, with a top-level `|`, or with the `m` flag passes and stores an address with free text (six probes). My R2.5 ruling left anchoring to review, which was wrong.
+    - **Fix.** One line in `refusesEveryProbe` plus a 14-line alternation scan, validated on scratch copies.
+    - **Review duty.** A name or phone class, and phone numbers or birth dates in `number` or `date` leaves, stay a review duty. That review needs `/packages/shared/src/events/` in CODEOWNERS before TASK-049 merges.
+  - **R4-n1 becomes PR043-SEC-10 (INFO, CWE-1173), widened.** `raw()` under a node-level `convert` preference stores an address: two new shapes, a `guid` with `replace` and a `date`. Extension rules confirmed.
+    - **Fix.** Allow-lists of flags and preferences, and validation with `Joi.build(describe())`, so that what validates is what the walk read.
+    - **Validation.** Mutant 1: 49 rows, 0 mismatches. Mutant 2: every control unchanged, 8 of 9 bypasses refused at load, and the ninth (a type-level hook) no longer runs.
+  - **R4-n2 becomes PR043-SEC-11 (INFO, CWE-1061), widened** by escape and backslash spellings. All five planted bypasses were missed, as predicted. Arm (b), the shipped `packages/config/src/testing` layer, has no image backstop. It can be fixed in the tripwire now: derive the folders from the `./testing` export targets.
+  - **R4-C2:** confirmed. The round-2 binding carries over, and this round adds a `Head` row on `3ba1eb53`.
+- **Not merge conditions of TASK-043.** `EVENT_MODULES` is `{}` at the head, and both files are unowned, so a fix keeps the binding.
+- **Simulation.** Main's real checker at `673d9771`, in merge-ref form, on a `--shared` clone with plumbing commits, the record as `PR-9999-…` and `--pr 9999`: 8 of 8 as expected.
+  - **Pass:** rounds 1 to 3 merged with `3ba1eb53`; rounds 1 and 2 only (the carry-over, bound by `93f9faa0`); round 3 alone (bound by `3ba1eb53`); a later commit in `packages/shared/src/events`; a later commit in `tools/repo`.
+  - **Fail:** a later commit in `prisma/sql/grants.manifest`; a later FAIL verdict row; main without the record.
+- **Open with owners, unchanged:** PR043-SEC-05 `org_id` INSERT arm and PR043-SEC-07 (TASK-047); PR043-SEC-06 (R-ARCH-38); QG-043-C4 C4-1 (holds: one producer call site) and C4-3 (my T-83 row before G3); QG-043-C3 T078-1 to T078-5.
+- **Conditions:**
+  - **C1.** Lane B PASS on the final head: the 42501 and 23514 rows, the column-privilege listing, C5 with the column tuples, and `open-queue.test.ts`. D-TASK043-14 and -15 are triage, not evidence. Also the hosted `security-integration` job at the pushed head.
+  - **C2.** Rename the record, then check the merge ref (D-ORCH-136/138).
+  - **C3.** A later commit to any of the 27 owned paths, or a merge of main after main changes one of them, needs a delta round.
+- **Routed:**
+  - **senior-developer (plan fold):**
+    - TASK-049: the merge prerequisite PR043-SEC-08 is replaced by PR043-SEC-09 and -10. They may land earlier in any commit that touches `event-definition.ts`.
+    - TASK-049, also before it merges: CODEOWNERS covers `/packages/shared/src/events/`, either from TASK-015 part 015-C or added by TASK-049 itself.
+    - The BOUNDARIES RESOLVED-FILE POLICY lines on TASK-047 and TASK-040 part 040-B gain PR043-SEC-11 (a) to (d): a comment before the literal, the `packages/config/src/testing` folder, `@platform/api/modules/*/tests`, and escaped or backslash literals.
+    - PR043-SEC-11 (b) in the tripwire, optionally earlier.
+  - **principal-architect:** nothing new.
+- **Reversibility:** High (a review record).

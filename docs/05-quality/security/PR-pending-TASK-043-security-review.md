@@ -387,3 +387,184 @@ P7, item by item:
   - A later merge of main voids it only if main has by then changed an owned path that this PR also changes. Main's changes after `af4a1b48` are documents only.
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 at `93f9faa0`: 0 Critical, 0 High, 0 Medium. Both merges are pure, `negative-fixtures.test.ts` included. Closed: PR043-SEC-01, -03 and -04; PR043-SEC-05 UPDATE and actor arms (F14, F15). PR043-SEC-02 reopened for its tripwire arm by code review R3-m2: the general `tests/`-folder rule is recommended in this PR and required before TASK-049 merges; it is not a merge blocker, because the image preflight refuses a production import of a pruned `tests/` file. Open with owners: PR043-SEC-05 `org_id` INSERT arm (TASK-047), PR043-SEC-06 (late task before G3, accepted residual R-ARCH-38), PR043-SEC-07 (TASK-047). New: PR043-SEC-08 INFO, widened by code review R3-m1 (whens, ordered, custom, inverted and permissive patterns, default functions, `base64` only under `*_enc` keys): a merge prerequisite of TASK-049, not of this PR. QG-043-C4: C4-2 met; C4-1 and C4-3 open as before. Owed: lane B PASS at `93f9faa0` (the 42501 and 23514 rows, C5 with the column tuples), the hosted `security-integration` job, the rename and merge-ref check |
+
+---
+
+# Round 3 (delta, bound to head `3ba1eb53`)
+
+| Field | Value |
+|---|---|
+| Head | 3ba1eb53ee0834cf181caac239b232f0af7473a6 |
+| Path since round 2 | From `93f9faa0`: `fe266fd1` (merge of main `eb0aab52`), `16c686ee` (test-layer tripwire), `02d7130b` (merge of main `b9c0ddeb`), `35bfb1b4` (AT-US-011-04 retitle), `65dff945` (merge of main `0bfc0620`) and `3ba1eb53` (fix cycle 3; D-TASK043-13 to -15 are in its body). The branch is unpushed, so no CI has run. Main tip when this round was written: `673d9771` (only documents and agent notes after `0bfc0620`) |
+| Owned paths | 27 against main (`--base main --head 3ba1eb53`), the same 27 as in round 2. The delta `93f9faa0..3ba1eb53` changes no owned path (main's checker: `not-required`). It changes six unowned files: `event-definition.ts`, `events.test.ts`, `tools/repo/test-seams.test.ts`, `system-tx.test.ts`, `open-queue.test.ts` and `relay.int.test.ts` (title only). The classifier selects the hosted `security-integration` job (21 security-critical paths) |
+| Bindings added | Code review round 3 (`74a91e1d`: R3-m1, R3-m2, R3-C2). Code review round 4 (`81bdc81e`: R4-m1, R4-n1, R4-n2, R4-C2), which landed on main while this round was in progress. D-TASK043-13 to -15 |
+| Method | Static review of the delta. Single-process Node 24 probes on a `git archive 3ba1eb53` extract under the session scratchpad, with only `joi` 18.3.2 junctioned in: the head walk with the real Joi; two scratch mutants of `event-definition.ts` carrying the remediations below; the head tripwire's own functions, loaded from a copy of `test-seams.test.ts` with Jest stripped, run over planted rows and over the extract's real tree. Merge purity, the record binding, and a record simulation with main's real checker. No npm, Jest, ESLint, Docker or PostgreSQL, and no command in any worktree |
+
+## R3.1 The three merges of main are pure
+
+For `fe266fd1`, `02d7130b` and `65dff945`, `git merge-tree --write-tree <parent 1> <parent 2>` gives the merge's own tree: no conflict and no hand edit. Main brought documents and agent notes only, so no owned path came in through a merge. `git merge-tree --write-tree main 3ba1eb53` (main `673d9771`) is clean. The PR diff (`0bfc0620..3ba1eb53`, 56 files) has no `package-lock.json`, `DECISIONS.md` or `.env*` change.
+
+## R3.2 The delta
+
+| Item | Ruling |
+|---|---|
+| R3-m1 / PR043-SEC-08 (a): `opensValues` | **Closed.** A node is refused if it has `whens`, `ordered`, `externals`, `flags.default`, `flags.failover` (beyond R2.5, D-TASK043-13), a `custom` rule or an inverted `pattern`. Probe: `mergeEvents` refuses every R2.3 shape and every R3-m1 row. Each of these shapes stores an e-mail address when it is validated without the walk, so no test row is vacuous |
+| R3-m1 (b): the pattern probe set | **Closed as R2.5 scoped it.** Each `pattern` must refuse an address, a text with a space, the empty string and 257 letters, with a fresh `RegExp` per probe. A regex that does not parse throws at load (D-TASK043-13): accepted, because it fails closed. That scope was too narrow: see PR043-SEC-09 |
+| R3-m1 (c): `base64` only under `*_enc` | **Closed.** Array items inherit the array's key. An object nested under an `x_enc` key does not pass the key down (probe: refused). The `token_enc` and `tokens_enc[]` controls are accepted. A key named exactly `_enc` is accepted too, which is harmless |
+| R3-m2 / PR043-SEC-02 tripwire arm (`16c686ee`, `3ba1eb53`) | **Closed.** This is the general rule of R2.5. It flags a relative specifier that resolves into a `test`, `tests` or `__tests__` folder (the CommonJS directory form included) and any `@platform/<pkg>/testing` specifier, under `apps/*/src` and `packages/*/src`. Back-quoted specifiers are read (the R2.2 residual). There are positive rows for `routing/tests/timing.js` and for a `packages/` form, and a non-vacuity check for `packages/`. Probe: all 6 planted controls are found, among them `import x = require(…)`, `export * as … from` and a multi-line `from`. The head tree has 255 production sources, 155 of them under `packages/`, and 0 offenders in all three scans. Residual spellings: PR043-SEC-11 |
+| `system-tx.test.ts` | Accepted. It asserts the SYSTEM context, and it asserts that `errorClassOf` never returns a message, with an address inside the thrown message |
+| `open-queue.test.ts` (D-TASK043-14) | Accepted. Only the timeouts change; the `[PR64-SEC-01]` assertions (no ACL password on `console.error` or stderr) are unchanged |
+| `35bfb1b4` retitle | Accepted. The title changes, nothing else |
+| D-TASK043-15 (up-down-up triage) | Not security evidence. `down.sql` revokes the grant (`REVOKE DELETE` on `job_executions`) and drops both tables. The evidence is lane B on the final head (merge condition 1) |
+
+## R3.3 Earlier items
+
+| Item | Status |
+|---|---|
+| PR043-SEC-02 (LOW) | **Tripwire arm closed.** The lint arm, the resolved-file boundaries twin, stays on the card of the next lint-lock holder (R2-C5 = R3-C3 = R4-C3). PR043-SEC-11 widens it |
+| PR043-SEC-08 (INFO) | **Closed** (R3.2, rows (a) to (c)) |
+| PR043-SEC-05, `org_id` INSERT arm | Open, TASK-047 (D-ARCH-197 item 3) |
+| PR043-SEC-06 | Accepted residual R-ARCH-38 until the definer-purge late task, before G3 |
+| PR043-SEC-07 | Open, TASK-047 (D-ARCH-199) |
+| QG-043-C4 | C4-1 holds: there is one production call site of the producer (`relay.ts:221`) and one construction (`start-worker.ts:136`). C4-2 is met. C4-3, the T-83 row of the threat model, is still my action before G3 |
+| QG-043-C3 (T078-1 to T078-5) | Unchanged |
+
+## R3.4 Rulings on code review rounds 3 and 4
+
+- **R3-m1 = PR043-SEC-08:** closed (R3.2).
+- **R3-m2:** closed. With it, the tripwire arm of PR043-SEC-02 is closed (R3.2).
+- **R4-m1 becomes PR043-SEC-09 (LOW), widened.** Anchoring can be decided mechanically, so the walk must decide it. My R2.5 ruling left it to review, and that was wrong.
+  - **Not a merge condition of TASK-043.** `EVENT_MODULES` is `{}` at the head, so no payload can be stored yet. The file is unowned, so a fix keeps this binding.
+  - **Due:** a merge prerequisite of TASK-049. On that card it replaces the PR043-SEC-08 prerequisite (D-SD-008 item 3). It may land earlier, in any commit that touches the file.
+- **R4-n1 becomes PR043-SEC-10 (INFO),** widened by the `raw()` shapes. It is due with PR043-SEC-09.
+- **R4-n2 becomes PR043-SEC-11 (INFO),** widened by two spellings. It goes on the lint-twin card line (R4-C3). Its arm (b) can be fixed in the tripwire at any time.
+- **R4-C2 ("the round-2 binding may carry over"): confirmed.** The delta changes no owned path, so the round-2 `Head` row (`93f9faa0`) still binds. The simulation (R3.6) passes with rounds 1 and 2 alone. This round's `Head` row adds `3ba1eb53`.
+
+## R3.5 New findings
+
+| ID | Title | Severity | CWE | OWASP | File:line | Owner / due |
+|---|---|---|---|---|---|---|
+| PR043-SEC-09 | The pattern probe set does not decide anchoring: a regex with no `^…$`, with a top-level `\|` or with the `m` flag admits free text (with code review R4-m1) | LOW | CWE-625 | A04 | `packages/shared/src/events/event-definition.ts:67, 74-80` | Merge prerequisite of TASK-049, or any earlier commit that touches the file |
+| PR043-SEC-10 | Values the walk cannot see: `raw()` under a node-level `convert` preference, and `Joi.extend` rules and hooks (with code review R4-n1) | INFO | CWE-1173 | A04 | `event-definition.ts:112-114, 156` | With PR043-SEC-09 |
+| PR043-SEC-11 | Spellings, and one shipped test layer, that the tripwire does not see (with code review R4-n2) | INFO | CWE-1061 | A04 | `tools/repo/test-seams.test.ts:34, 87, 136` | Lint-twin card line (R4-C3); arm (b) optionally earlier |
+
+### PR043-SEC-09 (LOW): the probe set does not decide anchoring
+
+- **Description.** Joi applies `pattern` as `regex.test(value)`, so an unanchored regex matches a substring. `refusesEveryProbe` tests four whole strings only. A regex whose grammar none of the probes contains therefore passes, and it then admits any text around a match. Probes with the real Joi; each schema passes `mergeEvents` and stores the value shown:
+
+  | Pattern | Stored |
+  |---|---|
+  | the UUID grammar without anchors | `p@example.com free text <uuid>` |
+  | `/\d/` | `p@example.com 1` |
+  | `/^ORD-/` (R4-m1) | `ORD-p@example.com free text` |
+  | `/[0-9]/` (R4-m1) | `call 5 p@example.com` |
+  | `/^[0-9]{3}\|\d{2}$/` (top-level alternation) | `p@example.com 12` |
+  | the anchored UUID grammar with the `m` flag | `<uuid>`, a line break, then `p@example.com free text` |
+
+  A UUID class anchored at the start only (`/^[0-9a-f-]{36}/`) is refused already, because 257 letters `a` match it.
+- **Exploitability and impact.** A missing `$` is a common slip, unlike the PR043-SEC-08 shapes. A caller must also put a personal value into that field. The result is personal data in `outbox_events.payload`: a SYSTEM table outside the vault, kept 30 days after publishing (ADR-0004 item 1, SEC-P3-12). Event files get no security round until `packages/shared/src/events/` is in CODEOWNERS. Impact Medium, likelihood Low, so LOW.
+- **Remediation** (validated on scratch copies, see the end of PR043-SEC-10). In `refusesEveryProbe`, after `flags` is read:
+
+  ```ts
+  if (flags.includes('m') || !source.startsWith('^') || !/(?:^|[^\\])\$$/.test(source) || topLevelAlternation(source)) return false;
+  ```
+
+  with
+
+  ```ts
+  /** True when `source` has a `|` outside every group and class (`^a|b$` anchors each branch at one end only). */
+  function topLevelAlternation(source: string): boolean {
+    let depth = 0;
+    let inClass = false;
+    for (let i = 0; i < source.length; i++) {
+      const c = source[i];
+      if (c === '\\') { i++; continue; }
+      if (inClass) { if (c === ']') inClass = false; continue; }
+      if (c === '[') inClass = true;
+      else if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (c === '|' && depth === 0) return true;
+    }
+    return false;
+  }
+  ```
+
+  Two edge cases are refused as well, and both fail closed: a source that ends in an escaped backslash before the `$`, and a `|` that follows a nested `v`-flag class.
+- **What stays a review duty.** The walk cannot decide these:
+  - a class that excludes the probes but admits a name or a phone number (`/^[^@\s]{1,256}$/` stores `John_Smith_+15551234567`);
+  - a `number` or `date` leaf that carries a phone number or a birth date.
+
+  That review needs `/packages/shared/src/events/` in CODEOWNERS before the first event file merges. The line comes from TASK-015 part 015-C, or TASK-049 adds it itself (the checker also reads the head's CODEOWNERS).
+- **Verification test.** `[PR043-SEC-09]` refusal rows in `events.test.ts`, each with its sync demonstration: `/^ORD-/`, `/[0-9]/`, the unanchored UUID, `/^[0-9]{3}|\d{2}$/` and the UUID with `m`. Controls: `/^[A-Z]{3}$/i`, `/^(?:en|es|fr)$/`, `/^[a|b]{2}$/` and `identifierPayload`.
+
+### PR043-SEC-10 (INFO): values the walk cannot see
+
+- **Description.**
+  - **`raw()` under a node-level `convert` preference (new).** The validator sets `convert: false` on the root, and a node's own preference overrides it for that node. `closedNode` reads only `preferences.allowUnknown` and `flags.unknown`. Two shapes pass the walk and store an address:
+    - `Joi.string().guid().prefs({ convert: true }).replace(/^[\s\S]*$/, <uuid>).raw()` stores `p@example.com`. The replacement satisfies `guid`, and `raw()` returns the input.
+    - `Joi.date().prefs({ convert: true }).raw()` stores `2020-01-01 (p@example.com)`, because V8's date parser ignores text in parentheses.
+    - Code review R4 found `.prefs({convert:true}).replace` with `guid` refused at validation. That holds without `raw()`.
+  - **`Joi.extend` (R4-n1), confirmed in part.** An extension that keeps the type name `string` or `number` and adds a value-returning rule stores `p@example.com` (two probes). My variant, a type-level `validate` on a `guid` string, was refused at validation, because the rule runs on the returned value. Code review's variant stored the address. Either way, `describe()` does not show a type-level hook.
+- **Exploitability and impact.** Each shape is deliberate code in an event file, as with PR043-SEC-08. INFO.
+- **Remediation.**
+  - **Allow-lists instead of the deny-list,** at the top of `closedNode`:
+
+    ```ts
+    const SAFE_FLAGS = new Set(['presence', 'only', 'insensitive', 'label', 'description', 'id', 'unit', 'empty', 'single', 'sparse', 'format', 'cast', 'unsafe', 'unknown']);
+    const SAFE_PREFERENCES = new Set(['messages', 'errors']);
+    if (Object.keys(node.flags ?? {}).some((flag) => !SAFE_FLAGS.has(flag))) return false;
+    if (Object.keys(node.preferences ?? {}).some((pref) => !SAFE_PREFERENCES.has(pref))) return false;
+    ```
+
+    This subsumes `default` and `failover`. It also refuses `result` (`raw()`, `strip()`) and any node-level `convert`.
+  - **Validate what the walk read.** In `mergeEvents`, store `Joi.build(definition.payload.describe())` instead of the author's schema object, and turn a build error into the usual "must be a closed Joi object" refusal.
+    - Extension rules do not build: "Invalid rule zzrule for type string", and `zz` for `number`.
+    - A type-level hook is dropped: the rebuilt schema stores the input UUID, not the hook's value.
+    - So the schema that validates is, by construction, the description the walk accepted.
+    - `Joi.build` exists in Joi 18 (`lib/index.js`, through `Manifest.build`), but it is typed `any` and thinly documented.
+  - **The alternative** is code review's per-type allow-list of rule names, plus a tripwire that refuses `.extend(` under `packages/shared/src/events/**`. It is weaker, because an extension can be imported from elsewhere.
+- **Verification test.** `[PR043-SEC-10]` refusal rows for the two `raw()` shapes, a `.strip()` and the two extension shapes; the extension rows assert the refusal at load. A control that `.messages({...})` and `.label()` stay accepted.
+
+**Validation of PR043-SEC-09 and -10 together.**
+
+- **Mutant 1** (the anchoring check without the alternation scan, plus both allow-lists): 49 rows, namely every shape of the head `events.test.ts` and the new ones. 0 mismatches. It differs from the head only on the 8 new bypass rows.
+- **Mutant 2** (adds the alternation scan and the rebuild): 14 rows. The five controls store the same values as at the head. Eight of the nine bypasses are refused at load. The ninth, the type-level hook, now stores the input UUID, because the hook no longer runs.
+
+### PR043-SEC-11 (INFO): what the tripwire does not see
+
+- **Description.** The scan reads the raw text of quoted specifiers, and its test layers are the `test`, `tests` and `__tests__` folders. Probe: 11 planted rows run through the head's own functions. All 6 controls were found, and these 5 were missed, as predicted:
+  - **(a) A comment** between `from` or `import(` and the literal (R4-n2 (a)).
+  - **(b) A relative import of `packages/config/src/testing/**`** from `packages/config/src` production code (R4-n2 (b)). That folder is the target of `@platform/config/testing` (D-ARCH-036), and it ships:
+    - prune-dist removes `fixtures/`, `tests/`, `spikes/` and `__fixtures__/`, but not `testing/`;
+    - the preflight skips `./testing`;
+    - lint's `TEST_FILES` do not name `testing/`;
+    - the head pins `./testing/index.js` as a clean row (`test-seams.test.ts:136`).
+
+    So neither the tripwire, nor lint, nor the image build stops such an import. `packages/config/src/fixtures/` is in the same position for the tripwire and lint, but it is pruned, so the image backstop applies to it.
+  - **(c) `@platform/api/modules/*`** matching `<m>/tests/<x>` (R4-n2 (c)). Not probed; no such file exists.
+  - **(d) New: two literal spellings.** A literal with an escape (`'…/tests/timing.js'`), and one with backslash separators after a leading `../` (`'../../../platform/routing\\tests\\timing.js'`). Node's ESM resolver parses a relative specifier as a file URL, and the URL parser treats `\` as `/`. I did not check whether TypeScript resolves the backslash form.
+- **Exploitability and impact.**
+  - (a), (c) and (d) are deliberate spellings. For a `tests/` target the image preflight still fails the build.
+  - (b) has no backstop. It needs a deliberate import of a module whose header says "Never import from production code", in a package whose start-up guards are owned paths.
+  - INFO.
+- **Remediation.**
+  - **(b) can be fixed in the tripwire now.** Treat the source folder of every workspace `./testing` export as a test layer:
+    - read each `apps/*/package.json` and `packages/*/package.json`;
+    - take the directory of `exports['./testing']['@platform/source']`;
+    - flag a resolved relative specifier under it;
+    - replace the `./testing/index.js` clean row with a positive row from `packages/config/src/web`.
+
+    Adding `testing` and `fixtures` to `TEST_FOLDER` also works: `packages/config/src/testing` is the only `testing` folder under `apps/*/src` and `packages/*/src` today.
+  - **(a), (c) and (d) belong to the resolved-file boundaries twin.** It resolves the parsed specifier, so it sees all of them. The R4-C3 card line names (a) to (d).
+- **Verification test.** For (b), a positive row and the tree scan above. For the twin, one negative fixture per spelling.
+
+## R3.6 Binding
+
+- **Head.** The `Head` row of this round names `3ba1eb53`. The round-2 row (`93f9faa0`) still binds as well, because no owned path changed after it.
+- **Simulation** with main's real checker (`check-security-owned-paths.mjs` at `673d9771`), in merge-ref form, on a `--shared` clone with plumbing commits. The record was committed on main as `PR-9999-…`, and the checker ran with `--pr 9999`. D-SECPR043-03 lists the scenarios.
+- **Later commits.**
+  - A later commit that touches only unowned paths keeps the binding. That includes a PR043-SEC-09 or -10 fix in `packages/shared/src/events/` and a PR043-SEC-11 (b) fix in `tools/repo/`.
+  - A commit that touches any of the 27 owned paths needs a delta round.
+  - A later merge of main voids the binding only if main has by then changed one of those 27 paths. Main's changes after `0bfc0620` are documents and agent notes.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 3 at `3ba1eb53`: 0 Critical, 0 High, 0 Medium. The three merges are pure. Closed: PR043-SEC-08 (R3-m1) and the tripwire arm of PR043-SEC-02 (R3-m2); the lint arm of SEC-02 stays on the R4-C3 card. New: PR043-SEC-09 LOW (anchoring, with R4-m1) and PR043-SEC-10 INFO (`raw()` under a node-level `convert`, and extensions, with R4-n1), both merge prerequisites of TASK-049 and not of this PR; PR043-SEC-11 INFO (tripwire spellings and the shipped `packages/config/src/testing` layer, with R4-n2), on the lint-twin card. Open with owners as before: SEC-05 `org_id` INSERT arm and SEC-07 (TASK-047), SEC-06 (R-ARCH-38), C4-1 and C4-3. Owed before merge: lane B PASS on the final head, the hosted `security-integration` job at the pushed head, and the rename with the merge-ref check |
