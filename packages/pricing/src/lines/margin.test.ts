@@ -5,7 +5,7 @@ import fc from 'fast-check';
 import { price, runPricing } from '../engine.js';
 import { isPricingError } from '../errors.js';
 import { DEFAULT_RULE, pricingInput } from '../tests/fixtures.js';
-import type { MarginRule, PricingInput } from '../types.js';
+import type { MarginRule, PricingInput, PricingStep } from '../types.js';
 import { baseFreightStep } from './base-freight.js';
 import { compareMarginRules, MARGIN_CODE, MARGIN_LABEL_KEY, marginRules, marginStep, selectMarginRule } from './margin.js';
 
@@ -203,6 +203,13 @@ describe('margin rule validation (PRICING_CONFIG_INVALID)', () => {
     expect(reads).toBe(1);
     expect(Object.isFrozen(copy)).toBe(true);
     expect(Object.isFrozen(copy?.rate)).toBe(true);
+  });
+
+  it('[R1-n4] adds its losing matches to the rejected candidates of the steps before it', () => {
+    const mock = rule({ ruleKey: 'mock-10', carrierCode: 'MOCK', rate: { bps: 1000 } });
+    const counting: PricingStep = (_input, state) => ({ ...state, rejectedCandidateCount: state.rejectedCandidateCount + 3 });
+    const result = runPricing(pricingInput(2000, 'USD', 'USD', [DEFAULT_RULE, mock]), [baseFreightStep, counting, marginStep]);
+    expect(result.explanation.rejectedCandidateCount).toBe(4);
   });
 
   it('needs the base freight line before it', () => {

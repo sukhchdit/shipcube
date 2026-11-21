@@ -13,7 +13,7 @@
  *  - `Math`: reported except as `Math.<static name>` other than `random`.
  * Type-only references (`(): Date`) are not values and are skipped.
  *
- * Imports:
+ * Imports (the specifier as a string literal or an expression-free template literal, PR080-SEC-03):
  *  - I/O modules: any `node:*` or Node core module, HTTP clients, database, queue and cache drivers, by static import,
  *    re-export, `import()` or `require()` (the ADR-0003 boundaries allow-list is the second control);
  *  - the clock and randomness that the allow-listed `@platform/shared` root exports (`uuidv7`, `uuidV7Timestamp`), by
@@ -29,6 +29,11 @@
  * create a module-scope binding, so the global-scope pass would not see the references, while at run time those
  * references are still the real globals.
  *
+ * Any other binding of a watched global name is reported as `shadowed <name>` (PR080-SEC-02, fail closed by name):
+ * a destructured `declare const { Date }`, a type-only import alias (`import type { Money as Date }`), a type-only
+ * `namespace Date {}`, an overload signature `function process(): void;`, a parameter or a local. TypeScript resolves
+ * the value reference of the first three to the real global; pricing never needs a local of these names.
+ *
  * Not reported (they read no clock): `value instanceof Date` and type queries such as `typeof Date.now` (R2-n3).
  *
  * Limits: a value that is not a global (an `Event().timeStamp`, `import.meta`) is not a clock read this rule can see;
@@ -37,12 +42,17 @@
  */
 import { builtinModules } from 'node:module';
 
+import { staticSpecifier } from './module-sources.mjs';
+
 const ALWAYS_IMPURE = new Set(['process', 'performance', 'crypto', 'navigator', 'globalThis', 'self', 'window', 'global']);
 const GLOBAL_OBJECTS = new Set(['globalThis', 'self', 'window', 'global']);
 const DATE_STATIC_ALLOWED = new Set(['UTC', 'parse']);
 const SHARED_ROOT = '@platform/shared';
-/** Globals whose ambient re-declaration would hide a reference from the global-scope pass (PR076-SEC-07). */
-const WATCHED_GLOBALS = new Set([...ALWAYS_IMPURE, 'Date', 'Math']);
+/**
+ * Globals whose re-declaration or any other binding would hide a reference from the global-scope pass (PR076-SEC-07,
+ * PR080-SEC-02). Pinned by tools/lint/pricing-purity-shared.test.ts (code review R1-m3).
+ */
+export const WATCHED_GLOBALS = new Set([...ALWAYS_IMPURE, 'Date', 'Math']);
 /**
  * `@platform/shared` exports that read the clock or randomness (`ids/uuidv7.ts`: `uuid` v7). Pinned by
  * tools/lint/pricing-purity-shared.test.ts against the modules the shared root re-exports (code review R2-n6).
@@ -197,8 +207,8 @@ export default {
      * @param {readonly string[]} names imported or re-exported names
      */
     const checkSource = (node, source, wholeModule, names) => {
-      if (source?.type !== 'Literal' || typeof source.value !== 'string') return;
-      const specifier = source.value;
+      const specifier = staticSpecifier(source);
+      if (specifier === undefined) return;
       if (isIoModule(specifier)) {
         report(node, specifier);
       } else if (specifier === SHARED_ROOT) {
@@ -214,13 +224,19 @@ export default {
     /** @param {{ importKind?: string; exportKind?: string }} node */
     const typeOnly = (node) => node.importKind === 'type' || node.exportKind === 'type';
 
+    /** Ambient declarations already reported by {@link checkAmbient}; the binding pass skips them. */
+    const ambientReported = new Set();
+
     /**
      * Reports an ambient declaration named like a watched global.
      * @param {{ id?: { type: string; name?: string } | null }} node
      */
     const checkAmbient = (node) => {
       const name = node.id?.type === 'Identifier' ? node.id.name : undefined;
-      if (name !== undefined && WATCHED_GLOBALS.has(name)) report(/** @type {never} */ (node), `declare ${name}`);
+      if (name !== undefined && WATCHED_GLOBALS.has(name)) {
+        ambientReported.add(node);
+        report(/** @type {never} */ (node), `declare ${name}`);
+      }
     };
 
     return {
@@ -254,13 +270,21 @@ export default {
         if (node.callee.type === 'Identifier' && node.callee.name === 'require') checkSource(node, node.arguments[0], true, []);
       },
       'VariableDeclaration[declare=true] > VariableDeclarator': checkAmbient,
-      'ClassDeclaration[declare=true], TSEnumDeclaration[declare=true], TSDeclareFunction': checkAmbient,
+      'ClassDeclaration[declare=true], TSEnumDeclaration[declare=true], TSDeclareFunction[declare=true]': checkAmbient,
       /** @param {{ kind?: string; global?: boolean; declare?: boolean; id?: { type: string; name?: string } }} node */
       TSModuleDeclaration(node) {
         if (node.kind === 'global' || node.global === true) report(/** @type {never} */ (node), 'declare global');
         else if (node.declare === true) checkAmbient(node);
       },
       'Program:exit'(node) {
+        // PR080-SEC-02: any other binding of a watched name, whatever declares it (fail closed by name).
+        for (const scope of context.sourceCode.scopeManager?.scopes ?? []) {
+          for (const variable of scope.variables) {
+            if (variable.defs.length === 0 || !WATCHED_GLOBALS.has(variable.name)) continue;
+            if (variable.defs.some((def) => ambientReported.has(def.node))) continue;
+            report(/** @type {never} */ (variable.defs[0]?.name), `shadowed ${variable.name}`);
+          }
+        }
         const globalScope = context.sourceCode.getScope(node);
         const references = [
           ...globalScope.through,

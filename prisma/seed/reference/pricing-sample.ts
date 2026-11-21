@@ -16,8 +16,8 @@ import type { Dataset } from '../framework/contracts.js';
 /** = `SAMPLE_PRICING_CONFIG_VERSION` of `@platform/pricing`. */
 export const PRICING_SAMPLE_VERSION_KEY = 'pricing-2026.11.0';
 
-/** = `SAMPLE_PRICING_CONFIG_SHA256` of `@platform/pricing`: lower-case hex SHA-256 of the configuration's JSON. */
-export const PRICING_SAMPLE_CONTENT_SHA256 = 'b56b94db94655393ce39a4bfe16b3aef857d68249705a6949167080edfdb1436';
+/** = `SAMPLE_PRICING_CONFIG_SHA256` of `@platform/pricing`: lower-case hex SHA-256 of the configuration's canonical JSON. */
+export const PRICING_SAMPLE_CONTENT_SHA256 = 'c4be2d6d710090fc97ee1dfade50085ea09c62c611b12bfc58678dd4495c180b';
 
 /** The instant the sample version takes effect and was published (fixed, so the dataset hash is stable). */
 export const PRICING_SAMPLE_EFFECTIVE_FROM = new Date('2026-11-01T00:00:00.000Z');

@@ -77,6 +77,10 @@ const pricingRows = (database: string): Promise<VersionRow[]> =>
     return result.rows;
   });
 
+/** An unpublished version row: $1 = the SYSTEM actor, $2 = the source. */
+const INSERT_DRAFT = `INSERT INTO public.pricing_config_versions (created_by, updated_by, version_key, effective_from, content_sha256, source)
+   VALUES ($1::uuid, $1::uuid, 'pricing-2099.1.0', pg_catalog.now(), pg_catalog.sha256('x'), $2)`;
+
 /** The SQLSTATE and message of a refused statement. */
 async function refusal(run: () => Promise<unknown>): Promise<{ code: string | undefined; message: string }> {
   try {
@@ -161,13 +165,12 @@ describe('sample pricing configuration version seed (TASK-080, data-model §9.1)
       insert: expect.objectContaining({ code: '42501' }),
     });
 
-    // An unpublished draft row stays editable for the owner (the trigger only guards published versions).
+    // An unpublished draft row stays editable for the owner (the trigger only guards published versions). OPERATOR is a
+    // source the CHECK admits (data-model §1.7, reserved for the M2 pricing admin; D-TASK080-14); ADMIN is not.
     const draft = await withClient(db.migratorConnection(database), async (client) => {
-      await client.query(
-        `INSERT INTO public.pricing_config_versions (created_by, updated_by, version_key, effective_from, content_sha256, source)
-         VALUES ($1::uuid, $1::uuid, 'pricing-2099.1.0', pg_catalog.now(), pg_catalog.sha256('x'), 'SEED')`,
-        [SYSTEM_ACTOR_ID],
-      );
+      const admin = await refusal(() => client.query(INSERT_DRAFT, [SYSTEM_ACTOR_ID, 'ADMIN']));
+      expect(admin).toMatchObject({ code: '23514', message: expect.stringContaining('ck_pricing_config_versions__source') });
+      await client.query(INSERT_DRAFT, [SYSTEM_ACTOR_ID, 'OPERATOR']);
       const updated = await client.query(
         `UPDATE public.pricing_config_versions SET notes = 'draft' WHERE version_key = 'pricing-2099.1.0'`,
       );
@@ -175,5 +178,28 @@ describe('sample pricing configuration version seed (TASK-080, data-model §9.1)
       return { updated: updated.rowCount, deleted: deleted.rowCount };
     });
     expect(draft).toEqual({ updated: 1, deleted: 1 });
+  }, 120_000);
+
+  it('[PR080-SEC-04] TRUNCATE is refused while a published version exists and allowed over drafts only', async () => {
+    const empty = await db.clone(template);
+    const draftsOnly = await withClient(db.migratorConnection(empty), async (client) => {
+      await client.query(INSERT_DRAFT, [SYSTEM_ACTOR_ID, 'SEED']);
+      await client.query('TRUNCATE public.pricing_config_versions');
+      return (await client.query<{ n: number }>('SELECT pg_catalog.count(*)::int AS n FROM public.pricing_config_versions')).rows[0]?.n;
+    });
+    expect(draftsOnly).toBe(0);
+
+    const database = await db.clone(template);
+    await seed(database, REFERENCE_DATASETS, recordingSink());
+    const before = await pricingRows(database);
+    const owner = await withClient(db.migratorConnection(database), (client) =>
+      refusal(() => client.query('TRUNCATE public.pricing_config_versions')),
+    );
+    expect(owner).toMatchObject({ code: 'P0001', message: expect.stringContaining('PRICING_VERSION_IMMUTABLE') });
+    const app = await withClient(db.appConnection(database), (client) =>
+      refusal(() => client.query('TRUNCATE public.pricing_config_versions')),
+    );
+    expect(app).toMatchObject({ code: '42501' });
+    expect(await pricingRows(database)).toEqual(before);
   }, 120_000);
 });

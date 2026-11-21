@@ -5,7 +5,8 @@
  *
  * The reference seed writes the row of this version into `pricing_config_versions`
  * (`prisma/seed/reference/pricing-sample.ts`) with `content_sha256` = {@link SAMPLE_PRICING_CONFIG_SHA256}, the SHA-256
- * of `JSON.stringify(SAMPLE_PRICING_CONFIG)`. Both literals are pinned by tests: a rule change here needs a new version
+ * of the UTF-8 bytes of `canonicalJson(SAMPLE_PRICING_CONFIG)` (sorted keys, `config/canonical-json.ts`; D-TASK080-15),
+ * so the hash does not depend on the literal's key order. Both literals are pinned by tests: a rule change here needs a new version
  * key and a new hash, because a published version is insert-only (data-model §9.1).
  */
 import type { PricingConfigSnapshot } from '../types.js';
@@ -26,5 +27,5 @@ export const SAMPLE_PRICING_CONFIG: PricingConfigSnapshot = Object.freeze({
   ]),
 });
 
-/** Lower-case hex SHA-256 of `JSON.stringify(SAMPLE_PRICING_CONFIG)` (config/sample.test.ts). */
-export const SAMPLE_PRICING_CONFIG_SHA256 = 'b56b94db94655393ce39a4bfe16b3aef857d68249705a6949167080edfdb1436';
+/** Lower-case hex SHA-256 of `canonicalJson(SAMPLE_PRICING_CONFIG)` (config/sample.test.ts). */
+export const SAMPLE_PRICING_CONFIG_SHA256 = 'c4be2d6d710090fc97ee1dfade50085ea09c62c611b12bfc58678dd4495c180b';

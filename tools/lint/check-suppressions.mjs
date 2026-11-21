@@ -30,6 +30,7 @@ export const PROTECTED_RULES = Object.freeze([
   'platform/outbound-http-via-client',
   'platform/audit-writer-allowlist',
   'platform/money-arith',
+  'platform/pricing-purity', // PR080-SEC-01: the engine's purity (AT-US-138-02) is never waived inline
   'platform/node-path-only',
   'platform/any-justification',
   'platform/password-hasher-only',

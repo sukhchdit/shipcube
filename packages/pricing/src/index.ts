@@ -1,6 +1,7 @@
 // Public entry point of @platform/pricing. Pure pricing engine (ADR-0015).
 // Exports are added by the tasks that implement this package.
 export { validatedBillableWeight } from './billable-weight.js';
+export { canonicalJson } from './config/canonical-json.js';
 export { SAMPLE_PRICING_CONFIG, SAMPLE_PRICING_CONFIG_SHA256, SAMPLE_PRICING_CONFIG_VERSION } from './config/sample.js';
 export { PRICING_STEPS, price, runPricing } from './engine.js';
 export { PRICING_ERROR_CODES, PricingError, isPricingError, type PricingErrorCode } from './errors.js';

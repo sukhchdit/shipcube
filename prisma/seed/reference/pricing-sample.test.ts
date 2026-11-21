@@ -56,7 +56,7 @@ describe('sample pricing configuration dataset (TASK-080, data-model §9.2)', ()
 
   it('pins the dataset hash: any edit of the published row (notes included) needs a new version key', () => {
     // A changed hash for the same version fails the next deploy's seed with SEED_INSERT_ONLY_CHANGED (data-model §9.1).
-    expect(hashDataset(pricingSampleDataset)).toBe('f62578cb470bcb5b21bf5e8e3def5ae9391cf12bcbe18b645d04c84c249bbea9');
+    expect(hashDataset(pricingSampleDataset)).toBe('63600bde69fdd47c2a2220b16e2f6b43b14452b591715ebfd914510f427179d3');
   });
 
   it('equals the literals of @platform/pricing (text-level cross-check: neither workspace may import the other)', () => {

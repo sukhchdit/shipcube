@@ -4,9 +4,11 @@
 // writer until the M2 pricing admin (data-model §9.1, §9.2).
 //
 // Not expressible in Prisma and kept in the migration SQL (20261121000000_pricing_config_versions): the CHECK
-// constraints (`ck_pricing_config_versions__version`, `__version_key`, `__content_sha256` = 32 bytes, `__source`,
-// `__notes`), the partial descending AP-PRICE-01 index `ix_pricing_config_versions__effective` and the raise-only
-// trigger `trg_pricing_config_versions__immutable_when_published`.
+// constraints (`ck_pricing_config_versions__version`, `__version_key`, `__content_sha256` = 32 bytes, `__source` =
+// SEED, SAMPLE or OPERATOR (data-model §1.7 reference_source), `__notes`), the partial descending AP-PRICE-01 index
+// `ix_pricing_config_versions__effective`, the raise-only row trigger
+// `trg_pricing_config_versions__immutable_when_published` and the statement trigger
+// `trg_pricing_config_versions__no_truncate`.
 
 /// One pricing configuration version (D-010): a published, immutable set of rules that quotes and booked shipments
 /// record (REQ-PRICE-020). `contentSha256` is the SHA-256 of the canonical JSON of the configuration. The rule tables

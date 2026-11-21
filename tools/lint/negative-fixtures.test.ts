@@ -357,6 +357,15 @@ const RULES: readonly Violation[] = [
       ],
       ['[PR076-SEC-07] declare const Date shadowing the global', 'bad-declare-date', 'declare Date'],
       ['[PR076-SEC-07] a declare global block', 'bad-declare-global', 'declare global'],
+      ['[R1-m3] declare const process shadowing the global', 'bad-declare-process', 'declare process'],
+      ['[R1-m3] declare const Math shadowing the global', 'bad-declare-math', 'declare Math'],
+      ['[PR080-SEC-02] a destructured declare const { Date }', 'bad-declare-destructured', 'shadowed Date'],
+      ['[PR080-SEC-02] a type-only import aliased as Date', 'bad-shadow-import-type', 'shadowed Date'],
+      [
+        '[PR080-SEC-03] a template-literal import() of a @platform/shared subpath',
+        'bad-template-import-subpath',
+        '@platform/shared/queues (a subpath; pricing imports the @platform/shared root only)',
+      ],
     ] as const
   ).map(([title, name, what]): Violation => [
     `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
@@ -364,6 +373,12 @@ const RULES: readonly Violation[] = [
     PRICING_PURITY,
     `'${what}' is not allowed in packages/pricing`,
   ]),
+  [
+    '[AT-US-138-02] [PR080-SEC-02] platform/pricing-purity and @typescript-eslint/no-namespace: a type-only namespace Date',
+    'rules/pricing-purity/packages/pricing/src/bad-shadow-namespace.ts',
+    [PRICING_PURITY, '@typescript-eslint/no-namespace'],
+    '',
+  ],
   [
     '[AT-US-138-02] [PR076-SEC-01] platform/pricing-purity: production code imports a module of its tests/ folder',
     'rules/pricing-purity/packages/pricing/src/bad-tests-import.ts',

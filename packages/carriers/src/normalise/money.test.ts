@@ -51,6 +51,18 @@ describe('carrierDecimalToMoney (R1-m6, D-TASK075-10; TASK-080)', () => {
     expect((error as Error).cause).toMatchObject({ code: expect.stringMatching(/^(MONEY_INVALID|CURRENCY_UNKNOWN)$/u) });
   });
 
+  it('[R1-m4] the refusal carries the carrier and the operation the adapter passed, never the value', () => {
+    const context = { carrier: 'MOCK', operation: 'getRates' } as const;
+    for (const value of ['12.345', '1e3']) {
+      const error = refusal(() => carrierDecimalToMoney(value, 'USD', context));
+      expect(error).toBeInstanceOf(CarrierError);
+      expect((error as CarrierError).toJSON()).toEqual({ code: 'CARRIER_UNKNOWN_ERROR', carrier: 'MOCK', operation: 'getRates' });
+      expect(JSON.stringify(error)).not.toContain(value);
+    }
+    // Without a context the error is as before: no carrier, no operation.
+    expect((refusal(() => carrierDecimalToMoney('1e3', 'USD')) as CarrierError).toJSON()).toEqual({ code: 'CARRIER_UNKNOWN_ERROR' });
+  });
+
   it('@property: the minor units of a USD amount round-trip through its two-decimal text', () => {
     fc.assert(
       fc.property(fc.integer({ min: -1e12, max: 1e12 }), (amount) => {

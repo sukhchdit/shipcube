@@ -77,7 +77,16 @@ describe('carrier vocabularies equal their OpenAPI enums (D-TASK075-02, D-ARCH-1
 
   it('the surcharge codes have no OpenAPI enum (charge line codes are free text; DR-B30 pin in packages/carriers)', () => {
     expect(OPENAPI).not.toMatch(/^ {4}SurchargeCode:$/mu);
-    expect(SURCHARGE_CODES).toContain('CARRIER_OTHER');
+    // R1-n2: no enum under any name lists the surcharge vocabulary. FUEL alone is shared with ChargeLine.source and
+    // ExplanationEntry.rule_type, so it is the one surcharge member an enum may hold.
+    const all = OPENAPI.split(/\r?\n/u);
+    const enums = all.flatMap((line, at) => (/^ +enum:$/u.test(line) ? [block(all, /^ +enum:$/u, at).lines.slice(1)] : []));
+    expect(enums.length).toBeGreaterThan(10);
+    const surcharges: ReadonlySet<string> = new Set(SURCHARGE_CODES);
+    const listed = enums.flatMap((values) =>
+      values.map((line) => line.trim().replace(/^- /u, '')).filter((value) => surcharges.has(value)),
+    );
+    expect([...new Set(listed)]).toEqual(['FUEL']);
   });
 
   it('each guard accepts exactly its own list', () => {

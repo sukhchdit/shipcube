@@ -310,6 +310,9 @@ const ENUM_CHECKS: Record<string, string[]> = {
   ck_memberships__status: ['ACTIVE', 'INVITED', 'REMOVED', 'SUSPENDED'],
   ck_organisations__default_locale: ['en', 'es', 'fr'],
   ck_organisations__type: ['BUSINESS_CUSTOMER', 'INDIVIDUAL', 'OPERATOR', 'PARTNER'],
+  // TASK-080 (data-model §1.7 reference_source, §3.9; D-TASK080-14): the pricing configuration version sources. OPERATOR
+  // is reserved for the M2 pricing admin; ISO does not apply to a pricing version.
+  ck_pricing_config_versions__source: ['OPERATOR', 'SAMPLE', 'SEED'],
   // Not an enum but an IN list all the same: exactly the two reserved actors of §1.6 are system users (PR26-SEC-04).
   ck_users__is_system: [SYSTEM_ACTOR, '00000000-0000-7000-8000-000000000002'],
   ck_users__locale: ['en', 'es', 'fr'],

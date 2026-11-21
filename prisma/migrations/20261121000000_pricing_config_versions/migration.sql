@@ -10,8 +10,11 @@
 -- Single writer: the reference seed as platform_migrator, the table owner (insert-only dataset, data-model §9.1).
 -- platform_app holds SELECT only (one line in prisma/sql/grants.manifest, C5; runtimeReadOnly in the manifest), so no
 -- runtime role writes the standard columns and no standard-columns guard is rendered (no stdColumns flag).
+-- source: the data-model §1.7 reference_source values that apply to a pricing version (ISO does not): SEED and SAMPLE
+-- for the reference seed, OPERATOR reserved for the M2 pricing admin (D-TASK080-14; C9 pins the list).
 -- Immutable when published: an AFTER UPDATE OR DELETE row trigger raises when the old row has published_at set. It
--- only raises (RETURN NULL), so it never runs after a BEFORE row trigger's change (C15 (b) does not apply).
+-- only raises (RETURN NULL), so it never runs after a BEFORE row trigger's change (C15 (b) does not apply). A
+-- BEFORE TRUNCATE statement trigger raises the same error while any published row exists (PR080-SEC-04, D-TASK080-17).
 -- No BEGIN ATOMIC routine and no prisma/bootstrap file is added.
 CREATE TABLE "public"."pricing_config_versions" (
     "id" UUID NOT NULL DEFAULT uuidv7(),
@@ -31,7 +34,7 @@ CREATE TABLE "public"."pricing_config_versions" (
     CONSTRAINT "ck_pricing_config_versions__version" CHECK ("version" >= 1),
     CONSTRAINT "ck_pricing_config_versions__version_key" CHECK ("version_key" ~ '^[a-z0-9][a-z0-9._-]{0,63}$'),
     CONSTRAINT "ck_pricing_config_versions__content_sha256" CHECK (octet_length("content_sha256") = 32),
-    CONSTRAINT "ck_pricing_config_versions__source" CHECK ("source" IN ('SEED', 'SAMPLE', 'ADMIN')),
+    CONSTRAINT "ck_pricing_config_versions__source" CHECK ("source" IN ('SEED', 'SAMPLE', 'OPERATOR')),
     CONSTRAINT "ck_pricing_config_versions__notes" CHECK ("notes" IS NULL OR char_length("notes") <= 2000)
 );
 
@@ -57,6 +60,23 @@ END $$;
 
 CREATE TRIGGER trg_pricing_config_versions__immutable_when_published AFTER UPDATE OR DELETE ON public.pricing_config_versions
   FOR EACH ROW EXECUTE FUNCTION platform.pricing_config_versions_immutable_when_published();
+
+-- PR080-SEC-04: TRUNCATE fires no row trigger, so a statement trigger refuses it while a published version exists.
+-- OLD is NULL in a statement trigger, hence a separate function. Same SQLSTATE and message as the row guard.
+CREATE FUNCTION platform.pricing_config_versions_no_truncate() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF EXISTS (SELECT FROM public.pricing_config_versions WHERE published_at IS NOT NULL) THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0001',
+      MESSAGE = 'PRICING_VERSION_IMMUTABLE: a published pricing configuration version cannot change; add a new version';
+  END IF;
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER trg_pricing_config_versions__no_truncate BEFORE TRUNCATE ON public.pricing_config_versions
+  FOR EACH STATEMENT EXECUTE FUNCTION platform.pricing_config_versions_no_truncate();
 
 -- Runtime grants (data-model §4.4; prisma/sql/grants.manifest, C5): read-only configuration.
 GRANT SELECT ON TABLE "public"."pricing_config_versions" TO platform_app;
