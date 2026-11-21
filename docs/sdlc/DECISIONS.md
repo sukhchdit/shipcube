@@ -8859,3 +8859,25 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - (2) Two `OUTBOX_RELAY_*` lines in `.env.example` on `feat/TASK-043-transactional-outbox-writer-at-least` (head `3ba1eb53`, pushed).
   - (3) Optionally, the TASK-034 C4 Compose run, which needs local secrets.
 - **Reversibility:** High.
+
+### D-ORCH-152 · 2026-11-21 · sdlc-orchestrator (session B) · Handback: TASK-040 part 040-B PR 1 built stacked; TASK-041 041-B fix cycle dispatched; open children at handback
+- **TASK-040 part 040-B, first PR:** built stacked at `a4aadd2e` on `feat/TASK-040-part-b-idempotency-production`, branched from `0f0d92a0`, upstream unset, unpushed. Its contents (D-TASK040-18..22 in the commit bodies):
+  - the lease rule PR040-SEC-04;
+  - HKDF-derived keys (PR040-SEC-01);
+  - the sealed envelope plus migration `20261121000000_idempotency_keys_completed_body` (PR040-SEC-02);
+  - PR040-SEC-09 and the PR040-SEC-07 pins.
+  - **Its second PR** needs the locked files: the production wiring, the purge, contract descriptions.
+  - **Open questions:**
+    - a possible lease gap (claim tx rest + D + T): principal-architect;
+    - stale config text: `IDEMPOTENCY_BODY_KEY` is described as an AES key in `schema.ts`/`keys.ts`, owner 040-B PR 2 or TASK-041;
+    - the security round confirms the non-JSON 2xx refusal.
+  - Lane B queued (`run-live60.sh`); code review and security round 1 owed.
+  - **Migration timestamp collision:** TASK-080's migration is also `20261121000000_…`; the second to merge re-times (D-TASK080-08).
+- **TASK-041 041-B fix cycle 1:** dispatched on R1-M1 option (a), the in-flight burst bound, plus m1, m2 and the NITs.
+- **Children still running at handback:**
+  - TASK-044 044-A fix cycle;
+  - TASK-041 041-B fix cycle;
+  - product-manager D-PM-089 (QG-044-C2);
+  - lane-B queue: TASK-034 `9c40d31e` running, then TASK-045 `3168c194` and TASK-040B `a4aadd2e`.
+  - Their results land in worktrees, `../.orch/laneb-queue/queue.log` and on main as uncommitted or local commits; the next session picks them up from D-ORCH-151/152 and the STATUS resume pointer.
+- **Reversibility:** High.
