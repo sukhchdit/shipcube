@@ -80,7 +80,7 @@ The `http.Server` of `app.listen` has `requestTimeout` 300,000 ms and `headersTi
 - **Impact Medium:** the credentialed service of an address is refused on the held instances, valid bearers and token refresh included, renewable for as long as the connections stay.
 - **Likelihood Low:** the client must share the victims' address, hold `limit` connections per instance (`N × 120` at the defaults), and keep them open. It already has a cheaper way to the wider lock of amendment 13 item 2: two refused credentials a second.
 
-So **LOW**. What the hold adds is stealth: no refused credential and no event. The squeeze of R2-m1 adds the same. A client keeps `settled = limit − 1` and leaves one unit per instance, and the event marks only the spend that reaches the limit. The signal of D-ARCH-227 answers both: its own label, a gauge, an alert, and reopen trigger (iv). Non-malicious triggers need more than a second of average time between step 0 and the authentication outcome at the ceiling's rate. That is rare, and its answer is a retryable 429.
+So **LOW**. What the hold adds is stealth: no refused credential and no event. The squeeze of R2-m1 adds the same. A client keeps `settled = limit − 1` and leaves one unit per instance, and the event marks only the spend that reaches the limit. The signal of D-ARCH-227 answers both: its own label, a gauge, an alert, and reopen trigger (iv). ~~Non-malicious triggers need more than a second of average time between step 0 and the authentication outcome at the ceiling's rate. That is rare, and its answer is a retryable 429.~~ *(Corrected in round 3, R3.2: this sentence rested on the claim that D-ARCH-228 withdrew. The hold is a bound on concurrency, so a non-malicious trigger is a burst of credentialed requests above the room of an address on one instance, whatever their speed. Its answer is a retryable 429 with `Retry-After: 1`. The rating stays LOW.)*
 
 **Remediation and conditions.**
 - (a) C-2 of rulings §9.3 (label `step0-authn-inflight`; a request whose client left before step 0 answered counts under neither label), fix cycle 2, test H5.
@@ -458,3 +458,277 @@ The record has two `Head` rows (rounds 1 and 2) and two `Verdict` rows; the last
 - Round 1's routes stand unchanged: TASK-108, TASK-055 bounded slot latency, TASK-214 event-loop gauge, TASK-052 cap, product-manager R-16 sentence, and mine before G3.
 
 | Verdict | **PASS_WITH_CONDITIONS.** Round 2 of part 041-B (delta `83a85739..12b8a10a`, fix cycle 2) at `12b8a10a`: 0 Critical, 0 High, 0 Medium. Closed: PR041-SEC-10 (C-1 verified; abort probe 5 entries in six shapes at limit 5, ledger empty; control 11 to 117, mutants 9 to 98) and PR041-SEC-02 (b), so PR041-SEC-02 is closed in full. C-2 verified (label `step0-authn-inflight`, `held` flag, an early abort counted under no label, no event), C-3 verbatim, D-TASK041-20 confirmed (0 authenticator entries through the `gzip` window against 20 to 31 without the guard; no hang, no leak), the D-TASK041-22 test seams unreachable from production. New: PR041-SEC-15 INFO (the D-TASK041-20 guard has unit rows only), PR041-SEC-16 LOW (a slot that never reports its outcome keeps its unit until restart, and its refusal spends nothing; card lines, optional hardening validated). Round 1's additions (a) and (b) to the (d) wording not folded yet (D-ORCH-158 routes them; not a merge condition). C1 discharged; conditions C2 (lane B on the merge head with H6), C3 (merge-only round after #82, item 3 bound to `12b8a10a`, 16 conflicts) and C4 (rename and merge-ref check) remain |
+
+# Round 3: the stacked merge `aade2672` (merge-only) and fix cycle 3 `aade2672..214ec79b` (delta); QG-041B-C4
+
+| Field | Value |
+|---|---|
+| PR | Not opened (`gh pr list --head` is empty). Branch `feat/TASK-041-part-b-rate-limit-rulings-rev2`, pushed: `origin` = `214ec79b`. Two commits since round 2: the merge `aade2672` of `12b8a10a` with main `3d54cef8` (D-ORCH-167), then fix cycle 3 `214ec79b` (change C-4 of D-ARCH-230, tests H7 to H10, riders; D-TASK041-23 in the body) |
+| Head | 214ec79bc583e6d9ea89e1a23e98909a3a97c3c4 |
+| Delta reviewed | (1) The merge `aade2672`, merge-only: main's side brings #80 to #84 and docs. (2) `aade2672..214ec79b`: 6 files, 447+/15-. Four are security-owned: `authn-failed.ts`, `authn-failed.test.ts`, `authn-failed.api.test.ts`, `kit.ts` (JSDoc only). Two are unowned: `app.ts` (one call site hands the wrapper the app logger) and `start-api.denial-budget.api.test.ts` (the R3-n3 pin). No lockfile, `package.json`, `packages/config/src/schema.ts`, lint configuration or tool |
+| Owned paths, whole part B | 21 under main's checker (`--base <main> --head 214ec79b`, section R3.9). The PR's net change against main is the same 26 files as in rounds 1 and 2 |
+| Lane A / lane B evidence | None for this head. Round 1's C2 stands. Code review round 4 relies on the same lane-B run |
+| Binding items checked | D-QG-008 (QG-041B-C4), D-QG-009 (finding 2, observation 1, QG-041B-C7 (b)); D-ARCH-228 to D-ARCH-234; rulings file revisions 4 and 5 (sections 10.2 to 10.4, 11.3); ADR-0016 amendment 13 item 6 as it stands on main `3b807c24`; D-PM-090 and D-PM-092; D-ORCH-163, D-ORCH-165, D-ORCH-167; D-DEVOPS-001, D-DEVOPS-002; D-TASK041-23; code review round 4 (`df1fb49c`, D-CRPR041B-01, APPROVED_WITH_NITS, R4-n1 to R4-n5), which landed on main while this round was being written and which I read before finalising; D-QG-010 (`7c1fad4a`), which also landed meanwhile: it routes rows 5a and 5b to this round and records the other half of R4-n2 as its observation 1 |
+| Reviewer / date | security-analyst, 2026-11-21. Round 3 of part 041-B: the merge-only round of round 1's C3 and the delta round of fix cycle 3, which also answers QG-041B-C4. Host rule as before: no Docker, no Jest, no npm suites, nothing run in the part-B worktree (all objects read from the main checkout's store). Single-process Node 24.22.3 probes on `git archive` extracts of `214ec79b` (head), `aade2672` (control: the merge, before C-4) and `83a85739` (positive control for the abort probe), and on five scratch copies of the head: M1 (release at every close), M2 (the `enter` result ignored), F (release at `finish`), C (a response already started at entry is not authenticated) and D (code review's `startedBefore` guard). The real `createApp`, the branch's `FakeValkey` called directly or delivering its replies per read, raw loopback sockets, `jose` 6.2.15 for ES256; Express 5.3.0 and body-parser 2.4.0 from the main checkout |
+
+## R3.1 Summary
+
+- **QG-041B-C4: PR041-SEC-11 stays LOW with the burst case.** I reproduced rows 5 and 6 of the architect's probe A on this head: 300 valid bearers at once give 16 refusals and 130 give 8, with a synchronous slot behind a store that delivers its replies per read. An ES256 authenticator refuses 136 of 300. Every refusal is a 429 with `Retry-After: 1`, counted under `step0-authn-inflight`, with no event. The silent repeat of D-ARCH-233 served all 144 refused requests of the two repeat rows at its first attempt.
+  - Honest traffic meets the hold only as such a burst. The impact is Low and the likelihood in this run is Low.
+  - The lever a co-located client has is unchanged. A burst adds no reach: keeping the room full without unfinished bodies takes thousands of requests a second, and the credentialed ceiling (6,000 a window) locks the address long before that.
+  - So trigger (vi) does not fire and D-PM-090 stands. The round-1 sentence that rested on the withdrawn claim is corrected in place (section 3, marked).
+- **C-4 is built as ruled, and PR041-SEC-16 is narrowed to rows 5a and 5b of rulings 11.3, still LOW.** Probe P1 ran every form of 11.3:
+  - rows 3 and 4 (the shapes of round 2's PH) now hold 0 units, the valid bearer is served, and one error line is written;
+  - rows 5a, 5b and 6 hold their units until restart, with no line;
+  - rows 1, 2 and 5 are unchanged.
+  - The form that remains exists in test seams only (code review round 4 census). The Accepted text forbids it for authenticators of the product, and card line 21 adds a unit row that fails it. The on-file change that would refuse the form is not triggered.
+- **The `headersSent` race (D-QG-009 observation 1, code review R4-n2) is new INFO PR041-SEC-17.** C-4 adds it. I measured it as a state model: the request timer's 503 is written just before the wrapper's `enter`.
+  - A callback-form slot is then released at its return while it still runs, and its refusal is dropped. 60 junk bearers at limit 5 enter the authenticator 60 times (50 at once) and spend nothing. At `aade2672` the same model gives 5 entries and 5 spends.
+  - Rows 1 and 2 are not affected.
+  - A real timer in front of step 0 did not reach the state in 180 trials. The answer's `finish` and `close` came before the next check phase, and every body that completed later was stopped by D-TASK041-20.
+  - Both candidate guards close it and leave every other probe unchanged.
+- **PA2, PG, PH and the timer case pass on the head.**
+  - PA2: 5 entries in eight abort shapes, against 7 to 61 at `83a85739` and 9 to 80 for M1.
+  - PG (the shape of the rider row): 20 of 20 early returns, 0 entries; M2 enters 6 times.
+  - The timer case: 5 entries, 5 spends, the second five answered 429 with `Retry-After: 1`. Build F gives 10 entries and 0 spends.
+  - **PR041-SEC-15 is closed** by the rider row.
+- **The stacked merge kept every control of main.**
+  - The tree of `aade2672` is the explicit-base merge-tree. The raw diffs are equal, old and new blob of all 26 paths.
+  - Every path of #80, #81, #83 and #84 carries main's blob at `214ec79b`.
+  - Of #82's 49 paths, the 16 that part B changes differ from main by exactly the reviewed part-B delta; main's blob equals `be843ae1` on each of them.
+  - Main has moved only in `docs/` and `.claude/` since `3d54cef8`.
+- **One branch-only gitleaks fingerprint.** The merge carries the PR080-SEC-07 line (`aade2672…:docs/sdlc/DECISIONS.md:generic-api-key:7697`), which PR #85 baselines (D-DEVOPS-002). The 447 added lines of fix cycle 3 give 0.
+
+0 Critical, 0 High, 0 Medium. **PASS_WITH_CONDITIONS**. Round 1's C3 is discharged here. C2 (lane B) and C4 (rename) remain.
+
+## R3.2 QG-041B-C4: PR041-SEC-11 with the burst case
+
+**What was wrong.** Round 1 wrote: "Non-malicious triggers need more than a second of average time between step 0 and the authentication outcome at the ceiling's rate. That is rare". It took over the claim of D-ARCH-225 that D-QG-008 measured as wrong and D-ARCH-228 withdrew. The hold bounds how many credentialed requests of an address are between step 0 and their outcome **at one moment**. The pace over the minute does not decide it, and neither does the time one authentication takes. The sentence is struck in section 3 and points here.
+
+**Probe P7** (head `214ec79b`; limit 120, one address, one instance, valid ES256 bearers; sockets connected in groups of 50 before the burst, then written in one synchronous loop; "replies per read" resolves the replies of all store calls made since the last delivery together, at the next check phase):
+
+| Row | Load, slot, store | Answers | Peak in authentication | Counter, events |
+|---|---|---|---|---|
+| B1 (= probe A row 5) | 300 at once; synchronous slot; replies per read (batches 128, 128, 32, 12) | 284 × 200, **16 × 429**, `Retry-After: 1` | 1 | `step0-authn-inflight` 16; 0 events |
+| B2 (= row 6) | 130 at once; synchronous; replies per read (128, 2) | 122 × 200, **8 × 429** | 1 | 8; 0 |
+| B3 | 120 at once; synchronous; replies per read | 120 × 200 | 1 | none |
+| B4 | 300 at once; synchronous; direct store | 300 × 200 | 1 | none |
+| B5 | 300 at once; ES256 (`async`, awaits `jwtVerify`); direct | 164 × 200, **136 × 429** | 120 | 136; 0 |
+| B6 | 300 at once; ES256; replies per read | 164 × 200, 136 × 429 | 120 | 136; 0 |
+| B7 | 100 at once; ES256; direct | 100 × 200 | 100 | none |
+| B8 | 300, one every 10 ms; ES256 | 300 × 200 | 1 | none |
+| B9 ("less room") | 119 junk bearers refused first, then 10 valid at once; ES256 | 2 × 200, **8 × 429** | 1 | 8; 0 |
+
+- The silent repeat of D-ARCH-233 was applied to the refused requests of B5 and B9: after `Retry-After` plus a random 0 to 1 s, at most three times. All 136 and all 8 were served at the first repeat.
+- As the architect says of probe A, a repeat on loopback opens new connections that no longer arrive together. That makes this a demonstration, not a bound.
+- My first run opened all 300 sockets at once, and 68 were refused at connect on this host (the loopback backlog). I discarded it. The rows above come from the run with connections opened in groups.
+
+**Rating, by trigger.**
+
+- **Honest traffic.**
+  - What triggers it: more credentialed requests of one address than its room (120 less the counted failures), read by one instance before the first of their outcomes. That is a parallel client by design (no such client in this run; trigger (vii) for M3), a load generator from one address, or the Compose and end-to-end runs with their one room.
+  - *Impact Low.* The excess is answered at once with `Retry-After: 1`. Nothing of the request ran. The clients repeat it by themselves (D-ARCH-233, D-PM-092), and every repeat of P7 was served the first time. No data or money is at risk.
+  - *Likelihood Low* in this run (D-ARCH-228, D-PM-090 item 2).
+  - Low × Low is **LOW** (INFO on its own).
+- **A co-located client, the lever round 1 rated.**
+  - *Impact Medium.* The credentialed service of the address is refused on the held instances for as long as the hold is kept full.
+  - *Likelihood Low.* The client must share the address, and it has the cheaper and louder lock of amendment 13 item 2.
+  - The burst case adds no reach. To keep the room full with requests that finish, a client needs `room ÷ time in authentication` requests a second, about 24,000 a second at 5 ms. The credentialed ceiling of 6,000 a window is spent in a fraction of a second, and its refusal then locks every credentialed request of the address for the rest of the window, which is a lever accepted before part B. Keeping the room full for longer still needs unfinished bodies, as round 1 rated.
+  - "Less room" (B9; code review R2-m1) is the quiet form: 119 refused credentials a window leave one unit per instance. Two overlapping requests of the address then collide whatever their speed, and the silent repeat absorbs most of it. It is weaker than the lock the same client can take with one more refusal, and the D-ARCH-229 alert `AuthnInFlightSustained` is its signal once TASK-214 exists.
+  - Medium × Low is **LOW**.
+- **Result: PR041-SEC-11 stays LOW.** Trigger (vi) of item 6 does not fire. D-PM-090, as amended by D-PM-092, keeps its condition (a).
+
+**The cost text against the code.** The restated "Residual (d), what the hold costs" and "When honest traffic meets it" of item 6 hold against P7. The values agree with probe A within host variation (ES256 at once: 136 refused here, 179 or 180 there with the in-memory store; replies per read: 16 and 8 in both). I concur with the restated text.
+
+## R3.3 PR041-SEC-16 after C-4: rows 5a and 5b
+
+**Probe P1** (limit 5; five junk bearers per form, the clients stay and then leave; then one valid bearer; rulings 11.3 numbering):
+
+| Row of 11.3 | Form | `214ec79b` | `aade2672` (no C-4) |
+|---|---|---|---|
+| 1 | reports before it returns (the stub's form) | 5 × 401; 0 held; 5 spent; no line | the same |
+| 2 | `async`, reports before it fulfils | 5 × 401; 0 held; 5 spent; no line | the same |
+| 3 | `async`, answers 401 itself, fulfils | 5 × 401; **0 held**; 0 spent; valid bearer 200; **one line** `{operation_id, status: 401}` | 5 held for good; valid 429 `Retry-After: 1` |
+| 3 | `async`, fulfils without report or answer | **5 × 500**; 0 held; 0 spent; valid 200; one line `{operation_id}` | no answers; 5 held |
+| 4 | plain, answers 401 itself | 5 × 401; **0 held**; valid 200; one line with status 401 | 5 held |
+| 5 | callback form, reports later (conforming seam) | 5 × 401; 0 held; 5 spent; no line | the same |
+| **5a** | callback form, answers 401 itself later | 5 × 401; **5 held for good**; 0 spent; valid 429 `Retry-After: 1`; **no line** | the same |
+| **5b** | callback form, never reports or answers | no answers; **5 held for good**, also after the clients left; valid 429; no line | the same |
+| 6 | promise that never settles | no answers; 5 held; no line | the same |
+
+(A first run with a 400 ms wait per request lost two answers to host timing. With 1.2 s, three runs agreed with the table.)
+
+**What remains, and its rating.** Rows 5a and 5b are as D-ARCH-234 and item 6 "The callback form" describe them.
+
+- Each such request takes one unit of its address on that instance until the process restarts. It spends nothing and writes no line.
+- 5b also leaves the request unanswered. Nothing answers a fully received request that is never answered, so it hangs until TASK-108's 503 or until the client leaves.
+- *Impact Medium.* After `limit − settled` of them, every credentialed request of the address on that instance is refused until restart, valid ones and NAT neighbours included. Nothing shows it before TASK-214's age gauge.
+- *Likelihood Low.* Only test seams have the form: `slowSeam` and one unit row (code review round 4 census of every `createApp` composition with `rateLimit`). The production slot is the stub, row 1. The Accepted text says an authenticator of the product reports before it returns or before its promise fulfils. Card line 21 (NO CALLBACK FORM) puts a unit row on the five authenticator cards, and that row fails any slot that has not reported when it returns.
+- **LOW**, narrowed from round 2: rows 3 and 4 are closed by C-4.
+- My rating is not above LOW, so the on-file change that refuses the form in the wrapper (rulings 11.7) is not triggered.
+
+**Optional, for TASK-052** (rulings 11.7 already leaves it open): type the authenticator handler so that it returns `Promise<void>`. A callback-form authenticator then does not compile. Written as an `async` function, it becomes row 3, which C-4 answers with 500 at once, so it cannot ship unnoticed.
+
+## R3.4 The `headersSent` race: PR041-SEC-17 (INFO, = code review R4-n2)
+
+**Where.** At the slot's return the wrapper tests `res.headersSent` (`authn-failed.ts:157`). When it is true and no outcome has come, it releases the unit and drops any later report (`:139-146`). The test cannot tell whether the slot started the response or something did before the slot was entered. The request timer of TASK-108 is that something: it answers 503 from the arrival of the request. The `close` of that answer releases an unentered unit, and D-TASK041-20 then keeps the request out of the slot. But between the timer's `res.end()` and the `close`, `enter` still returns true.
+
+**Probe P5, a state model.** The real `createApp` and the real ledger, behind an observing ledger whose `enter` first writes the timer's 503 to the response (`headersSent` true, `close` not yet emitted). Limit 5, slot 200 ms:
+
+| Slot | `214ec79b` | `aade2672` | Candidate C | Candidate D (`startedBefore`) |
+|---|---|---|---|---|
+| Row 1, ×60 | 5 entries, 5 spends | the same | 0 entries | 5, 5 |
+| Row 2, ×60 | 5 entries, peak 5, 5 spends | the same | 0 entries | 5, 5 |
+| Row 5, ×1 | 1 entry, **0 spends**, unit released at the return, line `{status: 503}` | 1 entry, 1 spend | 0 entries | 1, 1 |
+| Row 5, ×60 | **60 entries, 50 at once, 0 spends**, ledger 0; one line with status 503 | 5 entries, 5 spends | 0 entries | 5, 5 |
+
+**Probe P6, reachability.** A real timer stand-in sits in front of step 0 and answers 503 80 ms after arrival. Each request is a `POST` with a junk signature; half its body is sent at once and the rest at −3 to +3 ms around the timer. 90 trials with a reading client and 90 with a paused one:
+
+- The answer's `finish` and `close` came before the next check phase in 174 of 176 answers.
+- The wrapper was entered with a started response **0 times**.
+- 160 requests whose body completed after the answer reached the wrapper with `enter` false, which is D-TASK041-20 at work.
+
+The state therefore needs an answer whose write completes asynchronously, on a connection whose send buffer is full. I did not construct that case. On this host a fresh connection never reached the state.
+
+**Rating.**
+
+- *Impact Low.* Only a callback-form slot is affected. Each request that reaches the state must first have held a unit until the timer, 30 s under TASK-108. So an instance sees at most about `room` such authentications in each timer period, about twice the budget a minute. The client gets no result, because its request was answered.
+- *Likelihood Low.* The form is test seams only, and the state was not reached.
+- The false line (`status: 503` for a conforming seam) is noise in the same case.
+- **INFO.** It is not a merge condition.
+- It does show that item 6 "One more limit of the form" understates the consequence. That sentence says only that "the refusal it reports later is not spent". The unit is also released while the slot still runs, which is the class of R2-M1. Code review R4-n2 says the same.
+
+**Remediation (either form; validated on scratch copies).**
+
+- **D, code review's form.** Record `const startedBefore = res.headersSent;` right after `enter`, and take "answered itself" at the return only for `res.headersSent && !startedBefore`. The race model then gives 5 and 5. P1, P2 and P4 do not change.
+- **C, mine.** A response already started at entry is treated like a closed one: release the unit and go no further. This extends D-TASK041-20 to "answered before the slot". The race model gives 0 entries, P1 to P4 do not change, and no authentication runs for a request that has already been answered.
+- **Owner and date.** Either rides the next commit that touches `authn-failed.ts`: the JSDoc sentence that D-ARCH-234 item 7 and code review R4-n4 owe, or card line 22 of TASK-108, whichever comes first, and before TASK-108 merges. principal-architect picks the form and corrects the "One more limit" sentence, or removes it if a guard lands.
+- **Verification.** An api or unit row in which the response is started before the wrapper is entered, with a callback-form seam: `limit` entries and `limit` spends at most (D), or 0 entries (C). The mutant without the guard must fail it.
+
+**R4-n3 (a logger that throws), concurred INFO, no new ID.** The fulfilment callback (`:156`) has no rejection handler. A throwing `writeLine` there would be an unhandled rejection, and the API's process-error handlers end the process on one. The platform logger writes to stdout and does not throw in practice, and the case needs a row-3 slot, which is a defect. The fix of R4-n3 (write the line last, or guard it as the event sink is guarded) goes into the same commit as PR041-SEC-17.
+
+## R3.5 C-4 against the round-2 probes
+
+**PA2, abort after admission** (limit 5; junk bearers; entries):
+
+| Shape | `214ec79b` | `83a85739` (positive control) | M1: release at every close |
+|---|---|---|---|
+| 60, one every 2 ms, reset 5 ms after sending, callback slot 20 ms | **5** | 7 | 9 |
+| 200, one every 1 ms, reset at 5 ms, callback slot 200 ms | **5** | 61 | 80 |
+| 60, one every 2 ms, half-close at 5 ms, callback 20 ms | **5** | 11 | 11 |
+| 60, one every 3 ms, destroy in the slot, callback 400 ms | **5** | 60 | 60 |
+| As above, half-close in the slot | **5** | 60 | 60 |
+| As above, reset in the slot | **5** | 60 | 60 |
+| 60, one every 2 ms, reset at 5 ms, `async` slot 20 ms | **5** | 8 | 4 |
+| 60, one every 3 ms, destroy in the slot, `async` 400 ms | **5** | 60 | 60 |
+
+On the head the spends equal the entries and the ledger is empty after every run.
+
+**PG, the window of D-TASK041-20, in the shape of the rider row.** This is the PR041-SEC-15 row of `authn-failed.api.test.ts:847`: a complete `gzip` body that inflates to 900 kB, and a destroy once the body is written. 20 sequential requests:
+
+- head: 20 reach the wrapper, all with `enter` false; 0 authenticator entries; 0 held; 0 spent;
+- M2: 6 entries and 6 spends at limit 5.
+
+The burst form of round 2 (a reset 10 ms after sending) got 0 entries on the head and 1 on M2 this time: few requests fell into the window on this run. The rider row is the stronger probe. Code review R4-n5 notes its timing dependence; it must not be retried in lane B. **PR041-SEC-15 is closed.**
+
+**The timer case** (the shape of H9, with the timer in front of step 0: it answers 503 at 60 ms while a 400 ms slot runs; five junk bearers, five more 200 ms later):
+
+| Build | `async` slot | Callback slot |
+|---|---|---|
+| `214ec79b` | 5 held at 100 ms; second five 429 `Retry-After: 1`; 5 entries, 5 spends; ledger 0; no line | the same |
+| `aade2672` | the same | the same |
+| F (release at `finish`) | 0 held at 100 ms; second five admitted; **10 entries, 10 at once, 0 spends** | the same |
+
+The refusals reported after the timer's answer reach Express's final handler, which prints them to stderr. That is PR44-SEC-13's class; TASK-108 owns it with card line 22.
+
+**The answers on the merged tree** (probe P8, which includes main's problem rendering of #80):
+
+- A hold refusal: 429 `application/problem+json`, `RATE_LIMITED`, `Retry-After: 1`, `RateLimit-Limit: 5`, `Remaining: 0`, `Reset: 1`; counter `step0-authn-inflight` +1; no event.
+- A spent budget: the same with 60; counter `step0-authn-failed` +1; one `rate_limit_auth` event (`authn-failed`, `ip`).
+
+## R3.6 Merge-only: the stacked merge `aade2672` (round 1 section 8, items 1 to 7)
+
+| Item | Check | Result |
+|---|---|---|
+| 1, 3 | `git diff --raw --no-abbrev 3d54cef8 aade2672` against `git diff --raw --no-abbrev be843ae1 12b8a10a` | **Equal** (`cmp`), 26 paths, old and new blob. On each of the 26 paths main's blob equals `be843ae1`'s, so #82's squash equals `be843ae1` wherever part B changes a file. Control: `be843ae1..aade2672` has 282 lines |
+| 2 | `git merge-tree --write-tree --merge-base=be843ae1 12b8a10a 3d54cef8` | Clean; tree `13c4925f` = tree of `aade2672` (the corrected D-ORCH-158 rule, D-ORCH-167). With the real merge base, `merge-tree` reports the 17 conflicts D-ORCH-167 lists |
+| Main's controls | Every path of each main PR, blob at `214ec79b` against `3d54cef8` | #80 (idempotency, 52 paths), #81 (61), #83 (32), #84 (7): **all equal main**. #82 (rate limiting, 49 paths): 33 equal main. The other 16 are part-B paths, and they differ from main by exactly the part-B delta of rounds 1 and 2 plus fix cycle 3 (`app.ts` one call site, `kit.ts` JSDoc, `start-api.denial-budget.api.test.ts` one pin) |
+| 4 | Owned set | 21, as in rounds 1 and 2 (R3.9). Fix cycle 3 changes 4 of them, so this round binds `214ec79b` |
+| 5 | Lockfile, `package.json`, `schema.ts` | Not among the 26, so main's #84 bumps cannot void the record |
+| 6 | Gitleaks over the merge's first-parent diff (69,643 added lines, main's text) | One fingerprint, `aade2672…:docs/sdlc/DECISIONS.md:generic-api-key:7697`: the PR080-SEC-07 false positive, re-added by the merge (D-DEVOPS-001). PR #85 adds it to the baseline (count 22, D-DEVOPS-002). The emulation's over-approximation gives 275 `generic-api-key` candidates; with entropy, allowlists and stopwords, 1 remains |
+| 7 | The record checker in the merge-ref form | Simulated (R3.9); the merge-ref check of the real PR is C4 |
+| Main since | `git diff --name-only 3d54cef8 3b807c24` without `docs/` and `.claude/` | Empty. `git merge-tree --write-tree origin/main 214ec79b` is clean (code review round 4). A re-merge before the PR needs only the same raw-diff proof |
+
+No `.env*` path is in either commit's first-parent diff (checked by names only), and none was opened.
+
+**Gitleaks, fix cycle 3.** Over the 447 added lines of `214ec79b`, the over-approximation (keyword and regex only, 221 rules) gives 0, and so does the faithful emulation (entropy, rule allowlists including `regexTarget = "match"`, stopwords, global allowlist). The runtime positive controls fire.
+
+## R3.7 Earlier items at this head
+
+| ID | State |
+|---|---|
+| PR041-SEC-11 (LOW) | **Re-rated with the burst case: LOW** (R3.2). Section 3's sentence is corrected. (b) TASK-108 card line 22 and (c) TASK-214 card line 23 stay as routed. (d), the product sentence, is done (D-PM-090, D-PM-092) |
+| PR041-SEC-12 (INFO, accepted) | Unchanged. H6 against a real Valkey stays lane B's (C2) |
+| PR041-SEC-13, -14 (INFO) | Unchanged |
+| PR041-SEC-15 (INFO) | **Closed** by the rider row (R3.5 PG) |
+| PR041-SEC-16 (LOW) | **Narrowed** to rows 5a and 5b; rows 3 and 4 are closed by C-4 (R3.3) |
+| Round 1 additions (a), (b) to the (d) wording | **Folded** in item 6: "When a client causes it" (the declared oversize body, a timeout from arrival) and "A slot that never ends keeps its unit" (bounded latency) |
+| QG-041B-C2 text (D-QG-008: "a check of the text of QG-041B-C2") | Read in item 6 "Release" on `3b807c24`. Concur, except one sentence: "One more limit of the form" understates its consequence (PR041-SEC-17) |
+| PR041-SEC-03, -04, -06, -07 | Unchanged (round 2) |
+
+## R3.8 Findings of this round
+
+| ID | Severity | CWE / OWASP 2021 | Where (`214ec79b`) | Title | Owner, due |
+|---|---|---|---|---|---|
+| PR041-SEC-11 | LOW (re-rated, unchanged) | CWE-410 / A04 | `in-flight.ts` `admit`; `limiter.ts` `gated()`; `limits.ts` step 0 | The cost of the hold is a bound on concurrency: a burst of valid credentials above the room of an address on one instance gets `Retry-After: 1`; the lever of a co-located client is unchanged | Accepted (D-ARCH-228, D-PM-090, D-PM-092). Routes (b) and (c) unchanged |
+| PR041-SEC-16 | LOW (narrowed) | CWE-772 / A04 | `authn-failed.ts:153-159` (the wrapper waits for a callback-form slot without a limit) | A callback-form slot that answers itself (5a) or never reports (5b) keeps its unit until restart, spends nothing and writes no line | Card line 21 (NO CALLBACK FORM) on TASK-052, -055, -091, -171, -261; optional: a `Promise<void>` handler type at TASK-052 |
+| PR041-SEC-17 | INFO (= code review R4-n2) | CWE-362 / A04 | `authn-failed.ts:157` with `:139-146` | A response the request timer started before the slot is read as "answered itself": a callback-form slot is released at its return while it runs, and its refusal is dropped | principal-architect (the form, and the "One more limit" sentence) and senior-developer (guard C or D, at the next commit that touches `authn-failed.ts` or with TASK-108 card line 22, before TASK-108 merges) |
+
+## R3.9 Record binding and simulation
+
+- **Binding.** This round's `Head` row names `214ec79b`. The file now has three `Head` rows: `83a85739`, `12b8a10a` and `214ec79b`. Fix cycle 3 changed owned paths after `12b8a10a`, so only `214ec79b` satisfies the checker. This round's `Verdict` row is the last row of the file.
+- **What voids it.** Any commit on the branch that touches an owned path after `214ec79b`. That includes the JSDoc sentence owed by D-ARCH-234 item 7 (R4-n4) and the guard of PR041-SEC-17, so either needs a delta round first. A re-merge of main does not void it while main changes none of the 21 owned paths (docs only today). A lane-B evidence commit keeps it.
+
+**Simulation.** Main's real `tools/ci/check-security-owned-paths.mjs` ran in a `--shared` sparse clone of the main checkout. The record, with this round appended, was placed as `PR-9999-TASK-041B-security-review.md` on a commit on top of main `3b807c24`. `214ec79b` was merged into that commit, which is the merge-ref form. The checker ran `--pr 9999 --base <main with the record> --head <branch head>`, with the merge checked out as `--root`.
+
+| Scenario | Expected | Checker |
+|---|---|---|
+| S1 The merge ref: rounds 1 to 3 on main, `214ec79b` merged | pass | pass (`214ec79b`, 21 owned) |
+| S2 Control: no `PR-9999` record (only the `PR-pending` name) | fail | `missing` |
+| S3 Control: rounds 1 and 2 only (latest row `12b8a10a`) | fail | `missing` (owned paths changed after it) |
+| S4 Control: this round's `Verdict` row `FAIL` | fail | `missing` |
+| S5 Control: this round's head row names `aade2672` | fail | `missing` |
+| S6 Control: a later branch commit changes `authn-failed.ts` (as the owed JSDoc sentence would) | fail | `missing` |
+| S7 A lane-B evidence commit on the branch after the head | pass | pass (`214ec79b`) |
+| S8 A docs-only main commit after the record | pass | pass |
+| S9 The head row with the 8-character SHA | pass | pass |
+| S10 Control: main changes `policy.ts`, and the branch merges main again | fail | `missing` |
+| S11 The branch merges a docs-only main again | pass | pass |
+| S12 `--head aade2672` (the merge, before fix cycle 3) | pass | pass by round 2's `12b8a10a`: the merge alone kept round 2's binding, as R3.6 proves by blob |
+
+12 of 12 as expected. The record has three `Head` rows and three `Verdict` rows, and the last row of the file is this round's `Verdict` row.
+
+## R3.10 Conditions and routes
+
+**Conditions (merge of part 041-B).**
+
+- **C1** (round 1): discharged in round 2.
+- **C2 stands.** Lane B runs on `214ec79b`, or on the final merge head. It covers:
+  - H6 against a real Valkey;
+  - the api project with H7 to H10 and the rider rows, with no retries (code review R4-n5);
+  - `in-flight.test.ts`, the generated project and gitleaks-full.
+
+  gitleaks-full reports the `aade2672` fingerprint until main contains PR #85 with baseline 22. Read it as PR080-SEC-07 only when the report holds exactly the baselined fingerprints. Hosted lane A and `security-integration` run when billing allows.
+- **C3: discharged** by this round (R3.6, items 1 to 6; item 7 simulated).
+- **C4 stands.** The rename of this record and the merge-ref check (D-ORCH-136/138).
+- A commit that touches an owned path before the merge needs a delta round of mine first. That covers R4-n1, R4-n3, R4-n4 and the PR041-SEC-17 guard.
+
+**QG-041B-C4: discharged for the merge.** PR041-SEC-11 stays LOW with the burst case (R3.2), its round-1 sentence is corrected, and trigger (vi) does not fire, so D-PM-090 stands. The check of the QG-041B-C2 text is in R3.7. The threat-model half (R-13, T-11, T-39, T-93 against item 6) stays mine, due before G3, as D-QG-008 and D-QG-009 route it.
+
+**Routes.**
+
+- principal-architect: PR041-SEC-17. Choose guard C or D, or correct item 6 "One more limit of the form" and rulings 11.3's second limit to name the early release.
+- senior-developer: PR041-SEC-17 and R4-n3 with the JSDoc sentence (R4-n4), at the next commit that touches `authn-failed.ts`, or on TASK-108 card line 22. Optional at TASK-052: the `Promise<void>` handler type (PR041-SEC-16).
+- Earlier routes stand: TASK-108 (timeout from arrival, the declared oversize body), TASK-055 (bounded slot latency), TASK-214 (gauges, the event-loop delay of PR041-SEC-13, the two alerts), TASK-052 (cap, optional), and mine before G3.
+
+| Verdict | **PASS_WITH_CONDITIONS.** Round 3 of part 041-B at `214ec79b`: the stacked merge `aade2672` (merge-only) and fix cycle 3 (delta). 0 Critical, 0 High, 0 Medium. QG-041B-C4 answered: PR041-SEC-11 stays LOW with the burst case (P7: 16 and 8 refusals with a synchronous slot and replies per read, 136 with ES256; all `Retry-After: 1`, no event; every repeated request served the first time; no new reach for a co-located client), trigger (vi) does not fire, the round-1 sentence is corrected. C-4 verified (P1: rows 3 and 4 hold 0 units and write one line; PA2 5 in eight shapes; PG 0 entries; timer case 5 and 5; F gives 10 and 0). PR041-SEC-15 closed. PR041-SEC-16 narrowed to rows 5a and 5b, LOW (test seams only; card line 21). New PR041-SEC-17 INFO (= code review R4-n2): a response started by the request timer before the slot releases a callback-form slot at its return (state model 60 entries at limit 5, control 5; not reached by a real timer in 180 trials; guards C and D validated). The merge kept every control of #80 to #84 (raw-diff equality on 26 paths; every #80, #81, #83, #84 path equals main; #82's 16 overlapping paths differ by the part-B delta only). Gitleaks: one branch-only PR080-SEC-07 fingerprint on the merge, baselined by PR #85. C3 discharged; C2 (lane B on this head with H6 and H7 to H10) and C4 (rename and merge-ref check) remain |

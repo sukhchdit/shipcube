@@ -10928,3 +10928,58 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Not verified:** the lease test and its mutants (not run by me); a takeover race on PostgreSQL 18; that `timeout` bounds a transaction through its COMMIT, which amendment 18 takes out of the 5 s; the round trip of the store client; the values of `Retry-After` of limits that are not built (the stream caps); C-4 as a run (read only); TASK-065, which does not exist; the linguistic review of the two new keys in es and fr.
 - **No evidence note:** as for D-QG-001 to D-QG-009, this entry is the record. The next entry of this series is D-QG-011.
 - **Reversibility:** High (a verification record).
+
+### D-SECPR041B-03 · 2026-11-21 · security-analyst · TASK-041 part 041-B security round 3 (the stacked merge `aade2672`, merge-only; fix cycle 3 `aade2672..214ec79b`, delta; QG-041B-C4 of D-QG-008) = PASS_WITH_CONDITIONS at `214ec79b`. The round is appended to `docs/05-quality/security/PR-pending-TASK-041B-security-review.md` on main, with the round-1 sentence of PR041-SEC-11 corrected in place; the rename to `PR-<NNNN>-…` is still owed (D-ORCH-136/138)
+- **Trigger:** D-ORCH-165, D-ORCH-167 and the session C dispatch. D-ARCH-230 asks for a delta round on fix cycle 3 that re-runs PA2, PG and PH and runs the timer case. D-QG-008 and D-QG-009 ask for the rating of PR041-SEC-11 with the burst case (QG-041B-C4). D-ARCH-234 and D-QG-010 ask for the rating of rows 5a and 5b of rulings 11.3 and a reading of observation 1 of D-QG-009 against row 5. Round 1's C3 asks for the merge-only round after #82. Code review round 4 (`df1fb49c`, D-CRPR041B-01, APPROVED_WITH_NITS) and D-QG-010 (`7c1fad4a`) landed during the round, and I read both before finalising.
+- **Decision:** 0 Critical, 0 High, 0 Medium.
+  1. **QG-041B-C4: PR041-SEC-11 stays LOW with the burst case.** Probe P7 ran at limit 120 on the head, from one address to one instance, with valid bearers.
+     - 300 at once, a synchronous slot, store replies delivered per read: 16 × 429. 130 at once: 8 × 429. These are rows 5 and 6 of probe A.
+     - 300 at once with an ES256 authenticator: 136 × 429.
+     - None at 100 or 120 at once, none paced, and none with a direct store and a synchronous slot.
+     - Every refusal was `Retry-After: 1` under `step0-authn-inflight`, with no event. The silent repeat of D-ARCH-233 served all 144 refused requests at its first attempt.
+     - Honest bursts: impact Low × likelihood Low. A co-located client: Medium × Low, unchanged. A burst adds no reach, because keeping the room full without unfinished bodies takes thousands of requests a second, and the credentialed ceiling locks the address long before that.
+     - **Trigger (vi) does not fire, and D-PM-090 (as amended by D-PM-092) stands.** The round-1 sentence "Non-malicious triggers need more than a second of average time …" is struck in place and points to R3.2.
+  2. **C-4 verified (probe P1, every form of rulings 11.3).**
+     - Rows 3 and 4 now hold 0 units, the valid bearer is served, and one `api.authn_slot_unreported` line is written. At `aade2672` they held 5 for good.
+     - Rows 1, 2 and 5 are unchanged.
+     - PA2: 5 entries in eight abort shapes; the controls `83a85739` and M1 give 7 to 61 and 9 to 80.
+     - The PG rider shape: 20 of 20 early returns and 0 entries; M2 enters 6 times. **PR041-SEC-15 is closed.**
+     - The timer case: 5 entries, 5 spends, the second five answered 429 `Retry-After: 1`. Build F gives 10 entries and 0 spends.
+     - The answers on the merged tree keep their headers: problem+json, `RateLimit-*` and the counter labels.
+  3. **PR041-SEC-16 narrowed to rows 5a and 5b, LOW.**
+     - A callback-form slot that answers itself (5a) or never reports (5b) holds its unit until restart, spends nothing and writes no line.
+     - Only test seams have the form (the code review round 4 census). The Accepted text forbids it for authenticators of the product, and card line 21 adds a unit row that fails it. The stub is row 1.
+     - Not above LOW, so the on-file wrapper change of rulings 11.7 is not triggered.
+     - Optional for TASK-052: a `Promise<void>` handler type.
+  4. **New PR041-SEC-17 INFO (CWE-362, = code review R4-n2).**
+     - C-4's return test reads a response that the request timer started before the slot was entered as "answered itself".
+     - State model P5, with the 503 written just before `enter`: a callback-form slot is released at its return while it runs, and its refusal is dropped. 60 entries, 50 at once, 0 spends at limit 5. The control `aade2672` gives 5 and 5. Rows 1 and 2 are unaffected.
+     - P6, a real timer in front of step 0: 0 of 180 trials reached the state. `finish` and `close` came before the next check phase in 174 of 176 answers, and D-TASK041-20 stopped 160 late bodies.
+     - Guards C (a response already started at entry is not authenticated) and D (`startedBefore`) both close it and leave P1 to P4 unchanged.
+     - Item 6 "One more limit of the form" names the dropped spend but not the early release (D-QG-010 observation 1).
+     - Code review R4-n3, a throwing logger on the fulfilment path, is concurred as INFO and rides the same commit.
+  5. **Merge-only, round 1's C3 discharged.** The stacked merge kept every control of main:
+     - `git merge-tree --write-tree --merge-base=be843ae1 12b8a10a 3d54cef8` gives the tree of `aade2672` (`13c4925f`);
+     - `git diff --raw 3d54cef8 aade2672` equals `git diff --raw be843ae1 12b8a10a`, old and new blob of 26 paths;
+     - every path of #80 (52), #81 (61), #83 (32) and #84 (7) equals main at `214ec79b`. #82's 16 paths that part B changes differ by exactly the reviewed part-B delta, and main equals `be843ae1` on each of them;
+     - main has moved in docs only since `3d54cef8`.
+  6. **Gitleaks** (v8.30.1 emulation, positive controls fire):
+     - the 447 added lines of fix cycle 3: 0;
+     - the merge's first-parent diff: one fingerprint, `aade2672…:docs/sdlc/DECISIONS.md:generic-api-key:7697`. That is PR080-SEC-07's false positive, baselined by PR #85 (D-DEVOPS-002).
+- **Method:** single-process Node 24.22.3 probes on `git archive` extracts of `214ec79b`, `aade2672` and `83a85739`, plus five scratch copies of the head (M1, M2, F, C, D). The real `createApp`, the branch's `FakeValkey` (direct, and with replies delivered per read), raw loopback sockets, jose ES256. No Docker, no Jest, no npm suite, nothing run in the part-B worktree, `.env*` not opened (no dot-env path in either commit's first-parent diff, by names).
+- **Binding:** the round's `Head` row names `214ec79bc583e6d9ea89e1a23e98909a3a97c3c4`. Main's checker ran in a shared sparse clone in the merge-ref form on main `3b807c24`: 12 of 12 scenarios as expected.
+  - S1 passes with 21 owned paths.
+  - The controls fail as they should: no record, rounds 1 and 2 only, a FAIL verdict, a head row naming `aade2672`, an owned change after the head, and a re-merge of a main that changed `policy.ts`.
+  - `--head aade2672` passes on round 2's `12b8a10a`, so the merge alone did not void round 2.
+- **Conditions (merge of part 041-B):**
+  - C1 and C3 are discharged.
+  - C2 stands. Lane B on `214ec79b` or the final merge head: H6, H7 to H10 and the rider rows (no retries, R4-n5), gitleaks-full. gitleaks-full shows the `aade2672` fingerprint until #85 is on main.
+  - C4 stands: the rename and the merge-ref check.
+  - A commit that touches an owned path before the merge needs a delta round of mine first. That covers R4-n1, R4-n3, R4-n4 and the PR041-SEC-17 guard.
+- **QG-041B-C4: discharged for the merge.** The threat-model half (R-13, T-11, T-39, T-93 against item 6) stays mine before G3, as D-QG-008 and D-QG-009 route it. The QG-041B-C2 text check is done: I concur except the "One more limit" sentence.
+- **Routed:**
+  - principal-architect: PR041-SEC-17. Choose guard C or D, or correct item 6 "One more limit of the form" and rulings 11.3.
+  - senior-developer: the guard and R4-n3, with the JSDoc sentence (R4-n4), at the next commit that touches `authn-failed.ts`, or with TASK-108 card line 22, before TASK-108 merges. Optional at TASK-052: the `Promise<void>` handler type.
+  - quality-gatekeeper: the closing entry for QG-041B-C4.
+  - Earlier routes stand.
+- **Reversibility:** High (a review record).
