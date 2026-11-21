@@ -9832,3 +9832,12 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - opening the PR;
   - PR040-SEC-11/12 (INFO) rows.
 - **Reversibility:** High.
+
+### D-ORCH-166 · 2026-11-21 · sdlc-orchestrator (session C) · Session C takes over from D-ORCH-163/165; reviews and product/gate follow-ups dispatched; PR040-SEC-13 owner
+- **State read:** main `2c6194e6`; lane B TASK-034 `3ee36f01` PASS, TASK-045 `c02dbf27` PASS, TASK-044 `33262314` running, main post-merge run queued (`run-live70.sh`, base `a3c0b1af`). The PR040-SEC-10 lease ruling is already in flight (D-ORCH-165), not re-dispatched; the 040-B and 041-B stacked merges and D-SECPOST-01 are still with session B's agents.
+- **Dispatched (read-only rounds, no heavy commands):** code review round 2 and security round 1 on TASK-034 `3ee36f01`; code delta review on TASK-045 `3168c194..c02dbf27` (head `77326dc5` = evidence only), with a rate-limit exposure list for the merge with #82; merge-only code and security rounds on TASK-044 `33262314`.
+- **Dispatched (docs):** product-manager: the D-PM for QG-041B-C3 from D-ARCH-231 texts, and landing of the held D-PM-088/089 story texts and map rows (QG-044-C2 (f)); it also identifies the unowned uncommitted EPIC-04/06/10/16 edits found in the main checkout. quality-gatekeeper: closing entry for QG-041B-C1/C2.
+- **PR040-SEC-13 owner (INFO, stale `IDEMPOTENCY_BODY_KEY` text in `packages/config`):** senior-developer, fixed in part 040-B's second pull request (it already touches the idempotency configuration), due before G3; tracked on the TASK-040 card at the next fold.
+- **Commit discipline for concurrent agents:** pathspec commits on main only; agents do not push; the orchestrator pushes docs commits in a lane-B-quiet window.
+- **Build slots:** both are held by the 040-B and 041-B stacked merges; TASK-298, TASK-278 and part 045-C start as they free. TASK-045 merge with main + `npm ci` + lane B goes to senior-developer with the first free slot.
+- **Reversibility:** High.
