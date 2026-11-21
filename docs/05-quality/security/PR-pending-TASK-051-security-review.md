@@ -274,3 +274,184 @@ The operator-grant half (migration 2, O1-O6, the grant pins) carries no open fin
 | Field | Value |
 |---|---|
 | Verdict | PASS_WITH_CONDITIONS. No Critical, High or Medium finding. Conditions C1 to C7. LOW PR051-SEC-01 (condition C1), LOW PR051-SEC-02 and LOW latent PR051-SEC-03 routed; INFO PR051-SEC-04 and -05 routed. PR65-SEC-02 (b) and PR65-SEC-04 (a) close with this migration |
+
+---
+
+# Round 2: delta for fix cycle 1 and the v2 supersede, head `39cac6e5` on `feat/TASK-051-guest-capable-tables-atomic-claim-v2` (2026-11-21)
+
+This round meets condition C5 of round 1 and the security half of QG-051-C4 (D-QG-005). It covers three steps:
+
+- **Fix cycle 1 on the old branch, `203d02eb..a79facce`:**
+  - `9d483b21`: C16 rules B1 and B2, the both-owner key and T2-O entries (D-ARCH-207 to D-ARCH-209; PR051-SEC-01);
+  - `4e264a3b`: the operator rule on UPDATE and case O7 (D-ARCH-214; PR051-SEC-03);
+  - `90f23f93`: C2 and C6 at `23001`, the four-combination pin and the three-token tripwire (D-ARCH-211, D-ARCH-212), and the AT-US-080-03 set;
+  - `a79facce`: the same-organisation race rounds with their predicate control (PR051-SEC-02 (a)), the template pin (R1-m2) and the reworded comment (L-2).
+- **The supersede `c1c8a6ec`:** one squash commit on main `530629f4`, on the new branch.
+- **`39cac6e5`:** `[SEC-TC-79]` and `[SEC-TC-80]` in test titles only (code review R2-m1).
+
+The old branch keeps its commits, unpushed, as the archive of the reviewed SHAs. No ref was moved, and nothing was pushed or force-pushed. The developer decisions D-TASK051-10 to -15 are in the commit bodies (accepted by reference, D-ORCH-149).
+
+| Field | Value |
+|---|---|
+| Head | 39cac6e5f86d0f50332770e7bdac819b893a958a |
+| What was reviewed | The code delta `203d02eb..a79facce` (14 files) in full. The supersede `c1c8a6ec` by tree equality (R2.1). The titles commit `39cac6e5` by a normalised comparison (R2.1) |
+| Merge base with main | `530629f4`, the parent of `c1c8a6ec`. When this round was written, origin/main was `7f8731dd` and local main was `530bf62f`, two unpushed documents commits of other agents ahead. `530629f4..530bf62f` (34 commits) changes no path outside `docs/` and `.claude/`. `git merge-tree --write-tree` of `39cac6e5` with either tip is clean. No `feat/TASK-051*` ref exists on the remote |
+| Owned paths changed | 21, as main's checker counts them (`--base 530629f4 --head 39cac6e5 --pr 9999`, no record: `missing`; the same 21 with `--base` the main tip). They are the 20 of round 1 plus `prisma/sql/policy-templates/guest-capable-guard-function.sql` (template header, R1-m2). Not owned, as before: `packages/shared/src/classification/registry.ts` and `tools/repo/refused-reference-answer.test.ts`. The classifier (`tools/ci/security-paths.mjs`) gives `security_paths=true` (19 paths), so the hosted `security-integration` job runs on the PR |
+| Lane B evidence | **None for this head yet**; the final run on `39cac6e5` is queued.<br>- The run on `c1c8a6ec` (`20261121T0518Z_c1c8a6e`) is VOID: a Prisma spawn timed out under host load in one integration file, `c16-tenant-keys.int`. See `../.orch/laneb-queue/queue.log`.<br>- I read only the queue log and the lane B log. In that log, 1 of 44 integration files failed: that file, 15 tests. The `generated` project passed 162 of 162. The queue note says the race file was among them and the catalog copy of C16 passed 121 of 121.<br>- This agrees with the probes below. It is not credited |
+| Method | - Git plumbing from the main checkout.<br>- `git archive` extracts of `39cac6e5` and `203d02eb` in the session scratchpad.<br>- PGlite 0.4.3 (PostgreSQL 17.5): bootstrap files 00 to 02, then all 9 migrations as `platform_migrator`, statement by statement, as the runners apply them.<br>- The head's own modules, type-stripped: `tenant-keys.ts`, `guest-claim-probe.ts`, `table-classes.ts`, `lint-migrations.ts`, with the production `CONTEXT_STATEMENT_SQL`.<br>- **Positive controls:** the round-1 rules and the round-1 function text.<br>- The gitleaks v8.30.1 emulation of round 1, which has no digit check.<br>- Main's real `check-security-owned-paths.mjs` in a sparse shared clone.<br>- **Not used:** Docker, PostgreSQL 18, Jest, the TASK-051 worktree |
+
+## R2.1 Supersede: the code reviewed is the code of this head
+
+| Check | Result |
+|---|---|
+| `tree(c1c8a6ec)` against `git merge-tree --write-tree a79facce 530629f4` | **Equal**: `6cc1ca4b` for both, exit 0 |
+| Shape | `530629f4..39cac6e5` holds 2 commits and no merge. `c1c8a6ec` has the one parent `530629f4`, and `39cac6e5` has the one parent `c1c8a6ec` |
+| The net diff | **Identical, ignoring `index` lines:** `git diff e245e6e6 a79facce` (the old branch against its base) equals `git diff 530629f4 c1c8a6ec` (2,955 lines). The file sets are equal (23 files). `e245e6e6..530629f4` touches none of them, and no path outside `docs/` and `.claude/` |
+| `c1c8a6ec..39cac6e5` | **Titles only:**<br>- Two files: `organisations.int.test.ts` and `guest-claim.int.test.ts`.<br>- **Comparison method:** remove the two tags, all white space and the trailing commas before `)` (the Prettier re-wrap of two `it.each` calls). Both files are then equal to the `c1c8a6ec` text.<br>- **Controls:** without removing the tags, the texts differ; a one-token change in a test body also differs.<br>- `[SEC-TC-79]` is on the O1 to O6 title. `[SEC-TC-80]` is on 16 titles: G1-G6, G7, T1-T5, S1-S4, R1-R3, R4, C1 to C6, the 16 de-claim cases, the legitimate claim, AT-US-080-02 and AT-US-080-06. That is the list of round-1 §7 |
+
+So round 1 and the delta review below hold for `39cac6e5` unchanged.
+
+## R2.2 Delta: what changed and what I verified
+
+| Item | Result |
+|---|---|
+| **PR051-SEC-01, C16 (b) rules B1 and B2** (`9d483b21`; D-ARCH-208) | - `TENANT_UNIQUE_INDEXES_SQL` (`tenant-keys.ts:306-326`) returns `nulls_not_distinct`, and for each owner key column `not_null` and `equality` (btree strategy 3 through `pg_amop`, `conexclop` by key position).<br>- `ownerColumnDefects` decides. A missing operator fact counts as "not equality", so it fails closed. An exception applies only to an index with no owner key column at all.<br>- **P8 (B), planted lists:** every planted list of the head gives exactly its expected findings. Arm (a): 9 keys, with `c16_g_both_parent`. Arm (b) TENANT: 4 indexes, with `c16_ex_org_ne_code`. Arm (b) GUEST_CAPABLE: 6 indexes, with both NULLS NOT DISTINCT shapes and `org_id WITH <>`. **The round-1 rules on the same rows** report 3 of the 4 TENANT and 3 of the 6 GUEST_CAPABLE indexes: they miss every shape of PR051-SEC-01.<br>- **P8 (A), committed schema:** both arms report 0 findings and 0 exception findings (scope: 4 tables) |
+| **P8 (C): behaviour against classification on `gc_quotes`** | **Setup.** Committed rows: guest H2 and organisation A each hold `X`. Then guest H1 and organisation B insert `X` and `Y`, as `platform_app` with the production context statement. A "channel" means `X` and `Y` get different answers.<br>**The head reports every shape that opens a channel:**<br>- `(org_id, code) NULLS NOT DISTINCT`: guest `23505`;<br>- `(guest_token_hash, code) NULLS NOT DISTINCT`: organisation `23505`;<br>- `EXCLUDE gist (org_id WITH <>, code WITH =)`: organisation `23P01`;<br>- `EXCLUDE gist (guest_token_hash WITH <>, code WITH =)`: guest `23P01`;<br>- `(COALESCE(org_id, <zero uuid>), code)`: guest `23505`.<br>The round-1 rule misses the first four.<br>**Reported with no channel (fail closed):** `NULLS NOT DISTINCT (org_id, guest_token_hash, code)`, as D-ARCH-208 item 6 rules, and a partial NULLS NOT DISTINCT index `WHERE org_id IS NOT NULL`, the stated "predicates are not compared" limit.<br>**Passed with no channel:** `(org_id, code)`; `EXCLUDE (org_id WITH =, code WITH =)`; `EXCLUDE (org_id WITH =, guest_token_hash WITH <>, code WITH =)`; `EXCLUDE (org_id WITH =, code WITH <>)`.<br>`UNIQUE (code) INCLUDE (org_id)` could not be built over the seed rows; the planted `c16_ux_code_include` covers it.<br>**Result:** no shape opens a channel that the head passes |
+| **C16 (a): both-owner key and T2-O entries** (`9d483b21`; D-ARCH-207, D-ARCH-209) | - `violationKind` reports a key that holds both owner columns as `both-owners` and never takes it as a sibling.<br>- `exceptionDefect` requires all of: kind `org-only`; exactly one other referencing column; the named constraint on the referencing table; `contype c`; `convalidated`; the exact printed predicate.<br>- Code review round 2 probed the CHECK variants (dropped, `OR org_id IS NULL`, `NOT VALID`, `NO INHERIT`, a rewritten predicate) and found that each fails closed.<br>- **One gap in how an entry is matched to its column:** PR051-SEC-06 (R2.4) |
+| **PR051-SEC-03, the operator rule on UPDATE** (`4e264a3b`; D-ARCH-214) | - The migration equals the fenced block of rulings §3.4 item 1 byte for byte (indent stripped, 3,867 bytes). Its clause (`migration.sql:53-56`) is the one round 1 proposed. `down.sql` and the guard migration are unchanged since `203d02eb`.<br>- **Migration linter:** 0 findings on the head; the controls (guard made `SECURITY DEFINER`, manifest entry removed) give 2.<br>- **P9, every case as `platform_app` with the production context:**<br>&nbsp;&nbsp;- A SUSPENDED operator membership without a grant is set ACTIVE by another operator-context session: `P0001 … needs a staff grant`, and the member still sees 1 organisation.<br>&nbsp;&nbsp;- **Control, the round-1 function text replaced in the transaction:** `ok`, and the member sees 3 organisations.<br>&nbsp;&nbsp;- The same is refused through `INSERT … ON CONFLICT (id) DO UPDATE`, through `MERGE … WHEN MATCHED THEN UPDATE`, for `INVITED → ACTIVE`, and when the member reactivates itself.<br>&nbsp;&nbsp;- A granted member: `ok`, sees 3. A customer membership: `ok`.<br>&nbsp;&nbsp;- `ACTIVE → SUSPENDED` and `SUSPENDED → REMOVED` without a grant: `ok`, so offboarding is never blocked.<br>&nbsp;&nbsp;- `user_id` and `org_id` changes stay refused (`user_id cannot change`; a move into the operator organisation touches 0 rows).<br>&nbsp;&nbsp;- `ACTIVE → ACTIVE` without a grant: `ok`. This is the residual D-ARCH-214 states (deleting a grant does not end an ACTIVE membership; binding on the M2 amendment).<br>- **Trigger and function:** `AFTER INSERT OR UPDATE OF user_id, org_id, status`; the function is owned by `platform_migrator`, not definer, `search_path=pg_catalog, pg_temp`, EXECUTE for the owner only. After `down.sql` the body holds neither the grant rule nor the INVITED rule, which is the `20261117000000` body.<br>- O7 (`cases.ts:795`, `organisations.int.test.ts:316`) is the round-1 verification case. Code review round 2 killed its mutant on PGlite |
+| **PR051-SEC-02 (a), same-organisation race rounds** (`a79facce`; D-TASK051-14) | - Two rounds in `guest-claim-race.int.test.ts:264-277`: two users of A, and one user twice. The lock wait is asserted through `pg_stat_activity`. The loser commits when its claim touched a row. The claim record must keep the winner and the token digest.<br>- **The control (`:279-286`)** runs `CLAIM_WITHOUT_PREDICATE_SQL` (`:146`). It also asserts that `CLAIM_SQL` holds the predicate 4 times: the quote and the three children.<br>- **P10, a sequential replay on PGlite** (one connection; it equals what the blocked UPDATE re-evaluates under READ COMMITTED). The real statement gives 1 then 0, and the claim record is kept. The test's mutant gives 1 then 1 for two users of A and for the same user twice: `claimed_from_token_hash` becomes NULL, and for two users the claimant is overwritten. For A then B, the mutant gives 1 then 0, the same as the real statement. So only the new rounds see the predicate.<br>- The concurrent run is lane B's (C4). Part (b) is the TASK-146 card line REAL CLAIM STATEMENT IN SEC-TC-07 (D-SD-011) |
+| **C2 and C6 at `23001`; the D-ARCH-212 pins** (`90f23f93`) | - Only the two expectations, their titles and the header changed, citing D-ARCH-211. C3 stays `23503`.<br>- `map-db-error.test.ts` runs 2 SQLSTATEs × 2 Prisma codes, and asserts that the answers differ in `sqlState` only.<br>- `FK_CODE` carries three tokens, with positive and negative controls for each.<br>- **`git grep -P` with the tripwire pattern at the head:** no file under `apps/` or `packages/` names `P2003`, `23503` or `23001`, other than `map-db-error.*`. The timestamp `…20.123001Z` is not matched (digit lookbehind).<br>- No product code changed. The `sqlState` stays out of the client body (round 1, §4) |
+| **Template pin and header** (`a79facce`; R1-m2, part of PR051-SEC-04) | - `guest-claim-probe.test.ts` asserts three things: the guard migration contains `renderGuestCapableGuardFunction()` verbatim; it has one `CREATE FUNCTION`; and nothing remains besides comments.<br>- The template header says that a change needs a new migration.<br>- The code review's mutant run killed the pin. I read it and did not re-run it |
+| **AT-US-080-03 set** (`90f23f93`; D-TASK051-13) | Read. The set of nullable `org_id` roots is compared in both directions with GUEST_CAPABLE and a listed SYSTEM table. A union merge that adds a nullable `org_id` table now fails unless that table is flagged. No security objection |
+
+Not run by me: anything on PostgreSQL 18, the two-connection race, Jest, lint, typecheck. Code review round 2 ran the unit suites, lint, format and `tsc -b` on a `c1c8a6ec` extract, all clean, and `39cac6e5` changes only titles. Lane B on `39cac6e5` is the PostgreSQL 18 evidence (C4).
+
+## R2.3 Status of the round-1 findings at `39cac6e5`
+
+| ID | Status |
+|---|---|
+| PR051-SEC-01 (LOW) | **Closed in code.** Rules B1 and B2 are enforced on TENANT and GUEST_CAPABLE tables, the exclusion half included, as round 1 asked (no "stated limit"). The planted probes, fixtures and header are in place. P8 shows every channel shape reported and the round-1 rule missing them. PostgreSQL 18 proof: lane B (C4) |
+| PR051-SEC-02 (LOW) | **(a) closed in code** (the same-organisation rounds and the predicate control; P10). The concurrent proof on PostgreSQL 18 is lane B's (C4). **(b) open on TASK-146**, as its card line REAL CLAIM STATEMENT IN SEC-TC-07 says. It is not a TASK-051 item |
+| PR051-SEC-03 (LOW, latent) | **Closed in code** (D-ARCH-214, ADR-0005 amendment 15 item 39; O7; P9). **Residual, stated and bound:** a member who is ACTIVE when the grant is deleted stays an operator. The M2 amendment of rulings §3.3 item 4 ties grant deletion to the membership. Until M2 only the migrator lane deletes grants |
+| PR051-SEC-04 (INFO) | **The single-source half is closed** (the template pin). **The trigger-order half is open on TASK-087**, as card line OWNER COLUMN ASSIGNER (D-SD-011): a catalog check that reports a BEFORE UPDATE trigger assigning `org_id` or `guest_token_hash` on a GUEST_CAPABLE table |
+| PR051-SEC-05 (INFO) | **Open on TASK-089**, as card line STAFF GRANT READS (D-SD-011); the M2 admin design follows |
+| L-2 (gitleaks false positive, condition C3) | **Closed in the PR's history** (R2.5). The real-image proof is gitleaks-full in lane B on `39cac6e5` (C4) |
+
+PR65-SEC-02 (b) and PR65-SEC-04 (a) close when this migration merges, as round 1 said; P9 adds the UPDATE half. PR7-SEC-04, PR7-SEC-12 (d) and PR7-SEC-13 are unchanged from round 1 §5.
+
+## R2.4 New finding
+
+| ID | Title | Severity | CWE | OWASP | File:line | Owner / due |
+|---|---|---|---|---|---|---|
+| PR051-SEC-06 | A T2-O exception entry is matched to its referencing column by splitting the `rest` text on `=` and `,`, so a column name that contains `=` lets a CHECK on another column hide the key | INFO | CWE-1023 | A01 | `prisma/tests/catalog/tenant-keys.ts:122` (`rest` as joined text), `:223-226` (`soleRestColumn`), `:239`; the same text is the sibling key at `:191` | TASK-298, which owns these files and merges before TASK-087 opens its PR. TASK-087 writes the first entry (`fk_quotes__requote_of_quote_id`) |
+
+**PR051-SEC-06 (INFO): the entry check parses identifiers out of joined text.**
+
+- **What.**
+  - `TENANT_REFERENCES_SQL` builds `rest` as the text `child=parent,child=parent`.
+  - `soleRestColumn` takes everything before the first `=` as the referencing column.
+  - `exceptionDefect` then compares the named CHECK with `orgOnlyCheckDefinition(<that prefix>)`.
+  - PostgreSQL identifiers may hold `=` and `,` when quoted, and the migration linter does not restrict column names.
+- **Probe P8 (D).**
+  - **The plant:** `c16_g_eq` with the columns `a` and `"a=x"`; the CHECK `a IS NULL OR org_id IS NOT NULL`; and the key `(org_id, "a=x") → c16_gparent (org_id, id)`.
+  - **What C16 reads:** `rest` is `a=x=id`.
+  - **The gate is silent:** an exception entry that names the key and the CHECK hides it, and `referenceExceptionFindings` reports nothing.
+  - **The hole is real:** a guest row (`org_id` NULL) whose `"a=x"` names organisation A's parent is accepted (`ok`), because MATCH SIMPLE skips the key and the CHECK constrains `a`.
+  - **Control:** the same entry shape on a table whose CHECK is on the real column `b` refuses the guest row (`23514`).
+- **Exploitability.** Not reachable today: the exception map is empty until TASK-087. It needs both of these:
+  - a migration that quotes a column name containing `=`;
+  - an exception entry, which needs a principal-architect ruling, that names a CHECK on a different column.
+
+  Neither is a plausible mistake. The gate exists to catch mistakes, so this is INFO.
+- **Same construction elsewhere (reasoning, not probed).** The sibling comparison (`other.rest === row.rest`) compares the same text. So `a → "b=c"` and `"a=b" → c` would give equal `rest` values for different column pairs.
+- **Fix (code-level, TASK-298).**
+  - Return the pairs as structured data instead of joined text: `jsonb_agg(jsonb_build_array(ka.attname, kp.attname) ORDER BY k.n)`, or two `text[]` columns.
+  - Compare the arrays for siblings.
+  - `soleRestColumn` returns the referencing name of a one-element array.
+  - Plant `c16_g_eq` with an entry; it must be reported together with the entry.
+
+## R2.5 Gitleaks: the PR range holds no finding (condition C3)
+
+**The emulator.** The round-1 emulator `gl-nodigit`: gitleaks v8.30.1 git mode, `-U0 --diff-merges=first-parent`. Each hunk's added lines form one fragment. It has no digit check, uses `regexTarget` allowlists and stopwords, and takes the repository's `.gitleaks.toml` from main.
+
+**Controls.**
+- The runtime controls fire (1, 1, 0 as expected).
+- Main's `.gitleaks.toml` and `tools/quality/gitleaks-baseline.txt` are unchanged since `530629f4`.
+
+| Range | Added lines | Findings |
+|---|---|---|
+| `e245e6e6..a79facce` (old branch, control) | 2,723 | **1**: `b34f954e:prisma/tests/catalog/tenant-keys.ts:generic-api-key:75`, the lane B fingerprint of round 1 |
+| `203d02eb..a79facce` (fix cycle; includes the reword) | 877 | 0 |
+| `530629f4..39cac6e5` (lane A's PR range: event base = merge base) | 2,553 | **0** |
+| Whole ancestry of `39cac6e5` (what gitleaks-full scans) | 1,459,308 | **17, exactly the 17 fingerprints of `gitleaks-baseline.txt`** (`comm`: none extra, none missing) |
+
+**What this means:**
+- **Lane A** is clean.
+- **Lane B and lane C** (gitleaks-full) see the baseline only, because `b34f954e` is not an ancestor of the v2 head.
+- The baseline and `.gitleaks.toml` stay unchanged.
+
+**What is still owed:** this is an emulation. The real image's gitleaks-full on `39cac6e5` is part of C4. No values were printed.
+
+## R2.6 Items routed to security-analyst
+
+| Item | Answer |
+|---|---|
+| **Does O7 join SEC-TC-79?** (D-ARCH-214; QG-051-C4; code review R2-m1) | **Yes.** O7 is the UPDATE half of the same control: an operator membership is ACTIVE only with a staff grant (ADR-0005 amendment 15 item 39). The SEC-TC-79 case text becomes O1 to O7. Add to it: "an operator membership that becomes ACTIVE by UPDATE, ON CONFLICT DO UPDATE or MERGE without a grant is refused, and offboarding to SUSPENDED or REMOVED needs none".<br>**The `[SEC-TC-79]` tag on the O7 title is a follow-up, not a merge condition:**<br>- SEC-TC-79 is already carried by a passing test (O1 to O6), so qa-lead's manifest commit after merge is not blocked.<br>- What the missing tag loses is the evidence rule that no SEC-TC case may be skipped. `integration` is not a zero-skip suite, so until the tag lands, a skipped O7 would go unnoticed.<br>- Adding the tag now would change an owned path after this head and void this record (R2.8 C5).<br>- **Owner:** the next commit that changes `prisma/tests/organisations/organisations.int.test.ts`, or a titles-only commit by senior-developer. **Due:** before G3, where D-QG-005 looks for O7 |
+| SEC-TC-80 | Carried as round 1 §7 listed it (R2.1). qa-lead puts SEC-TC-79 and -80 into `integration.required_cases` in the manifest commit after merge (D-SEC-PR47-01) |
+| SEC-TC-79, -80 and -81 catalogue rows, and the T-35 wording | **Mine**, in the next threat-model revision before G3: the rows go into the SEC-TC table of `threat-model.md`. T-35 cites the grant as what protects the operator membership, and the grant-deletion residual of D-ARCH-214 |
+| D-ARCH-216 (QG-051-C6): a constraint counts only while it is enforced and validated | **Concur.** It is the reference-side twin of PR051-SEC-01. Reading `conenforced` and `convalidated` in the catalog covers `ALTER CONSTRAINT` and dynamic SQL, which a linter token rule would miss. The planted probes of arms (c) and (d) join **SEC-TC-76**: TASK-298 tags them `[SEC-TC-76]`, like the other C16 plants. I did not run them: `conenforced` does not exist on PostgreSQL 17, and I used no PostgreSQL 18 |
+| D-ARCH-215 arm (d): every foreign key is `RESTRICT` on both actions | **Concur** (read, not executed). PostgreSQL runs a referential action as the owner of the referencing table with row security not forced. A `CASCADE` or `SET NULL` key would therefore rewrite rows past the policies, the standard-columns guard and the audit trail |
+
+## R2.7 Conditions (these replace C1 to C7 of round 1)
+
+| Round-1 condition | Status at `39cac6e5` |
+|---|---|
+| C1 (PR051-SEC-01) | **Closed** (R2.2, R2.3) |
+| C2 (`23001`) | **Closed in code:** D-ARCH-211 amends rulings §2.7; `90f23f93` cites it; the four-combination pin is in place. PostgreSQL 18 proof: C4 |
+| C3 (gitleaks) | **Closed in the history** (R2.5). The real-image proof is in C4 |
+| C4 (lane B) | **Open.** See below |
+| C5 (delta and supersede rounds) | **Closed by this round** for `39cac6e5`. It stays in force for later changes (see below) |
+| C6 (card lines, SEC-TC-81) | **Closed** by D-SD-011 (`41bcb54a`), which carries the TASK-091 dispatch gate (QG-051-C5) |
+| C7 (rename) | **Open.** See below |
+
+**Open conditions for merge:**
+
+- **C4.** Lane B green on PostgreSQL 18 at `39cac6e5`, with `git_dirty` false. Triage is not evidence. It must show:
+  - `guest-claim.int.test.ts`: every case, C2 and C6 at `23001` and C3 at `23503`, the 16 de-claim cases, and AT-US-080-01 to -07;
+  - `organisations.int.test.ts`: O1 to O7 and every TASK-037 block;
+  - `c16-tenant-keys.int.test.ts`, in its integration copy and its catalog copy: the planted lists of `tenant-keys.ts` (the six D-ARCH-208 probes, `c16_g_both`), the four T2-O cases and the printed CHECK text;
+  - `tests/generated/rls/guest-claim-race.int.test.ts` through `rls-cross-tenant`: the cross-organisation race, the 5 rounds, both same-organisation rounds and the predicate control;
+  - `up-down-up`, `shadow-init`, `seed`, the generated RLS suite, and catalog C1 to C16;
+  - `tools/quality/gitleaks-full.int.test.ts`, clean against the unchanged 17-line baseline.
+
+  An answer on PostgreSQL 18 that differs from rulings §2.7 or §8 goes back to principal-architect, unadapted. The §8.3 definition text is the one exception.
+- **C7.** Rename this record on main for the v2 PR, as `PR-<NNNN>-TASK-051-security-review.md` (D-ORCH-136, D-ORCH-138). Then confirm that the merge ref contains it.
+- **C8 (new).** The hosted `security-integration` job is green on the PR's first `pull_request` event.
+- **C5, as it stands.**
+  - A change of an owned path after `39cac6e5` needs a new round. That includes the O7 tag of R2.6 if it is taken in this PR.
+  - A union merge of main that touches `prisma/sql/grants.manifest`, `tools/db/grants-manifest.test.ts` or `prisma/tests/rls/tenant-db.real-client.test.ts` needs a merge-only round. TASK-040, TASK-043 and TASK-080 touch them.
+  - Documents-only commits and lane B evidence commits keep the binding.
+
+**Follow-ups, not merge conditions:**
+- PR051-SEC-02 (b): TASK-146.
+- PR051-SEC-04: TASK-087.
+- PR051-SEC-05: TASK-089.
+- PR051-SEC-06: TASK-298.
+- The O7 tag: before G3.
+- The SEC-TC catalogue rows and T-35: mine, before G3.
+
+## R2.8 Record binding and simulation
+
+- **Binding.** This round binds the 21 owned paths of `530629f4...39cac6e5` to head `39cac6e5f86d0f50332770e7bdac819b893a958a`.
+  - The round-1 Head row (`203d02eb`) names a commit outside the v2 range. Main's checker skips such a row, so this round's row is the only one that can satisfy it.
+  - Without this round, the result is `missing` ("its head row names no commit of this PR").
+- **Simulation.** Main's real checker at `530bf62f`, in a sparse shared clone.
+  - **Setup:** the record, rounds 1 and 2, committed as `PR-9999-TASK-051-security-review.md` on a main-tip commit; that commit merged with the PR head through `git merge-tree` and `commit-tree`; the checker run with `--pr 9999`.
+  - **Record shape:** two Head rows (`203d02eb`, `39cac6e5`) and two Verdict rows; the last Verdict row is this round's.
+  - **Results: 14 of 14 as expected, each counting 21 owned paths.**
+    - **Pass, satisfied by `39cac6e5`:** the record merged with the head, with `--base` the merge base `530629f4` and with `--base` the main tip; a documents-only evidence commit after the head; an edit of the unowned `registry.ts` after the head; the branch merging a documents-only main.
+    - **Missing:** no record; the round-1 record alone (its Head row `203d02eb` is outside the v2 range); the pending name only; a later FAIL verdict row; the Head row naming a main commit; the round-2 Head row naming `c1c8a6ec` (the titles changed after it); an owned `tenant-keys.ts` edit after the head; the O7 tag added to `organisations.int.test.ts` after the head; the branch merging a main that also appended to `grants.manifest` (a union merge).
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 (delta for fix cycle 1, and the supersede) at `39cac6e5` on `feat/TASK-051-guest-capable-tables-atomic-claim-v2`.<br>- **Supersede:** the tree of `c1c8a6ec` is the merge of the reviewed `a79facce` with main (`6cc1ca4b`), and `39cac6e5` changes test titles only.<br>- **Findings:** 0 Critical, 0 High, 0 Medium.<br>- **Closed:** PR051-SEC-01, PR051-SEC-02 (a), PR051-SEC-03, the single-source half of PR051-SEC-04, and L-2 in the history.<br>- **Open and routed:** PR051-SEC-02 (b) to TASK-146, PR051-SEC-04 to TASK-087, PR051-SEC-05 to TASK-089.<br>- **New:** PR051-SEC-06 (INFO), routed to TASK-298.<br>- **SEC-TC-79:** O7 joins it. Its title tag is a follow-up, due before G3.<br>- **Gitleaks:** the emulation finds 0 in `530629f4..39cac6e5`, and the head's ancestry gives exactly the 17-line baseline.<br>- **Conditions for merge:**<br>&nbsp;&nbsp;- C4: lane B green on PostgreSQL 18 at `39cac6e5`, gitleaks-full included;<br>&nbsp;&nbsp;- C7: the rename and the merge-ref check;<br>&nbsp;&nbsp;- C8: the hosted `security-integration` job |
