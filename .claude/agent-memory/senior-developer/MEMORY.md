@@ -53,3 +53,5 @@
 - [TASK-043 resume triage](feedback_task043_resume_triage.md) — up-down-up runs twice per lane B run (cross-suite load proof), pg client.js:170 = connect timeout
 - [TASK-080 resume](feedback_task080_resume.md) — new table/model ripples (TenantDb pin, grants pins), prisma test import limits, parseDecimal exponents
 - [TASK-051 guest claim](feedback_task051_guest_claim.md) — shared probe modules in prisma/tests/harness, suite placement for pending SEC-TC, sibling self-match trap
+- [TASK-042 i18n](feedback_task042_i18n.md) — i18next usedLng-on-miss, JSON import attributes, isolateModules+React, lint-lock checker as lint step
+- [TASK-045 pagination](feedback_task045_pagination.md) — apps/api int tests can't import prisma harness; .binding lint, app.* literal lint, stray tsc emits, shared $ref
