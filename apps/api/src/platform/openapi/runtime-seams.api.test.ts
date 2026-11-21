@@ -7,6 +7,7 @@ import request from 'supertest';
 import { createApp } from '../../app.js';
 import { resolveApiMode, type ApiMode } from '../context/api-mode.js';
 import { currentRequestContext } from '../context/request-context.js';
+import { DEFAULT_RATE_LIMIT_SETTINGS } from '../rate-limit/tests/settings.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 
 function app(apiMode?: ApiMode) {
@@ -31,6 +32,8 @@ function app(apiMode?: ApiMode) {
     health,
     modules: [{ name: 'fixtures', routes: fixtures }],
     logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+    // A live composition needs the rate limiters (PR041-SEC-08); the others do not.
+    ...(apiMode === 'live' ? { rateLimit: { settings: DEFAULT_RATE_LIMIT_SETTINGS } } : {}),
     ...(apiMode === undefined ? {} : { apiMode }),
   });
 }

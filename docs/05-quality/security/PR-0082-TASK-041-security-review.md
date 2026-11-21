@@ -413,3 +413,216 @@ D-QG-001 asks for explicit concurrence or findings on items 2, 3, 5, 6 and 9 in 
 - Code review R2-n1 (README §13 wording) and R2-n2 (the default prefix argument): no security effect; I agree with both.
 
 | Verdict | **PASS_WITH_FOLLOW-UPS.** Round 2 (delta, part 041-A) at `3a6b4c8b`: 0 Critical, 0 High, 0 Medium. Closed: PR041-SEC-01, PR041-SEC-02 (a), PR041-SEC-05 (code), PR041-SEC-08. QG-041-C4 first half: concurrence on ADR-0016 amendment 12 items 2, 3, 5, 6 and 9; on item 4, concurrence with the `exp` pre-check under conditions E1-E5, and new PR041-SEC-09 LOW (the failed-authentication lock refuses every credentialed request of the IP, including returning browsers' sign-in), routed to principal-architect before part 041-B merges. Conditions: C1 lane B and hosted `security-integration` at the pushed head, C2 rename and merge-ref confirmation, C3 delta round only if a later commit touches owned paths, `app.ts`, `start-api.ts` or the configuration schema; the `.env.example` and evidence commits keep the binding |
+
+---
+
+# Round 3: merge-only review of part 041-A at `0614a90f` (2026-11-21)
+
+| Field | Value |
+|---|---|
+| Head | 0614a90f4964fde91af11ddd9af90acd2e41c7af |
+| Range since round 2 | `96eda1e1` (the user's `.env.example` commit, parent `3a6b4c8b`) and `0614a90f` (the orchestrator's automatic merge of `origin/main` `530629f4`; first parent `96eda1e1`, second parent `530629f4`). The branch is pushed at `0614a90f`; no PR exists yet |
+| Merge base with main | `530629f4` (`origin/main` at the time of the merge), which will be the event base. Main has moved since by docs-only commits. When this round was written, local main's tip was `a9bac01a` and `origin/main` was at `7f7dcf52`; neither changes a non-docs path after `530629f4` |
+| Owned paths changed | 27 (`--base 530629f4 --head 0614a90f`, main's checker). The set is identical to round 2's 27 (`--base 6ab40f28 --head 3a6b4c8b`). The PR now changes 41 paths: round 2's 40 plus `.env.example` |
+| Lane A / lane B evidence | None at review time. Hosted CI is blocked by billing (D-ORCH-146). Lane B on `0614a90f` is queued, with a fresh `npm ci` for the new lockfile (D-ORCH-148) |
+| Binding items checked | D-ORCH-148 (the user commit, the union, the gates); round-2 conditions C1-C3; D-ARCH-182 and D-PM-080 (PR041-SEC-09 ruled); main's `tools/ci/check-security-owned-paths.mjs` and `.github/CODEOWNERS` |
+| Reviewer / date | security-analyst, 2026-11-21, round 3 (merge-only). Method: git plumbing on the main checkout's object store and single-process Node 24 scripts. No Docker, npm, Jest or type-check. Nothing ran in any worktree. No `git archive` extract was needed, because every check below reads blobs and trees directly. **`.env.example` was not opened.** Its content was never read, diffed, printed or scanned. Only its name, mode and status were read, with `git show --name-only` and `git diff-tree --raw` |
+
+## R3.1 Summary
+
+The merge is a pure union, and the PR's change against main is the round-2 change plus one unowned file. No new finding.
+
+- **Union.** `git merge-tree --write-tree 96eda1e1 530629f4` gives tree `a70e30dd`, which is the tree of `0614a90f`, with no conflict. A three-way tree compare against the old merge base `6ab40f28` gives:
+  - The branch delta has 41 paths and main's delta has 397 (`--no-renames`). They overlap in two paths: `package-lock.json` and `docs/03-architecture/api/README.md`.
+  - The PR's view (`530629f4` to `0614a90f`) names exactly the 41 branch paths. What the merge brought (`96eda1e1` to `0614a90f`) names exactly the 397 main paths.
+  - 39 branch-only paths carry the branch blob. 395 main-only paths carry main's blob; six of these are record renames on main and are absent from both trees. No path outside the two deltas changed.
+- **`package-lock.json`** (leaf-level JSON delta):
+  - The PR's view has 7 leaves, equal to the branch delta. All 7 are removals of `rate-limit-redis`: the `apps/api` dependency, and the `node_modules` entry's version, resolved, integrity, license, engines and peer dependency. This is round 2's two-entry removal.
+  - The merge brought exactly main's 3 leaves (`effect` 3.20.0 to 3.22.4: version, resolved, integrity, TASK-295). Control: the two deltas differ from each other.
+  - At `0614a90f` the only `effect` entry is 3.22.4, and the string `rate-limit-redis` appears nowhere in the file. The root `overrides` keeps `@prisma/config` → `effect` 3.22.4.
+  - The 16 workspace manifests agree with their lockfile entries: 0 value mismatches at `0614a90f`, and 0 at `530629f4`.
+  - Nothing is added, so there is no new tuple to audit.
+- **`docs/03-architecture/api/README.md`.** The +/- lines of each side's delta are equal, as multisets, to what the PR shows and to what the merge brought: 11 lines on the branch side and 19 on main's side. Control: the two deltas differ.
+  - Per section: §7 (rate limiting) and §13 (security log events) equal the branch's text. §3, §5, §8 and §11 equal main's text.
+  - Neither side edited a section the other side edited. §7 keeps the TASK-041 text unchanged.
+- **Main's code does not reach this PR's code.** Main changed:
+  - the worker queues and jobs (TASK-039), carriers (TASK-079), pricing, shared money and units, UI tokens, and lint rules;
+  - `apps/api` only in `platform/db/system-models.ts` (`jobExecution` added to `SYSTEM_MODELS`) and its test;
+  - `packages/config` only by a new test, `carrier-environment.test.ts`;
+  - the root `package.json` (`tokens:build` and the `effect` override) and `eslint.config.mjs` (the carriers deep-import pattern and the `pricing-purity` block).
+
+  None of these changes names a rate-limit, trust-proxy, denial-budget, audit-capture or `authorise` symbol. The one `rl:` mention is an existing ACL test that writes `rl:acl-probe` as the api user. That is consistent with the `~rl:*` ACL this PR relies on. The type-check and the tests of the union belong to lane B (C1).
+- **Gitleaks emulation** (gitleaks v8.30.1 default rules, as pinned in `ci.yml`, plus the base `.gitleaks.toml` of `530629f4`; the faithful emulator described in the TASK-040 r3 and TASK-051 records):
+  - Scanned: the PR's 6 commits other than `96eda1e1` (`0d87b1a`, `56cf335`, `e6f484a`, `ba4d0aaa`, `3a6b4c8b`, `0614a90f`), with `--diff-merges=first-parent` as lane A scans them. Each merge's first-parent diff therefore includes the main text it brought.
+  - Result: 186,681 added lines and 0 findings. Without the repository allowlists it is also 0. The runtime positive controls gave 1, 1, 0 as expected.
+  - How `96eda1e1` was left out: its first-parent diff is the only one in `origin/main..0614a90f` that names a dot-env path, and main's delta names none. So excluding that one commit excludes the file, and no pathspec ever named it.
+  - Lane B's gitleaks-full covers the whole history, that commit included. Hosted lane A covers it within `base..head` once billing returns.
+- **The user's commit `96eda1e1`.**
+  - `git show --name-only --format= 96eda1e1` lists one path, `.env.example`. `git diff-tree --raw` gives `M`, mode 100644 on both sides.
+  - The path is not security-owned. Main's checker lists it among the PR's 41 changed paths but not among the 27 owned. CODEOWNERS owns `/compose.env` and the `compose*.yaml` files but no `.env*` pattern. `.github/CODEOWNERS` is unchanged on both sides since `6ab40f28`, so the base and head pattern sets are round 2's.
+  - On its own, the commit therefore kept the round-2 binding, as round 2 predicted (its S2).
+  - D-ORCH-148 states that the commit sets `TRUST_PROXY_HOPS=0`. That is the schema default (`schema.ts:287`) and the value PR041-SEC-05 recommended. The Compose runtime keeps one hop through the owned `compose.env` (line 23), which the commit does not touch. I did not verify the value myself.
+- **Why this round is needed.** `package-lock.json` is an owned path of this PR, and the merge changed it after `3a6b4c8b` (main's `effect` leaves). Main's checker compares every owned path of the PR between the named commit and the head, including paths that changed only through a merge. Of the paths changed between `3a6b4c8b` and `0614a90f`, the lockfile is the only owned one. Rounds 1 and 2 alone therefore no longer satisfy the check (S2 below).
+
+## R3.2 Findings at `0614a90f`
+
+No new finding. The merge changes nothing in the PR's code, so every round-2 state carries over, with one update:
+
+| ID | State |
+|---|---|
+| PR041-SEC-01, -02 (a), -05 (code), -08 | Closed (round 2); the PR's blobs are unchanged |
+| PR041-SEC-02 (b) | Open, part 041-B (D-ARCH-175, B1), due before TASK-052 is dispatched |
+| PR041-SEC-03 (INFO) | Ruled; HTTP-side fallback set (B4) checked in the 041-B round |
+| PR041-SEC-04, -07 (INFO) | Open with data-architect and devops, as in round 2 |
+| PR041-SEC-06 (INFO) | Open, mine, threat model §10.4 H before G3 |
+| PR041-SEC-09 (LOW) | **Ruled:** D-ARCH-182 adopts R1 (the refresh cookie selects the lock only on the three cookie routes, derived by `createApp` from route metadata) and R2 (i) (the lock stays for every credentialed request, with its true scope recorded, test B1 (10), TASK-214 alert); D-PM-080 marks the scope final (ADR-0016 amendment 13). It stays open until the part 041-B round verifies the implementation and B1 (10) |
+| E1-E5 | Card lines of TASK-052 and the B1 wrapper (D-ARCH-182 item 3); checked at the 041-B round and at TASK-052 |
+
+## R3.3 Record binding and simulation
+
+- **The binding.** This round's `Head` row names `0614a90f`.
+  - The round-2 row (`3a6b4c8b`) is voided by the lockfile change that the merge brought. The round-1 row (`e6f484a`) was already voided in round 2.
+  - The record now has three `Head` rows, one per round, and three `Verdict` rows. The last `Verdict` row is this round's.
+- **Later commits.**
+  - A lane-B evidence commit under `docs/05-quality/tests/runs/` keeps the binding.
+  - A later merge of main keeps the binding while main changes none of the 27 owned paths. When main changes one of them, the binding is voided and a merge-only round is needed (S9). Of the 27, `package-lock.json` is the path main is most likely to touch.
+
+**Simulation.** Main's real checker ran in a `--shared` sparse clone, so the main checkout was never checked out. Scenario commits were built with plumbing. This record (rounds 1 to 3) was placed as `PR-9999-TASK-041-security-review.md`, with `--pr 9999` and `--base 530629f4` unless a row says otherwise.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 Merge ref: rounds 1-3 committed on main (tip `a9bac01a`), merged with the head | pass | pass (`0614a90f`) |
+| S1b The same with `--base` set to the record commit on main | pass | pass (`0614a90f`) |
+| S2 Control: rounds 1 and 2 only (the record as on main before this round) | fail | fail (`missing`; note: `3a6b4c8` voided by `package-lock.json`) |
+| S3 Control: rounds 1-3 under the placeholder name only | fail | fail (`missing`) |
+| S4 Control: no record | fail | fail (`missing`) |
+| S5 Control: a later `FAIL` verdict row | fail | fail (`missing`, verdict `FAIL`) |
+| S6 Control: the round-3 `Head` row names `96eda1e1` (before the merge) | fail | fail (`missing`; `96eda1e` voided by `package-lock.json`) |
+| S7 Control: the round-3 `Head` row names main's `530629f4` | fail | fail (`missing`; not a commit of the PR) |
+| S8 Control: an owned path (`rate-limit/store.ts`) changed after the head | fail | fail (`missing`; `0614a90` voided by `store.ts`) |
+| S9 Control: a later merge of main where main changed `package-lock.json` (`--base` = that main commit) | fail | fail (`missing`; `0614a90` voided by `package-lock.json`) |
+| S10 A later merge of the docs-only main tip into the branch (`--base` = that tip) | pass | pass (`0614a90f`) |
+| S11 A lane-B evidence commit (`docs/05-quality/tests/runs/`) after the head | pass | pass (`0614a90f`) |
+| S12 An unowned path (`app.ts`) changed after the head | pass | pass (`0614a90f`; C3 asks for a delta round anyway) |
+
+13 of 13 as expected. In every scenario that passes, the checker's notes show both older rows as voided: `e6f484a` by the owned paths that the round-2 fix changed, and `3a6b4c8` by `package-lock.json` alone.
+
+Between `3a6b4c8b` and `0614a90f`, 398 paths changed (`--no-renames`: main's 397 plus `.env.example`). The only one of them that is an owned path of the PR is `package-lock.json`.
+
+S2 shows that rounds 1 and 2 alone no longer pass at this head. S9 shows that the same thing happens again if a later main merge changes the lockfile.
+
+## R3.4 Conditions and routes
+
+**Conditions (part 041-A).**
+- **C1.** Lane B at `0614a90f`, or at a later head that keeps this binding. It must include the fresh `npm ci` of the merged lockfile, the first real-Valkey run of `rate-limit.int.test.ts`, the api suites, the type-check of the union and gitleaks-full. Once billing returns (D-ORCH-146), hosted lane A and `security-integration` must be green at the PR head. Lane A's `base..head` Gitleaks covers `96eda1e1`, which this round left out.
+- **C2.** Rename this record and check the merge ref (D-ORCH-136/138), as in rounds 1 and 2.
+- **C3.** A delta round if a later commit on the branch changes an owned path, `app.ts`, `start-api.ts` or `packages/config/src/schema.ts`. A merge-only round if a later merge of main brings a change to one of the 27 owned paths (S9). An evidence commit or a docs-only main merge needs neither.
+
+**Routes.** Unchanged from round 2, except PR041-SEC-09, which is now ruled (R3.2). The part 041-B round (QG-041-C4 second half: items 4, 7 and 8, PR041-SEC-02 (b), PR041-SEC-09 and E1-E5) is due before TASK-052 is dispatched. My threat-model alignment (R-13, T-11, T-39, T-93 and PR041-SEC-06) is due before G3.
+
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 3 (merge-only, part 041-A) at `0614a90f`: 0 Critical, 0 High, 0 Medium, no new finding. The merge of `origin/main` `530629f4` is a pure union: the merge-tree equals the merge's tree; the lockfile keeps `effect` 3.22.4 and has no `rate-limit-redis`; its PR delta is exactly TASK-041's 7 removal leaves; README §7 keeps the TASK-041 text and main's edits sit in other sections. The user's `96eda1e1` changes only `.env.example`, which is not security-owned and was not opened. 27 owned paths, the same set as round 2. The emulated Gitleaks scan of the PR's other 6 commits has 0 findings. Binding simulated with main's checker, 13 of 13 scenarios as expected. Conditions: C1 lane B at `0614a90f` (then hosted lane A and `security-integration` once billing returns), C2 rename and merge-ref check, C3 delta or merge-only round if an owned path changes after `0614a90f`, including through a main merge |
+
+---
+
+# Round 4: merge-only review of part 041-A at `22f69a82`, the union with main `763800f3` (PR #80) (2026-11-21)
+
+| Field | Value |
+|---|---|
+| PR | #82, branch `feat/TASK-041-valkey-backed-rate-limiting-per`. Since round 3: `be843ae1` (lane-B evidence `20261121T0547Z_0614a90`, PASS, D-ORCH-150) and `22f69a82`, the coordinator's merge of `origin/main` `763800f3` (PR #80, TASK-040 part 040-A); first parent `be843ae1`, second parent `763800f3` (D-ORCH-161). The user squash-merged the PR as `61c53b5e` while this round was being written (D-ORCH-162), so this round is also the post-merge review of the #82 union that D-ORCH-162 (b) asks for |
+| Head | 22f69a82c8203f2db1c8be8111e70bfcbdf0d39e |
+| Merge base with main | `763800f3` after the union (round 3: `530629f4`). Main's tip was `3308474b` when the union was pushed and `cbdbd98e` when this round was written |
+| Owned paths changed | 27 (main's checker, `--base 763800f3 --head 22f69a82`). The list is identical to `--base 530629f4 --head be843ae1`, and to rounds 2 and 3 |
+| Lane A / lane B evidence | Lane B PASS at `0614a90f` (C1, D-ORCH-150). None at the union head. Hosted CI is refused (billing, D-ORCH-146). D-ORCH-162 (a) replaces both with one lane-B run on main `3c4d9a6d` |
+| Binding items checked | D-ORCH-161, D-ORCH-162, D-ORCH-163; round-3 conditions C1 to C3 (its S9 predicted this trigger); main's `tools/ci/check-security-owned-paths.mjs` and `.github/CODEOWNERS` at `3308474b` |
+| Reviewer / date | security-analyst, 2026-11-21, round 4 (merge-only). Method: git plumbing on the main checkout's object store, single-process Node 24 scripts, a `--shared` sparse clone for the binding, the gitleaks v8.30.1 emulation, and two registry tarballs of `express-rate-limit`. No Docker, npm, Jest, ESLint or type-check. Nothing ran in any worktree. **`.env.example` was not opened.** In this PR's range it appears only in round 3's `96eda1e1`. It was compared by blob id in `git diff --raw` listings, and the gitleaks scan left that commit out by commit selection. A slip outside this range is disclosed in R4.5 |
+
+## R4.1 Summary
+
+The union is pure, apart from the one named conflict. The conflict resolution is the union of both sides. The PR's change against main is the round-3 change, exactly. No new finding of this PR. The one gitleaks hit is main's text: PR080-SEC-07 in the PR #81 record (`PR-0081-TASK-080-security-review.md` R3.2).
+
+- **Union.** `git merge-tree --write-tree be843ae1 763800f3` gives tree `9f93f93f` with one conflict, `apps/api/src/platform/routing/pipeline-guards.test.ts`. The head's tree `767dce6c` differs from it in that path only.
+  - Three-way compare against `530629f4`: 47 branch-only paths carry the branch blob, 159 main-only paths carry main's blob, and 3,357 untouched paths are unchanged. There are 0 violations.
+  - Two paths changed on both sides: the conflicted test, and `package-lock.json`, which git merged without a conflict and which equals the merge-tree blob.
+- **The PR's delta is unchanged.** `763800f3..22f69a82` names the same 49 paths as the pre-merge `530629f4..be843ae1`.
+  - 47 paths have the same status, modes, old blob and new blob. `.env.example` is one of them, compared by blob id only.
+  - **`pipeline-guards.test.ts`.** The PR's lines are +8/−1 before and after the merge. What the merge brought equals main's +27/−3. Control: the two deltas differ.
+  - **`package-lock.json`, leaf-level JSON delta.** The PR's view has 7 leaves before and after: the 7 `rate-limit-redis` removal leaves of rounds 2 and 3.
+    - The merge brought exactly main's 24 leaves: #16's `@hookform/resolvers` 5.9.2 → 7.0.3 in `apps/web` and `apps/admin` (version, resolved, integrity and peer metadata), and the `@sinclair/typebox` dev flag. Control: the two deltas differ.
+    - At the head, `rate-limit-redis` appears nowhere, and `effect` is 3.22.4 only.
+  - What the merge brought (`be843ae1..22f69a82`) names exactly main's 161 paths. None of them is a dot-env path.
+- **The conflict resolution.**
+  - It keeps main's imports: `createBodyCipher`, `IdempotencyRouteError`, `createIdempotencyStore`, the three test keys, and `IdempotencyNotWiredError` from `../tx/execute.js`.
+  - It places the PR's `DEFAULT_RATE_LIMIT_SETTINGS` import between `../idempotency/tests/memory-keys.js` and `../tx/execute.js`.
+  - The PR's `rateLimit: { settings: DEFAULT_RATE_LIMIT_SETTINGS }` in the live/test `compose` case is unchanged, and so are main's two new TASK-040 mount cases.
+- **Main's change and this PR's code.**
+  - Between `be843ae1` and `22f69a82`, nothing changed under `apps/api/src/platform/rate-limit`, nor in `app.ts`, `start-api.ts`, `routing/pipeline.ts`, `packages/config/src/schema.ts` or `compose.env`. Round 3's C3 delta-round triggers are not hit.
+  - **Order.** Step 5 `rateLimit` runs before step 7a `idempotency` (`pipeline.ts`, the header and `ROUTE_PIPELINE`), so a replay is still counted first. #80 wires no idempotency store into `createApp`; only test compositions pass one. So no route takes a key at the union.
+  - **The 429 path through #80's problem-handler change** (`renderProblem` and the rendered-problem branch) is unchanged:
+    - The limiter sets `Retry-After` and the `RateLimit-*` headers on the response, then calls `next(new AppError('RATE_LIMITED'))` (`limits.ts`, `answer`).
+    - `sendProblem` still drops only `ETag`, `Last-Modified`, `Content-Disposition` and `Content-Language`, and sets `Retry-After` only when the classification carries one. #80's `CLIENT_RETRY_AFTER_CODES` adds `IDEMPOTENCY_IN_PROGRESS` only. The rendered-problem branch fires only for a thrown `RenderedProblem`.
+    - #80's idempotency store does not keep a 429 (D-SECPR040-01).
+    - All of this was read from the source; the api suites belong to lane B.
+- **Gitleaks.** I scanned 8 of the range's 9 commits. I left out `96eda1e1`, as in round 3, by commit selection: it is the only commit whose first-parent diff names a dot-env path.
+  - 232,949 added lines, 1 finding: `22f69a82c8203f2db1c8be8111e70bfcbdf0d39e:docs/sdlc/DECISIONS.md:generic-api-key:7697`. That is main's D-ORCH-147 text arriving in the merge's first-parent diff (PR080-SEC-07). The merge alone: 29,447 added lines, the same 1 finding.
+  - The branch's own text has 0 findings.
+  - Runtime controls fired as expected: a GitHub token (`github-pat`), an AWS key id (`aws-access-token`) and a generic key (`generic-api-key`); the negative control gave 0.
+- **Binding.** Simulated with main's checker, 12 of 12 scenarios as expected (R4.3).
+- **Post-merge.** The squash `61c53b5e` (parent `339b29d6`, #81's squash) has tree `bdf780c4`, which equals `git merge-tree --write-tree --merge-base=763800f3 339b29d6 22f69a82`. Its delta names the same 49 paths, with the head's 49 new blobs. What landed on main is what this round reviewed.
+  - At `4ba683ad`, 47 of the 49 still carry the head's blob. #84 (`3c4d9a6d`) changed `apps/api/package.json` and `package-lock.json`, and this PR's removal of `rate-limit-redis` holds in both.
+  - #84 bumps `express-rate-limit` from 8.7.3 to 8.7.4. Comparing the two registry tarballs, 8.7.4 changes only `MemoryStore#get` (expired entries) and the decrement error handling, in both `dist` builds. `ipKeyGenerator`, the only import (`policy.ts:11`), is byte-identical, and `package.json` changes only its version. So PR61-SEC-12's closure holds on main.
+  - 8.7.4 is MIT, was published on 2026-11-09 (older than `min-release-age`), and its lockfile integrity equals the tarball's SHA-512.
+
+## R4.2 Findings at `22f69a82`
+
+No new finding of this PR. Every round-3 state carries over, because the PR's blobs are unchanged:
+
+| ID | State |
+|---|---|
+| PR041-SEC-01, -02 (a), -05 (code), -08 | Closed (round 2) |
+| PR041-SEC-02 (b), PR041-SEC-09 (LOW) | Part 041-B (D-ARCH-175 B1; D-ARCH-182, D-PM-080). Checked in the 041-B rounds, before TASK-052 is dispatched |
+| PR041-SEC-03 (INFO) | Ruled. The HTTP-side fallback set (B4) is checked in the 041-B round |
+| PR041-SEC-04, -07 (INFO) | Open with data-architect and devops, as in round 3 |
+| PR041-SEC-06 (INFO) | Open, mine: threat model §10.4 H before G3 |
+| PR080-SEC-07 (LOW, PR #81 record) | Applies to this range through `22f69a82` (R4.1); routed there |
+
+## R4.3 Record binding and simulation
+
+- **The binding.** This round's `Head` row names `22f69a82`.
+  - The round-3 row (`0614a90f`) was voided by the union, which changed two owned paths of this PR after it: `pipeline-guards.test.ts` and `package-lock.json`. Round 3's S9 predicted this.
+  - The record has four `Head` rows, one per round, and its last `Verdict` row is this round's.
+  - The PR is merged, so no further `pull_request` event will run the check. The simulation documents the binding as of main `3308474b`.
+
+**Simulation.** Main's real checker ran in a `--shared` sparse clone. Scenario commits were built with plumbing on `3308474b`, and each merge ref was built with `git merge-tree` and `commit-tree`. Flags: `--pr 82` and `--base 763800f3` unless a row says otherwise.
+
+| Scenario | Expected | Result |
+|---|---|---|
+| S1 Merge ref, rounds 1 to 4 on main | pass | pass (`22f69a82`); 27 owned, the same list as the pre-merge range |
+| S1b The same with `--base` set to the record commit | pass | pass (`22f69a82`) |
+| S2 Control: the record as on main before this round | fail | fail (`missing`; `0614a90` voided by `pipeline-guards.test.ts` and `package-lock.json`) |
+| S3 Control: no record | fail | fail (`missing`) |
+| S4 Control: a later `FAIL` verdict row | fail | fail (`missing`, verdict `FAIL`) |
+| S5 Control: this round's `Head` row names the old head `be843ae1` | fail | fail (`missing`; voided by the same two paths) |
+| S6 Control: this round's `Head` row names main's `763800f3` | fail | fail (`missing`; not a commit of the PR) |
+| S7 Control: the owned `rate-limit/store.ts` changed after the head | fail | fail (`missing`) |
+| S8 Control: a later main merge that changes `package-lock.json` | fail | fail (`missing`; `22f69a8` voided by `package-lock.json`) |
+| S9 A lane-B evidence commit after the head | pass | pass (`22f69a82`) |
+| S10 A later docs-only main merge into the branch | pass | pass (`22f69a82`) |
+| S11 An unowned path (`apps/api/src/app.ts`) changed after the head | pass | pass (`22f69a82`; C3 asks for a delta round anyway) |
+
+12 of 12 as expected.
+
+## R4.4 Conditions and routes
+
+- **C1 (lane B).** Met at `0614a90f` (D-ORCH-150). For the union, D-ORCH-162 (a) replaces it with lane B on main `3c4d9a6d`: the real-Valkey `rate-limit.int.test.ts`, the api suites (now with #80's idempotency and #82's limiter on the same pipeline), the union's type-check, and gitleaks-full. That gitleaks-full is expected to report PR080-SEC-07's two history fingerprints; triage them by the rule in the PR #81 record. Hosted lane A and `security-integration` run on main when billing returns.
+- **C2 (rename and merge ref).** Closed (`99f6e45f`, D-ORCH-150).
+- **C3.** Closed for `22f69a82` by this round. With 041-A merged, part 041-B's stacked merge onto `61c53b5e` follows the D-ORCH-163 rule and gets its own rounds.
+- **For D-SECPOST-01 (the #84 review).** `express-rate-limit` 8.7.4 is checked above. `jose` 6.2.17 (TASK-052's verifier) and `cookie` 2.0.2 are left to that review.
+- **Routes.** Unchanged from round 3. My threat-model alignment (R-13, T-11, T-39, T-93, PR041-SEC-06) is due before G3.
+
+## R4.5 Disclosure
+
+For PR080-SEC-07 I also emulated gitleaks-full over main's whole ancestry (`4ba683ad`), and over the TASK-044 union commit `c33e5e92`. Those `git log -p` streams included the historic diff hunks of `.env.example`: 6 commits of the ancestry, and `c33e5e92`'s first-parent diff, which carries main's `.env.example` changes since TASK-044's base. The scanner held them in memory only. It printed and stored no line, and reported no fingerprint in them. I never opened, extracted or named the file in a command. The scans of this PR's own range (R4.1) left the file's only commit out.
+
+| Field | Value |
+|---|---|
+| Verdict | **PASS_WITH_FOLLOW-UPS.** Round 4 (merge-only, part 041-A) at `22f69a82`: 0 Critical, 0 High, 0 Medium, no new finding of this PR. The merge of `763800f3` is a pure union. Its one conflict, the imports of `pipeline-guards.test.ts`, keeps main's idempotency imports plus `DEFAULT_RATE_LIMIT_SETTINGS`. The lockfile keeps exactly the 7 `rate-limit-redis` removal leaves. The PR's delta equals round 3's, and the 27 owned paths are unchanged. The limiter still runs before idempotency, and its 429 headers survive #80's problem-handler change. Binding simulated, 12 of 12. The squash `61c53b5e` equals the head applied to `339b29d6`. On main, #84's `express-rate-limit` 8.7.4 leaves `ipKeyGenerator` byte-identical. The one gitleaks hit is main's D-ORCH-147 text (PR080-SEC-07, routed in the PR #81 record). Follow-ups: D-ORCH-162 (a) lane B on `3c4d9a6d`, with the PR080-SEC-07 triage; the 041-B rounds |

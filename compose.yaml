@@ -41,7 +41,7 @@ services:
       - no-new-privileges:true
 
   redis:
-    image: valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a
+    image: valkey/valkey:9.1-alpine@sha256:bf09d58e96d6b4524a15396b65b242bbe18beebbcc15a04d8ee75ddac62fae0b
     # ACL users api, worker and healthcheck; default off (platform.md §2.2). BullMQ requires noeviction.
     command: ['valkey-server', '--aclfile', '/etc/valkey/users.acl', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     env_file:
@@ -83,7 +83,7 @@ services:
       - no-new-privileges:true
 
   storage-init:
-    image: amazon/aws-cli:2.36.0@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334
+    image: amazon/aws-cli:2.39.7@sha256:bba262340b0bc7cbf3a8a48612531263b56f4b280c4f036a07816af1b271bda0
     entrypoint: ['/bin/sh', '/scripts/storage-init.sh']
     env_file:
       - infra/local/env/rustfs.env

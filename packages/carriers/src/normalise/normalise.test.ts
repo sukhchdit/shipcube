@@ -1,4 +1,5 @@
 import { describe, expect, it, jest } from '@jest/globals';
+import { money, type Money } from '@platform/shared';
 import fc from 'fast-check';
 
 import {
@@ -33,7 +34,7 @@ const DHL_INPUT: CarrierMappingsInput = {
   trackingEvents: { PU: 'PICKED_UP', OK: 'DELIVERED', CR: 'CUSTOMS_CLEARED' },
 };
 const DHL = defineCarrierMappings(DHL_INPUT);
-const usd = (amountMinor: number): { amountMinor: number; currency: string } => ({ amountMinor, currency: 'USD' });
+const usd = (amount: number): Money => money(amount, 'USD');
 
 function captureLogger(): { logger: NormaliseLogger; lines: { event: string; fields: unknown }[] } {
   const lines: { event: string; fields: unknown }[] = [];

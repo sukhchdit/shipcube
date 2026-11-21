@@ -2,7 +2,10 @@
 - [ID regex must allow digits](feedback_id_parsing.md) — REQ-I18N/NFR-A11Y rows vanish with [A-Z]+; sanity-check totals vs stats table
 - [QG-041 conditions (ADR-0016 am. 12)](project_qg041_adr0016_am12_conditions.md) — D-QG-001 VERIFIED_WITH_CONDITIONS 2026-11-20; C1..C4 open
 - [QG-043 conditions (ADR-0004 am. 2)](project_qg043_adr0004_am2_conditions.md) — D-QG-002 PASS_WITH_CONDITIONS 2026-11-20; C1..C7 open; story half of C5 on main since a3d0a02b
-- [QG-040 conditions (ADR-0014 am. 5-16)](project_qg040_adr0014_am5_9_conditions.md) — D-QG-003/004 2026-11-20; open: C3 (a), C4 rest, C6 map rows, C7 (Mock checkout contract), C8 (fold); next id D-QG-005
-- [Shared main checkout mechanics](feedback_shared_checkout_mechanics.md) — main moves mid-session; re-read HEAD before "missing" findings; guarded one-shot commits
+- [QG-040 conditions (ADR-0014 am. 5-16)](project_qg040_adr0014_am5_9_conditions.md) — D-QG-003/004 2026-11-20; open: C3 (a), C4 rest, C6 map rows, C7 (Mock checkout contract), C8 (fold)
+- [QG-051 conditions (ADR-0005 am. 15)](project_qg051_adr0005_am15_conditions.md) — D-QG-005/006 2026-11-21; C1..C4 closed; open: C5 (seam), C6 build (TASK-298), C7 (card items), C8 (map, story notes)
+- [Shared main checkout mechanics](feedback_shared_checkout_mechanics.md) — main moves mid-session; guarded one-shot commits; running a branch head from a scratch extract (junction safety)
 - [Verify "all N IDs" claims by set-diff](feedback_verify_count_claims.md) — late decisions add IDs that derived docs miss (NFR-RES-007 at G2)
-- [ADR amendment verification heuristics](feedback_adr_amendment_checks.md) — eight checks: universal claims, the other Accepted text, what runs before a moved check, contract prose, Applied-in vs commit
+- [ADR amendment verification heuristics](feedback_adr_amendment_checks.md) — nineteen checks: universal claims, the other Accepted text, contract prose, a proof per branch, burst vs average rate, UX flows vs a rule made universal
+- [QG-044 conditions (TASK-044 stream amendments)](project_qg044_stream_amendments_conditions.md) — D-QG-007 PASS_WITH_CONDITIONS 2026-11-21; C1..C7 open
+- [QG-041B conditions (ADR-0016 am. 13 item 6)](project_qg041b_adr0016_am13_item6_conditions.md) — D-QG-008/009 2026-11-21 (7c6d3654); C1..C3 closed; open: C4, C5, C6, C7 (client rule vs UX), code C-4 + H7..H10; next id D-QG-010

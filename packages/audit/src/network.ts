@@ -14,12 +14,6 @@ import { isIPv4, isIPv6 } from 'node:net';
 /** The address without its IPv6 zone (`fe80::1%eth0` -> `fe80::1`). */
 const withoutZone = (ip: string): string => ip.replace(/%.*$/su, '');
 
-/** The IPv4 address an IPv4-mapped IPv6 address carries, else the input. */
-function unmapped(ip: string): string {
-  const match = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-  return match?.[1] ?? ip;
-}
-
 /** The eight 16-bit groups of a valid IPv6 address (zone already removed), dotted-quad tail included. */
 function ipv6Groups(ip: string): number[] {
   let text = ip;
@@ -33,6 +27,19 @@ function ipv6Groups(ip: string): number[] {
   const right = rest === undefined || rest === '' ? [] : rest.split(':');
   const fill = rest === undefined ? [] : new Array<string>(8 - left.length - right.length).fill('0');
   return [...left, ...fill, ...right].map((group) => Number.parseInt(group, 16));
+}
+
+/**
+ * The IPv4 address an IPv4-mapped IPv6 address (::ffff:0:0/96) carries, else the input (PR61-SEC-12, CWE-1289). Decided
+ * on the parsed groups, so every spelling is unmapped: the dotted tail, the hex tail (`::ffff:7f00:1`), the expanded
+ * forms (`0:0:0:0:0:ffff:...`), upper case and zero-padded groups.
+ */
+function unmapped(ip: string): string {
+  if (!isIPv6(ip)) return ip;
+  const groups = ipv6Groups(ip);
+  if (!groups.slice(0, 5).every((group) => group === 0) || groups[5] !== 0xffff) return ip;
+  const [high = 0, low = 0] = groups.slice(6);
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
 }
 
 /**

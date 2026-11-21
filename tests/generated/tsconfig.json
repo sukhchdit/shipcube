@@ -10,6 +10,7 @@
   "files": [
     "../../tools/openapi/contract.ts",
     "../../tools/openapi/drift.ts",
+    "../../prisma/tests/harness/guest-claim-probe.ts",
     "../../prisma/tests/harness/postgres.ts",
     "../../tools/db/bootstrap.ts",
     "../../tools/db/render-rls.ts",

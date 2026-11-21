@@ -29,6 +29,8 @@ import {
   membershipLookup,
   membershipMemberIsActor,
   OPERATOR_ORG,
+  operatorReactivation,
+  operatorStaffGrants,
   personalDelete,
   personalOwnerRepoint,
   registration,
@@ -293,5 +295,30 @@ describe('organisations and users (TASK-037) against the committed schema', () =
     expect(result['rightStampsForeignOrg']).toMatch(RLS_REFUSED);
     expect(result['mergeMatchedForgedCreator']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: created_by on public\.organisations \(UPDATE\)$/);
     expect(result['mergeNotMatchedVersion']).toMatch(/^P0001 STD_COLUMNS_VIOLATION: version on public\.memberships \(INSERT\)$/);
+  });
+
+  it('[SEC-TC-79] [D-ARCH-165] [D-ARCH-166] operator staff grants O1 to O6: a self-join into the operator organisation needs a grant (O1); platform_app reads and cannot write grants (O2); a granted user joins and reads across tenants (O3); the other rules hold (O4); a customer join needs none (O5); INVITED is not reachable by UPDATE (O6)', async () => {
+    const result = await rolledBack(operatorStaffGrants);
+    const rule = (text: string): RegExp => new RegExp(`^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: ${text}$`);
+    expect(result.o1.join).toMatch(rule('an operator membership needs a staff grant'));
+    expect(result.o1.sees).toBe(1);
+    expect(result.o2.appInsert).toMatch(/^42501 permission denied for table operator_staff_grants$/);
+    expect(result.o2.appRead).toBe('ok');
+    expect(result.o3).toMatchObject({ grant: 'ok (1 row)', regrant: 'ok', join: 'ok', roleLink: 'ok' });
+    expect(result.o3.sees).toBeGreaterThan(result.o1.sees); // the OPERATOR scope reads another organisation's row
+    expect(result.o4.otherActor).toMatch(rule('the member is not the actor'));
+    expect(result.o4.suspended).toMatch(rule('a membership is created ACTIVE'));
+    expect(result.o5).toBe('ok');
+    expect(result.o6.invited).toMatch(rule('INVITED is reserved'));
+    expect(result.o6.lifecycle).toBe('ok,ok,ok');
+  });
+
+  it('[D-ARCH-214] [PR051-SEC-03] operator staff grants O7: a SUSPENDED operator membership whose grant was deleted is refused ACTIVE by UPDATE and its member still sees one organisation; once the grant is back the same update succeeds; SUSPENDED to ACTIVE in a customer organisation needs no grant', async () => {
+    const result = await rolledBack(operatorReactivation);
+    expect(result.withoutGrant).toMatch(/^P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: an operator membership needs a staff grant$/);
+    expect(result.seesWithoutGrant).toBe(1);
+    expect(result.withGrant).toBe('ok');
+    expect(result.seesWithGrant).toBeGreaterThan(result.seesWithoutGrant); // the OPERATOR scope reads the other organisations
+    expect(result.customer).toBe('ok');
   });
 });

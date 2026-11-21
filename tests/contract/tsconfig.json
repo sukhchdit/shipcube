@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "//": "Contract suites over openapi.yaml without an app (TASK-040 x-idempotency; later the carrier adapter contract suite of REQ-CARR-011). Not a workspace. tools/openapi/contract.ts is compiled here as a listed file (the tools project is noEmit), as in tests/api.",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "tsBuildInfoFile": "../../node_modules/.cache/tests-contract.tsbuildinfo"
+  },
+  "files": ["../../tools/openapi/contract.ts"],
+  "include": ["**/*.ts"]
+}

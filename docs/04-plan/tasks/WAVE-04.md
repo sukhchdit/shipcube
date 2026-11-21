@@ -2,7 +2,7 @@
 
 Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M1** · Priority band: **Must DC (+ non-DC enablers)**
 
-Tasks: **24** (S 5 / M 19; opus 6 / sonnet 18; demo-critical 14) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 64.5 developer-days (human-equivalent: S = 1.5, M = 3).
+Tasks: **25** (S 5 / M 20; opus 6 / sonnet 19; demo-critical 14) in **7** batches of ≤ 4 parallel tasks. Estimated effort ≈ 67.5 developer-days (human-equivalent: S = 1.5, M = 3).
 
 **Exit check:** Guest quote streams from 4 carriers (Mock + 3 fixture adapters) sorted with badges in the browser; contract suite green x4; lane B `wave` evidence; lane C `wave-end` if within the monthly cap (tier 2).
 
@@ -17,7 +17,7 @@ Tasks: **24** (S 5 / M 19; opus 6 / sonnet 18; demo-critical 14) in **7** batche
 | 4.3 | TASK-130 Pack-derived data<br>TASK-131 Carrier OAuth token caching<br>TASK-132 Carrier resilience<br>TASK-133 FX conversion with snapshot | mod-compliance<br>pkg-carriers-oauth<br>pkg-carriers-gateway<br>pkg-pricing-fx |
 | 4.4 | TASK-134 Tax per origin-country compliance pack<br>TASK-135 DHL Express<br>TASK-136 Rate response cache<br>TASK-137 Home quote hero and sticky mobile action bar | pkg-pricing<br>carrier-dhl<br>mod-quotes-rateshop<br>web-home |
 | 4.5 | TASK-138 Immutable charge lines and price explanation<br>TASK-139 FedEx REST adapter, fixture-backed<br>TASK-140 UPS REST adapter, fixture-backed<br>TASK-141 Streaming rate results | pkg-pricing<br>carrier-fedex<br>carrier-ups<br>mod-quotes |
-| 4.6 | TASK-142 Progressive results with static skeletons and partial-results notice<br>TASK-143 Country-driven address layout<br>TASK-144 Result option card and itemised price breakdown | web-quote-results<br>ui-address<br>web-quote-card |
+| 4.6 | TASK-120 k6 rate-shopping SSE profiles<br>TASK-142 Progressive results with static skeletons and partial-results notice<br>TASK-143 Country-driven address layout<br>TASK-144 Result option card and itemised price breakdown | tests-load<br>web-quote-results<br>ui-address<br>web-quote-card |
 | 4.7 | TASK-145 Sort by cheapest, fastest and best value with Cheapest/Fastest badges | web-quote-results |
 
 Locks are the exclusive-ownership units of PLAN.md §5 (overlap rule). Registries are per-module files aggregated by discovery (PLAN.md §5 rule 2), so tasks in a batch never edit the same file; the only serially merged shared files are `package-lock.json` (regenerated, never hand-merged) and `tools/quality/required-suites.json` (append-only).
@@ -143,6 +143,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-158 scenarios (S-W01)
 - SEC-TC-54 (client part): after claim, sign-out, 404 and expiry sweep no qt: entry remains; at most 20 kept; token never in URL/history/Referer
+- DISPATCH GATE, PUBLIC BUNDLE FORECAST (TASK-042 code review m4; D-TASK042-10; ADR-0026 amendment 3; D-ARCH-014; D-SD-011): TASK-042 left 16.03 kB gz of the 170 kB public initial budget (i18next about 15.9 kB, the ICU stack about 13.3 kB); before this task is dispatched principal-architect forecasts the home quote widget and hero stack (React Hook Form, Zod, TanStack Query, Axios) against the budget and names the lever; the first lever named by the review is to pre-compile messages to ASTs at build time and drop the runtime parser (about 8.4 kB), before the suffix-plural fallback of D-ARCH-014
 - AT-US-158-01 … AT-US-158-08: all 8 scenarios of US-158, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -510,6 +511,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-109 scenarios
+- PUBLIC BUNDLE FORECAST (TASK-042 code review m4; D-SD-011): the forecast and lever of the TASK-125 DISPATCH GATE apply to this task as well; size-limit stays green at this task head
 - AT-US-109-01 … AT-US-109-07: all 7 scenarios of US-109, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -621,7 +623,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET<br>US-040 (M0 Must) Redis-backed rate limiting and headers |
 | REQs | REQ-CARR-009, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-PERF-003 |
-| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005 |
+| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005, D-ARCH-217, D-ARCH-219, D-ARCH-220, D-ARCH-222, D-ARCH-223, D-SECPR044-01, D-QG-007, D-PM-089, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-083, TASK-136, TASK-044, TASK-041 |
@@ -636,11 +638,44 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - All US-135 scenarios
 - SEC-TC-42: reopening the stream 10 times (incl. Last-Event-ID) causes 0 extra carrier calls; 3rd concurrent stream from one IP -> 429
 - [AT-US-040-15-1], [AT-US-040-15-2] and [AT-US-040-16] at the quote stream route (D-PM-078): the route-level tests of AT-US-135-11 and AT-US-135-12 also carry these IDs (the 3rd concurrent stream from one anonymous IP and the 6th for one authenticated user answer 429 RATE_LIMITED, the open streams are unaffected, and for an anonymous IP with 2 open streams closing one lets the next open succeed); completes US-040
+- PRECONDITION PART 044-B (ADR-0016 amendment 14 item 9; D-ARCH-217; R-ARCH-41): TASK-044 part 044-B is on main before this task is dispatched; without it the stream answers private, no-store without no-cache, is reset at 20 s without a terminal event, and every disconnect writes an error line
+- STREAM DISCIPLINE (ADR-0016 amendment 14 items 2, 4, 5 and 8; ADR-0010 amendment 14; D-ARCH-219, D-ARCH-220, D-ARCH-222): the producer passes its signal to its own subscription and timers and to nothing else; it starts no carrier call and cancels none; test with the Mock latency scenario: a reader disconnects while carrier calls of the quote fan-out are in flight, every call completes and is persisted, and the next open replays the results; the route logs the failure reasons max_duration and draining at info and producer_failed and event_refused at error; live events carry their persisted sequence id and the error event carries none, so a client that resumes after error with SERVICE_UNAVAILABLE (the cap or a stopping server) misses nothing; test over two app instances on one database: the stream on the first is ended by its drain signal after event 1, the reader reopens on the second with its lastEventId and receives every later event and complete
+- STREAM SLOT TTL AND REPLAY SIZE (D-ARCH-219, D-ARCH-223; D-SECPR044-01 PR044-SEC-05 and PR044-SEC-07 item 3): the ttlMs of the stream slot is at least the time from its acquisition to the latest end of the stream: two transactions (admission wait plus maxWait plus timeout each), the 31 s stream deadline and 5 s for clock skew; a shorter slot lets a client hold more streams than the cap; the slot is released when the response closes, however it ends; the replay read is bounded so that its frames stay under the 1 MiB buffer bound of the tx slot (a replay is written in one turn and counts in full)
+- US-135 SCENARIOS OF D-PM-089: [AT-US-135-06] also covers an open with no bearer token and no quote token: 404 NOT_FOUND problem+json, not an event stream (A-078; D-ARCH-107 (5)); [AT-US-135-13] Closing a stream does not cancel carrier calls: the Mock latency test of the STREAM DISCIPLINE line carries this ID and asserts that the call completes, that its result is stored and replayed to the next open, and that the Mock call counter shows no extra call
+- STREAM SLOT ACQUIRE AND RELEASE (D-SECPR044-01 F2, PR044-SEC-05 LOW, CWE-770; D-QG-007 QG-044-C1 (c)): the route takes its stream slot from the kit of TASK-041 (streamSlotRule, acquire, release) in the pipeline step before execute and releases it on res.once close however the stream ends (complete, error, cap, drain, cut or client disconnect); the TTL of the STREAM SLOT TTL line is only the crash backstop; the per-user cap is one counter shared with streamBookingProgress (TASK-173); tests: the over-cap stream of one user and of one IP is refused before the stream starts, and a closed stream frees its slot at once (the next open is admitted without waiting for the TTL)
+- REPLAY AND RESUME CONDITIONS (D-SECPR044-01 F4, PR044-SEC-07 INFO items 1, 2 and 4; TASK-044 code review R1-n3; D-QG-007 QG-044-C1 (c)): the replay is keyed by the authorised quote and read under RLS in the short replay transaction, never by an id the client names alone; event ids are per-stream sequence numbers of the persisted results of that quote (the sequence of the PERSISTED EVENT SEQUENCE gate on TASK-087), never a table-wide sequence; a Last-Event-ID above the persisted maximum of the quote is treated as absent, so the replay starts from the first result, and never ends the stream with INTERNAL_ERROR (at the TASK-044 head Last-Event-ID 9999999999 does); one api row for each of the three
+- DISPATCH GATE, PERSISTED EVENT SEQUENCE (D-QG-007 QG-044-C7 and QG-044-C6): the ruling of the PERSISTED EVENT SEQUENCE line on TASK-087 exists before this task is dispatched, because the STREAM DISCIPLINE line (live events carry their persisted sequence id) and the two-instance resume test rest on it; the two-instance test also follows the QG-044-C6 ruling of the TASK-083 card (which instance ran createQuote, and what complete reports for carriers cut by a stop)
 - AT-US-135-01 … AT-US-135-12: all 12 scenarios of US-135, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-040-01 … AT-US-040-17: US-040 completes here under the delivery split of D-PM-078: this task proves the scenarios that the card lines above assign to it and TASK-041, TASK-049, TASK-052, TASK-091 the rest, with the IDs in the test titles; the story is accepted when all 17 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
 - Routes via `defineRoute` (permission, audit descriptor, Joi schema; unknown fields rejected); implements the `openapi.yaml` operation exactly with examples (contract changes go to api-designer as a change request, never edited in the task); problem+json codes from the catalogue; the generated RBAC-matrix, audit, RLS cross-tenant and abuse suites pick up the new routes/tables and stay green; keyset pagination + `org_id`-leading indexes for lists; Compose runs it.
+- Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
+
+### TASK-120 — k6 rate-shopping SSE profiles (first result, complete, hung carrier)
+
+| Field | Value |
+|---|---|
+| Stories (completes) | — |
+| REQs | — (enabler; see refs) |
+| NFRs | NFR-PERF-002, NFR-PERF-003, NFR-PERF-007 |
+| Spikes / security / decisions | D-ARCH-224, D-QG-007, D-SD-012 |
+| Specialist · model | performance-engineer · sonnet (escalate to opus from fix cycle 2) |
+| Complexity | M |
+| Depends on | TASK-091, TASK-280, TASK-141 |
+| Batch · locks | 4.6 · tests-load |
+| Branch | `feat/TASK-120-k6-rate-shopping-sse-profiles` |
+| Priority | Enabler |
+
+**Files / modules**
+- tests/load/scenarios/quote-sse.js (on the k6 harness)
+
+**Acceptance tests to write**
+- NFR-PERF-002 first result <= 1.5 s p95 and NFR-PERF-003 complete <= 5 s on the reference host; evidence under docs/05-quality/performance/runs/
+- PLACEMENT (D-ARCH-224 O-5; D-QG-007 QG-044-C1 (d); D-SD-012): the stream these profiles measure is streamQuoteResults, which TASK-141 mounts in batch 4.5, so this task is scheduled in batch 4.6 with a dependency on TASK-141 and keeps its ID; the profiles run on the default pipeline with TASK-044 part 044-B (the 31 s stream deadline and the 1 MiB buffer bound); performance-engineer may size STREAM_BUFFER_LIMIT_BYTES from these runs (D-ARCH-223)
+
+**DoD notes**
+- k6/Lighthouse scripts committed; host spec and results as machine-generated evidence under `docs/05-quality/performance/runs/`; thresholds taken from NFR.md.
 - Traceability: the orchestrator merges this task ID into `docs/sdlc/traceability.md` from `task-map.csv`; STATUS.md records fix cycles.
 
 ### TASK-142 — Progressive results with static skeletons and partial-results notice
@@ -650,7 +685,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-160 **DC** (M1 Must) Progressive results with skeletons and partial notice |
 | REQs | REQ-QUOTE-008 |
 | NFRs | NFR-WEB-003 |
-| Spikes / security / decisions | D-UX-008, D-UX-012 |
+| Spikes / security / decisions | D-UX-008, D-UX-012, D-ARCH-219, D-ARCH-220, D-SD-012 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-141, TASK-125 |
@@ -664,6 +699,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-160 scenarios (focus never moves; CLS <= 0.1)
+- CLIENT RESUME (ADR-0016 amendment 14 items 2, 4 and 8; D-ARCH-219, D-ARCH-220; flow F01): after error with SERVICE_UNAVAILABLE (the cap or a stopping server), and after a stream that ends without a terminal event, the client reopens the stream once, after a random delay of up to 1 s, with Last-Event-ID set to the reader lastEventId (the last result received; the error event has no id), and falls back to polling getQuote when the reopened stream ends the same way; after error with INTERNAL_ERROR it goes to getQuote at once; results are keyed by carrier, so a replayed result replaces its row; test with the fetch reader: a stream that ends with error after one result is reopened with that result id, and the page shows every carrier once
 - AT-US-160-01 … AT-US-160-08: all 8 scenarios of US-160, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

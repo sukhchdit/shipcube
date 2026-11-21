@@ -50,3 +50,33 @@ describe('[PR61-SEC-06] canonicalIp writes IPv6 in RFC 5952 form', () => {
     expect(canonicalIp('::ffff:203.0.113.7')).toBe('203.0.113.7');
   });
 });
+
+describe('[PR61-SEC-12] every spelling of an IPv4-mapped IPv6 address is unmapped from its parsed groups', () => {
+  it.each([
+    ['::ffff:127.0.0.1'],
+    ['::ffff:7f00:1'],
+    ['::ffff:7f00:0001'],
+    ['0:0:0:0:0:ffff:127.0.0.1'],
+    ['0:0:0:0:0:ffff:7f00:1'],
+    ['0000:0000:0000:0000:0000:ffff:7f00:0001'],
+    ['::FFFF:7F00:1'],
+    ['0::ffff:7f00:1'],
+    ['::ffff:127.0.0.1%eth0'],
+  ])('%s is the IPv4 address 127.0.0.1 for the coarse network and the canonical IP', (ip) => {
+    expect(coarseNetwork(ip)).toBe('127.0.0.0/24');
+    expect(canonicalIp(ip)).toBe('127.0.0.1');
+  });
+
+  it('unmaps a non-loopback address spelt in hex groups', () => {
+    expect(coarseNetwork('::ffff:c633:6409')).toBe('198.51.100.0/24');
+    expect(canonicalIp('::ffff:c633:6409')).toBe('198.51.100.9');
+  });
+
+  it.each(['::fffe:7f00:1', '::1:ffff:7f00:1', '1::ffff:7f00:1', '::ffff:0:7f00:1', '64:ff9b::7f00:1'])(
+    '%s is not IPv4-mapped and stays IPv6',
+    (ip) => {
+      expect(coarseNetwork(ip)).toMatch(/\/48$/u);
+      expect(canonicalIp(ip)).not.toMatch(/^\d+\.\d+\.\d+\.\d+$/u);
+    },
+  );
+});

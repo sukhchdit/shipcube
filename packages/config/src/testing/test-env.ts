@@ -59,6 +59,8 @@ export function createTestEnv(options: TestEnvOptions = {}): Record<string, stri
     NODE_ENV: hardened ? 'production' : 'test',
     WEB_APP_ORIGIN: `${scheme}://web.${appEnv}.test`,
     ADMIN_APP_ORIGIN: `${scheme}://admin.${appEnv}.test`,
+    // The API behind CloudFront + ALB names its trusted hops in staging and production (D-ARCH-179).
+    ...(hardened ? { TRUST_PROXY_HOPS: '2' } : {}),
     BRAND_NAME: 'Test Brand',
     DATABASE_URL: `postgresql://platform_app:${randomToken()}@db.${appEnv}.test:5432/platform?sslmode=${hardened ? 'verify-full' : 'disable'}`,
     REDIS_URL: `${hardened ? 'rediss' : 'redis'}://api:${randomToken()}@cache.${appEnv}.test:6379`,

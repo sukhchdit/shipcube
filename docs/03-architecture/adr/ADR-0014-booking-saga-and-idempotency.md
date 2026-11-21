@@ -147,10 +147,10 @@ Items continue at 10. Part 040-A was read at `3dc1e225`.
 
       | Stretch | Bound |
       |---|---|
-      | Through `call` | the call deadline D, plus T for the renewal that ends the stretch |
-      | After the last write | 3 × T plus the FAILED-entry wait: the handler transaction, the fail-closed entry of a VIEW or DOWNLOAD route, the completion or the release |
+      | Through `call` | ~~the call deadline D, plus T for the renewal that ends the stretch~~ |
+      | After the last write | ~~3 × T plus the FAILED-entry wait: the handler transaction, the fail-closed entry of a VIEW or DOWNLOAD route, the completion or the release~~ |
 
-      So `lease = max(30 s, max(D + T, 3 × T + 1 s) + 5 s)`. With the defaults (D = 20 s, T = 0.25 + 2 + 5 s) that is 32.25 s.
+      ~~So `lease = max(30 s, max(D + T, 3 × T + 1 s) + 5 s)`. With the defaults (D = 20 s, T = 0.25 + 2 + 5 s) that is 32.25 s.~~ *(Corrected 2026-11-21, item 18: both bounds count from the COMMIT of the transaction that wrote `lease_until`, and the value is the clock read before its statement. The table and the formula of item 18 replace them: `lease = max(30 s, timeout + max(D + T, 3 × T) + 1 s + 5 s)`, 38.25 s at the defaults. "The end of the request" in the rule above reads "the completion".)*
     - **Part 040-A** computes `max(30 s, max(D, 2 × (maxWait + timeout) + 1 s) + 5 s)`: 30 s at the defaults, which leaves about 3 s of the 5 s margin, and less than the read-only path needs from a statement timeout of 9 s (PR040-SEC-04). No row exists before part 040-B, so part 040-A merges with its formula and part 040-B implements the rule with a table test.
     - **The 30 s of data-model §3.5 and §6.2 are the floor.** A crashed request blocks its retry, with 409 and `Retry-After: 1`, for the length of its lease.
     - **A lost claim.** A renewal that finds the row taken over answers 409 `IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 1` and ends the request. No further phase runs, and the request neither completes nor releases the row, which belongs to the request that took it over.
@@ -203,6 +203,36 @@ Items continue at 10. Part 040-A was read at `3dc1e225`.
     - **Item 13 said too much about the Mock gateway.** "`checkoutOrder` … never confirms" binds a gateway that reaches a provider. The Mock gateway is a simulator inside the process and authorises in the `call`, as the contract says in four places; none of them changes. The M0 saga therefore needs no step that confirms: the handler of `checkoutOrder` writes the payment as `AUTHORISED`, moves the shipments to `PAID` and publishes `payment.authorised`, and saga step 1 of §Saga model reads as before. The rule, its control and the table of who establishes an authorisation are in ADR-0012 amendment 6.
     - **Part 040-A as built at `e96bd979`.** It already writes the `FAILED` entry of a claim lost after `call` (item 10), and logs WARN `api.idempotency_claim_lost` for a claim lost in either phase. It already seals `{origin, body}` (item 15). Items 10 and 15 named part 040-B for both.
     - **Classes of the payment-method operations** are ruled in ADR-0012 amendment 7. `deletePaymentMethod` has no `call`: its detach is a worker step after the commit.
+
+## Amendments after the reviews of the first pull request of part 040-B (2026-11-21; code review R1-m1 = PR040-SEC-10 of D-SECPR040B1-01; D-ARCH-232)
+
+Items continue at 18. The branch was read at `a4aadd2e`.
+
+18. **The lease counts every stretch from the write (corrects the table and the formula of item 10; code review R1-m1 = PR040-SEC-10, LOW, CWE-667; D-ARCH-232).**
+    - **What was wrong.** Item 10 counted each stretch from the COMMIT of the transaction that wrote `lease_until`. The stored value is the application clock, read inside that transaction before its statement, plus the lease. The transaction can run for up to `timeout` after that reading: a claim, for one, waits on the uncommitted row of a concurrent duplicate and succeeds when that row rolls back. The table also had no row for a `call` that fails with a 4xx, which is stored only after the FAILED-entry wait.
+    - **How a stretch is counted.** The sizing rule of item 10 stands: the longest stretch, plus 5 s, and never below 30 s. A stretch runs from the clock reading of one write of `lease_until` (a claim, a takeover or a renewal) to the statement that next protects the row, which is the next renewal or the completion. Its parts:
+      - the rest of the transaction that wrote the value, at most `timeout` (the bound of a transaction from its start to its commit);
+      - every transaction after it, with its full bound T = admission wait + pool wait (`maxWait`) + `timeout`. The transaction that ends the stretch counts in full too: its statement runs after its admission, its connection and its context statement;
+      - the call deadline D, where the stretch holds a `call`;
+      - the FAILED-entry wait F = 1 s, where a failure comes before the completion.
+
+      | Stretch after a write of `lease_until` | It ends at | Bound |
+      |---|---|---|
+      | `load` | the renewal that follows it | `timeout` + 2 × T |
+      | `call` | the renewal before the handler transaction | `timeout` + D + T |
+      | A `call` that fails with a 4xx that is stored | the completion, after the FAILED-entry wait | `timeout` + D + F + T |
+      | The handler transaction of a writing route | the completion inside it | `timeout` + T |
+      | A `load` or a handler transaction that fails with a 4xx that is stored | the completion, after the FAILED-entry wait | `timeout` + 2 × T + F |
+      | The handler transaction of a VIEW or DOWNLOAD route | the completion, after the fail-closed entry | `timeout` + 3 × T |
+
+      So `lease = max(30 s, timeout + max(D + T, 3 × T) + 1 s + 5 s)`. It is exact where the failed `call` is the longest stretch, as at the defaults, and at most 1 s above the longest stretch elsewhere. With the defaults (D = 20 s, `timeout` = 5 s, T = 0.25 + 2 + 5 s) it is 38.25 s, where item 10 gave 32.25 s. With a statement timeout of 120 s it is 492.75 s (item 10: 372.75 s).
+    - **A release needs no lease.** "The end of the request" in item 10 reads "the completion". A request that releases has stored nothing, and its retry runs again by design (amendment 6). A retry that takes the key over before the release changes nothing: the release is conditional on the row version and then deletes no row. A stretch that ends in a release (after a 5xx, a 429, a failed entry of a VIEW or DOWNLOAD route, or a renewal that fails) is therefore not in the table.
+    - **What a lease that is too short does.** One row has an effect that nothing else stops, the last one. On a VIEW or DOWNLOAD route the entry is written and `afterCommit` is scheduled whether or not the completion finds its row, so a retry that took the key over runs the route a second time. Today that is `emailShipmentDocuments`, the only idempotent operation of that kind (pin (b) of PR040-SEC-07): a second e-mail of the same documents to the same account address and a second, truthful DOWNLOAD entry, with WARN `api.idempotency_completion_failed` as the signal. On every other row the request loses its claim at its next conditional write and stops there: a renewal answers 409 (item 10), a completion inside the handler transaction rolls the write back, and a 4xx is answered without being stored. A second `call` is the case of item 13.
+    - **Why every stretch and not the read-only one alone.** Both reviews proposed `max(D + T, timeout + 3 × T, 3 × T + 1 s)`, which keeps 32.25 s at the defaults. It adds the rest of the writing transaction to one row. It counts the completion that ends the read-only stretch with its full T, and the renewal that ends the `call` stretch with its admission and pool wait only. Counted the same way, the `call` row has none of its 5 s left at the defaults and the failed `call` is 1 s short. What follows on those rows is a lost claim and not a second effect, so the proposal does close the finding. The rule is still written for every stretch: one way of counting, one model in the test, and no second correction when the next reader counts the `call` row. The price is 6 s on the time a crashed request blocks its retry at the defaults.
+    - **Not counted.** The round trip of a COMMIT that started within `timeout`, and the time the process needs between two phases. Both come out of the 5 s, as before.
+    - **Unchanged.** The renewals, the lost claim and its audit rule (item 10); the clock (item 11); the 30 s floor. data-model §3.5 and §6.2 and api/README §5 name the floor and the rule, and no figure. Without the configured admission wait the function counts `maxWait` in its place (D-TASK040-18), which only lengthens the lease: 40 s as the first pull request of part 040-B composes it, 38.25 s once the second passes the configured wait.
+    - **Rejected.** A renewal before the entry of a VIEW or DOWNLOAD route, which D-ARCH-200 had already declined: one more write on every such request and one more point where a claim can be lost, for a stretch the formula covers, and nothing for the `call` rows. A ceiling on the statement timeout: it limits a database budget for a reason nobody would look for there, and the `call` rows have no margin left at the defaults, below any ceiling.
+    - **Where it is built.** The fix cycle of the first pull request of part 040-B: one expression in `idempotencyLeaseMs`, and its test, which measures the six stretches from the write over a table of statement timeouts and as a property over the configuration bounds. No route takes a key before the second pull request, so no row was ever written with the shorter lease.
 
 ## Reversibility
 

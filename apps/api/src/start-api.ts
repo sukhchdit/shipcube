@@ -142,6 +142,9 @@ export async function startApi(overrides: Partial<StartApiDependencies> = {}): P
       auditConfig: config,
       ...(auditPrivacy === undefined ? {} : { auditPrivacy }),
       apiMode: resolveApiMode(config.APP_ENV),
+      // The trusted proxy chain and the Valkey-backed limiters (TASK-041): production always composes the real ones.
+      trustProxyHops: config.TRUST_PROXY_HOPS,
+      rateLimit: { settings: config, valkey: services.valkey },
       ...(docs === undefined ? {} : { docs }),
       logger: log,
     });

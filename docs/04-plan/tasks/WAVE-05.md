@@ -4,15 +4,15 @@ Owner: senior-developer · P4 plan v1.0 · 2026-11-12 · Milestone: **M1** · Pr
 
 Tasks: **20** (S 4 / M 16; opus 5 / sonnet 15; demo-critical 19) in **6** batches of ≤ 4 parallel tasks. Estimated effort ≈ 54 developer-days (human-equivalent: S = 1.5, M = 3).
 
-**Exit check:** Wizard steps 1-5 complete for a claimed quote; documents rendered and downloadable; lane B `wave` evidence; lane C `wave-end` run green.
+**Exit check:** Wizard steps 1-5 complete for a claimed quote; US-080 complete with the HTTP halves of AT-US-080-04 to -07 at claimQuote (TASK-146, D-PM-087); documents rendered and downloadable; lane B `wave` evidence; lane C `wave-end` run green.
 
-**Stories completed in this wave (22):** US-072, US-166 (DC), US-171 (DC), US-172 (DC), US-174 (DC), US-175 (DC), US-180 (DC), US-181 (DC), US-182 (DC), US-186 (DC), US-189 (DC), US-191 (DC), US-192 (DC), US-220 (DC), US-221, US-222 (DC), US-223 (DC), US-224 (DC), US-225 (DC), US-232 (DC), US-233 (DC), US-234 (DC).
+**Stories completed in this wave (23):** US-072, US-080 (DC), US-166 (DC), US-171 (DC), US-172 (DC), US-174 (DC), US-175 (DC), US-180 (DC), US-181 (DC), US-182 (DC), US-186 (DC), US-189 (DC), US-191 (DC), US-192 (DC), US-220 (DC), US-221, US-222 (DC), US-223 (DC), US-224 (DC), US-225 (DC), US-232 (DC), US-233 (DC), US-234 (DC).
 
 ## Batches
 
 | Batch | Tasks (parallel) | Locks held |
 |---|---|---|
-| 5.1 | TASK-146 Claim a quote when booking starts; start-booking API with sign-in gate<br>TASK-147 Document model and private encrypted object storage<br>TASK-148 Pickup date and window rules | mod-quotes<br>mod-documents-core<br>mod-pickups |
+| 5.1 | TASK-146 Claim a quote when booking starts; start-booking API with sign-in gate<br>TASK-147 Document model and private encrypted object storage<br>TASK-148 Pickup date and window rules | mod-quotes<br>mod-documents-core, db-tools-backup<br>mod-pickups |
 | 5.2 | TASK-149 Server-side draft shipment, resume and optimistic concurrency<br>TASK-150 Document versioning<br>TASK-151 Pickup record and instructions<br>TASK-152 Guest sign-in gate UI with BookingContextCard, returning to the wizard with the quote claimed | mod-shipments<br>mod-documents-core<br>mod-pickups<br>web-booking-gate |
 | 5.3 | TASK-153 Order basket model<br>TASK-154 Customs API<br>TASK-155 Carrier label stored in every offered format<br>TASK-156 Responsive wizard shell and step navigation | mod-orders<br>mod-customs<br>mod-documents-label<br>web-wizard-shell |
 | 5.4 | TASK-157 Commodity code search and format validation<br>TASK-158 Asynchronous document generation job<br>TASK-159 Wizard step 1<br>TASK-160 Wizard step 2 UI | mod-customs, ui-combobox<br>mod-documents-render<br>web-wizard-step1<br>web-wizard-step2 |
@@ -29,11 +29,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 | Field | Value |
 |---|---|
-| Stories (completes) | US-166 **DC** (M1 Must) Claim a quote when booking starts |
+| Stories (completes) | US-166 **DC** (M1 Must) Claim a quote when booking starts<br>US-080 **DC** (M0 Must) Guest-capable tables and atomic claim |
 | Stories (partial; completed by TASK-152) | US-171 **DC** (M1 Must) Guest sign-in gate and quote claim at wizard start |
-| REQs | REQ-QUOTE-016, REQ-BOOK-001 |
+| REQs | REQ-QUOTE-016, REQ-RLS-013, REQ-BOOK-001 |
 | NFRs | NFR-TENANT-001 |
-| Spikes / security / decisions | D-ARCH-162, D-SD-003, D-ARCH-191 |
+| Spikes / security / decisions | D-ARCH-162, D-SD-003, D-ARCH-191, D-ARCH-211, D-ARCH-212, D-ARCH-213, D-SECPR051-01, D-QG-005, D-PM-087, D-SD-011 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-087, TASK-091, TASK-052, TASK-059 |
@@ -48,9 +48,15 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-166 scenarios
 - US-171 API scenarios (claim is atomic; selected option preserved)
-- The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 (D-ARCH-162): a claim written as separate statements fails with 23503 by design
+- The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 and 2026-11-21 (D-ARCH-162, D-ARCH-211): a claim written as separate statements is refused by design, with 23001 when the quote is updated first and with 23503 when a child is updated first (PostgreSQL 18); the claim repository handles neither code, both are defects that mapDbError answers with 500 (D-ARCH-212), and its outer count goes through expectAffected(result, 1)
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: claimQuote, createShipment (optional) (D-SD-007)
+- CLAIM CONTEXT (D-TASK051-07; D-ARCH-213; SEC-TC-81): claimQuote and the implicit claim of createShipment run with the organisation and the actor of the session principal and with guestTokenHash = guestTokenHash(X-Quote-Token), bound by the pipeline seam ruled for TASK-091; without a well-formed token the context binds the empty string and the claim touches 0 rows (the service re-reads: 200, 409 or 404)
+- US-080 HTTP HALVES (D-ARCH-213; D-ARCH-210): [AT-US-080-04] after claimQuote the organisation reads the quote and its children and getQuote with the token answers 404; [AT-US-080-05] a claim by an account of another organisation answers 409 QUOTE_ALREADY_CLAIMED and the owner is unchanged; a repeat by an account of the organisation that owns the quote answers 200, changes neither the owner nor claimed_by_user_id and writes no second audit entry (AT-US-166-04; REQ-RLS-013 note; DR-A16); [AT-US-080-06] claimQuote without a bearer answers 401 AUTH_REQUIRED and the transaction runner records no transaction; database backstop on the real tables: the claim statement in a context with the guest hash and no organisation is refused by the standard-columns guard (P0001 STD_COLUMNS_VIOLATION, a BEFORE trigger) before WITH CHECK, where the TASK-051 probe tables answer 42501; [AT-US-080-07] the claim writes one UPDATE audit entry of the quote with old org_id null and new org_id set, in the claim transaction; the tests go through the mounted claimQuote on the real quote tables and carry the IDs in their titles; a test of AT-US-166-01 to -03, -06 or -08 that asserts the same thing on claimQuote may carry both IDs; completes US-080 (D-PM-087)
+- REAL CLAIM STATEMENT IN SEC-TC-07 (PR051-SEC-02 (b), LOW, CWE-362; D-SECPR051-01; D-QG-005 QG-051-C2): SEC-TC-07 runs the statement of the claim repository of this task, imported from the repository and not copied into the test, on the real quote tables: two users of one organisation claiming concurrently, and one user claiming twice, give one claim, keep claimed_by_user_id and claimed_from_token_hash of the first claim and write one audit entry; a mutant without AND org_id IS NULL fails it; the same-organisation repeat of US-080 HTTP HALVES (AT-US-080-05) may be the same test (D-PM-087)
+- WRONG TOKEN ON CLAIM (moved from the TASK-091 card by D-PM-087 and D-SD-011; ADR-0008 amendment 6 item 1 (b)): api test: claimQuote with a well-formed X-Quote-Token that is not the token of the quote answers 404 NOT_FOUND and the quote stays unclaimed (the claim context sees no row, CLAIM CONTEXT); the raw token is never stored or logged
+- SEC-TC-81 (D-SECPR051-01; qa-lead): the tests of CLAIM CONTEXT carry the SEC-TC-81 tag; with TASK-091 this task owns the required_cases_pending row, which qa-lead moves to required after the second of the two merges
 - AT-US-166-01 … AT-US-166-08: all 8 scenarios of US-166, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
+- AT-US-080-01 … AT-US-080-07: US-080 completes here under the delivery split of D-PM-087: this task proves the scenarios that the card lines above assign to it and TASK-051, TASK-091 the rest, with the IDs in the test titles; the story is accepted when all 7 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - Covers the scenarios of AT-US-171-01 … AT-US-171-06 that belong to its layer; US-171 closes in TASK-152
 
 **DoD notes**
@@ -64,11 +70,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-220 **DC** (M1 Must) Document model and private encrypted storage |
 | REQs | REQ-DOC-001, REQ-DOC-005, REQ-DOC-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SPK-05, D-025, PR30-SEC-02, PR30-SEC-07, PR30-SEC-09, PR30-SEC-10, D-ARCH-097, D-SEC-TM-01, D-ARCH-180 |
+| Spikes / security / decisions | SPK-05, D-025, PR30-SEC-02, PR30-SEC-07, PR30-SEC-09, PR30-SEC-10, D-ARCH-097, D-SEC-TM-01, D-ARCH-180, D-TASK034-04, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-019, TASK-029, TASK-016 |
-| Batch · locks | 5.1 · mod-documents-core |
+| Batch · locks | 5.1 · mod-documents-core, db-tools-backup |
 | Branch | `feat/TASK-147-document-model-private-encrypted-object` |
 | Priority | Must · demo-critical |
 
@@ -83,6 +89,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - DOWNLOAD, KEY AND METADATA CONTRACT (ADR-0021 am. 3, D-ARCH-097; PR #30 security r2 PR30-SEC-02, -07, -09, -10, code review r1 n2 and r2 flag 1; DUE WITH THIS TASK, binding on TASK-155 and TASK-162): (1) the documents module owns ONE storage facade (modules/documents/storage-facade.ts) and it is the only code outside platform/storage that touches RuntimeServices.storage: putDocument and presignDownload(document, ttl) — presignDownload reads the bucket, key, versionId and responseContentType from the RLS-visible document row (the type stored at put time from the detected format, never request, carrier or user text), builds the disposition with attachmentDisposition (item 3) and NEVER sets allowInline; (2) allowInline: a repository test (modules/documents/storage-policy.test.ts) fails when allowInline appears in apps or packages source outside apps/api/src/platform/storage and its tests — allowInline: true with an active content type (text/html, image/svg+xml, application/xhtml+xml, any +xml type, application/xml, a script type) is the XSS-by-document path; there is no M1 caller, and an inline preview needs an ADR-0021 amendment, a facade method restricted to an allow-list of passive types (application/pdf, image/png, image/jpeg) and a security record; (3) attachmentDisposition(name) is one pure function exported by platform/storage that returns attachment; filename="<ASCII fallback>"; filename*=UTF-8 followed by two single quotes and the RFC 5987 percent-encoded name, where the name is composed only from server-held parts (document type, shipment reference, version, an extension from a closed set) and the fallback keeps only letters, digits, dot, underscore and hyphen; the port check is anchored on ASCII (no Unicode trim) and refuses an inline token anywhere after the type; unit cases: U+00A0 before attachment, attachment; x; inline, U+2028, a quote, a backslash, CR and LF, a 300-character name and an all-non-ASCII name; (4) ONE typed key builder (modules/documents/document-keys.ts) is the only code that constructs a key string — UUID-typed parts and closed enums, the organisation id taken from the tenant context and never from request input, the grammar of ADR-0021 Decision 2; the port additionally rejects a . segment, an empty segment and a trailing / (the store answers 400 to two of those), caps the total metadata bytes (names plus values) at 2048 with INVALID_ARGUMENT before any I/O instead of an S3 MetadataTooLarge reported as UNEXPECTED, and imports the bucket predicate from the single S3_BUCKET definition of packages/config; (5) result precision (PR30-SEC-10): get().contentLength is the number of bytes read, an SDK-detected checksum mismatch on the response is INTEGRITY_MISMATCH instead of UNEXPECTED, and put compares the echoed ChecksumSHA256 with the digest it sent when the response carries one (the contract suites on RustFS now and on real S3 before G4-production pin that it is carried)
 - SEC-TC-75 (proposed ID, D-SEC-TM-01; qa-lead adopts it through required_cases_pending with checkpoint G3): the storage-policy repository tests of items (1) to (4) above carry [SEC-TC-75]
 - JOB CONTEXT CASE (D-ARCH-180; ADR-0013 amendment 4 item 23): add the platform.job_context case of the kind this table serves (documents; live and soft-deleted organisation) and the definer read of data-model 4.3 (definerRead in the manifest); without the policy the function sees no row and every job of the kind ends as JOB_CONTEXT_NOT_FOUND
+- RESTORE REHEARSAL, DOCUMENTS (D-TASK034-04; TASK-034 code review round 1 m4; D-SD-012): the restore-rehearsal job of TASK-119 gains the RustFS copy of the documents bucket (object versions included) into the fresh stack, and tools/db/verify-restore.ts (TASK-034) gains the document check: every documents row has its object in the restored bucket and the SHA-256 of the object equals the stored sha256; a negative control (one object changed) fails; [NT-REC-003-a] in the title
 - AT-US-220-01 … AT-US-220-07: all 7 scenarios of US-220, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -268,7 +275,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-160, TASK-160) | US-180 **DC** (M1 Must) Step 2: contents, customs applicability and document declaration<br>US-181 **DC** (M1 Must) Step 2: customs lines and reason for export |
 | REQs | REQ-BOOK-009, REQ-CUST-001, REQ-CUST-002, REQ-CUST-003, REQ-CUST-004 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-191 |
+| Spikes / security / decisions | D-ARCH-191, D-ARCH-215, D-SD-011 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-130, TASK-122 |
@@ -283,6 +290,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - API scenarios of US-180 and US-181
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: replaceShipmentCustoms (optional) (D-SD-007)
+- CUSTOMS CURRENCY KEY (D-QG-005 condition QG-051-C1 (a); D-ARCH-215; ADR-0005 amendment 15 item 37 as clarified 2026-11-21; data-model 3.11 note of 2026-11-21): fk_customs_items__declaration_currency is FOREIGN KEY (org_id, declaration_id, currency) REFERENCES customs_declarations (org_id, id, currency) ON DELETE RESTRICT ON UPDATE RESTRICT on the target index ux_customs_declarations__org_id_id_currency (org_id, id, currency), which replaces UNIQUE (id, currency); there is no ON UPDATE CASCADE, and every relation of customs.prisma states onDelete: Restrict and onUpdate: Restrict; every unique index of customs_declarations and customs_items leads with org_id; a change of the declaration currency is ONE statement that updates the declaration and every line of it, soft-deleted lines included, one update as a data-modifying CTE of the other, each row with its version step and actor; integration cases on PostgreSQL 18: the declaration first is refused with 23001 and a line first with 23503, both on fk_customs_items__declaration_currency, the one statement succeeds, and a line of another organisation that names the declaration is refused with 23503 on the same constraint; C16 is the gate
 - Covers the scenarios of AT-US-180-01 … AT-US-180-08 that belong to its layer; US-180 closes in TASK-160
 - Covers the scenarios of AT-US-181-01 … AT-US-181-09 that belong to its layer; US-181 closes in TASK-160
 
