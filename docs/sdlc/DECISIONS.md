@@ -11188,3 +11188,27 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Not verified:** nothing was run. The limits that a service consumes do not exist, so the rule is a requirement and not a finding. Whether the lane B evidence of part 041-B binds to a tree that the patch then changes is the orchestrator's to check; the patch touches documentation only.
 - **Applied in:** ADR-0016 amendment 13 item 6 ("Answer", the point "Before any effect"); `rulings/wave-1-task-041-rulings.md` revision 6 (card line 29; sections 12.4 and 12.5; a pointer in 11.6); the held patch, which is outside the repository.
 - **Reversibility:** High (documents; the patch is not applied).
+
+### D-CRCHORE-02 · 2026-11-21 · code-reviewer · Code review round 1 of PR #88 (commit-bound gitleaks allow entries for the three PR080-SEC-07 merge commits) at `641ff03c` = APPROVED_WITH_NITS (record `docs/05-quality/reviews/PR-0088-chore-gitleaks-allow-code-review.md`)
+- **Method:** git, grep and reads only (dispatch: no npm, Jest, Docker or Node). The pattern of each table was matched with `grep -cP` against line 7697 of each merge blob; counts only, the value is never printed.
+- **Exactly commit-bound:**
+  - Each table has one full SHA, `generic-api-key`, `^docs/sdlc/DECISIONS\.md$` and one `^\n?<line>$` pattern. Its only non-literal part is `[a-z=]{12}`.
+  - The pattern matches 1 line in `c33e5e92`, `0ccdd009`, `aade2672` and `d7585e78`, and 0 in main.
+  - Line 7697 has blob hash `e56ad62a` in all four. Each merge's first-parent diff adds exactly that line.
+  - No other commit in the three branch ranges adds it.
+  - Each merge is in exactly one branch (TASK-044 local only; 040-B; 041-B) and not in main.
+  - The value appears nowhere in the diff or the message.
+  - The squash of each task head takes main's rewording, so D-SEC-PR45-01 condition 7 holds.
+- **Tests kill the claimed widenings:** exact `toEqual` pins on commits, rule, path and pattern, pattern identity across the three tables, and the description list. The mutation probes exercise the helpers, and they are not vacuous. The negative-control outcomes are deterministic.
+- **No conflict:** `git merge-tree` of `641ff03c` with #85 `72249e40`, #86 `72e3dc9f`, #87 `0ccac6bf`, main, and the stack of all four is clean.
+- **Findings:**
+  - **R1-m1 (MINOR):** PR45-SEC-01 (the `[extend]` = `useDefault` only pin, the dd7a2dd literal pin, the absent-key oracle) was due before this `.gitleaks.toml` change. Fix: fold it in, or security re-dates it.
+  - **R1-m2 (MINOR):** the retirement owner and trigger are missing. PR #45's dd7a2dd table is still on main after #39 squashed (`3f589352`). Route: devops-engineer, one shrink-only PR that removes all four tables and #85's three inert baseline lines once TASK-044, 040-B and 041-B have merged.
+  - **R1-n1 (NIT):** the fingerprint-comment check is a whole-file `toContain` and does not bind each comment to its table.
+  - **R1-n2 (NIT):** the header says "already pushed"; local-only `c33e5e92` is in the class through D-SECPR040-02.
+- **Merge order:** #85 -> #86/#87 -> #88 (any order is textually safe). #88 lands before hosted lane A is counted for the three task PRs.
+- **Merge conditions:**
+  1. A security record on `641ff03c` with the real-image before/after and controls (D-SEC-PR45-01 condition 5), ruling on R1-m1 and R1-n2.
+  2. Hosted CI when billing returns.
+  3. After #88 lands, each task PR needs a fresh push, because lane A reads `.gitleaks.toml` from the event's `base.sha` (PR45-SEC-02 pattern). TASK-044 pushes `c33e5e92` first.
+- **Reversibility:** High (review record).
