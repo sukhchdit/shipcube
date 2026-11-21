@@ -1,6 +1,6 @@
 ---
 name: wave1-task041-ratelimit-rulings
-description: TASK-041 rate limiter rulings D-ARCH-173..182 and 225..227 (ADR-0016 am. 12 and 13 incl. item 6 in-flight hold / R-ARCH-36 (d), ADR-0010 am. 13) — two-part delivery, what is still owed, and the lessons from ruling it
+description: TASK-041 rate limiter rulings D-ARCH-173..182 and 225..231 (ADR-0016 am. 12 and 13 incl. item 6 in-flight hold as a concurrency bound, release contract and change C-4 / R-ARCH-36 (d), ADR-0010 am. 13) — two-part delivery, what is still owed, and the lessons from ruling it
 metadata:
   type: project
 ---

@@ -50,6 +50,8 @@ TASK-040 round 1 = PASS_WITH_FOLLOW-UPS, bound to the final head `3dc1e225` (fix
 
 **Why:** 040-B (wiring + hourly worker purge) gets its own security round and must close the LOWs.
 
+**Update 2026-11-21:** #80 squash-merged as `763800f3`. 040-B PR 1 round 1 at `a4aadd2e` closed 01/02/07/09 and 04 as ruled; see [[project-p5-task040b1]] (new 10-13). PR 2 still owes P-1..P-5 and the purge.
+
 **How to apply:**
 - At 040-B: check 01/02/04/05/07/09, P-1..P-5, the purge ships with the wiring, the register row and data-model §10.4 updated, and the Pino IdempotencyLog stays class-only.
 - At TASK-187: check T187-1..6.

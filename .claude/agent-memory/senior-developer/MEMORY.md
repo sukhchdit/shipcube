@@ -68,3 +68,5 @@
 - [TASK-041B fc2](feedback_task041b_fc2.md) — entered-marker release rule + admission-to-slot gap, check-suppressions 0 every cycle, sed mutation proof
 - [TASK-041B fc1](feedback_task041b_fc1.md) — in-flight hold for read-then-spend gates (atomic admit, abort trap), wiring-pin api rows, heredoc parse kills whole cmd
 - [TASK-034 fc2](feedback_task034_fc2.md) — Prisma banner on stderr/status on stdout, never tail joined streams, Compose-prefix rewrite harness CLI proof
+- [TASK-044 lane B private](feedback_task044_laneb_private.md) — anonymous fixture for non-anonymous op: pre-handler problems lack private; error-only mark wrapper
+- [PR #80 unions](feedback_pr80_unions.md) — shared origin/main moves mid-merge (check parent SHA), coordinator takeover, merge subject vs commitlint

@@ -86,6 +86,7 @@
 
 - [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit
 - [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb + r2 delta/supersede @39cac6e5 PASS_W_COND (a385cc9c); 01/02a/03 closed; INFO 06 TASK-298; O7 in SEC-TC-79
-- [P5 TASK-045 cursors/keyset](project_p5_task045.md) — r1 @b380f429 + r2 @3168c194 PASS_W_COND (658d9918); C1-C3 closed; LOW 08 smallint (045-C), INFO 09; C4 lane B
+- [P5 TASK-045 cursors/keyset](project_p5_task045.md) — r1 @b380f429, r2 @3168c194, r3 delta @c02dbf27 PASS_W_COND (5e8ceb01); C4 discharged; 08 smallint + C5 ride 045-C; sim --head = PR head
 - [P5 TASK-042 i18n](project_p5_task042.md) — r1 @b8ba7788 PASS_W_COND (35f8ef0a); MED 01 i18next repo advisory -> bump >=27.1.3 (C1, delta round); INFO 02-05
-- [P5 TASK-044 SSE convention](project_p5_task044.md) — r1 @dc64193f PASS_W_COND (d04731f7); PR44-SEC-13 closed; MED 01 e-mail ReDoS in guard; LOW 02-05; C1-C3, delta round
+- [P5 TASK-044 SSE convention](project_p5_task044.md) — r1 @dc64193f + r2 @3b56ab54 PASS_W_COND (ef446899); 01-03/06 closed; INFO 08/09 to 044-B; QG-044-C3 given (G1 conds)
+- [P5 TASK-040B1 040-B PR1](project_p5_task040b1.md) — r1 @a4aadd2e PASS_W_COND (6b2c6a7f); SEC-10 LOW lease gap (R1-m1), 11-13 INFO; D-ORCH-158 rule refined: explicit merge base

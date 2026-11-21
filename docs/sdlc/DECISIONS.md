@@ -9635,3 +9635,35 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - The fixture `signedIn` stub signs in whatever the route declares, while production reads only declared kinds. It is test-only; part 045-C may align it.
   - An explicit `undefined` still type-checks as `ORG_A`. That is for the code review.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-163 · 2026-11-21 · sdlc-orchestrator (session B) · Checkpoint before handback (orchestrator context limit): in-flight agents and the queue for the next session
+- **Main:** includes #80–#84 (D-ORCH-162).
+- **Reviews landed:**
+  - TASK-040B1: code review round 1 AWN (`43c010d1`), security round 1 PWC (`6b2c6a7f`, D-SECPR040B1-01; PR040-SEC-10 lease gap LOW, needs an architect ruling before merge).
+  - TASK-044 044-A: code review round 2 AWN (`ab4e6b9e`), security round 2 PWC (`ef446899`; QG-044-C3 concurrence given).
+- **Stacked-merge rule, corrected (supersedes D-ORCH-158's rule):** take the stacked head's blob for a conflicted file only where main did not change that file since the predecessor head for another reason; otherwise hand-union.
+  - The final tree must equal `git merge-tree --write-tree --merge-base=<predecessor head> <stacked head> origin/main`.
+  - Then prove `git diff --raw origin/main <merge>` = `git diff --raw <predecessor> <stacked head>`, except the listed unions.
+- **TASK-044 044-A:** union head `33262314`, local and unpushed, with the R1-m4 `appError` deletion. Lane B is queued (`run-live69.sh`, background). Owed:
+  - code review and security merge-only rounds on `33262314`;
+  - landing the D-PM-089 held US-042 text and map rows (QG-044-C2 (f));
+  - then push and PR.
+- **TASK-045:** head `77326dc5` (pushed, no PR), no overlap with main. Security delta round 3 is running. Owed: a code delta review of `c02dbf27`, the PR, and a re-run of the api suite under #82's rate limiting.
+- **TASK-034:** fix cycle 2 head `3ee36f01`; lane B running. Then code review round 2 and security round 1.
+- **Agents running at handback:**
+  - principal-architect, QG-041B-C1/C2: the in-flight hold as a concurrency bound and the release contract;
+  - security-analyst, the post-merge review of #80–#84 (D-SECPOST-01) and TASK-045 delta round 3;
+  - senior-developer, the 040-B stacked merge with the migration re-time, and the 041-B stacked merge.
+  - Their reports go to the coordinator; the next session picks them up from this entry.
+- **Lane-B queue:**
+  - TASK-034 `3ee36f01` (running);
+  - main `3c4d9a6d`, the post-merge regression evidence for D-ORCH-162;
+  - TASK-044 `33262314`;
+  - next: 040-B and 041-B on their merge heads.
+- **Owed rulings:** the principal-architect lease ruling for PR040-SEC-10, dispatched after the 041-B ruling lands, to avoid concurrent DECISIONS.md edits.
+- **Owner needed:** PR040-SEC-13, the stale `IDEMPOTENCY_BODY_KEY` text in `packages/config`, before G3.
+- **Next build slots:** TASK-298, TASK-278, part 045-C (unblocked by 041-A on main).
+- **Parked:**
+  - TASK-042 until 2026-11-23T05:54Z;
+  - TASK-043 until the user's `.env.example` commit moves its branch past `3ba1eb53`.
+- **Reversibility:** High.
