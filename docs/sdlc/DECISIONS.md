@@ -9078,3 +9078,22 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - an owner for the stale `IDEMPOTENCY_BODY_KEY` description in `schema.ts` and `keys.ts`;
   - the migration timestamp `20261121000000` collides with TASK-080's (`20261121000000_pricing_config_versions`), so the second to merge re-times.
 - **Reversibility:** High.
+
+### D-ORCH-157 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-041 part 041-B fix cycle 1 at `83a85739`; D-TASK041-18 recorded; round 2 reviews and the R-ARCH-36 (d) wording dispatched
+- **Head:** `83a85739` on `feat/TASK-041-part-b-rate-limit-rulings-rev2` (parent `e7354249`), stacked, upstream unset, unpushed.
+- **R1-M1 fixed (option (a)):** a per-instance in-flight ledger, `apps/api/src/platform/rate-limit/in-flight.ts`, with its admit hook in `consumeGated`. Burst test: limit 5, 60 parallel requests, the authenticator was entered exactly 5 times.
+- **Also fixed:** R1-m1, R1-m2 (mutants K1–K3), NITs n1–n5, and a lazy-start race in the `tests/serve.ts` helper. n7 and n8 stay routed.
+- **Host checks:** lint 0, Prettier clean, typecheck 0, unit 952, api files 50/50; changed-file coverage 99.79 % lines / 98.06 % branches.
+- **Behaviour change on the outage path:** in fallback mode the rule's hit is counted even when the gate refuses.
+- **Lane-B timing:** the K1/K2 row relies on the real 5 s breaker cool-down.
+- **D-TASK041-18 (developer; recorded here, text in the commit body and in the developer's memory note `feedback_task041b_fc1.md`):**
+  - The in-flight per-instance slack is 0.
+  - The cross-replica bound is N × `RATE_LIMIT_PUBLIC_PER_MIN` per IP and window, for N API instances.
+  - Accepted cost: a valid credential gets 429 with `Retry-After: 1` while the IP's failed-authentication limit is in flight, including during slow uploads.
+  - The drafted residual text for R-ARCH-36 (d) goes to principal-architect and security-analyst.
+- **Dispatched:**
+  - code review round 2 (delta `e7354249..83a85739`);
+  - the security round (QG-041-C4 second half, on the fix head; it also rates the residual);
+  - principal-architect for the R-ARCH-36 (d) wording in ADR-0016 am. 13. Security-analyst rates it in its round.
+- **Lane B:** for 041-B, run only after #82 merges and main is merged in (the stacked head's earlier run was void, D-ORCH-150). TASK-043's lane B is not re-queued until its branch moves past `3ba1eb53`, i.e. until the user's `.env.example` commit.
+- **Reversibility:** High.
