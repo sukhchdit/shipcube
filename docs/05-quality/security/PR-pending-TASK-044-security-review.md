@@ -456,3 +456,113 @@ Main's real checker (`tools/ci/check-security-owned-paths.mjs` at `a3c0b1af`) in
 | Field | Value |
 |---|---|
 | Verdict | PASS_WITH_CONDITIONS. No Critical, High or Medium finding open at `3b56ab54`. Closed: PR044-SEC-01 (MEDIUM), PR044-SEC-02, PR044-SEC-03, PR044-SEC-06; R1-n2; conditions C1 and C2 met; D-ARCH-220 holds. Open: LOW PR044-SEC-04 (F1, part 044-B), LOW PR044-SEC-05 (F2), INFO PR044-SEC-07 (F4), new INFO PR044-SEC-08 (F6) and PR044-SEC-09 (F7). Merge conditions: C3 lane B green on `3b56ab54`; C4 the merge-only round with PR #80. QG-044-C3: concurrence given with D-ARCH-218, -219, -221 and -223 (R2.5), with conditions G1 for the security round of part 044-B |
+
+---
+
+# Round 3 (merge-only): the union with main at `33262314` (part 044-A)
+
+| Field | Value |
+|---|---|
+| PR | Not opened yet. Branch `feat/TASK-044-server-sent-events-convention`, local and unpushed (D-ORCH-163, D-ORCH-167). Since round 2: `cbd590db` (test only, D-TASK044-19), merge `c33e5e92` (parents `cbd590db` and main `4ba683ad`, which carries #80 TASK-040 040-A, #81 TASK-080, #82 TASK-041 041-A, #83 TASK-051, #84 npm group, #49, #50) and `33262314` (the R1-m4 deletion of the unused `appError` binding) |
+| Head | 332623146adff840992a778b1a106d0ccb145c15 |
+| Merge base with main | `4ba683ad` (was `530629f4`). Main's tip when this round was written: `f3472957`. `4ba683ad..f3472957` changes nothing outside `docs/` and `.claude/`; `git merge-tree --write-tree f3472957 33262314` is clean (tree `62fee48c`) |
+| Lane A evidence | None: the branch is not pushed, and hosted Actions is billing-blocked (D-ORCH-162) |
+| Lane B evidence | None yet. The run on `33262314` is in progress (D-ORCH-163 `run-live69.sh`, D-ORCH-167). The lane-B run on `3b56ab54` failed one test (the malformed `Last-Event-ID` 400 without `private`), which `cbd590db` addresses. The run queued on `cbd590db` was cancelled before it started (D-ORCH-161) |
+| Binding items checked | Rounds 1 and 2 above (conditions C3 and C4, G1, F1 to F7); code review round 2 (`cbd590db`: R2.3, R2-m1) and round 3 (merge-only, `5330380f`, APPROVED, security flags (1) and (2)); D-ORCH-161 to D-ORCH-163 and D-ORCH-167; D-ARCH-226 to D-ARCH-230 (the in-flight hold and its release); the contract's `streamQuoteResults` and `streamBookingProgress` (`x-idempotency`, `x-rate-limit-class`, `x-rate-limit-route`, `security`) |
+| Reviewer / date | security-analyst, 2026-11-21, round 3 (merge-only), pre-push. Static review only, per the dispatch: git plumbing (`merge-tree`, `diff --raw`, `show`, `grep`) and code read by SHA. No npm, Node, Docker, lint or test run, and nothing run in the TASK-044 worktree |
+
+## R3.1 Summary
+
+The merge is a pure union, and every security control of both sides survives it.
+
+- **Union proof.** `c33e5e92^{tree}` equals `git merge-tree --write-tree cbd590db 4ba683ad` (`1cb6c882`): git merged without a conflict, and the merge commit carries no hand edit. `git diff --raw 4ba683ad 33262314` equals `git diff --raw 530629f4 cbd590db` on all 18 paths except `problem-handler.ts`, the only path both sides changed. `33262314` removes exactly one line there.
+- **PR44-SEC-13 holds on the union.** After the headers, the problem handler still passes a new code-only `AppError(code)` to Express. `code` now comes from TASK-040's `renderProblem`, whose `codeOf` is the former local function moved verbatim. TASK-040's pre-rendered path runs only while `!res.headersSent`. A `RenderedProblemError` thrown after the headers is classified `unexpected` and leaves as `AppError('INTERNAL_ERROR')`, so its stored body and its cause never reach `console.error`. #84 leaves Express 5.3.0 and finalhandler 2.1.1 unchanged, so round 1's P1 S4 evidence still describes the runtime.
+- **Idempotency (#80) never touches an SSE GET.** Five independent layers, listed in R3.3.
+- **Rate limiting (#82).** Each stream open is counted once at step 0 and once by its contract class at step 5, before the stream opens. A refusal is a normal problem document with `Retry-After`. The concurrency cap (2 per IP, 5 per user) is still unwired, as planned: PR044-SEC-05 stays open on the TASK-141 and TASK-173 cards, and no production module mounts a stream route at this head.
+- **The in-flight hold (041-B) is not on main or on this union.** On 041-B's pushed stacked head `aade2672`, the hold lasts from step 0 to the authentication outcome only, so a stream never holds a unit while it streams. The union of `aade2672` with `33262314` is clean, and the two share no path.
+- **Headers.** `send`, `completeStream` and `requestLifetime` in `execute.ts` are byte-identical to round 2's base. `SSE_HEADERS` (`X-Accel-Buffering: no`, the no-store `Cache-Control`) is unchanged. #82's `RateLimit-*` headers ride along on a stream response, as the contract requires.
+- **`cbd590db`** is test-only. Its wrapper only makes refusals of one fixture more private, never less. I concur with code review R2.3 and R2-m1.
+
+No new finding. Verdict: **PASS_WITH_CONDITIONS**. Round 2's C4 is discharged. C3 moves to the union head: lane B green on `33262314` (R3.6), together with lane A (C5).
+
+## R3.2 Union proof
+
+| Check | Result |
+|---|---|
+| Parents | `c33e5e92^1 = cbd590db` (round 2's head plus the test-only commit), `c33e5e92^2 = 4ba683ad` (on main). `33262314` has the single parent `c33e5e92` |
+| Merge-tree identity | `git merge-tree --write-tree cbd590db 4ba683ad` = `1cb6c8829a90` = `c33e5e92^{tree}` |
+| File-set partition | Branch side `530629f4..cbd590db`: 18 paths. Main side `530629f4..4ba683ad`: 295 paths. Shared: `apps/api/src/platform/errors/problem-handler.ts` only |
+| Conservation | `git diff --raw 4ba683ad c33e5e92` equals `git diff --raw 530629f4 cbd590db` line for line, except the `problem-handler.ts` row (`c2d503e4 -> 957f48ba` against `5cc78bdb -> b1850807`) |
+| The hand edit | `c33e5e92..33262314`: one file, one line removed (`const appError = classified.kind === 'app' ? classified.error : undefined;`). `appError` occurs nowhere in the file afterwards; `classified`, `code` and `AppError` are still read. Union blob `3305466c` |
+| The branch's other 17 files | Byte-identical to `cbd590db`. The SSE module, the reader and the helpers are also byte-identical to round 2's `3b56ab54`; `cbd590db` changed `tests/api/event-stream.api.test.ts` only |
+| Owned paths | `.github/CODEOWNERS` is unchanged `530629f4..33262314`, so the owned set is the same 11 paths as in rounds 1 and 2 |
+
+## R3.3 The security controls across the union
+
+| Control | Status at `33262314` | Evidence (by SHA) |
+|---|---|---|
+| PR44-SEC-13: nothing server-only reaches Express's `console.error` after the headers | **Holds** | `problem-handler.ts:124-130`: `next(new AppError(code))`, a new code-only error. `code` comes from `renderProblem` (`rendered-problem.ts:26-51`), the same mapping as the removed local `codeOf`. The structured `http.request_failed` line above it still carries the thrown value for the redacting logger. The PR44-SEC-13 unit pins in `problem-handler.test.ts` are unchanged (branch blob) and exercise the same code path. The catch-all keeps `res.destroy()` after the headers (PR9-SEC-07) |
+| TASK-040 pre-rendered problems after the headers | **Safe** | `problem-handler.ts:103`: the pre-rendered branch requires `!res.headersSent`. Otherwise `classifyThrown` gives `unexpected` for a `RenderedProblemError`: it is not an `AppError` or a `DbError` and has no body-parser `type`. Express therefore gets `AppError('INTERNAL_ERROR')`, never the stored body or its `cause`. No main-side test asserts the value passed to `next` after the headers (code review R3.1 item 7) |
+| Idempotency never applies to an SSE GET | **Holds** (five layers) | (1) The contract gives both stream operations `x-idempotency: not-applicable`. (2) The slot passes `not-applicable` through and ignores an `Idempotency-Key` (`idempotency.ts:46-50`), so no claim is recorded. (3) An idempotent mode on a safe method is refused at mount (`idempotency.ts:52-54`; `IDEMPOTENT_METHODS` is POST, PUT, PATCH and DELETE). (4) `execute.ts:338` refuses a stream result from a route that holds a claim. (5) `settleClaim` never stores a stream result (`execute.ts:523`). For a route without a claim, `run()` follows round 2's flow: `renew` is a no-op, and the `.catch` in `executeSlot` acts only on a replayed `RenderedProblemError` |
+| Rate limiting of stream opens (#82) | **Holds as intended for part 044-A** | Step 0 (`limits.ts:83-97`) counts every stream open under `/api/v1`: 120 per minute per IP when anonymous, the credentialed ceiling when a credential header is present. Step 5 (`limits.ts:110-136`) consumes the contract class once per open: `public` per IP for `streamQuoteResults`, `authenticated` per user for `streamBookingProgress`. Both answer before `execute`, so a refusal is a problem document with `Retry-After`, never a stream. An open stream consumes nothing more, which is how a fixed window per request is meant to work. The concurrency cap of README §7 (`streamSlotRule`, `RateLimiter.acquire`/`release`) has no consumer yet: PR044-SEC-05 (F2) stays on the TASK-141 and TASK-173 cards, and G1 item 4 covers its TTL and release order. `git grep` finds no `eventStream` or `sseStream` call outside `platform/sse/`, so no stream route is exposed |
+| The in-flight hold (TASK-041 part 041-B) | **Not on this union; respected by design** | 041-B is not merged. At its pushed stacked head `aade2672`, step 0 admits a credentialed request against the in-flight ledger (`limits.ts` `ipLimiter`). `withAuthnFailedBudget` releases the unit at the authentication outcome (`authn-failed.ts` `done`), before authorisation, rate limit and `execute`. The close releases only a unit that never entered the slot. So a stream holds a unit only until it is authenticated, never for its 30 s life (D-ARCH-228 item 3). `git merge-tree --write-tree 33262314 aade2672` is clean, and the two share no path. The client side of D-ARCH-228's reconnect argument (a random reopen delay of up to 1 s) belongs to the stream clients (card lines 20, 21 and 26 of the TASK-044 rulings, for example TASK-142). It does not belong to this PR's reader, which never reconnects by itself |
+| Authentication, authorisation and tenancy guards | **Unchanged for streams** | The pipeline order (`ROUTE_PIPELINE`) and the `PipelineSlots` keys are unchanged. #82 adds the denial budget to `authorise` only when the composition has `auditConfig`. `execute.ts` builds the tenant context and the transactions as in round 2. The event-stream test composition (no `apiMode: 'live'`, no rate-limit kit) cannot trip `RateLimitMissingError` |
+| Route metadata coverage | **Unchanged** | The union adds no production route. The stream fixtures are declared through `defineRoute`/`fixtureRoute`, in a test composition only. `tests/generated/route-metadata.ts` compares production routes with the contract, `x-rate-limit-class` included |
+| Stream headers | **Hold** | `send`, `completeStream` and `requestLifetime` are byte-identical between `530629f4` and `33262314`. `SSE_HEADERS` (`frame.ts:17-21`) is unchanged: `Content-Type: text/event-stream; charset=utf-8`, `Cache-Control: private, no-cache, no-store`, `X-Accel-Buffering: no`. A private response still gets `private, no-store` from `send()` (D-ARCH-218 is part 044-B). #82 adds no compression or header middleware to `app.ts`, and the `RateLimit-*` headers it sets before the handler stay on the stream response (REQ-API-014) |
+| Runtime dependencies behind the PR44-SEC-13 evidence | **Unchanged** | `express` 5.3.0, `finalhandler` 2.1.1, `router` 2.2.0, `on-finished` 2.4.2 and `pino` 10.4.0 are the same in both lockfiles. #84 moves `jose` from 6.2.15 to 6.2.17, which no SSE path uses. The 28 bumps of #84 are the subject of D-SECPOST-01 (D-ORCH-162) |
+| `cbd590db` (test only) | **Concur with code review R2.3 and R2-m1** | For `operationId === 'streamQuoteResults'` only, the wrapper marks a refusal of the six steps before `execute` as private. It never removes `private` and changes no product path. Its new assertion proves the private mark, not the `declaresPrivateResponse` rule; that rule is pinned by `problem-handler.api` and `declared-credentials.api` (mutant PH-b of the code review). R2-m1's part 044-B card line retires the wrapper, and G1 item 6 below adds the check to the part 044-B security round |
+| Secrets | **None** | A static secret-shape scan of the 39 lines added since round 2 (`3b56ab54..cbd590db` and `c33e5e92..33262314`) gives 0 hits; the only long-token matches are import paths. The merge brings in main's own content, which the post-merge review D-SECPOST-01 covers |
+
+## R3.4 Round 2's conditions and follow-ups
+
+| ID | Status | Note |
+|---|---|---|
+| C3 | **Moved to `33262314`** | Lane B on `3b56ab54` failed one test, `cbd590db` fixes it in the test composition, and lane B now runs on the union head (R3.6) |
+| C4 | **Discharged** | The union with PR #80 (and #81 to #84), the R1-m4 edit, and this merge-only round. Lint of the union belongs to lane A (code review R3.3 item 2) |
+| F1 (PR044-SEC-04) | Open, part 044-B | Unchanged by the merge (D-ARCH-221, proof (g)) |
+| F2 (PR044-SEC-05), F4 (PR044-SEC-07) | Open | On the TASK-141 and TASK-173 cards (D-SD-012). #82 put `streamSlotRule` and `acquire`/`release` on main, still without a consumer |
+| F6 (PR044-SEC-08), F7 (PR044-SEC-09) | Open, part 044-B | Unchanged: the SSE module is byte-identical to `3b56ab54` |
+| G1 items 1 to 5 | Open, part 044-B security round | Unchanged. Item 4 now refers to code on main: `RateLimiter.acquire` takes the slot TTL from its caller and fails open on a store error (`limiter.ts`), so the consumer chooses the 31 s plus margin and must pin it |
+
+## R3.5 Findings
+
+None new. Open, all carried unchanged: LOW PR044-SEC-04 (F1) and PR044-SEC-05 (F2); INFO PR044-SEC-07 (F4), PR044-SEC-08 (F6) and PR044-SEC-09 (F7).
+
+## R3.6 Conditions and routing
+
+| ID | Condition or follow-up | Owner | Due |
+|---|---|---|---|
+| C3 (re-pointed) | Lane B green on `33262314`: the 12 tests of `tests/api/event-stream.api.test.ts`, each in the JUnit by title (round 2 R2.7), plus `problem-handler.api`, `declared-credentials.api` and `idempotency.api`, whose paths run through the union `problem-handler.ts` (code review R3.3 item 3) | orchestrator (lane B) | Before merge |
+| C5 | Lane A on the pushed head: lint (closes R1-m4), format, typecheck, unit (the PR44-SEC-13 pins and the SSE suites), build and diff coverage. A pushed head that differs from `33262314` only by a docs-only merge of `origin/main` may stand in | orchestrator | Before merge |
+| G1 item 6 (new) | In the part 044-B security round: the event-stream fixture carries the contract's auth set, `privateRefusals` and `PRE_STREAM_STEPS` are gone, and the 400 test proves SEC-TC-29 through `declaresPrivateResponse` (code review R2-m1) | part 044-B developer; security-analyst | That round |
+
+**Unions with the branches in flight** (`git merge-tree --write-tree` against `33262314`):
+
+| Branch head | Paths shared with TASK-044 | Result |
+|---|---|---|
+| TASK-041 part 041-B `aade2672` (pushed, stacked on main) | None | Clean |
+| TASK-040 part 040-B PR 1 `2c9cc41c` (pushed) | None | Clean |
+| TASK-042 `b8ba7788` | `packages/ui/src/index.ts` (not owned) | Clean |
+| TASK-045 `77326dc5`, TASK-034 `3ee36f01` | None | Clean |
+
+No in-flight branch changes one of this PR's 11 owned paths, so none of them voids this round if it merges first (rule (d) in R3.7). Any other PR that changes `problem-handler.ts`, `platform/sse/**` or `tests/api/helpers/contract-validator.ts` before this one merges does void it.
+
+## R3.7 Record binding (static)
+
+Main's checker (`tools/ci/check-security-owned-paths.mjs`) was read, not run, because this is a static round. Its rule (d) accepts a record when a `Head` row names a commit of the PR and none of the PR's own owned paths changed between that commit and the checked head. Evaluated with git:
+
+| Scenario | Expected |
+|---|---|
+| This record (renamed to `PR-<NNNN>-…`) on main; PR head `33262314`, or the merge ref with main `f3472957` | pass, satisfied by `33262314`. `git diff --name-only 33262314 <merge-tree(f3472957, 33262314)>` lists 0 paths outside `docs/` and `.claude/` |
+| The `dc64193f` and `3b56ab54` rows | Each gives a note and does not satisfy, as expected: owned paths changed after them, for the second through `problem-handler.ts`. The `33262314` row satisfies |
+| A docs-only merge of `origin/main`, or a docs-only lane-B evidence commit, after `33262314` | pass |
+| Any owned edit after `33262314` on the branch, or a main that changes one of the 11 owned paths before the merge | missing: a new round is needed |
+| The record only under its `PR-pending` name | missing: the orchestrator renames it once the PR exists |
+
+The combined record now has three `Head` rows (`dc64193f`, `3b56ab54`, `33262314`) and three `Verdict` rows. The last one is this round's.
+
+## R3.8 Verdict
+
+| Field | Value |
+|---|---|
+| Verdict | PASS_WITH_CONDITIONS. Merge-only round at `33262314`: a pure union with main `4ba683ad` (#80 to #84, #49, #50) plus the R1-m4 deletion. Every control of both sides holds: PR44-SEC-13 on the union `problem-handler.ts`; TASK-040's pre-rendered path only before the headers; no idempotency on SSE GETs (five layers); stream opens counted at step 0 and step 5 before the stream opens; the in-flight hold of 041-B (not merged) ends at the authentication outcome; stream headers unchanged. No new finding. C4 discharged. Open merge conditions: C3 lane B green on `33262314`, C5 lane A. Carried: LOW PR044-SEC-04 (F1) and PR044-SEC-05 (F2); INFO PR044-SEC-07 (F4), -08 (F6) and -09 (F7); G1 items 1 to 6 for the part 044-B security round |
