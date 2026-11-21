@@ -11341,3 +11341,62 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Alternatives rejected:** the query client on TASK-068 or TASK-069 (two cards in one batch would share one module, or the admin shell would wait for the web shell); line 25 on TASK-280 (the rulings say it holds the harness, and the hold time needs the counters of TASK-214, Wave 7); the devops items as a line on TASK-287 (above); placing C5 (b) on TASK-041 (part 041-B is in its merge rounds and fix cycle 3 did not take it).
 - **Routed:** frontend-developer of TASK-054 and ux-designer: the RATE-LIMITED STATE line is my reading of D-UX-037 and components section 4; ux-designer may reword it before TASK-054 is dispatched. qa-lead: the rows of lines 27 and 28 beside rule 2 of TEST-STRATEGY section 10.4 (D-QG-010 follow-up 3) are theirs to map. principal-architect: guard C or D of PR041-SEC-17 before TASK-108 merges (or at the next commit to `authn-failed.ts`). orchestrator: TASK-299 into the next free slot (its pull request 1 is dispatchable after about 2026-11-25), and the STATUS.md count.
 - **Reversibility:** High (plan text; one new late card).
+
+### D-SECPR034-02 · 2026-11-21 · security-analyst · TASK-034 security round 2 (condition C2 delta round on fix cycle 3, D-ARCH-238 F1 to F15; the merges `1a0cdeaf` and `e17f1d6d`; D-TASK034-15 to -23) = PASS_WITH_CONDITIONS at `1bac00b1` (appended as round 2 to `docs/05-quality/security/PR-pending-TASK-034-security-review.md`; threat model v1.3 checked, SEC-TC-85 assigned)
+- **Trigger:** D-ORCH-174. The C2 delta round is owed on `1bac00b1`, to close or keep C1 against data-model §4.6, §8.3 and §8.6 and the five checks of D-ARCH-238. Before finalising I read D-ARCH-235 to D-ARCH-238 and the code review round 3 (D-CRPR034-02, APPROVED_WITH_NITS at the same head).
+- **Decision:** 0 Critical, 0 High.
+  1. **The five checks of D-ARCH-238 hold.**
+     - (1) The four P1b escalation shapes are rule-21 findings, and P7b is rule 14.
+     - (2) All 13 C17 cases pass on PostgreSQL 18 in lane B `20261121T1743Z_1bac00b`, `query_to_xml` included.
+     - (3) The gate int case passes there, and the unit refusals come before any admin session or `CREATE DATABASE`.
+     - (4) `--same-cluster` is refused when missing and when wrong, and `target.sameCluster` is reported.
+     - (5) RR-19 equals round 1's residuals plus (b) and (c), and §8.6 states the rule, the exception and its end.
+  2. **Closed:** PR034-SEC-02, -03, -04, -05, -06 and -08.
+     - -03: 7 of 11 deploy shapes leak at `3ee36f01` and 2 at the head, both stated residuals.
+     - -04: on PGlite, a column `t` no longer hides the row.
+     - -06: X4 is rule 10 at the lint level.
+     - -08: the child environment keeps 12 of 29 names and drops every database URL, password, `NODE_OPTIONS`, `PG*`, `LD_PRELOAD` and `BASH_ENV`.
+     - The rule-10 fuzz is unchanged (0 misses in 20,562; mutant 646).
+  3. **The merges are pure.** `git merge-tree` equals both merge trees, `package.json` hunks are identical both ways, and the raw diff equals the branch's own apart from that blob. `lintRepository` gives 0 findings over 11 migrations, and its rule-21 control fires.
+  4. **New PR034-SEC-09 MEDIUM (CWE-250, CWE-184; A04).** C17 and the gate accept an operator whose routine lives in `pg_catalog`, whatever the operator's schema and the routine's volatility.
+     - A `public.@@@` over `pg_catalog.ts_rewrite(tsquery, text)`, which is VOLATILE with PUBLIC EXECUTE and runs its text argument, is used in a table CHECK, a domain CHECK, or a `NOT VALID` + `VALIDATE` CHECK. On PGlite 17.5 the migrator becomes SUPERUSER at the superuser write, and C17 at the head returns 0 rows. The candidate fix (an operator outside `pg_catalog` is a finding) reports each, and the committed operator shapes stay at 0.
+     - Rule 14 does not read DO or routine bodies (r1 too), and rule 21 does not see an unqualified operator, so the whole chain lints clean as one migration. The PR24-SEC-02 catalog operator case still meets that actor in lane B. Nothing meets a holder of the migrator credential.
+     - Fix: C17's `:opno` arm requires `oprnamespace = pg_catalog` (and refuses VOLATILE operator routines); two planted C17 probes; `REFUSED_OBJECTS` at body statement starts; rule-21 limits text. principal-architect amends §4.6 C17 (a) and the §8.6 sentence on IMMUTABLE built-ins.
+  5. **New PR034-SEC-10 MEDIUM (CWE-250, CWE-706; A04).** `captureManifest` (`MIGRATION_TABLE_SQL`, `MIGRATION_HEAD_SQL`) and `APPLIED_CHECKSUM_SQL` read `public._prisma_migrations` as the bootstrap superuser with no relkind check.
+     - The migrator owns that table and can replace it with a view. On PGlite, the superuser's read makes the migrator SUPERUSER, with the routine in the view's WHERE clause or only in its select list.
+     - Inside `runBackup`'s `REPEATABLE READ READ ONLY` transaction, `ALTER ROLE` is refused (25006), but `COPY … TO` a server file succeeds as `postgres`, and `COPY … TO PROGRAM` is the same class.
+     - This happens on the source cluster during `db:backup`, so D-ARCH-235's isolation does not bound it. Data-model §8.6 already says the sessions "never read a view"; `FROM ONLY` does not exclude one (PGlite).
+     - Round 1 missed this read. Fix: lock (`ACCESS SHARE`), then require `relkind = 'r'` by OID and refuse anything else. Lock the fingerprinted tables the same way (a reasoned race). principal-architect corrects the §8.6 wording.
+  6. **New PR034-SEC-11 INFO.** Prisma codes are collected from `DETAIL` lines too, so a row token shaped like `P2025` reaches the detail. `errorSummary` keeps a server message whose severity word is not upper-case English.
+  7. **Rulings and concurrence:**
+     - D-TASK034-15, -16, -18 to -23 are accepted. -17 is accepted for this head (R3-n2), and -22 gains the limits of SEC-09 item 4.
+     - I concur with code review R3-m1 (the same shape as mine), R3-n1, R3-n4 and R3-n5.
+  8. **Threat model v1.3 (my document):** confirmed. §10.4 I item 3 (a) is qualified for operators, item 7 is numbered SEC-TC-85 (row added to §10.4 F), and item 8 records PR034-SEC-09 and -10 as open findings, not RR-19 residuals. SEC-TC-85 is free on origin/main (the highest in use is 84).
+- **Lane B (C4 of this round), read from the queue log and the run's JUnit; not committed by me.** `20261121T1743Z_1bac00b` is FAIL.
+  - 7 of TASK-034's own `backup-restore.int.test.ts` cases fail with "schema: the normalised schema dump differs from the source": the restore, the negative controls, the tampered manifest, the R1-M1 / R2-m1 record case, concurrent writes, `db:verify-restore` main, and the second-cluster CLI case.
+  - The other reds are main-wide (D-ORCH-170): gitleaks-full ×2 and the compose Valkey digest.
+  - Lane B passed at `3ee36f01`, before the merges.
+- **Conditions:**
+  - **C1 (tracked):** kept open and narrowed to PR034-SEC-09 and -10, with their architect text. Due before `restore-rehearsal` activation, before any non-synthetic rehearsal, and at the latest G3. TASK-034 has used its fix cycles, so I recommend D-ARCH-238's split rule: one follow-up card on `db-tools-backup` and the `tools/db` linter, with PR034-SEC-09, -10 and -11 and R3-m1, -n3 and -n4. The orchestrator decides.
+  - **C2:** discharged.
+  - **C3 (remaining):** commit the lane-B evidence, hosted CI when billing allows, rename and the merge-ref check. The merge-only part is done.
+  - **C4 (binding): NOT MET.** The head goes back to senior-developer with the `schemaDiff` lines of the red cases. If a line is a grant, a policy, an owner, an RLS flag, a trigger or an event trigger, security reviews it. A fixed head needs lane B and a security delta round. This verdict does not clear `1bac00b1` for merge.
+- **Method:**
+  - Single-process Node 24.22.3 probes on `git archive` extracts of `1bac00b1`, `3ee36f01` (control) and a mutant.
+  - PGlite 0.4.3 for the operator, the view and the read-only probes.
+  - Fake sessions for the gate and the cluster check.
+  - A record simulation: main's `check-security-owned-paths.mjs` on a simulated merge ref with this record as `PR-9999-…` passes with 64 owned paths, and the controls (no record, FAIL, a Head row naming `e17f1d6d`, round 1 only) fail.
+  - A gitleaks v8.30.1 emulation: 0 findings over `e17f1d6d..1bac00b1` and over the added text; the runtime controls fire.
+  - No Docker and no npm suites. No command ran in the worktree; I only read its lane-B run files.
+- **Routed:**
+  - principal-architect: the text of SEC-09 and SEC-10 (§4.6 C17 (a), §8.6), whether rule 14 reads bodies, and R3-n5.
+  - senior-developer: C4 now; then the follow-up card (or the next `tools/db` holder) for SEC-09 items 1 to 4, SEC-10, SEC-11 and R3-m1/n3/n4.
+  - qa-lead: `restore-rehearsal` activation waits for C1, and SEC-TC-85 joins `catalog-c1-c14.required_cases` after the merge.
+  - orchestrator: C4 with the §7 step, C3, the C1 carrier, and the PR034-SEC-07 checklist lines.
+- **Reversibility:** High. Records and conditions only. No code was changed by this round.
+
+### D-ORCH-175 · 2026-11-21 · sdlc-orchestrator (session C, after handback) · TASK-034 lane B on fix cycle 3 FAILS for one cause; escalation ladder rung 1; plan fold D-SD-015 pushed
+- **TASK-034 lane B `20261121T1743Z_1bac00b` = FAIL.** Besides the main-red cases (gitleaks-full x2, compose valkey), 7 backup/restore integration cases fail with one message: `schema: the normalised schema dump differs from the source` (`db:verify-restore` FAIL, 29 tables, 1370 rows). Unit, catalog and the other suites pass. First run of the fix-cycle-3 integration cases and of the branch merged with main (#80–#84 migrations); likely cause: the schema normalisation versus a fix-cycle-3 change (load-time gate / cluster check / restore target) or main's new migrations.
+- **MAX_FIX_CYCLES (3) reached on TASK-034 → Escalation Ladder rung 1 (CLAUDE.md §7):** re-dispatch the same task to senior-developer with `model: opus` and a sharper brief carrying all findings (code r1–r3, D-SECPR034-01, D-ARCH-235..238, this run's JUnit at `../Shipqube-TASK-034/docs/05-quality/tests/runs/20261121T1743Z_1bac00b/`); first step is a diff of the two normalised dumps to name the differing object. If that fails, rung 2: principal-architect root cause on the comparison rule. Owner: the next coordinator. The security round 2 on `1bac00b1` (running) stays valid only if the fix touches no owned path.
+- **Plan fold D-SD-015** (`392bd8af`, pushed): card lines 20–29 of the TASK-041 rulings, D-ARCH-240 on TASK-187, the D-PM-091 gate on TASK-141, review riders on 040-B PR 2, 044-B and 045-C, the D-QA-023 rules, and new chore TASK-299 (batch 1.12; PR 1 from ~2026-11-25, PR 2 after the three task squashes). STATUS Wave 1 count needs +2 (TASK-298, TASK-299).
+- **Reversibility:** High.
