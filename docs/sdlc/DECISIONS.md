@@ -7868,3 +7868,27 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Gatekeeper:** not needed for this entry (no ADR text changes).
 - **Applied in:** rulings file §8.8. **Card lines:** §8.9 (TASK-091 with a dispatch gate, TASK-146, TASK-234).
 - **Reversibility:** High (card lines; nothing is built).
+
+### D-ARCH-214 · 2026-11-21 · principal-architect · TASK-051 security round 1 (D-SECPR051-01), the items routed to me: PR051-SEC-03 is folded into this migration — the staff grant is also required when an operator membership becomes ACTIVE by UPDATE (ADR-0005 amendment 15 item 39); PR051-SEC-01 and L-1 are answered by D-ARCH-208 and D-ARCH-211
+- **Trigger:** `docs/05-quality/security/PR-pending-TASK-051-security-review.md` (PASS_WITH_CONDITIONS at `203d02eb`), which landed while D-ARCH-207..213 were written. It routes PR051-SEC-01 (rule text), PR051-SEC-03 and L-1 to me.
+- **PR051-SEC-03 (LOW latent, CWE-269): folded now.**
+  - The function replacement of the operator staff grants migration gains one clause in its UPDATE branch: a membership of an OPERATOR organisation whose status becomes `ACTIVE` needs a grant for its user. The refusal is the one of the INSERT rule. The comment above the function is amended with it. `down.sql` does not change.
+  - The exact text is rulings file `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §3.4 item 1 as amended, and it is the clause the security record proposes. Test case O7 and its mutant are in §3.4 item 7.
+- **Why now and not with M2** (the record offered both and prefers now):
+  - the migration is not merged, so the clause costs four lines and one test; after the merge the file is immutable and the clause needs a second function replacement with its own `down.sql`;
+  - it is the same kind of gap as PR65-SEC-04 (a), which this replacement already closes (D-ARCH-166): a rule on INSERT that an UPDATE walks around;
+  - the impact, if it is ever reached, is read access to every tenant for a former staff member;
+  - offboarding is then safe with SUSPENDED as well as with REMOVED.
+- **What stays open, stated:** deleting a grant does not change a membership. A member who is ACTIVE when the grant is deleted stays an operator until the membership is suspended or removed. Until M2 only the migrator lane can delete a grant, and it suspends or removes the membership first. **Binding on the M2 amendment** (the runtime writer of grants, D-ARCH-165): it ties the deletion to the membership in the database, by refusing the deletion while a membership that is not REMOVED exists or by letting `app_is_operator()` read the grant.
+- **Checked (PGlite 17.5, reduced schema; rulings file §8.11 rows S3a to S3f):** the function text of the branch at `203d02eb` with the clause inserted compiles; a suspended operator membership without a grant is refused ACTIVE and one with a grant is accepted; a customer membership is unaffected; the other update rules and the insert rules answer as before. The committed function, as the negative control, accepts the first case.
+- **Not verified:** the real schema with RLS, the migration linter on the amended file, PostgreSQL 18. Lane B at the fix head and the security delta round are the evidence.
+- **Considered and not chosen:** carrying the clause in the M2 amendment. Its merit is that the complete control belongs to the deletion of a grant, which only M2 introduces. That part is kept as a binding on the M2 amendment; the clause itself is cheaper now than as a later function replacement.
+- **PR051-SEC-01 (rule text):** answered by D-ARCH-208, which enforces both halves on TENANT and GUEST_CAPABLE tables. One planted probe is added from the security record: `EXCLUDE USING gist (org_id WITH <>, code WITH =)` on `c16_parent`, reported although `org_id` is `NOT NULL` there.
+- **L-1 and condition C2:** answered by D-ARCH-211. **Condition C6:** answered by D-ARCH-213; the card lines of TASK-091 and TASK-146 now name SEC-TC-81.
+- **Not mine:** PR051-SEC-02 (the same-organisation round of the race), PR051-SEC-04 and PR051-SEC-05 are routed to senior-developer by the record.
+- **Gatekeeper:** needed. Item 39 extends item 35 of an Accepted ADR; it is verified with items 37 and 38 (one check of amendment 15, before TASK-051 merges).
+- **Effect on the orchestrator's option to split the operator-grant half for TASK-089** (review merge condition 8): that half now carries this one change. It is four lines and one test, and it travels with the half if it is split.
+- **Applied in:** ADR-0005 amendment 15 item 39 (pointer at item 35); data-model §3.2 (`memberships` rule 7, `operator_staff_grants`), A41; risks.md R-ARCH-35 (version 1.28); rulings file §3.3, §3.4, §8.2, §8.9, §8.10 and §8.11.
+- **Card line:** rulings file §8.9 (TASK-051, "OPERATOR RULE ON UPDATE").
+- **Routed:** security-analyst (whether O7 joins SEC-TC-79; T-35 wording); product-manager (EPIC-B-207: grant removal is tied to the membership by the M2 amendment).
+- **Reversibility:** High until the migration merges; afterwards the clause is removed by another function replacement.

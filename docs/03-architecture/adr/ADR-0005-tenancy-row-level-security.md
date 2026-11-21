@@ -189,7 +189,7 @@ Consequence for the 2026-11-14 ruling: at invitation acceptance the membership's
 35. **A membership of an OPERATOR organisation needs a staff grant.** This adds to item 29 and changes item 26.
     - Item 29 makes every membership insert a self-insert, so a session whose context names the operator organisation could create its own ACTIVE membership, which is the fact `app_is_operator()` reads (PR65-SEC-02).
     - `public.operator_staff_grants` (GLOBAL, read-only at runtime) holds one row per user who may hold such a membership. `platform_app` has `SELECT` and nothing else. The writer is the provisioning lane, as `platform_migrator`.
-    - `platform.memberships_lifecycle_guard()` refuses the insert of a membership of an OPERATOR organisation unless a grant names the member. An organisation the session cannot see counts as OPERATOR. The member is still the actor.
+    - `platform.memberships_lifecycle_guard()` refuses the insert of a membership of an OPERATOR organisation unless a grant names the member. An organisation the session cannot see counts as OPERATOR. The member is still the actor. *Extended 2026-11-21 by amendment 15 item 39: also on an update that makes the membership ACTIVE.*
     - Item 26 said the first-staff command runs as `platform_app`. It still does, for the user, the membership and the role; the grant between the user and the membership is written with the migrator credential, which the pipeline task therefore holds as well. The demo seed does the same through the migrator connection of the seed CLI.
     - No definer function gains a write, no policy changes and no role is added.
     - Staff management in the admin app (M2) needs a runtime writer of grants. That is a new amendment: an insert policy gated by `app_is_operator()`, and the removal of a grant when a staff member leaves.
@@ -198,7 +198,7 @@ Consequence for the 2026-11-14 ruling: at invitation acceptance the membership's
     - **A transition guard on `users`.** Every writer of a `users` row acts as that user (`p_users__own`), system flows included, so a trigger cannot tell a self-service request from the verification flow, the housekeeping job or `ops:staff-reactivate`. Closed request schemas on the self-service routes stay the control.
     - **A backstop against PARTNER organisations.** Deferred to the M3 partner design, which decides how such an organisation is provisioned. No partner route or permission exists in M1.
 
-## Amendment 15 (2026-11-21, TASK-051 code review round 1 and lane B on PostgreSQL 18: observation L-1, findings R1-M1 and R1-m4; `rulings/wave-1-r-arch-34-operator-rulings.md` §8; D-ARCH-208, D-ARCH-211, D-ARCH-212)
+## Amendment 15 (2026-11-21, TASK-051 code review round 1, security review round 1 and lane B on PostgreSQL 18: observation L-1, findings R1-M1, R1-m4 and PR051-SEC-03; `rulings/wave-1-r-arch-34-operator-rulings.md` §8; D-ARCH-208, D-ARCH-211, D-ARCH-212, D-ARCH-214)
 
 37. **A refused reference is `23503` or `23001`.** PostgreSQL 18 reports a refused `RESTRICT` action, the change or deletion of a referenced key while a row still names it, as `23001` (`restrict_violation`). Up to 17 that was `23503`. A row that names a missing parent is `23503` in every version. Every foreign key of the Platform is `ON DELETE RESTRICT ON UPDATE RESTRICT`, and that does not change.
     - **This revises the last sentence of item 32.** A claim that leaves a child table out fails with `23001` on PostgreSQL 18, on the guest key of the table left out. A claim written as separate statements fails with `23001` when the quote is updated first and with `23503` when a child is updated first. The one-statement claim is unaffected.
@@ -209,6 +209,10 @@ Consequence for the 2026-11-14 ruling: at invitation acceptance the membership's
     - an exclusion constraint whose operator on the owner column is not equality (`org_id WITH <>`) conflicts only across owners.
 
     Rule: in a unique index the owner column is `NOT NULL` or the index is `NULLS DISTINCT`; in an exclusion constraint the operator on the owner column is equality. The two indexes of a uniqueness rule on a GUEST_CAPABLE table are `NULLS DISTINCT`, and one index over both owner columns is not an alternative. An index whose owner column does not count is refused and cannot be a listed exception. Catalog assertion C16 (b) enforces both forms (data-model §4.6).
+
+39. **The staff grant is required whenever a membership of an OPERATOR organisation becomes ACTIVE** (security review PR051-SEC-03). This extends item 35, which checked the grant on insert only. A suspended membership whose grant was gone could be set ACTIVE again by any session in the context of the operator organisation, and its member then read every tenant. `platform.memberships_lifecycle_guard()` therefore applies the operator rule to an update that sets `ACTIVE` from another status as well. The clause joins the function replacement of item 35, which is not merged yet, so no further migration is needed.
+    - **What stays open.** Deleting a grant does not change a membership: a member who is ACTIVE when the grant is deleted stays an operator until the membership is suspended or removed. Until M2 only the migrator lane can delete a grant, and it suspends or removes the membership first.
+    - **Binding on the M2 amendment of item 35** (a runtime writer of grants): it ties the deletion to the membership in the database, either by refusing the deletion while a membership that is not REMOVED exists or by letting `app_is_operator()` read the grant. It is not complete without one of the two.
 
 Verification of this amendment: quality-gatekeeper (CLAUDE.md §5), before TASK-051 merges. The test evidence is lane B of TASK-051 at its fix head.
 

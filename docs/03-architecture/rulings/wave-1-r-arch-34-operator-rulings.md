@@ -1,6 +1,6 @@
 # Wave-1: rulings on guest-row binding (R-ARCH-34), operator memberships (PR65-SEC-02 (b)) and four smaller items (2026-11-19)
 
-Owner principal-architect. Decisions D-ARCH-162 to D-ARCH-167. These are the two dispatch gates of D-SD-002: TASK-051 `guestclaim` and TASK-089 `seeddemo`. *Amended 2026-11-21 after the TASK-051 code review, round 1, and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-213): section 8, with dated notes in sections 2.3 to 2.7 and 6.*
+Owner principal-architect. Decisions D-ARCH-162 to D-ARCH-167. These are the two dispatch gates of D-SD-002: TASK-051 `guestclaim` and TASK-089 `seeddemo`. *Amended 2026-11-21 after the TASK-051 code review, round 1, and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-214): section 8, with dated notes in sections 2.3 to 2.7, 3.3, 3.4 and 6.*
 
 **Inputs.** D-SD-002. `docs/05-quality/security/PR-0065-TASK-037-security-review.md` (PR65-SEC-02, PR65-SEC-04). `docs/05-quality/security/PR-0072-TASK-293-security-review.md` (PR293-SEC-03). risks.md R-ARCH-33, R-ARCH-34. data-model §3.2, §3.10, §4.3, §4.5, §4.6, §4.7, §6.1, §9, §10. ADR-0004, ADR-0005 (amendments 12 and 13), ADR-0013 (amendment 3). The merged code at `29fe2a1`: migration `20261117000000_organisations_identity`, `prisma/tests/catalog/tenant-keys.ts` and `c16-tenant-keys.int.test.ts`, `apps/api/src/platform/db/map-db-error.ts`, `prisma/tests/organisations/cases.ts`, `prisma/seed/**`, `tools/db/lint-migrations.ts`. The cards of TASK-051, TASK-057, TASK-087 and TASK-089. US-080, US-167, REQ-QUOTE-015 to -017.
 
@@ -211,7 +211,7 @@ The results are the same with `ux_quote_packages__org_quote_seq` partial on `org
 ### 3.3 The rule
 
 1. **`public.operator_staff_grants`** holds one row per user who may hold a membership of an OPERATOR organisation. Class GLOBAL, `runtimeReadOnly`: no RLS, `SELECT` for `platform_app`, written by `platform_migrator` only.
-2. **`platform.memberships_lifecycle_guard()`** refuses the INSERT of a membership of an OPERATOR organisation unless a grant names `NEW.user_id`. An organisation the session cannot see counts as OPERATOR (fail closed). The other rules are unchanged, and "member = actor" still holds for staff.
+2. **`platform.memberships_lifecycle_guard()`** refuses the INSERT of a membership of an OPERATOR organisation unless a grant names `NEW.user_id`. An organisation the session cannot see counts as OPERATOR (fail closed). The other rules are unchanged, and "member = actor" still holds for staff. *Amended 2026-11-21 (security review PR051-SEC-03; D-ARCH-214; section 8.11):* the same holds for an UPDATE that makes such a membership ACTIVE.
 3. **Who writes a grant.** The provisioning lane, as `platform_migrator`, between creating the user and adding the membership: the demo seed (TASK-089) now and `ops:staff-bootstrap` at M5. Neither api nor worker ever holds that credential (REQ-RLS-005), so no request can write one.
 4. **Staff management in the admin app (M2, EPIC-B-207)** needs a runtime writer. That is a new ADR-0005 amendment: an INSERT policy on the grants gated by `platform.app_is_operator()`, and the removal of a grant when a staff member leaves.
 
@@ -220,12 +220,13 @@ The results are the same with `ux_quote_packages__org_quote_seq` partial on `org
 - It does not stop SQL injection. A session that can set the context keys can name an existing staff member as its actor (T-35, accepted). The grant closes minting a membership, not impersonation.
 - A context that names the operator organisation for a non-member still shows that organisation's own rows, as for any tenant. The route conditions of PR65-SEC-02 (a) stay binding on TASK-049, TASK-224 and TASK-227.
 - A granted user can add his own membership again after it was REMOVED, in an operator context. Run 1 has no flow that removes staff; item 4 deletes the grant.
+- *2026-11-21 (D-ARCH-214):* deleting a grant does not change a membership. A member who is ACTIVE when the grant is deleted stays an operator until the membership is suspended or removed, so the membership goes first (section 8.11).
 
 ### 3.4 Exact change list for the implementing task
 
 **Task.** Recommended: TASK-051, as a second migration directory in the same PR (database-engineer, the RLS lane, one security review for both guards; it then needs the `mod-organisations` lock, which no other task of batch 1.5 holds). senior-developer may place it elsewhere at the fold. The only ordering rule: it is merged before TASK-089 opens its PR, and TASK-089 depends on it.
 
-1. **`prisma/migrations/<timestamp>_operator_staff_grants/migration.sql`** (4 statements; linted clean here):
+1. **`prisma/migrations/<timestamp>_operator_staff_grants/migration.sql`** (4 statements; the first version was linted clean here. *Amended 2026-11-21, D-ARCH-214: the UPDATE clause for `ACTIVE` and the comment above the function, run on a reduced schema and not linted again; section 8.11*):
 
    ```sql
    -- migration-kind: expand
@@ -258,8 +259,10 @@ The results are the same with `ux_quote_packages__org_quote_seq` partial on `org
    GRANT SELECT ON TABLE "public"."operator_staff_grants" TO platform_app;
 
    -- The function of 20261117000000_organisations_identity, replaced in place: the trigger and its column list are
-   -- unchanged. New: the operator rule on INSERT (fail closed: an organisation the session cannot see counts as OPERATOR)
-   -- and the INVITED rule on UPDATE (PR65-SEC-04 (a): the insert rule alone left INVITED reachable by UPDATE).
+   -- unchanged. New: the operator rule, on INSERT and on an UPDATE that makes the row ACTIVE (fail closed: an
+   -- organisation the session cannot see counts as OPERATOR; PR051-SEC-03: the insert rule alone let a suspended
+   -- membership return without a grant), and the INVITED rule on UPDATE (PR65-SEC-04 (a): the insert rule alone left
+   -- INVITED reachable by UPDATE).
    CREATE OR REPLACE FUNCTION platform.memberships_lifecycle_guard() RETURNS trigger
    LANGUAGE plpgsql
    SET search_path = pg_catalog, pg_temp
@@ -277,7 +280,11 @@ The results are the same with `ux_quote_packages__org_quote_seq` partial on `org
        v_rule := CASE WHEN NEW.user_id IS DISTINCT FROM OLD.user_id THEN 'user_id cannot change'
                       WHEN NEW.org_id  IS DISTINCT FROM OLD.org_id  THEN 'org_id cannot change'
                       WHEN OLD.status = 'REMOVED' AND NEW.status IS DISTINCT FROM 'REMOVED' THEN 'REMOVED is terminal'
-                      WHEN NEW.status = 'INVITED' AND OLD.status IS DISTINCT FROM 'INVITED' THEN 'INVITED is reserved' END;
+                      WHEN NEW.status = 'INVITED' AND OLD.status IS DISTINCT FROM 'INVITED' THEN 'INVITED is reserved'
+                      WHEN NEW.status = 'ACTIVE' AND OLD.status IS DISTINCT FROM 'ACTIVE'
+                       AND NOT EXISTS (SELECT 1 FROM public.organisations o WHERE o.id = NEW.org_id AND o.type <> 'OPERATOR')
+                       AND NOT EXISTS (SELECT 1 FROM public.operator_staff_grants g WHERE g.user_id = NEW.user_id)
+                                                                                 THEN 'an operator membership needs a staff grant' END;
      END IF;
      IF v_rule IS NOT NULL THEN
        RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = pg_catalog.format('MEMBERSHIP_LIFECYCLE_VIOLATION: %s', v_rule);
@@ -304,8 +311,9 @@ The results are the same with `ux_quote_packages__org_quote_seq` partial on `org
    | O4 | A granted user is inserted by another actor; a granted user joins as SUSPENDED | `P0001 … the member is not the actor`; `P0001 … a membership is created ACTIVE` |
    | O5 | A user without a grant joins a BUSINESS_CUSTOMER organisation | ok |
    | O6 | `ACTIVE → INVITED` | `P0001 … INVITED is reserved`; `ACTIVE ↔ SUSPENDED` and `→ REMOVED` stay ok |
+   | O7 *(added 2026-11-21, D-ARCH-214)* | A SUSPENDED membership of the operator organisation whose grant the migrator has deleted: `SUSPENDED → ACTIVE`; the same once the grant is back; `SUSPENDED → ACTIVE` in a BUSINESS_CUSTOMER organisation | `P0001 … an operator membership needs a staff grant`, and with the OPERATOR scope the member still sees one organisation; ok; ok |
 
-   - Mutant, by hand, reported in the PR: with the operator clause removed, O1 becomes ok.
+   - Mutant, by hand, reported in the PR: with the operator clause removed, O1 becomes ok. *2026-11-21:* and with the UPDATE clause removed, O7 becomes ok.
    - Existing fixtures plant operator memberships as the superuser under `session_replication_role = replica` (`cases.ts` `fixture`, the generated RLS suite, C1 to C12), so no trigger fires and none of them changes.
 8. **Catalog.** C5 (the manifest line), C10 and C1 to C2 (GLOBAL allow-list) follow from items 3, 4 and 6. C15 is unaffected: the table is `runtimeReadOnly`. C11 is unaffected: the function stays `SECURITY INVOKER`.
 
@@ -418,15 +426,15 @@ Written without apostrophes, for `plan-data.mjs`.
 5. **M2 staff management** (EPIC-B-207) needs the amendment of section 3.3 item 4. product-manager may note it on the epic.
 6. **data-model §8.3** still owes the wording for the rule-10 call sites and the lone carriage return (D-ORCH-139). Not done here.
 
-## 8. Amendment of 2026-11-21: TASK-051 code review round 1 and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-213)
+## 8. Amendment of 2026-11-21: TASK-051 code review round 1, security review round 1 and lane B on PostgreSQL 18 (D-ARCH-207 to D-ARCH-214)
 
-**Inputs.** `docs/05-quality/reviews/PR-pending-TASK-051-code-review.md` (CHANGES_REQUESTED; section 4 questions 1 to 6; findings R1-M1, R1-m1, R1-m4, R1-n1; observation L-1; merge condition 6). The branch `feat/TASK-051-guest-capable-tables-atomic-claim` at `203d02eb`, read by SHA: `prisma/tests/catalog/tenant-keys.ts`, `prisma/tests/harness/guest-claim-probe.ts`, `prisma/tests/rls/guest-claim.int.test.ts`, `apps/api/src/platform/db/map-db-error.ts` and its test, `tools/repo/refused-reference-answer.test.ts`. Lane B run `20261121T0336Z_203d02e` on PostgreSQL 18 (summary and log). `@prisma/adapter-pg` and `@prisma/client` 7.10.1 as installed. `prisma/sql/function-templates/std-columns-guard.sql`. `api/openapi.yaml`, read only: `claimQuote`, the three operations with `x-tenancy: guest`, the three operations with the `QuoteToken` parameter.
+**Inputs.** `docs/05-quality/reviews/PR-pending-TASK-051-code-review.md` (CHANGES_REQUESTED; section 4 questions 1 to 6; findings R1-M1, R1-m1, R1-m4, R1-n1; observation L-1; merge condition 6). The branch `feat/TASK-051-guest-capable-tables-atomic-claim` at `203d02eb`, read by SHA: `prisma/tests/catalog/tenant-keys.ts`, `prisma/tests/harness/guest-claim-probe.ts`, `prisma/tests/rls/guest-claim.int.test.ts`, `apps/api/src/platform/db/map-db-error.ts` and its test, `tools/repo/refused-reference-answer.test.ts`. Lane B run `20261121T0336Z_203d02e` on PostgreSQL 18 (summary and log). `@prisma/adapter-pg` and `@prisma/client` 7.10.1 as installed. `prisma/sql/function-templates/std-columns-guard.sql`. `api/openapi.yaml`, read only: `claimQuote`, the three operations with `x-tenancy: guest`, the three operations with the `QuoteToken` parameter. Added the same day: `docs/05-quality/security/PR-pending-TASK-051-security-review.md` (security round 1, PASS_WITH_CONDITIONS; D-SECPR051-01), which routes PR051-SEC-01, PR051-SEC-03 and L-1 to principal-architect.
 
-**Edited (docs only).** This file: dated notes in sections 2.3 to 2.7 and 6, and this section. ADR-0005 (amendment 15, items 37 and 38; dated pointers at items 32, 33 and 34). data-model §3.10, §4.3, §4.6 (C16), §4.7 and amendment row A40. risks.md (R-ARCH-34; version 1.28). DECISIONS.md.
+**Edited (docs only).** This file: dated notes in sections 2.3 to 2.7 and 6, and this section. ADR-0005 (amendment 15, items 37 to 39; dated pointers at items 32 to 35). data-model §3.2, §3.10, §4.3, §4.6 (C16), §4.7 and amendment rows A40 and A41. risks.md (R-ARCH-34, R-ARCH-35; version 1.28). DECISIONS.md.
 
 **Deliberately not edited.** `plan-data.mjs` and the generated cards: the lines are in section 8.9. The story files, `api/**` and `gherkin-test-map.md` (tooling inputs). `threat-model.md`: SEC-TC-76 names `23503` for cases on the referencing side only, which stays true. No product code.
 
-**Run here.** One single-process Node probe on in-memory PGlite 0.4.3 (PostgreSQL 17.5) with `btree_gist`, in the session scratchpad. No Jest, no container, nothing in the TASK-051 worktree, nothing written to the repository. Results: section 8.7.
+**Run here.** Two single-process Node probes on in-memory PGlite 0.4.3 (PostgreSQL 17.5), the first with `btree_gist`, in the session scratchpad. No Jest, no container, nothing in the TASK-051 worktree, nothing written to the repository. Results: sections 8.7 and 8.11.
 
 **Not run here.** PostgreSQL 18. For 18 the evidence is lane B of the pull request: the run at `203d02eb` for sections 8.4 and 8.5, and the run at the fix head for the rest. A PGlite replay of section 2.7 answers `23503` for C2 and C6. That is the 17.5 answer and not a failure.
 
@@ -439,6 +447,7 @@ Written without apostrophes, for `plan-data.mjs`.
 | 5 | L-1: C2 and C6 on PostgreSQL 18 | **Amended to `23001` (D-ARCH-211).** The keys stay `RESTRICT`. | yes: ADR-0005 amendment 15 item 37 |
 | 6 | R1-m4: E1 and E2 name `23503` only | **Extended to `23001` (D-ARCH-212).** One response for both; the tripwire names three tokens. | yes: the same item 37 |
 | + | D-TASK051-07 and merge condition 6: the route-side binding and the HTTP halves | **Agreed (D-ARCH-213).** The rule and its owners are in section 8.8. The pipeline seam for two of its three cases is not designed and is owed by me before TASK-091 is dispatched. | no (the seam ruling will need one) |
+| S | Security round 1, PR051-SEC-03: the staff grant is checked on INSERT only | **Folded into this migration (D-ARCH-214).** The operator rule also applies to an UPDATE that makes the membership ACTIVE. Section 8.11. | yes: ADR-0005 amendment 15 item 39 |
 
 ### 8.1 A foreign key that holds both owner columns (question 1; D-TASK051-03; D-ARCH-207)
 
@@ -504,6 +513,7 @@ SELECT x.relname::text AS index, t.relname::text AS "table",
 | `c16_gparent` | `EXCLUDE USING gist (org_id WITH <>, code WITH =)` | reported |
 | `c16_gparent` | `EXCLUDE USING gist (org_id WITH =, code WITH =)` | not reported |
 | `c16_parent` (`org_id NOT NULL`) | `UNIQUE NULLS NOT DISTINCT (org_id, code)` | not reported |
+| `c16_parent` (`org_id NOT NULL`) | `EXCLUDE USING gist (org_id WITH <>, code WITH =)` | reported: `NOT NULL` does not rescue an operator that is not equality (security record PR051-SEC-01) |
 
 Fixture rows of the host unit test: each row above; `UNIQUE NULLS NOT DISTINCT` over both owner columns (reported); an exception entry that names an index whose owner column does not count (the index is reported and the entry is reported as not live). The header of `tenant-keys.ts` describes arm (b) accordingly and keeps its two stated limits.
 
@@ -630,25 +640,56 @@ Written without apostrophes, for `plan-data.mjs`.
 | Task | Line |
 |---|---|
 | TASK-051 `guestclaim` (fix cycle) | "C16 (a) BOTH OWNER COLUMNS (D-TASK051-03; D-ARCH-207; rulings/wave-1-r-arch-34-operator-rulings.md section 8.1; data-model 4.6 C16 as amended 2026-11-21): a foreign key of a table with guest_token_hash that holds both owner columns is reported and is nobody's sibling; the planted probe c16_g_both (org_id, guest_token_hash, parent_id) -> c16_gparent (org_id, guest_token_hash, id) joins PLANTED_GUEST_REFERENCE_FINDINGS" |
-| TASK-051 | "C16 (b) AN OWNER COLUMN SEPARATES OWNERS (R1-M1; D-ARCH-208; ADR-0005 amendment 15 item 38; rulings section 8.2): an owner column counts in a unique index only when it is NOT NULL or the index is NULLS DISTINCT (pg_index.indnullsnotdistinct false), and in an exclusion constraint only when its operator at that key position (pg_constraint.conexclop) is the equality member of a btree operator family (pg_amop, strategy 3); the SQL returns the facts and the pure function decides, driven by fixtures in tenant-keys.test.ts; an exception entry is live only for an index with no owner key column at all; planted on c16_gparent and reported: UNIQUE NULLS NOT DISTINCT (guest_token_hash, code), UNIQUE NULLS NOT DISTINCT (org_id, code), EXCLUDE USING gist (org_id WITH <>, code WITH =); planted and not reported: EXCLUDE USING gist (org_id WITH =, code WITH =) on c16_gparent and UNIQUE NULLS NOT DISTINCT (org_id, code) on c16_parent; fixture: UNIQUE NULLS NOT DISTINCT over both owner columns is reported; the header describes arm (b) accordingly and keeps its two stated limits" |
+| TASK-051 | "C16 (b) AN OWNER COLUMN SEPARATES OWNERS (R1-M1; D-ARCH-208; ADR-0005 amendment 15 item 38; rulings section 8.2): an owner column counts in a unique index only when it is NOT NULL or the index is NULLS DISTINCT (pg_index.indnullsnotdistinct false), and in an exclusion constraint only when its operator at that key position (pg_constraint.conexclop) is the equality member of a btree operator family (pg_amop, strategy 3); the SQL returns the facts and the pure function decides, driven by fixtures in tenant-keys.test.ts; an exception entry is live only for an index with no owner key column at all; planted on c16_gparent and reported: UNIQUE NULLS NOT DISTINCT (guest_token_hash, code), UNIQUE NULLS NOT DISTINCT (org_id, code), EXCLUDE USING gist (org_id WITH <>, code WITH =); planted on c16_parent and reported: EXCLUDE USING gist (org_id WITH <>, code WITH =); planted and not reported: EXCLUDE USING gist (org_id WITH =, code WITH =) on c16_gparent and UNIQUE NULLS NOT DISTINCT (org_id, code) on c16_parent; fixture: UNIQUE NULLS NOT DISTINCT over both owner columns is reported; the header describes arm (b) accordingly and keeps its two stated limits" |
 | TASK-051 | "C16 (a) T2-O ENTRY (R1-m1; D-ARCH-209; rulings section 8.3): an entry of TENANT_REFERENCE_EXCEPTIONS names the key, its CHECK and the reason; it is live only for a key reported as org-bound without a guest-bound sibling whose referencing columns are org_id and one other column c, and only while the named constraint on the referencing table is a validated CHECK whose pg_get_constraintdef equals CHECK (((c IS NULL) OR (org_id IS NOT NULL))); otherwise the key is reported and the entry is reported; tests on the planted c16_g_org_only with a map passed in by the test: the entry with its CHECK hides the key and is live; the CHECK dropped, the CHECK with the predicate c IS NULL OR org_id IS NULL and the CHECK NOT VALID each report the key; an entry naming the single-column key c16_g_single_parent hides nothing; the committed map stays empty" |
 | TASK-051 | "POSTGRESQL 18 ANSWER OF C2 AND C6 (L-1; D-ARCH-211; ADR-0005 amendment 15 item 37; rulings section 2.7 as amended 2026-11-21): guest-claim.int.test.ts expects 23001 fk_gc_quote_packages__guest_token_hash_quote_id for C2 and 23001 fk_gc_quote_shares__guest_token_hash_quote_id for C6 (a refused RESTRICT action is restrict_violation on PostgreSQL 18); C3 and every other case keep 23503; the titles and the header follow; the commit cites D-ARCH-211" |
 | TASK-051 | "ONE ANSWER, BOTH SQLSTATES (R1-m4; D-ARCH-212; ADR-0005 amendment 15 item 37; rulings section 8.6): the deep-equal test of map-db-error.test.ts runs for 23503 and for 23001, each under P2010 and under P2003 (Prisma 7.10.1 reports both SQLSTATEs of a model operation as P2003), and asserts that under one Prisma code the two mappings differ in sqlState only; refused-reference-answer.test.ts looks for P2003, 23503 and 23001 with a positive and a negative control for each; no product code changes" |
 | TASK-051 | "AT-US-080-06 DATABASE HALF (D-TASK051-06; D-ARCH-210): 42501 is acknowledged as the answer of the class block on the gc_ probe tables; the expectation does not change" |
+| TASK-051 | "OPERATOR RULE ON UPDATE (PR051-SEC-03; D-ARCH-214; ADR-0005 amendment 15 item 39; rulings section 3.4 as amended 2026-11-21): the CREATE OR REPLACE of platform.memberships_lifecycle_guard in the operator staff grants migration gains the UPDATE clause exactly as given there (a membership of an OPERATOR organisation that becomes ACTIVE needs a staff grant) and the amended comment above the function; down.sql is unchanged; case O7: a SUSPENDED operator membership whose grant the migrator has deleted is refused ACTIVE with P0001 MEMBERSHIP_LIFECYCLE_VIOLATION: an operator membership needs a staff grant and its member still sees one organisation with the OPERATOR scope, the same update succeeds once the grant is back, and SUSPENDED to ACTIVE in a BUSINESS_CUSTOMER organisation needs no grant; mutant by hand: with the UPDATE clause removed O7 becomes ok" |
 | TASK-087 `quote` | Add: "UNIQUE KEYS ARE NULLS DISTINCT (D-ARCH-208; ADR-0005 amendment 15 item 38; data-model 4.7 U2 as amended 2026-11-21): the two indexes of a uniqueness rule are created with the default NULLS DISTINCT, never NULLS NOT DISTINCT and never as one index over both owner columns (C16 (b) reports both); the entry fk_quotes__requote_of_quote_id of TENANT_REFERENCE_EXCEPTIONS names its CHECK ck_quotes__requote_org_only, which C16 verifies (D-ARCH-209)" |
 | TASK-091 `guestquote` | Add: "DISPATCH GATE (D-ARCH-213; rulings section 8.8): principal-architect rules the pipeline seam that puts a guest token hash into the transaction context for createQuote by an anonymous caller and for the claim operations (a note on the route descriptor of ADR-0003, with security-analyst) before this task is dispatched" |
-| TASK-091 | Add: "GUEST BINDING, ROUTE SIDE (D-TASK051-07; D-ARCH-213; ADR-0005 amendment 10 items 8 and 11; data-model 4.3): the transaction context carries a non-empty guestTokenHash only on getQuote and streamQuoteResults for a guest principal (the hash the quote-token authenticator derived), on createQuote for an anonymous caller (the hash of the token minted for this request) and on the claim operations of TASK-146; a session caller on getQuote or streamQuoteResults binds the empty string; the hash is derived server-side by guestTokenHash and no handler, service or repository supplies it; api test over the mounted route table: on every operation other than getQuote, streamQuoteResults, createQuote, claimQuote, saveQuote and createShipment a request that presents a well-formed X-Quote-Token is given a recorded context whose guestTokenHash is the empty string" |
+| TASK-091 | Add: "GUEST BINDING, ROUTE SIDE (D-TASK051-07; D-ARCH-213; SEC-TC-81; ADR-0005 amendment 10 items 8 and 11; data-model 4.3): the transaction context carries a non-empty guestTokenHash only on getQuote and streamQuoteResults for a guest principal (the hash the quote-token authenticator derived), on createQuote for an anonymous caller (the hash of the token minted for this request) and on the claim operations of TASK-146; a session caller on getQuote or streamQuoteResults binds the empty string; the hash is derived server-side by guestTokenHash and no handler, service or repository supplies it; api test over the mounted route table: on every operation other than getQuote, streamQuoteResults, createQuote, claimQuote, saveQuote and createShipment a request that presents a well-formed X-Quote-Token is given a recorded context whose guestTokenHash is the empty string" |
 | TASK-091 | Add: "US-080 HTTP HALVES (D-ARCH-213; the database halves are on TASK-051): [AT-US-080-01] getQuote with the guest token returns the quote; [AT-US-080-02] the token of another guest, a guessed token, a bearer of another organisation and the quote id alone answer 404 NOT_FOUND" |
 | TASK-146 `claim` | Replace the D-ARCH-162 line: "The claim is the ONE statement of data-model 4.3 as amended 2026-11-19 and 2026-11-21 (D-ARCH-162, D-ARCH-211): a claim written as separate statements is refused by design, with 23001 when the quote is updated first and with 23503 when a child is updated first (PostgreSQL 18); the claim repository handles neither code, both are defects that mapDbError answers with 500 (D-ARCH-212), and its outer count goes through expectAffected(result, 1)" |
-| TASK-146 | Add: "CLAIM CONTEXT (D-TASK051-07; D-ARCH-213): claimQuote and the implicit claim of createShipment run with the organisation and the actor of the session principal and with guestTokenHash = guestTokenHash(X-Quote-Token), bound by the pipeline seam ruled for TASK-091; without a well-formed token the context binds the empty string and the claim touches 0 rows (the service re-reads: 200, 409 or 404)" |
+| TASK-146 | Add: "CLAIM CONTEXT (D-TASK051-07; D-ARCH-213; SEC-TC-81): claimQuote and the implicit claim of createShipment run with the organisation and the actor of the session principal and with guestTokenHash = guestTokenHash(X-Quote-Token), bound by the pipeline seam ruled for TASK-091; without a well-formed token the context binds the empty string and the claim touches 0 rows (the service re-reads: 200, 409 or 404)" |
 | TASK-146 | Add: "US-080 HTTP HALVES (D-ARCH-213; D-ARCH-210): [AT-US-080-04] after claimQuote the organisation reads the quote and its children and getQuote with the token answers 404; [AT-US-080-05] a claim by a second account answers 409 QUOTE_ALREADY_CLAIMED; [AT-US-080-06] claimQuote without a bearer answers 401 AUTH_REQUIRED and the transaction runner records no transaction; database backstop on the real tables: the claim statement in a context with the guest hash and no organisation is refused by the standard-columns guard (P0001 STD_COLUMNS_VIOLATION, a BEFORE trigger) before WITH CHECK, where the TASK-051 probe tables answer 42501; [AT-US-080-07] the claim writes one UPDATE audit entry of the quote with old org_id null and new org_id set, in the claim transaction" |
 | TASK-234 save | Add: "saveQuote claims a guest quote through the claim repository of TASK-146 (the one statement) in the claim context of D-ARCH-213; it writes no claim statement of its own" |
 | TASK-237 share | In the D-ARCH-162 line, replace the last clause by: "the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23001 fk_quote_shares__guest_token_hash_quote_id on PostgreSQL 18 (D-ARCH-211)" |
 
 ### 8.10 Verification and open items
 
-1. **quality-gatekeeper** verifies ADR-0005 amendment 15 (items 37 and 38) before TASK-051 merges (CLAUDE.md §5). Questions 1, 3 and 4 change no ADR text and need no check.
-2. **security-analyst** runs round 1 in parallel. Sections 8.2, 8.3 and 8.6 tighten controls it owns the test ids for; nothing here waits for it.
+1. **quality-gatekeeper** verifies ADR-0005 amendment 15 (items 37 to 39) before TASK-051 merges (CLAUDE.md §5). Questions 1, 3 and 4 change no ADR text and need no check.
+2. **security-analyst:** round 1 landed while this was written (D-SECPR051-01, PASS_WITH_CONDITIONS). Its PR051-SEC-01 is section 8.2, its condition C2 is section 8.5, its condition C6 is section 8.8 (SEC-TC-81 is named on the card lines), and its PR051-SEC-03 is section 8.11. Its delta round on the fix head covers the amended function.
 3. **Owed by principal-architect:** the pipeline seam of section 8.8, before TASK-091 is dispatched.
 4. **product-manager and senior-developer:** whether US-080 stays open until TASK-146 (section 8.8).
 5. **Observed, not changed.** data-model §3.12 and §6.3 give `ux_saga_steps__saga_step_shipment ON (saga_id, step, shipment_id) NULLS NOT DISTINCT` on a TENANT table: it has no owner column, so C16 (b) will report it when the saga tables are created. With `org_id` leading it passes, `NULLS NOT DISTINCT` included (rule B1: `org_id` is `NOT NULL`). The creating task meets the gate; the sketch is corrected then.
+
+### 8.11 The operator rule also applies when a membership becomes ACTIVE by UPDATE (security round 1, PR051-SEC-03; D-ARCH-214; ADR-0005 amendment 15 item 39)
+
+Added the same day, after the security record landed (D-SECPR051-01).
+
+**Finding.** The guard checks the grant on INSERT only. A SUSPENDED membership of the operator organisation whose user has no grant can be set ACTIVE by any session in that organisation's context, and the member then reads every tenant (probe P4 of the security record; reproduced here on a reduced schema with the function as committed, row S3a).
+
+**Ruling: folded into this migration.** The function replacement of section 3.4 gains one clause in its UPDATE branch: a membership of an OPERATOR organisation whose status becomes `ACTIVE` needs a grant for its user. The text of section 3.4 is amended in place and stays binding. `down.sql` does not change.
+
+- **Why now and not with M2** (the record offered both, and prefers now):
+  - the migration is not merged, so the clause costs four lines and one test. After the merge the file is immutable, and the same clause needs a second function replacement with its own `down.sql`;
+  - it is the same kind of gap as PR65-SEC-04 (a), which this replacement already closes: a rule on INSERT that an UPDATE walks around;
+  - the impact, if it is ever reached, is read access to every tenant;
+  - with the clause, "a membership of an OPERATOR organisation needs a staff grant" holds for every way a membership becomes ACTIVE, and offboarding is safe with SUSPENDED as well as with REMOVED.
+- **What stays open.** Deleting a grant does not change a membership. A member who is ACTIVE when the grant is deleted stays an operator until the membership is suspended or removed.
+  - Until M2 only the migrator lane can delete a grant (`platform_app` holds `SELECT` only, C5). It suspends or removes the membership first.
+  - The M2 amendment of section 3.3 item 4 ties the deletion to the membership in the database: it refuses the deletion while a membership that is not REMOVED exists, or it lets `app_is_operator()` read the grant. It is not complete without one of the two.
+- **Tests.** Case O7 of section 3.4 item 7, and its mutant. The security-analyst decides whether O7 joins SEC-TC-79.
+- **Run here** (PGlite 17.5; reduced schema: `organisations`, `memberships`, `operator_staff_grants`, a stub of `platform.app_actor_id()`, the trigger as migrated; the function text is that of the branch at `203d02eb` with the clause inserted, and the committed function is the negative control):
+
+| Row | Case | Committed function | With the clause |
+|---|---|---|---|
+| S3a | Operator membership, no grant: `SUSPENDED → ACTIVE` | ok | `P0001 … an operator membership needs a staff grant` |
+| S3b | Operator membership, grant present: `SUSPENDED → ACTIVE` | ok | ok |
+| S3c | Customer membership, no grant: `SUSPENDED → ACTIVE` | ok | ok |
+| S3d | Operator membership, no grant: `SUSPENDED → REMOVED`; an update that keeps `SUSPENDED` | ok; ok | ok; ok |
+| S3e | `→ INVITED`; `org_id` changed | `P0001`, the unchanged rules | the same |
+| S3f | Insert into the operator organisation without a grant; with one; into a customer organisation without one | `P0001`; ok; ok | the same |
+
+- **Not run here:** the real schema with RLS, the migration linter on the amended file, PostgreSQL 18. On an UPDATE the organisation of the row is the organisation of the context, so the fail-closed half of the clause is as unreachable as it is on INSERT (code review R1-n6). Lane B at the fix head is the evidence.

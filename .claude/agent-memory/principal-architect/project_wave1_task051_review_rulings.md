@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-D-ARCH-207..213 answered the six architect questions of the TASK-051 code review (round 1, CHANGES_REQUESTED at `203d02eb`) plus merge condition 6. The rules, the probe table and the card lines are in `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §8 and ADR-0005 amendment 15 (items 37 and 38). This note keeps what those do not say. Earlier context: [[wave1-r-arch34-operator-rulings]], [[project-wave1-pr65-r1-rulings]].
+D-ARCH-207..213 answered the six architect questions of the TASK-051 code review (round 1, CHANGES_REQUESTED at `203d02eb`) plus merge condition 6. D-ARCH-214 answered the security round that landed mid-session (PR051-SEC-03: the staff grant is also required when an operator membership becomes ACTIVE by UPDATE, folded into the unmerged migration). The rules, the probe tables and the card lines are in `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §8 and ADR-0005 amendment 15 (items 37 to 39). This note keeps what those do not say. Earlier context: [[wave1-r-arch34-operator-rulings]], [[project-wave1-pr65-r1-rulings]].
 
 **What the first ruling got wrong, and why:**
 - D-ARCH-162 pinned `23503` for cases C2 and C6 from a PGlite probe. PGlite is PostgreSQL 17.5. PostgreSQL 18 gives a refused `RESTRICT` action (the referenced side) its own SQLSTATE, `23001`; the referencing side stays `23503`. The semantics I ruled held on 18 (the one-statement claim passed with `RESTRICT` keys). Only the code moved.
@@ -22,6 +22,7 @@ D-ARCH-207..213 answered the six architect questions of the TASK-051 code review
 **Still owed by me:**
 - The pipeline seam for the route-side guest binding (D-ARCH-213), before TASK-091 is dispatched: how `createQuote` by an anonymous caller and the claim operations (`claimQuote`, `saveQuote`, `createShipment`) put a guest token hash into the transaction context. Today `tenantContextOf` copies the principal's value and nothing else sets one. It is a platform change (`apps/api/src/platform/tx/**`, `define-route.ts`), needs security-analyst (a header-derived value in the context of an authenticated caller) and a gatekeeper check, and must reconcile the TASK-091 card sentence about the handler comparing the stored hash (under RLS the policy is the comparison).
 - quality-gatekeeper has to verify ADR-0005 amendment 15 before TASK-051 merges. Conditions, if any, come back to me.
+- The M2 staff-management amendment (already owed, see [[wave1-r-arch34-operator-rulings]]) now also has to tie the deletion of a grant to the membership in the database: refuse the deletion while a membership that is not REMOVED exists, or let `app_is_operator()` read the grant (D-ARCH-214). I first leaned to defer the UPDATE clause to M2 because the complete control sits at the deletion; I folded it because the migration was unmerged (four lines now, a second function replacement later), security preferred now, and it is the same gap class as PR65-SEC-04 (a).
 - Observed, not changed: data-model §3.12/§6.3 `ux_saga_steps__saga_step_shipment` has no owner column. C16 (b) will report it at the creating task.
 
 **Process lessons:**
@@ -31,3 +32,5 @@ D-ARCH-207..213 answered the six architect questions of the TASK-051 code review
 4. PGlite ships `btree_gist` (`dist/contrib/btree_gist.js`, passed as `extensions`), which is what an exclusion constraint with `<>` on a uuid needs. A btree exclusion constraint can only use `=`.
 5. The fence check of [[wave1-r-arch34-operator-rulings]] lesson 3 must use the test's own regex. A regex that wants the closing fence at column 0 pairs indented fences wrongly and reports a false difference.
 6. Trailer: the brief again named another model. I used the harness attribution and said so in the handoff.
+7. A parallel review can land items routed to me after my commit. Read the tail of DECISIONS.md once more before the handoff; here the security record arrived one commit before mine and needed a second commit (D-ARCH-214).
+8. When I add a clause to ruled SQL, build the amended text mechanically from the committed file (`git show <sha>:<path>`, one anchored insertion), run that text, and let the applier assert that the lines written into the rulings file are the lines that ran.
