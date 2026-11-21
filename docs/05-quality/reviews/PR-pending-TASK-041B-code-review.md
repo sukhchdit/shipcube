@@ -353,3 +353,144 @@ I ran every command in the foreground, one at a time, with no Docker. Nothing ra
 - R2-M1 / PR041-SEC-10: closed here by fix; P4b, the half-close and case B each give 5 entries. Probe file: `review/TASK-041B-cr3/copy/apps/api/src/platform/rate-limit/zzcr3probe.api.test.ts` in my scratchpad.
 - D-TASK041-20: P8 shows that the branch is reachable (a complete compressed body, then a disconnect) and that it ends the request with nothing open. Without the branch, such a request would be the remaining way around the hold.
 - P9: an authenticator that never answers keeps its unit, so the address's hold on that instance stays full (429 `Retry-After: 1` for valid credentials) until the process restarts. This is by design (am. 13 item 6, rulings §9.4) and depends on every authenticator card having its own timeout (TASK-052/055/091/171/261).
+
+# Round 4: the stacked merge `aade2672` and fix cycle 3 (`aade2672..214ec79b`)
+
+| Field | Value |
+|---|---|
+| Head | `214ec79b` on `feat/TASK-041-part-b-rate-limit-rulings-rev2`, pushed (`origin/feat/TASK-041-part-b-rate-limit-rulings-rev2` = `214ec79b`), no PR number yet. Parent `aade2672`, the merge of `12b8a10a` with main `3d54cef8` (D-ORCH-167) |
+| Delta reviewed | (1) the merge `aade2672`; (2) one commit `214ec79b` (`fix(api)`, D-TASK041-23 in the body): 6 files, 447+/15-, namely `app.ts`, `authn-failed.ts`, `kit.ts` (JSDoc only), `authn-failed.test.ts`, `authn-failed.api.test.ts`, `start-api.denial-budget.api.test.ts` |
+| Base now | `origin/main` = `88fd7360`, 19 commits past `3d54cef8`, all under `docs/` and `.claude/`. `git merge-tree --write-tree origin/main 214ec79b` is clean |
+| Bindings read | D-ORCH-163 (stacked-merge rule), D-ORCH-167 (the merge), D-ARCH-230 (C-4), D-ARCH-234 (the callback form), D-QG-009 (what this round must check), rulings file §10.3, §10.4 and §11.3; rounds 1 to 3 of this record |
+| Reviewer | code-reviewer, 2026-11-21 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The stacked merge is pure: the explicit-base merge-tree equals its tree and the raw diffs are equal (26 paths,
+         no union). C-4 is built as D-ARCH-230 and rulings 10.4 word it; the five named mutants and nine more die by
+         reading, one survives (R4-n1). H8 asserts the error line; H1 to H6 are unedited. Five NITs, no MAJOR.
+```
+
+## R4.1 What I verified myself
+
+Git and reading only, as the dispatch requires: no Jest, no build, no lint, no Docker, nothing in the lane-B worktree. Every mutant verdict below is **by reading** (which assertion fails, and why), not by a run. The developer's memory note says that a scripted runner killed seven mutants; I did not see its output.
+
+| Check | How | Result |
+|---|---|---|
+| Merge parents | `git cat-file -p aade2672` | Parents `12b8a10a` (the round-3 head) and `3d54cef8` (main); tree `13c4925f` |
+| **D-ORCH-163 rule, tree** | `git merge-tree --write-tree --merge-base=be843ae1 12b8a10a 3d54cef8`. `be843ae1` is the predecessor head (PR #82); it is an ancestor of `12b8a10a` and not of main, which has its squash | Exit 0, no conflict, tree **`13c4925f`**: identical to the tree of `aade2672` |
+| **D-ORCH-163 rule, raw diff** | `git diff --raw --no-renames 3d54cef8 aade2672` against `git diff --raw --no-renames be843ae1 12b8a10a` (also compared with rename detection on) | 26 lines each, `cmp` equal. **No listed union is needed.** The merge took nothing from main into 041-B's paths and dropped nothing of 041-B |
+| Main since the merge | `git diff --name-only 3d54cef8 origin/main`, minus `docs/` and `.claude/` | Empty. A re-merge before the PR is docs-only and needs no code-review round if the same raw-diff proof holds |
+| fc3 scope | `git diff --stat aade2672 214ec79b` | 6 files, all inside rulings 10.4: `authn-failed.ts`; `app.ts` (one call site that hands over `{ log: logger }`); the tests; two riders (the R3-n2 row; the R3-n3 pin plus "Test seam:" JSDoc on `kit.ts`). `in-flight.ts` is not touched, as 10.4 requires |
+| H1 to H6 unedited | `git diff -U0 aade2672 214ec79b -- authn-failed.api.test.ts` has two hunks: `-10,0 +11` (the `gzipSync` import) and `-748,0 +750,153` (new blocks after the last describe). `rate-limit.int.test.ts` and `in-flight.test.ts` are not in the delta | **Unedited.** H2 to H5 sit at lines 586 to 711 and H6 at `rate-limit.int.test.ts:197`; neither file loses a line. The five deleted lines of `authn-failed.test.ts` are the mechanical third argument (`k.options`) on four existing wrapper units ([R2-M1], [D-TASK041-20] and two B1 units), none of which is an H row |
+| Callers of the changed signature | `git grep "withAuthnFailedBudget("` | `app.ts:209` and the unit file only. The third argument is required, so a caller that forgets the logger does not compile |
+| Seams that meet C-4 (the developer's claim; D-QG-009's "not read") | Every `createApp` composition with `rateLimit`: `capture.api.test.ts:158`, `idempotency.api.test.ts:112`, `limits.api.test.ts:55`, `composition.int.test.ts:74`, `tests/generated/rbac/matrix-app.ts:182` (delegates to the stub), `start-api` (the production stub), `runtime-seams` (no seam) | All are plain functions that report through `next` before they return (row 1 of rulings 11.3). The only callback-form slots (row 5) are `slowSeam` (`authn-failed.api.test.ts:480`) and the unit row "a plain slot ... is waited for", and both are test seams. The production stub `authenticate.ts` reports before it returns. So the form that C-4 does not end exists only in tests, which is what D-ARCH-234 accepts |
+
+**Not run here:** typecheck, lint, prettier and every test. For these I rely on lane B on `214ec79b` (C4 below). It has not run yet: no `.orch` record names this head.
+
+## R4.2 Fix cycle 3 against D-ARCH-230 (C-4) and D-ARCH-234
+
+| Requirement (rulings 10.4) | Code at `214ec79b` | Status |
+|---|---|---|
+| A promise that fulfils with no outcome ends the slot; a rejection is an outcome as before | `authn-failed.ts:155-156`: `result.then(endedWithoutOutcome, (error) => done(error \|\| new Error(...)))` | Met |
+| No promise: with `headersSent` and no outcome the slot has ended; with nothing started the wrapper waits | `:157-158`; the callback form falls through and waits | Met. The unit row "a plain slot ... is waited for: it reports from a callback" pins the wait (0 released and 1 held until the report, then 1 spend and no line) |
+| Answered itself: mark the outcome known, release, call nothing more, no spend | `:142-146` (`settled = true`, `release`, return) | Met. `release` is idempotent: `in-flight.ts` deletes the holder, so the later `close` finds nothing to free |
+| Nothing answered: report `new Error(SLOT_UNREPORTED_MESSAGE)` through the wrapper's own outcome path (500, no spend, released) | `:147` → `done` → `spendsAuthnBudget(error)` is false for a plain `Error` → `release`, `next(error)` | Met |
+| The error line: `api.authn_slot_unreported`, level error, `operation_id`, and `status` only when one was written, once a minute per operation and instance, no request data | `:94-104`; `lineWrittenAt` is one `Map` per wrapper (one wrapper per `createApp`), keyed by the mounted operation ids | Met. D-TASK041-23 is **Accepted** (R4.5) |
+| No listener on the response; the close releases only a unit that never entered; the `finish` releases nothing | The delta adds no `res.on` | Met. H9 pins it |
+| `app.ts` only hands over a logger | `app.ts:205-209` | Met |
+| The JSDoc of `withAuthnFailedBudget` states the contract | `:74-85`: an outcome is `next` once, a throw or a rejection; an authenticator never starts or ends the response; the promise rule; "a slot that returns no promise may report later from a callback, and the wrapper waits for it while nothing has been answered" | Met for D-ARCH-230. The one sentence that D-ARCH-234 item 7 adds is owed at the next touch and is not a condition (R4-n4) |
+| D-ARCH-234: C-4 does not end the callback form, and that is acceptable only for test seams | The seam census in R4.1 | Holds. No product authenticator and no production composition has the form, and card line 21 (NO CALLBACK FORM) keeps TASK-052 and the other authenticator cards out of it |
+
+Two more points from reading the wrapper:
+
+- **The `settled` guard in `endedWithoutOutcome` is load-bearing, and correct.** A plain slot that reports success synchronously can have the rest of the pipeline answer synchronously before `inner` returns, so `headersSent` is true at `:157`; the guard makes that a no-op. For an `async` slot that reports and then fulfils, the guard stops the line from being written. H10 pins both through its async rows.
+- **The status in the line.** When something other than the slot answered (later, the TASK-108 timer), the line carries that status (503). The comment at `:101` says so ("the slot (or whatever answered)"). Acceptable.
+
+## R4.3 D-QG-009's asks
+
+**(a) The five mutants of rulings 10.4, plus ten more of my own, by reading:**
+
+| # | Mutant | Verdict | Killed by (the assertion that fails) |
+|---|---|---|---|
+| M1 | A release at `finish` (`res.once('finish', () => kit.inFlight.release(res))` in the wrapper) | Killed | api H9 (`:823`): the timer's 503 at 60 ms frees the five units and the second five (200 ms) are admitted, so `entered` is 10 and the second statuses are 503, not `[429, '1']` |
+| M2 | No check at fulfilment (`result.then(undefined, ...)`, the `12b8a10a` line) | Killed | api H7 async (`:768`): `held(KEY_A)` is 5 and the valid bearer gets 429. Unit H7 async: `released()` is 0. Unit H8: `passed` is `[]`. api H8 would hang until the 120 s Jest timeout (slow, but H7 kills first) |
+| M3 | No `headersSent` check at the return (drop `:157-158`) | Killed | api H7 plain (held 5, the valid bearer gets 429); unit H7 plain (`released()` 0, no line) |
+| M4 | The unanswered case calls `next()` with no error | Killed | api H8 (`:787`): the request goes on with the fail-closed `ANONYMOUS` principal (`principalOf`) to `authorise`, which answers 401 `AUTH_REQUIRED` on the `session` route (`authorise.ts:167-168`), not `[500, 'INTERNAL_ERROR']`. Unit H8: `(undefined as Error).message` throws |
+| M5 | The unanswered case spends | Killed | api H8: with a budget of 5, the sixth of the eight sequential requests is refused 429 at step 0, and `failedKey` is defined. Unit H8: `spends()` is 1 |
+| M6 | No error line in the unanswered case (D-QG-009 observation 2) | Killed | api H8 `:817` and unit H8 expect `[['api.authn_slot_unreported', { operation_id: 'getProfile' }]]` |
+| M7 | No error line in the answered case | Killed | api H7 `:783`, unit H7 |
+| M8 | No once-a-minute rule | Killed | unit H7 (two entries, one line), api H7 (five entries, one line), api H8 (thirteen entries, one line), the throttle unit `:450` |
+| M9 | The minute is kept globally, not per operation | Killed | the throttle unit (`listAddresses` gets its own line at `INTERVAL - 1`) |
+| M10 | `<` becomes `<=` in the minute check | Killed | the throttle unit (a third line is expected at exactly `INTERVAL`) |
+| M11 | `status` is always written | Killed | api H8 and unit H8 expect no `status` (it would be 200) |
+| M12 | No `if (settled) return` in `endedWithoutOutcome` | Killed | unit H10: "accepts (async)" and "refuses (async)" fulfil after they report and would write a line, but `o.lines` must be `[]` |
+| M13 | The answered branch does not release | Killed | api and unit H7 |
+| M14 | The answered branch calls `next()` | Killed | unit H7 (`passed` must be `[]`); api H7 would write a second response |
+| M15 | The answered branch does not set `settled = true` | **Survives** | No row has a slot that answers itself and reports afterwards (R4-n1) |
+
+All five named mutants die, and so does M6, the mutant of D-QG-009 observation 2.
+
+**(b) Does H8 assert the error line `api.authn_slot_unreported`?** Yes, at both layers. api H8 at `authn-failed.api.test.ts:817` expects exactly one line, with no `status`, over 13 requests, including the five whose clients left. Unit H8 is at `authn-failed.test.ts:409-421`. D-QG-009 observation 2 is closed.
+
+**(c) Are H1 to H6 unedited?** Yes (R4.1). They still run on the old seams. Those are row-1 or row-5 forms, so no C-4 branch applies to them. That is why the callback form stays allowed for seams (D-ARCH-234, "Why not close the form in the wrapper now").
+
+**(d) The `headersSent` race (D-QG-009 observation 1; D-ARCH-234 item 6).** By reading, it is as the gatekeeper described, with one consequence the text does not state:
+
+- At the return (`:157`) the wrapper reads `res.headersSent`, not who set it. Only a callback-form slot (row 5) reaches that check with no outcome: rows 1 and 2 have reported (settled) before the wrapper looks, and row 3 is judged at fulfilment.
+- Today nothing can answer a request between step 0 and the slot and still let it reach the slot. The CORS and OPTIONS responders end the chain, and a body-parser error goes to the problem handler (round 3, ruling on D-TASK041-20). With TASK-108 the request timer can: it answers 503 while the body is still being read, and Express continues the chain once the body completes. If that completion lands after `end()` and before the response's `close` (which frees the unit through `releaseUnentered`), the slot is entered with `headersSent` already true.
+- A row-5 slot in that window is misread as row 4. The line is written with status 503, **the unit is released at the return while the callback still runs**, and the later refusal is dropped (no spend). So the cost is one authentication outside the hold per request that hits the window, the class of R2-M1, and not only "its later refusal is not spent". It needs the callback form, which only test seams have, and a window that only TASK-108 opens. That makes it a NIT, not a condition (R4-n2).
+- The remedy is one line. Add `const startedBefore = res.headersSent;` before `inner(...)`, and change `:157` to `else if (!startedBefore && res.headersSent)`. A row-5 slot entered after another party answered is then waited for, like every row-5 slot. Rows 1 to 4 do not change: a slot cannot start a response that is already started without throwing, and the `catch` turns the throw into an outcome.
+
+## R4.4 Findings of this round
+
+| ID | Severity | file:line | Issue | Required fix |
+|---|---|---|---|---|
+| R4-n1 | NIT | `apps/api/src/platform/rate-limit/authn-failed.ts:143` | M15 survives. No row pins "a later report is dropped" for a slot that answered itself. Without `settled = true`, that later report would spend and call `next(error)` into an answered response. The comment at `:135-137` promises the drop | A unit row in the H7 shape: the slot answers 401, then calls `next(new AppError('AUTH_REQUIRED'))` from a 1 ms timer. Expect `passed` `[]`, `spends()` 0, `released()` 1 |
+| R4-n2 | NIT | `authn-failed.ts:154-158` | The `headersSent` race of R4.3 (d). With TASK-108, a callback-form slot entered after the timer answered is released at the return while it still runs, and its refusal is dropped. Test seams only; D-ARCH-234 item 6 records the limit | Optional: the `startedBefore` guard of R4.3 (d), at the next commit that touches the file or under card line 22 (TASK-108). If it is not taken, principal-architect adds the "authentication outside the hold" consequence to the second limit in rulings 11.3 |
+| R4-n3 | NIT | `authn-failed.ts:139-147`, `:156` | `writeLine` runs before the state changes, and the fulfilment callback at `:156` has no rejection handler. A logger that throws there would cause an unhandled rejection (process exit under Node 24 defaults) and leave the unit held. `done` already guards the event sink with `.catch(() => undefined)` for the same reason. The platform logger writes to `process.stdout` and does not throw in practice | Write the line last (after `release` or `done`), or wrap `writeLine` in a `try`/`catch` that swallows, as the event-sink guard does |
+| R4-n4 | NIT (owed, not a condition) | `authn-failed.ts:23-28`, `:80-85` | The sentence of D-ARCH-234 item 7 and rulings 11.3 on the limit of the callback form is missing: a slot that never reports is held until restart; the form is for test seams; a product authenticator reports before it returns, or returns a promise and reports before it fulfils. The module header bullet "A slot that ends without an outcome is ended by the wrapper" has no exception either | The words of rulings 11.3, or the developer's own, at the next commit that touches the file |
+| R4-n5 | NIT | `apps/api/src/platform/rate-limit/authn-failed.api.test.ts:847-901` (the R3-n2 rider) | The row relies on timing: the socket close must be handled before zlib finishes inflating 900 kB. The margin is generous (P8 20/20 at 200 kB; the developer 10/10 at 900 kB). Still, a fast inflate on an idle host or a slow close on a loaded one fails it (`enters` contains `true`) or makes it hang in `until`. Neither would mean a product defect | No change now. If lane B shows it red once, do not retry (C4). Report it, and gate the inflate in the row (a slow `Content-Encoding` stream or a larger body) |
+
+The riders **close** round 3's R3-n2 and R3-n3. The gzip row reaches the wrapper with `enter() === false` 10 times out of 10 and enters the slot 0 times. The startApi row pins `['settings', 'valkey']` (`start-api.denial-budget.api.test.ts:225-226`), and `kit.ts` says "Test seam:" on both lines. **R3-n1 stays open**: H6 is not edited this cycle, by rule, so it moves to the next TASK-041 change. Round 1's n7 and n8 stay with C7.
+
+## R4.5 Rulings
+
+| Item | Ruling |
+|---|---|
+| D-TASK041-23 (the minute in one `Map` per wrapper; a required `options` argument with `log` and a `now` seam) | **Accepted.** It keeps the line off the kit and off the security-event channel, as 10.4 asks, and a route mounted twice shares one minute. The map is bounded by the mounted operation ids. Only the unit rows use the `now` seam; `app.ts` passes none |
+| The riders (the PR041-SEC-15 / R3-n2 row, the R3-n3 pin) | **Accepted** in this commit, as rulings 10.4 allows. R3-n1 is rightly left out, because H6 must stay unedited |
+| The stacked merge `aade2672` | **Pure** under the D-ORCH-163 rule, with no union. It needs no review beyond this record |
+| Round 3's verdict on fix cycle 2 | Stands, as D-ARCH-230 says |
+
+## R4.6 Merge conditions (these replace round 3's R3.6)
+
+- **C1, C2.** Closed in round 3. D-QG-009 rules QG-041B-C1 CLOSED and QG-041B-C2 CLOSED_WITH_FOLLOW_UP; this round is the code-review half of its follow-up 2.
+- **C3.** Closed: PR #82 is merged and the stacked merge `aade2672` is proven pure (R4.1). Main is now 19 docs-only commits ahead. If main is merged again before the PR, repeat the raw-diff proof. A docs-only main delta needs no further code-review round; any change to code needs a merge round.
+- **C4. Lane B on `214ec79b`, or on the final merge head:**
+  - `rate-limit.int.test.ts` with H6 against a real Valkey (QG-041B-C5 (a));
+  - the api project, including `authn-failed.api.test.ts` (H1 to H5, H7 to H9, the R2-n1 row, the gzip row), `start-api.denial-budget.api.test.ts`, `limits.api.test.ts` and `runtime-seams.api.test.ts`;
+  - the unit files `authn-failed.test.ts` (H10 and the C-4 units) and `in-flight.test.ts`;
+  - the generated project;
+  - typecheck, lint, prettier and `check-suppressions` on the branch;
+  - coverage of `authn-failed.ts` (the new rows should cover every C-4 branch);
+  - gitleaks-full (D-ORCH-168).
+
+  The loopback rows (H2 to H4, H8 with leaving clients, the gzip row) must pass **without retries**. R4-n5 explains what a red gzip row would mean.
+- **C5. Security delta round on `214ec79b`** (D-ARCH-230; follow-up 2 of D-QG-009). It re-runs PA2, PG, PH and the timer case; closes or narrows PR041-SEC-16, with rows 5a and 5b of rulings 11.3 rated; reads the R4-n2 consequence against row 5; and takes QG-041B-C4 (PR041-SEC-11 with the burst case). That round carries the binding.
+- **C6.** QG-041B-C3 is CLOSED_WITH_FOLLOW_UP (D-PM-090, D-PM-092). The api/README §7 sentence of rulings 10.7 must be on the merge head (D-QG-009, residual 4). The client sentence waits for QG-041B-C7 (a).
+- **C7.** The orchestrator routes round 1's n7 and n8, R3-n1, and R4-n1 to R4-n5. None of them holds the merge. R4-n4 is owed at the next touch of `authn-failed.ts`, per D-ARCH-234.
+
+## R4.7 Good
+
+- C-4 is exactly the ruled form. It adds no listener on the response, and its two checks sit at the only two ends the wrapper can see, so nothing about the response can release an entered unit.
+- The unanswered case reuses `done`, so the 500, the absent spend and the release come from the one path that rounds 1 to 3 already proved.
+- H9 passes on the old head on purpose: it pins the reason remedy (b) was declined, and it kills the build-F mutant directly.
+- The gzip rider wraps `inFlight.enter` to prove that the D-TASK041-20 guard really ran 10 times. It does not rely on "0 entries", which a request that never arrived would also give.
+- The startApi row pins the exact key set of `rateLimit`, so a test fails if a future seam leaks into production.
+
+## R4.8 Security flags (for security-analyst)
+
+- R4-n2: once TASK-108 exists, a callback-form slot entered between the timer's answer and the close is released at the return while it still runs. That is one authentication outside the hold per such request, on top of the dropped spend that D-ARCH-234 item 6 records. Only test seams have this form today. Please rate it with rows 5a and 5b.
+- R4-n3: a throwing logger on the fulfilment path causes an unhandled rejection. LOW or INFO by my reading, because the platform logger does not throw.
+- The census in R4.1: no production composition has the callback form. The matrix seam and the stub both report before they return.

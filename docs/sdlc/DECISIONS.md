@@ -10731,3 +10731,34 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **principal-architect:** RR-19 mirrored in `risks.md` at the next revision of the register; data-model §8.3 as shipped for rule R and rule 21, after the merge (as D-ARCH-172 did for TASK-293); a ruling when a migration first needs a built-in that is not IMMUTABLE, or a routine, in a load-time expression.
 - **Not verified:** the list was not built or run. F8 and F12 are specified from reading `3ee36f01`.
 - **Reversibility:** High.
+
+### D-CRPR041B-01 · 2026-11-21 · code-reviewer · TASK-041 part 041-B code review round 4 (the stacked merge `aade2672` and fix cycle 3, `aade2672..214ec79b`) = APPROVED_WITH_NITS at head `214ec79b` (appended as round 4 to `docs/05-quality/reviews/PR-pending-TASK-041B-code-review.md` on main)
+
+- **Decision:** APPROVED_WITH_NITS. No BLOCKER, MAJOR or MINOR finding is open. There are 5 NITs (R4-n1 to R4-n5). The verdict on fix cycle 2 (round 3) stands.
+- **Stacked merge (D-ORCH-163 rule):** pure, with no union.
+  - `git merge-tree --write-tree --merge-base=be843ae1 12b8a10a 3d54cef8` is clean and gives tree `13c4925f`, which is the tree of `aade2672`.
+  - `git diff --raw 3d54cef8 aade2672` equals `git diff --raw be843ae1 12b8a10a` byte for byte (26 paths).
+  - Main has moved 19 commits since then, all docs. A re-merge needs only the same proof.
+- **Fix cycle 3 against D-ARCH-230 change C-4 and D-ARCH-234:**
+  - Every clause of rulings 10.4 is met in `authn-failed.ts`. `app.ts` only hands over the logger, and `in-flight.ts` is unchanged.
+  - D-TASK041-23 is accepted: the once-a-minute map lives per wrapper, and `options` is a required argument.
+  - A census of every `createApp` composition with `rateLimit` finds the callback form, which C-4 does not end, only in test seams (`slowSeam` and one unit row). The stub, the matrix seam and every other seam report before they return. This is the condition under which D-ARCH-234 accepts the form.
+- **D-QG-009's asks:**
+  - (a) The five named mutants all die by reading: a release at `finish` (H9); no check at fulfilment (H7 async, H8); no `headersSent` check at the return (H7 plain); `next()` without an error (H8: 401 from `authorise`, not 500); a spend in the unanswered case (H8). Nine of my ten extra mutants die. M15 (the answered branch does not set `settled`) survives, which is R4-n1.
+  - (b) H8 asserts `api.authn_slot_unreported` at both layers (`authn-failed.api.test.ts:817`, unit H8). Observation 2 is closed.
+  - (c) H1 to H6 are unedited. The api test file only gains lines, and the int and in-flight test files are not in the delta.
+  - (d) The `headersSent` race is a NIT (R4-n2). Once TASK-108 exists, a callback-form slot entered between the timer's answer and the close is misread as "answered itself". That releases its unit while the slot still runs (one authentication outside the hold), in addition to the dropped spend that D-ARCH-234 item 6 records. A one-line `startedBefore` guard removes it.
+- **NITs:**
+  - R4-n1: a unit row for a report that follows an answer.
+  - R4-n2: the race above.
+  - R4-n3: `writeLine` runs before the state changes, and the fulfilment callback has no rejection handler, so a throwing logger would become an unhandled rejection.
+  - R4-n4: the JSDoc sentence that D-ARCH-234 item 7 owes.
+  - R4-n5: the gzip rider depends on timing; do not retry it in lane B.
+  - R3-n2 and R3-n3 are closed by the riders. R3-n1 stays open, routed.
+- **Merge conditions (round 4, R4.6):**
+  - C4: lane B on `214ec79b` or the final merge head, with H6 against a real Valkey, H7 to H10, gitleaks-full and no retries.
+  - C5: the security delta round on `214ec79b` (PR041-SEC-16 rows 5a and 5b, QG-041B-C4), which carries the binding.
+  - C6: the api/README §7 sentence of rulings 10.7 on the merge head.
+  - C7: the orchestrator routes the open NITs.
+- **Not verified:** nothing was run (the dispatch allowed git and reads only, and lane B holds the lock). Every mutant verdict is by reading. Typecheck, lint, format and tests rely on lane B on this head, which has not run yet.
+- **Reversibility:** High (a review record).
