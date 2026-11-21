@@ -7704,3 +7704,59 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Dispatched (free locks, Wave 0 still open):** TASK-034, the backup/restore rehearsal and zero-downtime migration probe tooling.
   - Held by locks: TASK-284 (api-routing, api-tx-execute; on the path to TASK-052), TASK-030 (lint) and TASK-031 (pkg-audit-redaction). TASK-041 holds those locks and waits on the user; TASK-040 holds api-tx-execute.
 - **Reversibility:** High.
+
+### D-SECPR051-01 · 2026-11-21 · security-analyst · TASK-051 security round 1 (pre-push, `e245e6e6..203d02eb`: guest-capable de-claim guard function, operator staff grants and the INVITED rule, one answer for a refused reference, C16 as amended, guest binding, the one-statement claim and the SEC-TC-07 race) = PASS_WITH_CONDITIONS at head `203d02eb` (record `docs/05-quality/security/PR-pending-TASK-051-security-review.md` on main; rename per D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium. Three LOW findings (one latent) and two INFO.
+  - **Method.** Single-process Node 24 probes on `git archive` extracts of `203d02eb` and `e245e6e6`:
+    - the PR's own probe module and `CONTEXT_STATEMENT_SQL` on PGlite 0.4.3 (PostgreSQL 17.5), with bootstrap 00 to 02 and all 9 migrations applied as `platform_migrator`;
+    - the migration linter;
+    - a gitleaks v8.30.1 emulation;
+    - main's real record checker.
+  - Lane B run `20261121T0336Z_203d02e` was read with the read-only file tools.
+  - Not used: Docker, PostgreSQL 18 directly, and any command in the TASK-051 worktree.
+- **Owned paths.** 20 against main (`--base e245e6e6 --head 203d02eb`). The classifier selects `security-integration` (18 paths). `git merge-tree` with local main `60e0b646` is clean.
+- **Database side holds:**
+  - **Guest binding.** The empty binding and 8 malformed bindings read no guest row. An organisation context cannot plant a guest row. Foreign and unknown parents get one constraint per writer class.
+  - **De-claim guard.** The guard is the renderer's text: migrator-owned, invoker, fixed path, no EXECUTE grant. It refuses all four transitions through UPDATE, ON CONFLICT DO UPDATE and MERGE, in the claim context too.
+  - **The claim** is one statement through `expectAffected`.
+  - **Operator rule.** It refuses a self-join through INSERT, MERGE and ON CONFLICT. The down.sql control admits it, and the user then sees 3 organisations. `platform_app` gets 42501 on every write to the grants. INVITED is unreachable by UPDATE.
+  - **D-ARCH-164.** E1 holds; `23001` maps the same and is not client-visible.
+- **Findings:**
+  - **PR051-SEC-01 (LOW, CWE-1023).** C16 (b) passes `NULLS NOT DISTINCT` unique indexes and non-equality exclusion operators on an owner column. Probed: guest-vs-guest `23505`, org-vs-org `23505` through `(guest_token_hash, code) NULLS NOT DISTINCT`, and org-vs-org `23P01` through `org_id WITH <>`, which also works on TENANT tables. Same as code review R1-M1. Enforce both halves; a stated limit for the exclusion half only with a "no exclusion constraint in scope" assertion. Merge condition C1.
+  - **PR051-SEC-02 (LOW, CWE-362).** The SEC-TC-07 race pairs two organisations, where row security alone stops the loser. A mutant without `AND org_id IS NULL` passes it, while the same-organisation double claim overwrites `claimed_by_user_id` and nulls `claimed_from_token_hash`. Fix: (a) a same-organisation round in this PR; (b) TASK-146 makes SEC-TC-07 run the repository's statement.
+  - **PR051-SEC-03 (LOW latent, CWE-269).** The grant is checked on INSERT only. A SUSPENDED operator membership without a grant goes ACTIVE by UPDATE from any operator-context session (probed: the member then sees 3 organisations). Unreachable in Run 1, because grants are never deleted. principal-architect: fold the UPDATE clause into this migration, or carry it in the M2 grant-removal amendment with "offboarding = REMOVED plus grant deletion".
+  - **PR051-SEC-04 (INFO, CWE-696).** The de-claim trigger is the only refusal for a childless quote and for a child moved under the guest's quote (probed with the trigger dropped: the guest then reads the row). A later-sorting BEFORE UPDATE trigger that assigns an owner column bypasses it. TASK-087: a catalog assigner row for owner columns. The template pin goes with code review R1-m2.
+  - **PR051-SEC-05 (INFO, CWE-200).** The staff list is readable by every session and module (ruled). TASK-089's repository test also covers reads of `operatorStaffGrant`.
+- **Closed or advanced:**
+  - PR65-SEC-02 (b) and PR65-SEC-04 (a) close with this migration (lane B O1-O6 green on 18). PR65-SEC-02 (a) stays binding on TASK-049/224/227.
+  - PR7-SEC-04 and PR7-SEC-12 (d) close at the database, subject to lane B on the final head.
+  - PR7-SEC-13: database half done; the repository is TASK-146's.
+- **SEC-TC (rulings §7 item 3).** For qa-lead's next manifest commit after merge (D-SEC-PR47-01):
+  - **SEC-TC-79**, operator staff grant O1-O6: `integration.required_cases`.
+  - **SEC-TC-80**, guest-row binding, the claim and the de-claim cases of `guest-claim.int`: `integration.required_cases`. The tags are added in this PR's fix cycle.
+  - **SEC-TC-81**, route-side guest binding (D-TASK051-07): `required_cases_pending`, owners TASK-091 and TASK-146.
+  - SEC-TC-07 gains the same-organisation round. SEC-TC-76's text follows C16 as amended.
+- **Lane B at `203d02eb` (FAIL).**
+  - **L-1.** C2/C6 answer `23001` on PostgreSQL 18. This goes to the architect, unadapted.
+  - **L-2: the D-ORCH-147 attribution is confirmed.** It is a false positive at `prisma/tests/catalog/tenant-keys.ts:75` in this PR's commit `b34f954e`: the keyword "key columns", a comma, then a backticked `child=parent`, entropy about 3.58.
+    - Corrected emulation: over the full 610-commit ancestry of `203d02eb` it gives exactly the 17 baseline fingerprints plus this one.
+    - **Fact:** gitleaks v8.30.1 has no "generic secret needs a digit" check. My earlier emulators assumed one, and that hid this finding in the first run.
+    - The D-ORCH-147 handling stands: reword in the fix cycle, a v2 squash supersede, baseline unchanged. The new wording must avoid the keyword-operator-token shape. The v2 range and the v2 gitleaks-full must be clean.
+- **Simulation.** Main's real checker at `d7585e78`, merge-ref form, the record as `PR-9999-…`, `--pr 9999`: 11 of 11 as expected.
+  - **Pass:** the record with the head (merge-base and main-tip `--base`); an evidence commit; an unowned `registry.ts` edit; the branch merging a docs-only main.
+  - **Fail:** no record; the placeholder name; a later FAIL row; a Head row naming a main commit; an owned `tenant-keys.ts` edit; the branch merging a main that also appended to `grants.manifest`.
+- **Conditions:**
+  - **C1.** PR051-SEC-01 fixed.
+  - **C2.** The architect amends rulings §2.7 C2/C6 for `23001`; the expectations change only after that, citing it; the R1-m4 pin is added.
+  - **C3.** L-2 closed by the D-ORCH-147 route: comment reworded, v2 supersede, clean scans.
+  - **C4.** Lane B green on PostgreSQL 18 at the final head (record §9).
+  - **C5.** A delta round on the fix head and a supersede round on the v2 head (tree equality, own Head row, a record named for the v2 PR). A merge-only round after any union merge that touches an owned path (`grants.manifest`, `grants-manifest.test.ts`, `tenant-db.real-client.test.ts`: TASK-040/043/080).
+  - **C6.** D-TASK051-07 and SEC-TC-81 on the TASK-091 and TASK-146 cards, with the AT-US-080 HTTP halves.
+  - **C7.** Rename the record and check the merge ref.
+  - If the orchestrator splits the operator-grant half for TASK-089, that PR needs its own record.
+- **Routed:**
+  - **principal-architect.** PR051-SEC-01 rule text; PR051-SEC-03; L-1.
+  - **senior-developer.** PR051-SEC-01, -02 (a), R1-m2, the SEC-TC tags and the `tenant-keys.ts:75` reword in this fix cycle. Card lines: TASK-146 (-02 (b)), TASK-087 (-04), TASK-089 (-05), TASK-091 and TASK-146 (C6).
+  - **qa-lead.** SEC-TC-79..81 rows and manifest; SEC-TC-07 and SEC-TC-76 text.
+  - **Mine, before G3.** Threat model T-35 cites the grant and the PR051-SEC-03 residual.
+- **Reversibility:** High (a review record).
