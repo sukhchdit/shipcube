@@ -115,3 +115,127 @@ R1-M1 by (a) a fix commit with the parallel-burst test, or (b) the architect rul
 - m1: a falsy rejection of the authentication slot continues the request without a principal when the kit is composed (fail-open to anonymous on optional-auth routes).
 - n7: two-key `rl:` scripts in a future cluster deployment.
 - n8: raw (non-`AppError`) authenticator errors spend nothing.
+
+
+---
+
+# Round 2: delta `e7354249..83a85739` (fix cycle 1)
+
+| Field | Value |
+|---|---|
+| Head | `83a85739` on `feat/TASK-041-part-b-rate-limit-rulings-rev2` (parent `e7354249`), not pushed, no PR number yet. The worktree `HEAD` is `83a85739` and clean |
+| Delta reviewed | One commit, `83a85739` (`fix(api)`, D-TASK041-18 in the body): 13 files, 496+/42-. New: `apps/api/src/platform/rate-limit/in-flight.ts` and `in-flight.test.ts` |
+| Base | PR #82 is still **OPEN** at `be843ae1` (`gh pr view 82`). `origin/main` is `bf9f3454`; the merge base is still `530629f4`, no file is changed on both sides, and `git merge-tree --write-tree origin/main 83a85739` is clean |
+| Bindings read | Round 1 of this record; the commit body (D-TASK041-18); D-ORCH-157 (`docs/sdlc/DECISIONS.md:9082`); ADR-0016 amendment 12 item 11 and amendment 13; R-ARCH-36 (`docs/03-architecture/risks.md:42`) |
+| Reviewer | code-reviewer, 2026-11-21 |
+
+```
+VERDICT: CHANGES_REQUESTED (one MAJOR, closable by a small fix or by the R-ARCH-36 (d) ruling now being drafted; see R2.5)
+SUMMARY: R1-M1 is fixed for clients that wait for their answer: limit 5, 60 parallel junk bearers now reach the
+         authenticator 5 times (probe P2 re-run), and R1-m1, R1-m2 (K1-K3) and n1-n5 are closed; 14/14 mutants die.
+         MAJOR R2-M1: a client that aborts after admission frees its unit while its authentication still runs (P4b: 60 of 60).
+```
+
+## R2.1 What I verified myself
+
+I ran everything in the foreground, one command at a time, with no Docker. Nothing ran in the lane-B worktree. All runs used a `git archive 83a85739` extract in my scratchpad (`review/TASK-041B-cr2/copy`), with a junction to the worktree's `node_modules` and the git-ignored `prisma/generated` copied in. After the mutation batch I compared the six mutated files byte for byte with `git show 83a85739:<file>`: all were equal.
+
+| Check | How | Result |
+|---|---|---|
+| Delta | `git log` / `git diff e7354249..83a85739` | 1 commit, 13 files. Only `apps/api/src/**` is touched; no lockfile, config schema or file of another task |
+| Main drift | merge base, `comm -12` of both file lists, `git merge-tree --write-tree origin/main 83a85739` | No shared file; merge-tree clean. #82 is not merged yet, so R2.6 C3 is still ahead |
+| Jest selection | unit + api projects, `--testPathPatterns "platform/rate-limit/\|platform/authn/\|start-api\|runtime-seams\|capture\.api"`, `--maxWorkers=2` | **398/398 pass** (31 s) at the head |
+| Prettier | `prettier --check` on the 13 changed files | Clean. Two comment lines are over the wrap width (R2-n3) |
+| Probe P2 (round-1 burst, re-run) | `zzcr2probe.api.test.ts`. The seam refuses after 20 ms; limit 5; 60 parallel junk bearers from one IP | **5 x 401, 55 x 429; authenticator entered 5 times, peak concurrency 5, failed count 5** (round 1: 60 x 401, 0 x 429) |
+| Probe P4a, abort at slot entry, parallel | 60 parallel requests; the socket is destroyed when the slot is entered; slot 200 ms | 5 entered, 55 x 429. All 60 passed step 0 before any abort, so the released units found no taker |
+| **Probe P4b, abort after admission, staggered** | 60 junk bearers, one every 3 ms. Each client destroys its socket 15 ms after sending, which is after step 0 answered and before the 300 ms slot ends | **authenticator entered 60 times, 60 authentications in flight at once, failed count 60** (R2-M1) |
+| Probe P4c, control | P4b without the abort | 5 entered, 5 x 401, 55 x 429 |
+| Probe P5, reply-order race | `zzcr2race.ts` (tsx), over `createRateLimitKit` with the breaker-wrapped Valkey store. The client runs scripts in Valkey order and delivers queued replies in one synchronous step, as ioredis does for one socket chunk. Limit 1, Y admitted; X's step-0 script runs before Y's spend, and both replies are delivered together | X's admission (settled 0, held 1) runs **before** Y's release, so X is refused. When X runs after the spend, the gate refuses X. No undercount from reply interleaving in the production composition |
+| Mutants | `mutate-041b-r2.cjs`, one at a time over the selection above | **14/14 killed.** K1, K2, K3 (round 1's survivors) now die. New: N1 close listener does not release; N2 `!closed` dropped; N3 ledger `>=` -> `>`; N4 non-spend path keeps the unit; N5 spend path keeps the unit; N6 release before the spend is issued; N7 outage path ignores `admit`; N8 `admit(0)`; N9 falsy rejection passed as is; N10 in-flight refusal retries after the gate window; N11 `ipLimiter` without the ledger |
+
+**Not re-run here:** `npm run typecheck`, the repository ESLint run, the integration suite (Docker), the generated project and the whole api project. For these I rely on the developer's report (D-ORCH-157: lint 0, typecheck 0, unit 952, api files 50/50, changed-file coverage 99.79 % / 98.06 %) and on lane B at the merge head (R2.6 C4).
+
+## R2.2 Closure of round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R1-M1 | **Closed for waiting clients; reopened in part by R2-M1** | P2 re-run 5/55. The api row `authn-failed.api.test.ts` "60 parallel junk bearers with limit 5" kills N3 and N11. That row stays deterministic under load: `settled + held` never passes 5, so `entered` cannot pass 5 however the arrivals spread. A client that aborts after admission is not covered (R2-M1) |
+| R1-m1 | Closed | `authn-failed.ts:83-85`. `Promise.reject(undefined)` and `Promise.reject(false)` become `Error('Rejected promise')`; a falsy synchronous throw becomes `Error('Thrown falsy value')`; none spends. The unit row kills N9. A falsy synchronous throw is stricter than the router (which would continue), which is the right side to err on |
+| R1-m2 | Closed | K1 and K2 are killed by `start-api.denial-budget.api.test.ts` "[K1] [K2]" through `startApi`; K3 is killed by `authn-failed.api.test.ts` "[K3]" (replaced `pipeline` plus `rateLimit`). The K1/K2 row's dependence on the 5 s cool-down is R2-n2 |
+| n1 | Closed | `limits.ts:184-186` now names the other spellings and the unauthenticated budget |
+| n2 | Closed | The loop asserts `valkey.calls === 1` and `breaker.state() === 'open'`, with no wall clock. The one remaining bound (`>= STORE_TIMEOUT_MS - 5` on the first call) can only fail if a timer fires early |
+| n3 | Closed | `access-token-precheck.ts:40-41` |
+| n4 | Closed | Both silent drops are commented (`authn-failed.ts:57`, `:70-71`) |
+| n5 | Closed | Kept, with the reason (`store.ts:124-129`) |
+| n6 | Closed (routed) | README wording kept; api-designer notes it at the next fold |
+| n7, n8 | Open, routed | Not in this delta; they stay with C7 |
+
+## R2.3 Findings of this round
+
+| ID | Severity | file:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-M1 | MAJOR | `apps/api/src/platform/rate-limit/limits.ts:153-158`, `apps/api/src/platform/rate-limit/authn-failed.ts:61-77` | **A client that aborts after admission frees its in-flight unit while its authentication still runs.** The `close` listener releases the unit whenever the response closes. Express does not stop a request whose client has gone, so the slot still runs, refuses, and spends later. The next admissions read `settled` without that refusal and `held` without its unit. Probe P4b: 60 junk bearers, one every 3 ms, each aborted 15 ms after sending, slot 300 ms, limit 5. Result: **60 authenticator entries, 60 in flight at once, 60 spends**; the control without the abort gives 5. Aborting is the natural behaviour of a flooding client, which never needs the 401. Per instance and window the bound becomes about `limit x (1 + slot latency / time from send to admission)`, not the `limit` that D-TASK041-18 states, and it grows when the slot slows down (the refresh-cookie lookup of TASK-055 under database pressure; R-ARCH-36 (a)). The JSDoc at `limits.ts:136-137` and the api test title "so an abort cannot skip the hold" cover only an abort **before** step 0 answers. As with R1-M1, nothing is exposed until TASK-052/055/091/171/261 give the slot a cost | Either (a) **code (recommended, a few lines):** once the wrapper has entered the slot for a holder, closing the response no longer releases its unit; the unit goes at the slot's outcome (`done`), after the spend. For example, `InFlightLedger.enter(holder)` marks it, and the `close` listener calls a `releaseIfNotEntered(holder)`. A slot that never settles then keeps its unit only for as long as it keeps the request, which the authenticator cards bound. Add one api row in the P4b shape (staggered requests, each aborted by the client after step 0 answered, slot slower than the abort): the authenticator is entered at most `limit` times. Fix the JSDoc and the test title. Or (b) **ruling:** principal-architect adds the abort case and its bound to the R-ARCH-36 (d) text being drafted under D-ORCH-157, and security-analyst rates it in the QG-041-C4 round |
+| R2-m1 | MINOR | D-TASK041-18 (commit body; D-ORCH-157 `DECISIONS.md:9089-9093`); `in-flight.ts:1-14` | **The accepted cost is stated too narrowly for the R-ARCH-36 (d) text.** The ledger holds a unit for **every** credentialed request of the IP, valid ones included, from step 0 until the slot's outcome. That interval includes the JSON body upload, because `jsonBodyParser` runs between step 0 and the slot (`app.ts:214-216`). Three consequences follow. (1) With no failure at all, one IP with `RATE_LIMIT_PUBLIC_PER_MIN` (120 by default) credentialed requests between step 0 and authentication on one instance gets 429 `Retry-After: 1` on the next one. (2) After k refusals in the window, the IP's per-instance concurrency is `limit - k`. A client on a shared address can spend `limit - 1` and squeeze every user of that address to one request in that interval; `rate_limit_auth` is emitted only when the limit is reached. (3) A client holding 120 slow-body connections per instance (bounded by Node's default 300 s `requestTimeout`) keeps the IP refused without a spend or an event; only the `step0-authn-failed` counter rises. None of this is a new capability beyond the accepted residual (b), which locks the address outright with 120 junk requests a minute, but it is quieter. The D-ORCH-157 wording ("while the IP's failed-authentication limit is in flight") reads as if only failing requests counted | The R-ARCH-36 (d) / ADR-0016 am. 13 text says: "all credentialed requests of an IP, valid ones included, between step 0 and the authentication outcome, body upload included". It also names the squeeze (`limit - k`) and the quiet hold. security-analyst rates (2) and (3) with (d). No code change is required |
+| R2-n1 | NIT | `limits.ts:121-124`, `limiter.ts:146` | An in-flight refusal and a request refused because its client had already gone are counted as `step0-authn-failed`, the same label as a spent window. TASK-214's alert cannot tell a lock from an in-flight squeeze, and it counts aborted clients as refusals | Route to TASK-214: a distinct label (for example `step0-authn-inflight`), or no count for a closed response |
+| R2-n2 | NIT | `apps/api/src/start-api.denial-budget.api.test.ts:299-314` | The K1/K2 row relies on the real `BREAKER_COOLDOWN_MS` (5 s): the two later requests must finish within about 4.75 s of the breaker opening. A longer host stall in lane B sends a probe, and `valkey.calls === 1` fails. The risk is low | If it ever flakes, inject the breaker's clock through the kit dependencies; never retry it |
+| R2-n3 | NIT | `apps/api/src/platform/rate-limit/kit.ts:4` (171 columns), `authn-failed.api.test.ts:4` (194 columns) | Comment lines over the wrap width. Prettier does not reflow comments | Rewrap with the next commit |
+
+## R2.4 Rulings
+
+| Item | Ruling |
+|---|---|
+| `in-flight.ts` ledger | **Accepted with R2-M1.** Check and hold happen in one synchronous step after the last `await`. Units are per IP (`clientIpKey(req.ip)`, the key of the gate and the spend). The holder is the `Response`, so a request holds at most one unit and `release` is idempotent (N1, N4, N5, N6 pinned). Memory: one map entry per IP with a request in flight, deleted at its last release, and one `WeakMap` entry per held response; nothing outlives the requests. Every admitted request is released exactly once in effect: at the slot's outcome, or at `close` when the slot is never reached (404, body-parser error, a refusal before the slot). That holds except that `close` also releases too early (R2-M1). P5 shows no undercount from reply interleaving |
+| `consumeGated`'s `gated()` | **Accepted.** A spent gate refuses with the rest of its window before the rule is consulted; a request the rule refuses holds nothing; an in-flight refusal retries after 1 s (N10 pinned). `admit` is not asked when the gate is spent or the rule refuses (`in-flight.test.ts` "is not asked") |
+| Rule-then-gate order on the outage path | **Correct.** (1) The order is needed. The gate's peek must be the last `await` before `admit`, otherwise a concurrent request could change `held` between the reading and the admission. (2) In `fallback` mode the rule's hit is now counted even when the gate refuses. That matches the healthy path: `HIT_AND_PEEK_SCRIPT` always `INCR`s `KEYS[1]` before it reads the gate (`store.ts:104-121`), so before this change the outage path was the inconsistent one. (3) No production caller uses `fallback` here: `ipLimiter` passes `fail-open` (`limits.ts:149`), so the rule's decision on the outage path is a constant and nothing is counted. The behaviour change has no production effect today |
+| `ipLimiter` close and admit | **Accepted with R2-M1.** Never admitting a request whose response closed before the store answered is right (pinned by the api row and N2). The listener is registered in the same synchronous step that handles the request, so a `close` cannot be missed. Releasing on `close` after the slot was entered is R2-M1 |
+| The wrapper's release | **Accepted.** Non-spend path: released before `next` (N4). Spend path: released in `finally`, after the spend has landed and before `next` (N5, N6). The unit test pins that the unit is still held while the spend is issued. Releasing at authentication rather than at `close` means long handlers (SSE streams, uploads after authentication) do not hold units |
+| D-TASK041-18 | **Accepted with R2-M1 and R2-m1.** (i) Slack 0 per instance: met for clients that wait (P2, the api row, N3/N11), not for clients that abort (R2-M1). (ii) The cross-replica bound N x `RATE_LIMIT_PUBLIC_PER_MIN` per IP and window is the honest residual of a per-instance ledger without an extra round trip (rulings §8). The two-replica row pins at most 5 per replica. Recording it as R-ARCH-36 (d) is right. (iii) The cost (429 `Retry-After: 1`, slow uploads included) is acceptable under the accepted residual (b), with the wording of R2-m1 |
+| `tests/serve.ts` lazy-start race | **Correct.** The map now stores the listening promise synchronously on the first call, so parallel first calls share one server, and `closeServedApps` closes the only one. Round 1's 59 leaked servers cannot recur |
+
+## R2.5 What closes this round
+
+R2-M1 can be closed in either of two ways:
+
+- **(a) Fix commit (recommended).** It needs the abort-after-admission api row and the JSDoc/title fix. Round 3 then reviews that delta only, re-runs P4b, and adds a mutant that restores the early release.
+- **(b) Ruling.** Principal-architect puts the abort case and its bound into the R-ARCH-36 (d) wording now being drafted, and security-analyst rates it. Then I re-check only the text, and the verdict becomes APPROVED_WITH_NITS with no code change.
+
+R2-m1 rides the (d) wording either way. R2-n1 goes to TASK-214. R2-n2 and R2-n3 are optional.
+
+## R2.6 Merge conditions (these replace round 1's §6)
+
+- **C1.** R2-M1 is closed as described in R2.5.
+- **C2.** The R-ARCH-36 (d) and ADR-0016 amendment 13 text (principal-architect, dispatched in D-ORCH-157) states the N x limit bound, the scope of the hold (R2-m1) and, if C1 takes option (b), the abort bound.
+- **C3. After PR #82 merges** (it is still open at `be843ae1`):
+  - Merge `origin/main` into this branch; do not rebase.
+  - Prove the squash of #82 equals `be843ae1` on the part-A files: `git diff --stat be843ae1 <squash> -- <files of 530629f4..be843ae1>` is empty, except for files main changed independently.
+  - Prove `git diff origin/main <merge>` equals `git diff be843ae1 <final head>` file by file.
+  - Show any hand resolution (`app.ts`, `limits.ts`, `README.md` are the candidates) with `git show --cc`.
+  - A pure merge needs no code-review round. A hand-resolved code file needs a delta round.
+  - Today `merge-tree` against `origin/main` `bf9f3454` is clean and no file is shared.
+- **C4. Lane B on that merge head**, not on the stacked head (D-ORCH-150, D-ORCH-157):
+  - `rate-limit.int.test.ts`: the three real-Valkey cases of round 1.
+  - The api project, with `authn-failed.api.test.ts` (25 rows, including the five R1-M1/D-TASK041-18 rows and the K3 row), `start-api.denial-budget.api.test.ts` (the K1/K2 row; R2-n2 timing), `limits.api.test.ts` and `runtime-seams.api.test.ts`.
+  - `in-flight.test.ts`; the generated project; coverage of the changed files.
+  - Lane A: the `security-integration` job.
+- **C5. Security round** QG-041-C4 second half on the final head: amendment 12 items 4, 7 and 8 with PR041-SEC-09 and E1-E5, and PR041-SEC-02 (b). It also rates R-ARCH-36 (d), R2-m1 (2) and (3), and R2-M1 if C1 takes option (b). `app.ts` and `pipeline.ts` changed, so their C3 of round 2 of the security record applies.
+- **C6.** QG-041-C2 second half (product-manager: REQ-SEC-006, A-053, EC-A32 wording) before merge, unchanged from round 1.
+- **C7.** The orchestrator routes:
+  - n7 (cluster hash slots) to data-architect and devops;
+  - n8 (TASK-052 401-only row);
+  - R2-n1 (counter label) to TASK-214.
+
+  D-TASK041-10..17 (`DECISIONS.md:8823`) and D-TASK041-18 (D-ORCH-157) are recorded.
+
+## R2.7 Good
+
+- The admission sits in the one place that cannot race: the same synchronous step as the store reply, after the last `await`. The outage path was reordered to keep that true. P5 confirms it against in-order reply delivery through the real breaker-wrapped store.
+- No extra store round trip, and the ledger cleans itself up: no timers and no sweeps, and memory is proportional to requests in flight.
+- The release comes after the spend has landed, and a unit test pins it (the unit is still held while the spend is issued), so a sequential reader never sees neither the unit nor the spend.
+- The new api rows prove the claims through `createApp` and `startApi`, not on hand-built pairs. All three round-1 survivors now die.
+- The `serve.ts` fix removes the leak at its cause instead of raising Jest's timeouts.
+
+## R2.8 Security flags (for security-analyst)
+
+- R2-M1: an abort after admission skips the in-flight hold (CWE-307 / CWE-770 class). It is reproducible with `zzcr2probe.api.test.ts` case P4b in my scratchpad (`review/TASK-041B-cr2/copy/apps/api/src/platform/rate-limit/`).
+- R2-m1: valid requests count toward the hold. Also: the `limit - k` squeeze of a shared address, and slow-body holds without a spend or an event.
+- Round 1's n7 and n8 stand.
