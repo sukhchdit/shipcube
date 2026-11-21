@@ -54,6 +54,14 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 2
+    # node semver-major is ignored (D-DEVOPS-002): ADR-0001 and D-ARCH-001 fix Node 24 LTS, and package.json engines
+    # (">=24.2 <25") with engine-strict reject any other major in the image npm ci stages. #50 moved all five Dockerfiles
+    # to node:26 and was reverted. Node 26 is a reviewed task PR with a superseding ADR (engines, .node-version, CI and
+    # images together), not an automated bump. 24.x minor and patch bumps still come, in the same docker-images group
+    # as the debian:trixie-slim runtime base, so node and debian still move together (D-ARCH-116 rule 3).
+    ignore:
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
     groups:
       docker-images:
         patterns: ['*']

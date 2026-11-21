@@ -303,6 +303,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       schedule: { interval: 'monthly' },
       cooldown: { 'default-days': '7' },
       'open-pull-requests-limit': '2',
+      // D-DEVOPS-002: the node base stays on the ADR-0001 major (24; engines ">=24.2 <25"); 26 needs an ADR.
+      ignore: [{ 'dependency-name': 'node', 'update-types': ['version-update:semver-major'] }],
       groups: { 'docker-images': { patterns: ['*'] } },
       'commit-message': { prefix: 'build(deps)' },
     });
