@@ -11299,3 +11299,9 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - squash.
 - **Verification:** git, grep and reads only, per the dispatch. No npm, Jest or Docker.
 - **Reversibility:** High.
+
+### D-ORCH-174 · 2026-11-21 · sdlc-orchestrator (session C) · Handback checkpoint (session C context)
+- **Results since D-ORCH-173:** TASK-045 lane B `20261121T1717Z_ff1489f` = main-red only (PASS by D-ORCH-170); #87 api image built on Node 24 under the lock (`prep=0 build=0`); TASK-034 code review round 3 APPROVED_WITH_NITS at `1bac00b1` (D-CRPR034-02; R3-m1 MINOR routed to the next rule-14/21 change, R3-n1 to TASK-119); D-TASK034-01..23 accepted by reference (code rounds 1-3).
+- **In flight at handback (reports go to the coordinator; do not re-dispatch):** senior-developer slot 1 (TASK-045 merge + PR, then TASK-298 integration/PR prep); senior-developer slot 2 (plan fold of card lines); security-analyst TASK-034 round 2 (C1/C2) on `1bac00b1`; security-analyst #88 record (D-SECCHORE-02, real-image gitleaks under the lock); lane B: TASK-034 `1bac00b1` running, then 040-B `9d1687b1` + 041-B `214ec79b` (`run-live75`), chore #86 re-run (`run-live77`), chore #87 (`run-live76`).
+- **Next for the successor:** read those reports; open PRs for 040-B PR1 and TASK-034 once lane B and the security rounds settle; 041-B: lane B, apply `../.orch/held/TASK-041B-api-readme-s7.patch` as a docs rider, gatekeeper D-QG-011 (C4, C5 (a), D-ARCH-239 item 6 points), PR; TASK-044: lane A, push (after #88 lands), PR; next build slots TASK-278 and part 045-C; dispatch devops follow-ups (PR86-SEC-01/02, PR85-SEC-01/02, PR87-SEC-01, D-CRCHORE retirements) as one chore when a slot frees.
+- **Reversibility:** High.
