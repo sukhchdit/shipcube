@@ -9967,3 +9967,30 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Routed (b):** devops-engineer, with a security record, adds the 2 exact fingerprints to `tools/quality/gitleaks-baseline.txt` (`BASELINE_COUNT` 19, `sec-static.test.ts` pin). Until then, a lane-B gitleaks-full failure that shows exactly these 2 fingerprints is classed as PR080-SEC-07, not a new finding.
 - **TASK-044 `33262314`** (unpushed): its union `c33e5e92` re-adds the line from main's history. Redo the union after the reword, or rely on (b) before pushing.
 - **Reversibility:** High.
+
+### D-CRPR034-01 · 2026-11-21 · code-reviewer · TASK-034 code review round 2 (fix cycles 1 and 2, `6feac2e8..3ee36f01`) = APPROVED_WITH_NITS at head `3ee36f01` (appended as round 2 to `docs/05-quality/reviews/PR-pending-TASK-034-code-review.md` on main)
+
+- **Decision:** APPROVED_WITH_NITS. No BLOCKER or MAJOR finding is open. There is 1 MINOR (R2-m1) and 3 NITs.
+- **Round 1 closed:**
+  - **M1:** `--migration` runs `prisma migrate deploy` with the root config on the restored data after the comparison, then `migrate status`. The record needs `verification.deployed`. The int case uses real Prisma 7.10 through the fixture config: status alone is behind with `pending = [M]`, then deploy, up to date, and rule R accepts the record.
+  - **M2:** `tolerantRead`, a comment-aware fallback with linear cost, plus comment blanking and E-string line-break decoding in the lexed path. Shapes C, D and E and the comment variants are rule-10 hits, and a differential test checks it against the token reading.
+  - **m1:** `migrations/added-out-of-order`.
+  - **m2:** wording.
+  - **m3:** the runner settles after the sink closes; the CLI is proven by C4.
+  - **m4:** routed by D-SD-012 to TASK-119, TASK-147 and TASK-116, with qa-lead for the marker.
+  - **n1 to n8:** all fixed.
+- **C4:** the harness-only proof of D-ORCH-160 is what is delivered. `main` of both CLIs runs with the production dependencies and only the transport is swapped (`docker compose -p P exec -T postgres` becomes `docker exec -i`). It is green in lane B `20261121T1443Z_3ee36f0`: integration 430/0/0/0, unit 8403 with 2 skipped (pre-existing platform skips in packages/config). Compose's project and service lookup is not proven, which D-ORCH-160 accepts.
+- **Rulings:** D-TASK034-09, -10, -11, -13 and -14 are accepted. D-TASK034-12 is accepted in design; security rules on it.
+- **New findings:**
+  - **R2-m1 (MINOR):** `writeRehearsalRecord` re-reads `migration.sql` at write time and binds the record to those bytes, not to the bytes `migrate deploy` applied, so an edit during the rehearsal yields a record that rule R accepts. Fix: compare against the `_prisma_migrations.checksum` of the scratch database (or the bytes read at the fail-fast step), and write the record before printing PASS. It must be fixed before the first `data-changing: yes` migration is rehearsed; the orchestrator picks the carrier.
+  - **R2-n1 (NIT):** stale "no owner task" text against D-SD-012.
+  - **R2-n2 (NIT):** the out-of-order rule is relative to the merge base and runs from the tested base, so a merge on a stale CI run still slips. Detection is by the `lintRepository` pins.
+  - **R2-n3 (NIT):** `listedUnder` is pinned to Prisma 7.10's output format.
+- **Merge conditions:**
+  - commit the lane-B evidence;
+  - security round 1 on `3ee36f01` (the `tolerantRead` fuzz and D-TASK034-12);
+  - lane B on the merge result with main (the only shared file is `package.json`; main's 4 new migrations are all `data-changing: no`);
+  - D-TASK034-01..14 accepted by reference in DECISIONS.md;
+  - rename the record once the PR exists.
+- **Alternatives:** CHANGES_REQUESTED for R2-m1 was rejected. No `data-changing: yes` migration exists yet, the bypass needs an edit during a run, and the fix is local to the writer.
+- **Reversibility:** High (a review record).

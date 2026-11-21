@@ -238,3 +238,140 @@ Card items:
 5. Other implicit-call shapes next to rule 14 that are worth a look in the delta round:
    - `CREATE TYPE … AS RANGE (subtype_diff = w)`, called by GiST builds;
    - a `CREATE DOMAIN … CHECK (w(VALUE))` call site, where rule 10 sees the name, so it fails closed.
+
+---
+
+# Round 2 (pre-push, after fix cycles 1 and 2)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `3ee36f01` (`6feac2e8` + fix cycle 1 `9c40d31e` + fix cycle 2 `3ee36f01`; base still `530629f4`) |
+| Delta reviewed | `git diff 6feac2e8..3ee36f01`: 30 files, +1785 / -320, no lockfile change |
+| Lane-B evidence | `20261121T1443Z_3ee36f0` (uncommitted in the worktree), verdict PASS |
+| Round | 2 |
+| Date | 2026-11-21 |
+| Verdict | **APPROVED_WITH_NITS** (0 BLOCKER, 0 MAJOR, 1 MINOR, 3 NIT) |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Both round-1 MAJORs are closed. --migration now deploys the migration on the restored data before the status
+  check (M1), and the rule-10 fallback is a comment-aware tolerant reader with a lexed-path differential test (M2).
+  m1-m3 and n1-n8 are fixed, m4 is routed (D-SD-012), and the C4 harness-only proof (D-ORCH-160) is delivered and green
+  in lane B. One new MINOR: the rehearsal record hashes migration.sql as it is at write time, not as deployed.
+```
+
+## R2.1 What I verified myself
+
+Under the dispatch constraints I ran no npm, Node or Docker command. I used git, grep and file reads only.
+
+- **Delta.** I read every changed production file in full: `verify-restore.ts`, `prisma-outcome.ts` (new), `sql-text.ts` (`tolerantRead`, `decodeLineBreaks`), the rule-10 part of `lint-migrations.ts` (`bodyDataChanging`, `doBlockChangesData`, `writingRoutineCall`, `lintRehearsals`), `rehearsal-record.ts`, `pg-archive.ts`, `bootstrap.ts` (`readSecretFile`), `zero-downtime-probe.ts`, `check-migration-immutability.mjs`, the fixture `prisma/tests/fixtures/rehearsal/prisma.config.ts`, the harness change, `.dockerignore` and the runbook. I read the new and changed tests in `verify-restore.test.ts`, `prisma-outcome.test.ts`, `pg-archive.test.ts`, `lint-migrations.test.ts`, `sql-text.test.ts`, `check-migration-immutability.test.ts`, `backup-restore.int.test.ts` and `zero-downtime.int.test.ts`.
+- **Lane B `20261121T1443Z_3ee36f0`.** `git_sha` is `3ee36f01…`, `git_dirty` false, `build_clean` true, and the Postgres image digest equals `compose.yaml:24`. Results: unit 8403 passed with 2 skipped (both are `packages/config/src/file-secret-provider.test.ts` platform skips, pre-existing and outside TASK-034), integration 430/0/0/0, catalog-c1-c14 113/0, rls-cross-tenant 157/0, api 179/0. Merged coverage is 99.48 % lines and 97.3 % branches. `integration.junit.xml` holds all 11 TASK-034 cases: 6 in `backup-restore.int` (including the R1-M1 case), 5 in the C4 describe, and 3 in `zero-downtime.int`. The `bootstrapConnection` consumers ran green with them (C2).
+- **Tolerant reader by hand.** It is linear: each dollar opener's `indexOf` region is consumed, the tag scan runs over disjoint identifier runs, and unterminated pieces jump to the end. The continuation state survives white space and `--` comments but not `/* */` (scan.l `quotecontinue`). The E-prefix test is bounded by `codeStart`, as the lexer's is.
+  - **Escape decoding.** An escape the linter does not decode (`\x27`, `\'`) cannot hide DML, because every string body is also re-read as SQL down to `MAX_DYNAMIC_DEPTH`.
+  - **Normalisation.** Dropping the outer `normalise` before `tokenize` is also more faithful: dollar tags are case-sensitive in PostgreSQL, and `E'…'` plus a newline is a continuation only while the newline exists.
+- **Union exposure.** I diffed `530629f4..main` against `530629f4..3ee36f01`. The only shared file is `package.json` (scripts against devDependency bumps, separate hunks). Main added 4 migrations, all `data-changing: no`, so rule R adds no finding on the union. I read their routine bodies, and none holds a rule-10 form under the new reading. Lane B on the merge result stays the orchestrator's condition.
+
+## R2.2 Round-1 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| M1 | **Closed** | `verifyRestoredDatabase` (`verify-restore.ts:108-133`) compares and runs the anti-joins first, then runs `migrate deploy` (root config, `prismaMigrate('deploy')`, `:317-326`, 30 min), then `migrate status`. The verdict needs both. `writeRehearsalRecord` refuses a report without `migrateDeploy.ok` (`:283-285`). Rule R requires `verification.deployed === true` (`rehearsal-record.ts:80`). Tests: the unit test uses the real `databaseIsBehind` text and exit 1 (`verify-restore.test.ts:55-59`, `:237-275`); a failed deploy fails even with an up-to-date status (`:277`); the int case copies `prisma/migrations`, adds a data-changing M and runs the real Prisma 7.10 through the fixture config. It shows status alone behind (`pending = [M]`), then deploy, status up to date, 3 rows present and the record accepted by `lintRehearsals`. The fix-cycle-2 parser (`prisma-outcome.ts`) reads both streams, which closes the D-ORCH-154 failure. D-TASK034-09 and -14 are accepted. |
+| M2 | **Closed** | `tolerantRead` (`sql-text.ts:218-326`) blanks `--` (LF or CR) and nested `/* */` comments, passes strings, names and dollar bodies through, keeps an E-string's escapes live across a continuation, and returns every literal body. The lexed path now blanks comments too, and an E-string body has its line-break escapes decoded (`decodeLineBreaks`) before it is read as SQL. Tests: shapes C, D and E, a nested comment holding `;` and `'`, a lone CR, and WITH, each a rule-10 hit through `lintTexts` (`lint-migrations.test.ts:1405-1441`); comment-only DML controls stay clean; `\n` and `\012` dynamic SQL is caught; linearity covers comment-heavy text (300 KB against 1.2 MB). The differential test asserts `tolerantRead` equals the token reading on every `LEXER_CASES` and `ATOMIC_BODY_CASES` text (`sql-text.test.ts:394-457`), a strong pin. D-TASK034-13 is accepted. The fuzz is security's (C3). |
+| m1 | **Closed** | `checkMigrationChanges` refuses a new directory that sorts before the last base directory (`migrations/added-out-of-order`, once per directory, rename named). `ls-tree -d` lists directories only, so `migration_lock.toml` cannot be "last". The test is `check-migration-immutability.test.ts:90-104`. Runbook `:69` was updated. D-TASK034-10 is accepted. Residual: R2-n2. |
+| m2 | **Closed** | `verify-restore.ts:15-18` and runbook step 5 now say that status proves the config loads and the history matches, and that it does not prove partition coverage. |
+| m3 | **Closed** | (1) The runner settles only after the sink's `'close'` (`pg-archive.ts:160-166`). A late `ENOSPC` gives `code: null` and the error line. Tests: slow sink, final-flush ENOSPC, and a real file of 70 000 bytes (`pg-archive.test.ts:169-215`). (2) C4: see R2.3. |
+| m4 | **Closed (routed)** | The titles and describes say "(partial)". D-SD-012 item 6 routes the image-level probe and the marker stream or `/health/ready` to TASK-119, the documents to TASK-147 and the chain to TASK-116 (`WAVE-03.md:685`, `:771`; `WAVE-05.md:92`). The marker mismatch goes to qa-lead's activation PR. The STATUS partial marks are the orchestrator's. Stale text: R2-n1. |
+| n1 | Closed | `rehearsal-manifest.ts:56-61`: the text now names the 310 s client timeout. |
+| n2 | Closed | `.dockerignore` adds `reports`, pinned in `check-dockerignore.test.ts`. |
+| n3 | Closed | `rehearsalTarget` runs before any database work (`verify-restore.ts:360`). Test `:571`. |
+| n4 | Closed | `migrationNames` (directories with `migration.sql`) is shared by rule R and the writer. Test `:360`. |
+| n5 | Closed | `pool.on('error')` counts `idleErrors`, which fail the run. Test `zero-downtime-probe.test.ts:203`. |
+| n6 | Closed | Warm-up saturation gives `invalid-workload`. Test `:169`. |
+| n7 | Closed | In-container `timeout -k 10 <s>`, with the host grace 30 s longer, and exit 124 mapped. The same image as Compose ran it in lane B. |
+| n8 | Closed | `--project` goes through `ArchiveTarget` to `docker compose -p`, validated by `PROJECT_NAME`. Runbook prerequisite added. |
+| Security flag 3 | Fixed (security rules) | `readSecretFile` re-resolves after the open, requires the result under the root and requires the same `dev`/`ino` (bigint) as the descriptor. Both swap orders are tested (`bootstrap.test.ts:178-245`). D-TASK034-12 is for security-analyst. |
+
+## R2.3 C4: the harness-only proof (D-ORCH-160)
+
+**Delivered as D-ORCH-160 specifies.** `backup-restore.int.test.ts:353-559` (describe at `:363`) runs `main` of `db:backup` and `db:verify-restore` with `BACKUP_DEPENDENCIES` and `VERIFY_RESTORE_DEPENDENCIES`: real argument parsing, the URL rules, `connectPrivileged`, `00-roles.sql`, `composeArchiveTool` with the real `runProcess`, and the real `prismaMigrate('status')` with the root config. There is one substitution: the runner rewrites the asserted prefix `compose -p harness_c4 exec -T postgres` to `docker exec -i <container>`.
+
+What it proves:
+
+- The custom-format archive streams binary (the `PGDMP` magic and NUL bytes) to a host file over the docker CLI's stdout on the Windows lane-B host.
+- `pg_restore` reads a non-seekable stdin from the host, with exit 0.
+- The report totals equal the manifest, and the scratch database is dropped.
+- The `wx` refusal leaves the archive unchanged.
+- A truncated archive gives exit 1 with one masked line and no report.
+- The `tsx` entry points set exit code 1 with no secret on stderr.
+
+Not proven, as the commit states and D-ORCH-160 accepts: Compose's own project and service lookup. No manual Compose run is owed.
+
+## R2.4 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-m1 | MINOR | `tools/db/verify-restore.ts:280-299` (with `:277`), `:360`, `:392-395` | See [R2-m1](#r2-m1-the-record-hashes-migrationsql-as-it-is-at-write-time-not-as-deployed). | See [R2-m1](#r2-m1-the-record-hashes-migrationsql-as-it-is-at-write-time-not-as-deployed). |
+| R2-n1 | NIT | `docs/07-ops/runbooks/backup-restore.md:101`, `:104-110`; `tools/db/zero-downtime-probe.ts:19-21`; `prisma/tests/migrations/zero-downtime.int.test.ts:108`; `tools/db/verify-restore.ts:24-25` | The texts say the image-level NT-AVAIL-003-b job has "no owner task yet" and list the D-TASK034-04 items without owners. D-SD-012 has since routed them to TASK-119, TASK-147 and TASK-116. | Name TASK-119, TASK-147 and TASK-116, or drop the "no owner" clause. A text-only change. |
+| R2-n2 | NIT | `tools/ci/check-migration-immutability.mjs:53`, `:72-78`; `.github/workflows/ci.yml:157-163` | See [R2-n2](#r2-n2-the-out-of-order-rule-has-a-stale-ci-residual). | One sentence in the runbook or the D-TASK034-10 text naming the stale-run residual and its detector. |
+| R2-n3 | NIT | `tools/db/prisma-outcome.ts:29-30`, `:55` | `listedUnder` stops at the first line that is not a bare migration name. If a future Prisma prints indented names, `trim()` handles them, but a bulleted form (`- name`) would give an empty `pending` list. Fail-closed (the verdict still needs exit 0 and "up to date"), so this affects reporting only. | None now. Re-pin `BEHIND` on the next Prisma bump. |
+
+### R2-m1: the record hashes `migration.sql` as it is at write time, not as deployed
+
+**Issue.** `writeRehearsalRecord` calls `rehearsalTarget` again after the run (`:281`). That re-reads `migration.sql` and binds the record to the bytes it finds **then**. The JSDoc `:277` says so ("the files may have changed during the run").
+
+The deployed bytes are the ones Prisma read during `migrate deploy`, which can be 30 minutes or more after the fail-fast read at `:360`. If the author edits `migration.sql` during the rehearsal (a fix noticed while waiting, or an editor save), the record carries the SHA of unrehearsed bytes. Rule R accepts it, because the record SHA equals the committed file. That is exactly the case rule R exists to refuse.
+
+`main` also prints `PASS` (`:392`) before the write, which can still throw (exit 1 after a PASS line). That is a smaller version of the R1-n3 concern.
+
+**Why it matters.** The record is the only artefact behind the CLAUDE.md §5 guardrail until M5. It should bind the bytes that were rehearsed.
+
+**Fix.** Do one of these:
+
+- **Preferred:** after the deploy, read `checksum` of M from `_prisma_migrations` on the scratch database. Prisma stores the SHA-256 hex of the applied file. Carry it in the report, and have `writeRehearsalRecord` require that `sha256(current bytes)` equals it, else refuse ("migration.sql changed during the rehearsal").
+- **Or:** keep the bytes read at `:360`, pass them through, and refuse at write time when the current bytes differ.
+
+Write the record before printing `PASS`, or print a FAIL line when the write throws.
+
+Tests:
+
+- a unit case that changes `migration.sql` between the deploy fake and the write, which must be refused;
+- the int R1-M1 case asserting that the report's checksum equals the record's `migrationSha256`.
+
+Not a merge blocker: no `data-changing: yes` migration exists yet, so the first real use comes after the merge. The fix fits the activation PR or a follow-up.
+
+### R2-n2: the out-of-order rule has a stale-CI residual
+
+**Issue.**
+
+- The new `migrations/added-out-of-order` rule compares against the **merge base**.
+- Lane A runs the gate tools from the tested base, so this rule protects the PRs after this one.
+- A PR whose CI ran before a later-timestamped migration merged can still merge on that stale run.
+- A released data-changing record then goes stale on main. The `lintRepository(repoRoot)` pins in lane A turn red on the next run, which fails closed but lands on an unrelated PR.
+
+**Fix.** Name this residual and its detector in the runbook or in D-TASK034-10. Requiring branches to be up to date before merging closes it.
+
+## R2.5 Rulings on D-TASK034-09..14
+
+| ID | Ruling |
+|---|---|
+| D-TASK034-09 (deploy then status; record needs `deployed`) | **Accepted.** It also rehearses the migration on restored data (§8.6). The rejected alternative (accept exactly `[M]` pending) would not have done that. Residual: R2-m1. |
+| D-TASK034-10 (out-of-order directory refused) | **Accepted.** The rule also protects Prisma's deploy order on existing databases. Residual: R2-n2. |
+| D-TASK034-11 (partial NT IDs, premise corrected, routings) | **Accepted.** The owners now exist (D-SD-012). Text: R2-n1. |
+| D-TASK034-12 (`readSecretFile` re-resolve plus dev/ino) | **Accepted in design.** The ruling belongs to security. |
+| D-TASK034-13 (rule 10 reads bodies as written; `tolerantRead`) | **Accepted.** The differential test against the token reading is the right pin. |
+| D-TASK034-14 (`prisma-outcome.ts`, report v1 fields added) | **Accepted.** Adding fields keeps `v1` readable. Masking covers quoted values and `=(…)` key values. |
+
+## R2.6 Merge conditions
+
+- **C1.** Met: M1, M2 and m1–m3 are fixed, and m4 is routed. R2-m1 is MINOR. Fix it before the first `data-changing: yes` migration is rehearsed (the activation PR or a follow-up card) or before this merge, as the orchestrator decides. R2-n1 to R2-n3 are optional.
+- **C2.** Met on `3ee36f01` (lane B `20261121T1443Z_3ee36f0`). The evidence must be committed, and lane B must run on the merge result with main.
+- **C3.** Open: security round 1 on `3ee36f01`, which re-fuzzes `tolerantRead` and rules on D-TASK034-12.
+- **C4.** Met by the harness-only proof (D-ORCH-160).
+- **C5.** D-TASK034-01..14 accepted by reference in DECISIONS.md (none are there yet), and the record renamed once the PR exists.
+
+## R2.7 Good
+
+- `prisma-outcome.ts` turns a stream-ordering flake into structured `pending` and `failed` lists, and its tests cover all three stream layouts.
+- The `tolerantRead` differential test against the token reading over the shared case corpora.
+- The C4 proof asserts the exact Compose prefix and the in-container argv, then swaps only the transport.
+- `verified before deploy` is asserted in both the unit test (step order) and the int test (`differences = []` after the deploy).
