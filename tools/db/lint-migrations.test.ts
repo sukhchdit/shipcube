@@ -25,6 +25,7 @@ import {
   loneCarriageReturnLines,
   main,
   parseHeader,
+  quoteAwareSegments,
   readReviewers,
   routineBodyChangesData,
   routineDefinitionSha256,
@@ -32,6 +33,7 @@ import {
   type LockTimeoutEvent,
 } from './lint-migrations.js';
 import { renderRls } from './render-rls.js';
+import { SqlLexError, normalise, tokenize } from './sql-text.js';
 import { loadTableClasses, type TableClassEntry } from './table-classes.js';
 import { findRepoRoot } from '../test-support/process.js';
 
@@ -834,7 +836,15 @@ describe('TASK-024 linter rules (11c, 17, 16 E-strings and dynamic SQL, 11/15 se
       ['20261114000300_create_operator', '14'],
       ['20261114000400_create_operator_class', '14'],
       ['20261114000500_create_rule', '14'],
+      ['20261114000700_create_cast', '14'],
+      ['20261114000800_create_aggregate', '14'],
     ]);
+  });
+
+  it('[D-ARCH-172] rule 14: CREATE CAST and CREATE [OR REPLACE] AGGREGATE are refused outright, with the message naming them', () => {
+    const findings = lintCase('refused-objects').filter((finding) => /create_(?:cast|aggregate)/.test(finding.file));
+    expect(findings).toHaveLength(2);
+    for (const finding of findings) expect(finding.message).toMatch(/CREATE CAST and CREATE AGGREGATE are refused in prisma\/migrations/);
   });
 
   it('[PR11-SEC-14] rule 16: EXECUTE in a function or procedure body off DYNAMIC_SQL_ALLOW_LIST fails; EXECUTE FUNCTION, GRANT/REVOKE EXECUTE, the word in a message and DO bodies are clean', () => {
@@ -1350,21 +1360,75 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
     expect(lintTexts('sec01-controls', [migration])).toEqual([]);
   });
 
-  it('[PR293-SEC-01] stated limits, pinned: attribute notation, a cast function and an aggregate support function call a writer unseen', () => {
+  it('[PR293-SEC-01] stated limit, pinned: attribute notation calls a writer unseen', () => {
     const writerOfRow =
       'CREATE FUNCTION public.fixture_attr(t public.fixture_items) RETURNS integer LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; SELECT 1; END;';
-    const migration = [
-      writerOfRow,
-      'SELECT t.fixture_attr FROM public.fixture_items t;',
-      'CREATE CAST (public.fixture_items AS integer) WITH FUNCTION public.fixture_attr(public.fixture_items);',
-      'SELECT (t)::integer FROM public.fixture_items t;',
-      WRITER,
-      'CREATE AGGREGATE public.fixture_agg(integer) (SFUNC = public.fixture_purge, STYPE = integer);',
-      'SELECT public.fixture_agg(1);',
-    ].join('\n');
-    // PostgreSQL runs the DELETE in each of the three shapes (security record PR293-SEC-01 rows 3-5); the linter does
-    // not see it. A change that starts seeing one of them updates this pin and the "Not seen" list together.
+    const migration = [writerOfRow, 'SELECT t.fixture_attr FROM public.fixture_items t;'].join('\n');
+    // PostgreSQL runs the DELETE (security record PR293-SEC-01 row 3); the linter does not see it. A change that starts
+    // seeing it updates this pin and the "Not seen" list together.
     expect(lintTexts('sec01-limits', [migration])).toEqual([]);
+  });
+
+  it('[D-ARCH-172] PR293-SEC-01 rows 4 and 5 are no longer limits: the cast-function and aggregate-support shapes are refused by rule 14', () => {
+    const writerOfRow =
+      'CREATE FUNCTION public.fixture_attr(t public.fixture_items) RETURNS integer LANGUAGE sql BEGIN ATOMIC DELETE FROM public.fixture_items; SELECT 1; END;';
+    const cast = lintTexts('sec01-row4', [
+      [
+        writerOfRow,
+        'CREATE CAST (public.fixture_items AS integer) WITH FUNCTION public.fixture_attr(public.fixture_items);',
+        'SELECT (t)::integer FROM public.fixture_items t;',
+      ].join('\n'),
+    ]);
+    expect(ruleOf(cast)).toEqual([[0, 'migration.sql', '14']]);
+    const aggregate = lintTexts('sec01-row5', [
+      [
+        WRITER,
+        'CREATE AGGREGATE public.fixture_agg(integer) (SFUNC = public.fixture_purge, STYPE = integer);',
+        'SELECT public.fixture_agg(1);',
+      ].join('\n'),
+    ]);
+    expect(ruleOf(aggregate)).toEqual([[0, 'migration.sql', '14']]);
+  });
+
+  it('[PR293-SEC-04] (a) text that does not lex is also cut at the ; outside quotes: a name holding ; hides no following UPDATE (contrived shape of the record)', () => {
+    const shape = normalise(`begin perform 1; update "fixture;items" set note = 1; raise notice 'x; end`);
+    expect(() => tokenize(shape)).toThrow(SqlLexError); // the shape does not lex: the fallback reads it
+    expect(routineBodyChangesData(shape)).toBe(true);
+    expect(quoteAwareSegments(`a; update "x;y" set b = 'c;d'; e "f`)).toEqual(['a', ' update "x;y" set b = \'c;d\'', ' e "f']);
+    expect(quoteAwareSegments(`a 'it''s; here'; b`)).toEqual([`a 'it''s; here'`, ' b']);
+    // Controls: the same unlexable text without DML, and a row lock, stay clean.
+    expect(routineBodyChangesData(normalise(`begin perform 1; select "fixture;items"; raise notice 'x; end`))).toBe(false);
+    expect(routineBodyChangesData(normalise(`begin perform 1 from "a;b" for update; raise notice 'x; end`))).toBe(false);
+    const findings = lintTexts('sec04-a', [`DO $$ BEGIN PERFORM 1; UPDATE "fixture;items" SET note = 1; RAISE NOTICE 'x; END $$;`]);
+    expect(ruleOf(findings).filter(([, , rule]) => rule === '10')).toEqual([[0, 'migration.sql', '10']]);
+  });
+
+  it('[PR293-SEC-04] (a) the fallback reading stays linear: time(4n) / time(n) < 8 on unlexable text full of quotes and semicolons', () => {
+    const body = (n: number) => `'${'; update "a; b'.repeat(n)}`;
+    const fastest = (text: string) =>
+      Math.min(
+        ...[0, 1, 2].map(() => {
+          const started = performance.now();
+          routineBodyChangesData(text);
+          return performance.now() - started;
+        }),
+      );
+    const small = fastest(body(20_000));
+    const large = fastest(body(80_000));
+    expect(large / Math.max(small, 1)).toBeLessThan(8);
+  });
+
+  it("[PR293-SEC-04] (b) a string literal in a body is read as dynamic SQL, prose included: RAISE NOTICE 'running in update mode' stays a rule-10 finding (fail closed, kept by D-TASK034)", () => {
+    // Narrowing to EXECUTE arguments would miss a literal that reaches EXECUTE through a variable or format(), and
+    // query_to_xml('…') executes its argument wherever it stands; so the reading stays fail closed.
+    const prose = lintTexts('sec04-b', [DO("RAISE NOTICE 'running in update mode';")]);
+    expect(ruleOf(prose)).toEqual([[0, 'migration.sql', '10']]);
+    const viaVariable = lintTexts('sec04-b-variable', [
+      "DO $$ DECLARE q text := 'DELETE FROM public.fixture_items'; BEGIN EXECUTE q; END $$;",
+    ]);
+    expect(ruleOf(viaVariable)).toEqual([[0, 'migration.sql', '10']]);
+    // Declared data-changing, the same prose is clean.
+    expect(lintTexts('sec04-b-declared', [DO("RAISE NOTICE 'running in update mode';")], 'yes')).toEqual([]);
   });
 
   it('[PR66-SEC-02] rule 10 call-site controls: references that call nothing, a reading routine, a row lock and a same-prefix name are clean', () => {
@@ -1385,8 +1449,9 @@ describe('TASK-293: token boundaries as PostgreSQL reads them (PR66-SEC-01) and 
       'SELECT public.fixture_purge_count(), other.fixture_purge();',
       // The statement exemption alone covers the second name of a list (it has no FUNCTION keyword before it).
       'GRANT EXECUTE ON FUNCTION public.fixture_read(), public.fixture_purge() TO platform_app;',
-      // The FUNCTION-reference stripping alone covers a reference in a statement outside the exemption list.
-      'CREATE CAST (public.fixture_money AS integer) WITH FUNCTION public.fixture_purge() AS ASSIGNMENT;',
+      // The FUNCTION-reference stripping alone covers a reference in a statement outside the exemption list (a CREATE
+      // CAST served here before rule 14 refused it, D-ARCH-172).
+      "SECURITY LABEL FOR fixture ON FUNCTION public.fixture_purge() IS 'x';",
     ].join('\n');
     expect(lintTexts('call-controls', [migration])).toEqual([]);
   });

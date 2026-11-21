@@ -2,7 +2,18 @@
  * Pure parts of the bootstrap runner and the reset guard (the PostgreSQL 18 runs are prisma/tests/bootstrap).
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+  type readSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,8 +23,10 @@ import {
   BootstrapError,
   DEFAULT_BOOTSTRAP_DIR,
   SECRET_FILE_MAX_BYTES,
+  SECRET_FILE_OPEN_FLAGS,
   bootstrapVariables,
   listBootstrapFiles,
+  readBounded,
   readSecret,
   reapplyDatabaseLevel,
   runBootstrap,
@@ -26,7 +39,7 @@ afterAll(() => rmSync(work, { recursive: true, force: true }));
 
 /** Random test-only role passwords (never committed values). */
 const passwords = { migrator: randomBytes(32).toString('base64url'), app: randomBytes(32).toString('base64url') };
-const unused = { host: 'unused.invalid' };
+const unused = { connectionString: 'postgresql://unused.invalid/unused' };
 
 describe('role passwords reach the server only as SCRAM-SHA-256 verifiers (PR5-SEC-01)', () => {
   it('substitutes verifiers into 00-roles.sql: the SQL text contains neither plaintext password', () => {
@@ -164,6 +177,30 @@ describe('readSecret: *_FILE hardening parity with the file provider (ADR-0018 a
     expect(refusal({ S_FILE: '/run/secrets/big' })).toBe(`S_FILE: exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
     expect(refusal({ S_FILE: '/run/secrets/missing' })).toBe('S_FILE: could not be read (ENOENT)');
   });
+
+  it('[PR11-SEC-11 d] opens the file once, read-only and non-blocking, with O_NOFOLLOW where the platform has it', () => {
+    expect(SECRET_FILE_OPEN_FLAGS & constants.O_RDONLY).toBe(constants.O_RDONLY);
+    expect(SECRET_FILE_OPEN_FLAGS & (constants.O_NOFOLLOW ?? 0)).toBe(constants.O_NOFOLLOW ?? 0);
+    expect(SECRET_FILE_OPEN_FLAGS & (constants.O_NONBLOCK ?? 0)).toBe(constants.O_NONBLOCK ?? 0);
+  });
+
+  it('[PR11-SEC-11 d] reads at most limit bytes from the descriptor, however much the file holds or grows by', () => {
+    const chunks = [Buffer.from('abc'), Buffer.from('defgh'), Buffer.from('ijklmnop')];
+    const fake = ((_fd: number, buffer: Buffer, offset: number, length: number) => {
+      const chunk = chunks.shift();
+      if (chunk === undefined) return 0;
+      return chunk.copy(buffer, offset, 0, Math.min(length, chunk.length));
+    }) as unknown as typeof readSync;
+    expect(readBounded(3, 6, fake).toString()).toBe('abcdef');
+    expect(readBounded(3, 64, () => 0)).toHaveLength(0);
+    const big = openSync(join(root, 'big'), 'r');
+    try {
+      expect(readBounded(big, SECRET_FILE_MAX_BYTES + 1)).toHaveLength(SECRET_FILE_MAX_BYTES + 1);
+      expect(readBounded(big, 10)).toHaveLength(0); // the position moved on: one pass over the descriptor
+    } finally {
+      closeSync(big);
+    }
+  });
 });
 
 describe('db:reset guard', () => {
@@ -173,6 +210,7 @@ describe('db:reset guard', () => {
     expect(resetTarget('postgresql://admin@127.0.0.1:5432/platform', ['--yes'], migrator)).toEqual({
       database: 'platform',
       maintenanceUrl: 'postgresql://admin@127.0.0.1:5432/postgres',
+      bootstrapUrl: 'postgresql://admin@127.0.0.1:5432/platform',
     });
     expect(() => resetTarget('postgresql://admin@127.0.0.1:5432/platform', [], migrator)).toThrow(/pass --yes/);
     expect(() => resetTarget(undefined, ['--yes'], migrator)).toThrow(/DATABASE_BOOTSTRAP_URL is not set/);
@@ -211,6 +249,7 @@ describe('db:reset guard', () => {
     expect(resetTarget(socket, ['--yes'], 'postgresql://m@%2Fvar%2Frun%2Fpostgresql/platform')).toEqual({
       database: 'platform',
       maintenanceUrl: 'postgresql://admin@%2Fvar%2Frun%2Fpostgresql/postgres',
+      bootstrapUrl: socket,
     });
   });
 

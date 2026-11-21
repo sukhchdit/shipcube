@@ -176,12 +176,21 @@ describe("connection-level 'error' events (R2-n3, R2 m1)", () => {
       .mockRejectedValue(new Error('no server in unit tests'));
     const lines: string[] = [];
     await expect(
-      connectPrivileged({ host: '127.0.0.1', port: 1, user: 'u', database: 'd' }, { writeError: (line) => lines.push(line) }),
+      connectPrivileged({ connectionString: 'postgresql://u@127.0.0.1:1/d' }, { writeError: (line) => lines.push(line) }),
     ).rejects.toThrow('no server in unit tests');
     const listener = on.mock.calls.find(([event]) => event === 'error')?.[1] as ((error: Error) => void) | undefined;
     expect(listener).toBeDefined();
     listener?.(Object.assign(new Error(PASSWORD), { code: 'EPIPE' }));
     expect(lines).toEqual(['[bootstrap] connection error (Error EPIPE)']);
+  });
+
+  it('[PR5-SEC-14] connectPrivileged refuses a config without a non-empty connectionString before creating a client (no libpq environment defaults)', async () => {
+    const connect = jest.spyOn(pg.Client.prototype, 'connect');
+    const refusal = /a privileged connection needs a non-empty connectionString; libpq environment defaults are never used/;
+    for (const connection of [{}, { connectionString: '' }, { host: '127.0.0.1', user: 'u', database: 'd' }]) {
+      await expect(connectPrivileged(connection as { connectionString: string })).rejects.toThrow(refusal);
+    }
+    expect(connect).not.toHaveBeenCalled();
   });
 
   it('connectPrivileged refuses a TLS problem before creating a client', async () => {

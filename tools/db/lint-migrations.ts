@@ -54,7 +54,9 @@
  *       or any other SET search_path; a bootstrap file whose first statement is not that SET
  *   14  CREATE SCHEMA, CREATE EXTENSION, ALTER DATABASE, ALTER SCHEMA ... OWNER TO, ALTER/CREATE/DROP ROLE|USER,
  *       ALTER DEFAULT PRIVILEGES, GRANT/REVOKE ... ON SCHEMA (PR11-SEC-15 d); CREATE OPERATOR [CLASS | FAMILY]
- *       (PR24-SEC-02) and CREATE [OR REPLACE] RULE (PR11-SEC-15 e) are refused outright
+ *       (PR24-SEC-02), CREATE [OR REPLACE] RULE (PR11-SEC-15 e), CREATE CAST and CREATE [OR REPLACE] AGGREGATE
+ *       (D-ARCH-172, TASK-034: a writer used as a cast or an aggregate support function is a call rule 10 cannot
+ *       see) are refused outright
  *   15  GRANT/REVOKE on a function after its `OWNER TO platform_definer` in the same file; CREATE FUNCTION ...
  *       SECURITY DEFINER outside a `SET [SESSION] ROLE platform_definer; ... RESET ROLE;` block (the only accepted
  *       form, PR11-SEC-07); any `ALTER … OWNER TO platform_definer` (D-ARCH-071 (2) b); a file that ends with a
@@ -83,7 +85,10 @@
  *       the file (PR66-SEC-01: it ends a `--` comment, invisibly in review)
  *   S   bootstrap lane: only the variables db_name, migrator_password and app_password, and every PASSWORD keyword in
  *       code is followed by :'migrator_password', :'app_password' or NULL (PR5-SEC-12)
- * Rules 2-11 and 14-19 apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
+ *   R   a `data-changing: yes` migration without a fresh, passed backup/restore rehearsal record (`rehearsal.json` in its
+ *       directory, written by tools/db/verify-restore.ts; CLAUDE.md §5, §8.6; TASK-034). Run by lintRepository (the CLI
+ *       and lane A) through lintRehearsals, not by lintMigrations, so the fixture cases are unchanged
+ * Rules 2-11, 14-19 and R apply to prisma/migrations; 12, 13, 20, L and S also (or only) to prisma/bootstrap.
  *
  * Stated limits (text rules cannot be complete over dynamic SQL; PR #11 review R2-n2, PR11-SEC-14/15/17): a setter
  * whose name and key are both built by `format()` or keyword-split concatenation, `EXECUTE` of a computed or table-read
@@ -101,7 +106,10 @@
  * computed. Rule 10 sees that call shape since TASK-293 (PR66-SEC-02: a top-level call of a writing routine of this or
  * an earlier migration file, also after RENAME TO / SET SCHEMA); it still does not see a writing routine of the
  * bootstrap lane, a write reached only through `EXECUTE` of a string built at run time, a call through a computed name,
- * attribute notation, a cast function or an aggregate support function (PR293-SEC-01 rows 3-5, pinned by tests). The outcome controls are the
+ * or attribute notation (PR293-SEC-01 row 3, pinned by a test). A cast function or an aggregate support function
+ * (rows 4 and 5) cannot occur, because rule 14 refuses CREATE CAST and CREATE AGGREGATE (D-ARCH-172). Rule 10 reads
+ * every string literal of a DO or routine body as dynamic SQL, so prose such as `RAISE NOTICE 'in update mode'` is a
+ * finding too (fail closed; PR293-SEC-04 b, kept by TASK-034). The outcome controls are the
  * catalog suite (C5 grants incl. PUBLIC, C1
  * ENABLE/FORCE, the C11 converse on definer-owned objects), the withTenantTx session-leak check and, for rule 11, the
  * next file's own leading `SET lock_timeout`.
@@ -115,6 +123,8 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { sha256Hex } from './rehearsal-manifest.js';
+import { RECORD_FILE, rehearsalProblems } from './rehearsal-record.js';
 import { RenderRlsError, renderRls } from './render-rls.js';
 import {
   SqlLexError,
@@ -543,9 +553,11 @@ const BOOTSTRAP_ONLY = [
 /**
  * Rule 14: objects refused in prisma/migrations outright. An operator (and its class or family) or a rewrite rule
  * redirects comparisons or whole queries to code that no policy template or catalog test reviews (PR24-SEC-02 class
- * fix and PR11-SEC-15 e, lint halves).
+ * fix and PR11-SEC-15 e, lint halves). A cast or an aggregate runs a routine through syntax that names no routine
+ * (`x::type`, `a(…)` calling its SFUNC or FINALFUNC), so rule 10's call site cannot follow a writer there (D-ARCH-172,
+ * D-TASK293-10, PR293-SEC-01 rows 4 and 5; TASK-034). No table, index or policy of the data model needs either.
  */
-const REFUSED_OBJECTS = [/^create operator\b/, /^create (?:or replace )?rule\b/];
+const REFUSED_OBJECTS = [/^create operator\b/, /^create (?:or replace )?rule\b/, /^create cast\b/, /^create (?:or replace )?aggregate\b/];
 /**
  * Rule 15 (PR11-SEC-15 b): `set_config('role' | 'session_authorization', …)` in any case, with the setter or the key
  * quoted, at any quoting depth of dynamic SQL (`''role''`), matched on the body-expanded text with strings kept.
@@ -745,14 +757,16 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
    * Segments end at a `;` of CODE only: a `;` inside a string literal or a quoted identifier (`UPDATE "a;b"`,
    * `WITH x AS (SELECT ';') DELETE …`) never cuts a statement (PR293-SEC-01 rows 9-11). Each string literal and dollar
    * body is also read as a body of its own (dynamic SQL, `EXECUTE 'SELECT 1; DELETE …'`), down to MAX_DYNAMIC_DEPTH.
-   * Text that does not lex is read both whole and cut at every `;` (fail closed).
+   * Text that does not lex is read whole, cut at every `;`, and cut at every `;` outside a quoted name or a string
+   * (quoteAwareSegments, the lexed path's code-`;` cut as far as the text allows), so a name holding `;` hides no
+   * following statement there either (fail closed; PR293-SEC-04 a, TASK-034).
    */
   const check = (text: string, depth: number): boolean => {
     let tokens: Token[];
     try {
       tokens = tokenize(text);
     } catch {
-      return segmentWrites(text) || text.split(';').some(segmentWrites);
+      return segmentWrites(text) || text.split(';').some(segmentWrites) || quoteAwareSegments(text).some(segmentWrites);
     }
     const segments: string[] = [];
     let current = '';
@@ -775,6 +789,30 @@ function bodyDataChanging(starts: string): (text: string) => boolean {
     return segments.some(segmentWrites);
   };
   return (text) => check(text, 0);
+}
+
+/**
+ * Rule 10's reading of text that does not lex (PR293-SEC-04 a): the segments between the `;` that stand outside a
+ * double-quoted name and outside a single-quoted string. A doubled quote closes and reopens, which leaves the state as
+ * PostgreSQL's; a quote that never closes runs to the end of the text. One pass, linear in the text.
+ */
+export function quoteAwareSegments(text: string): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  let quote: string | undefined;
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at];
+    if (quote !== undefined) {
+      if (char === quote) quote = undefined;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ';') {
+      segments.push(text.slice(start, at));
+      start = at + 1;
+    }
+  }
+  segments.push(text.slice(start));
+  return segments;
 }
 /**
  * PL/pgSQL statement starts before which a data-changing form also runs: `FOR target IN <query>` and `OPEN cursor
@@ -812,10 +850,11 @@ function doBlockChangesData(statement: string): boolean {
  *    runs at a later DML statement, which rule 10 judges itself, except a plain `INSERT … VALUES`, which is no rule-10
  *    form: a writing trigger fired by one is not seen; R1-n2), and `FUNCTION | PROCEDURE | ROUTINE <name>(` references.
  *    A call written with a three-part name (`db.schema.name(`) is seen through its last two parts (R2-n2).
- *  - Not seen (stated limits; PR293-SEC-01 rows 3-5, pinned by tests): a routine created in the bootstrap lane, a write
- *    reached only through `EXECUTE` of a string built at run time, a call through a computed name, a call in attribute
- *    notation (`SELECT t.w FROM t` calls `w(t)`), a writer used as a cast function (`CREATE CAST … WITH FUNCTION w`,
- *    then `x::type`) or as an aggregate support function (`CREATE AGGREGATE a (SFUNC = w, …)`, then `a(…)`).
+ *  - Not seen (stated limits; PR293-SEC-01 row 3, pinned by a test): a routine created in the bootstrap lane, a write
+ *    reached only through `EXECUTE` of a string built at run time, a call through a computed name, and a call in
+ *    attribute notation (`SELECT t.w FROM t` calls `w(t)`). A writer used as a cast function (`CREATE CAST … WITH
+ *    FUNCTION w`, then `x::type`) or as an aggregate support function (`CREATE AGGREGATE a (SFUNC = w, …)`, then
+ *    `a(…)`) is no limit any more: rule 14 refuses both statements (D-ARCH-172, PR293-SEC-01 rows 4 and 5; TASK-034).
  */
 export const routineBodyChangesData = bodyDataChanging(`begin|then|else|loop|execute|as|atomic|query|in|${OPEN_FOR}`);
 const NOT_A_CALL_SITE =
@@ -1196,14 +1235,14 @@ function lintTask016Rules(statements: readonly string[], add: Add, classes: read
       }
     }
 
-    // --- Rule 14: bootstrap-lane statements; operators and rewrite rules (refused outright).
+    // --- Rule 14: bootstrap-lane statements; operators, rewrite rules, casts and aggregates (refused outright).
     if (BOOTSTRAP_ONLY.some((pattern) => pattern.test(text))) {
       add('14', `schemas, extensions, roles and database settings belong to the bootstrap lane (§8.1): ${preview(index)}`);
     }
     if (REFUSED_OBJECTS.some((pattern) => pattern.test(text))) {
       add(
         '14',
-        `CREATE OPERATOR [CLASS | FAMILY] and CREATE RULE are refused in prisma/migrations (they re-route queries and comparisons outside the reviewed functions; PR24-SEC-02, PR11-SEC-15 e): ${preview(index)}`,
+        `CREATE OPERATOR [CLASS | FAMILY], CREATE RULE, CREATE CAST and CREATE AGGREGATE are refused in prisma/migrations (they re-route queries, comparisons and calls outside the reviewed functions; PR24-SEC-02, PR11-SEC-15 e, D-ARCH-172): ${preview(index)}`,
       );
     }
 
@@ -1688,12 +1727,54 @@ export function readReviewers(path: string): string[] {
   return raw.reviewers;
 }
 
+/**
+ * Rule R (backup guardrail, CLAUDE.md §5 Database; data-model §8.6; TASK-034): every migration declared
+ * `data-changing: yes` carries `rehearsal.json`, a passed backup/restore verification bound to its migration.sql bytes
+ * and taken at the migration just before it (tools/db/rehearsal-record.ts). The repository lanes and the CLI run it;
+ * the fixture cases of lintMigrations do not, so their outcomes are unchanged. A migration whose header does not parse
+ * is rule 1's; one without `data-changing: yes` needs no record.
+ */
+export function lintRehearsals(root: string, labelRoot: string = root): LintFinding[] {
+  if (!existsSync(root)) return [];
+  const names = readdirSync(root)
+    .filter((name) => statSync(join(root, name)).isDirectory())
+    .sort();
+  const findings: LintFinding[] = [];
+  names.forEach((name, index) => {
+    const migrationFile = join(root, name, 'migration.sql');
+    if (!existsSync(migrationFile)) return;
+    const bytes = readFileSync(migrationFile);
+    if (parseHeader(bytes.toString('utf8')).dataChanging !== true) return;
+    const file = join(labelRoot, name, RECORD_FILE);
+    const add = (message: string) => findings.push({ file, rule: 'R', message });
+    const recordPath = join(root, name, RECORD_FILE);
+    if (!existsSync(recordPath)) {
+      add(
+        `a data-changing migration needs a fresh, verified backup (CLAUDE.md §5): run "npm run db:backup", then "npm run db:verify-restore -- --backup <dir> --migration ${name}" (${RECORD_FILE} is missing)`,
+      );
+      return;
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(recordPath, 'utf8'));
+    } catch {
+      add(`${RECORD_FILE} is not valid JSON`);
+      return;
+    }
+    const expected = { migration: name, migrationSha256: sha256Hex(bytes), previous: index === 0 ? null : (names[index - 1] as string) };
+    for (const problem of rehearsalProblems(raw, expected)) add(`stale or failed rehearsal record: ${problem}`);
+  });
+  return findings;
+}
+
 /** Lints the repository's lanes; returns the findings with repository-relative paths. */
 export function lintRepository(root: string = REPO_ROOT, today: string = new Date().toISOString().slice(0, 10)): LintFinding[] {
   const reviewers = readReviewers(join(root, 'tools', 'db', 'audit-ddl-reviewers.json'));
   const rel = (path: string) => relative(root, path).replaceAll('\\', '/');
+  const migrations = join(root, 'prisma', 'migrations');
   return [
-    ...lintMigrations(join(root, 'prisma', 'migrations'), rel(join(root, 'prisma', 'migrations'))),
+    ...lintMigrations(migrations, rel(migrations)),
+    ...lintRehearsals(migrations, rel(migrations)),
     ...lintBootstrap(join(root, 'prisma', 'bootstrap'), { reviewers, today }, rel(join(root, 'prisma', 'bootstrap'))),
   ];
 }

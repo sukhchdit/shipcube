@@ -24,7 +24,7 @@
  * or up to date, 1 = failure.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, readSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -94,10 +94,16 @@ export function listBootstrapFiles(dir: string): BootstrapFile[] {
  * URL's selectors only, through the platform's one implementation (an object without `connectionString` is plain TCP).
  */
 export type PrivilegedConnection = Omit<pg.ClientConfig, 'options' | 'ssl'>;
+/**
+ * A connection the runner opens: it names its server in a non-empty `connectionString`, so `pg` never fills a missing
+ * host, database or user from PGHOST, PGDATABASE or PGUSER (PR5-SEC-14, TASK-034). `connectPrivileged` also checks
+ * the value at run time.
+ */
+export type PrivilegedUrlConnection = PrivilegedConnection & { connectionString: string };
 
 export interface BootstrapOptions {
   /** Cluster-admin connection. Must not carry its own `options`; the runner sets the search path. */
-  connection: PrivilegedConnection;
+  connection: PrivilegedUrlConnection;
   /** Role passwords from the secret manager; they reach the server only as SCRAM-SHA-256 verifiers. */
   passwords: RolePasswords;
   /** Further variable values. `db_name` and every `*_password` name are reserved. */
@@ -203,8 +209,18 @@ export function connectionErrorLine(error: unknown): string {
   return `[bootstrap] connection error (${name}${safeCode})`;
 }
 
-/** Opens a privileged session pinned to `pg_catalog, pg_temp` and checks the effective path. */
-export async function connectPrivileged(connection: PrivilegedConnection, options: PrivilegedConnectionOptions = {}): Promise<pg.Client> {
+/**
+ * Opens a privileged session pinned to `pg_catalog, pg_temp` and checks the effective path. Refuses, before a client
+ * exists, a connection without a non-empty `connectionString` (PR5-SEC-14).
+ */
+export async function connectPrivileged(
+  connection: PrivilegedUrlConnection,
+  options: PrivilegedConnectionOptions = {},
+): Promise<pg.Client> {
+  const url: unknown = (connection as Partial<PrivilegedUrlConnection>).connectionString;
+  if (typeof url !== 'string' || url === '') {
+    throw new BootstrapError('a privileged connection needs a non-empty connectionString; libpq environment defaults are never used');
+  }
   const client = new pg.Client(privilegedClientConfig(connection, options.caDirectories));
   const writeError = options.writeError ?? ((line: string) => process.stderr.write(`${line}\n`));
   // Without a listener an idle-connection error would crash the process; a pending query still rejects (R2 m1).
@@ -354,25 +370,50 @@ const isWithin = (root: string, target: string): boolean => {
   return path !== '' && !path.startsWith('..') && !isAbsolute(path);
 };
 
-/** Reads a confined secret file; every error names `variable` only, never the path or the content. */
+/** Flags of the one open of a secret file: read-only, non-blocking, and no final symlink where the platform has one. */
+export const SECRET_FILE_OPEN_FLAGS = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
+
+/** At most `limit` bytes from `fd`: a file that grows after the fstat is still read only up to the limit. */
+export function readBounded(fd: number, limit: number, read: typeof readSync = readSync): Buffer {
+  const buffer = Buffer.alloc(limit);
+  let length = 0;
+  while (length < limit) {
+    const count = read(fd, buffer, length, limit - length, null);
+    if (count === 0) break;
+    length += count;
+  }
+  return buffer.subarray(0, length);
+}
+
+/**
+ * Reads a confined secret file; every error names `variable` only, never the path or the content. The file is opened
+ * ONCE and every later check runs on that descriptor (PR11-SEC-11 d, TASK-034): a file swapped in after the realpath
+ * check cannot be read, and a FIFO or a growing file cannot force an unbounded read.
+ */
 function readSecretFile(variable: string, locator: string, root: string): string {
   const refuse = (reason: string): never => {
     throw new BootstrapError(`${variable}: ${reason}`);
   };
   if (!SECRET_FILE_PATH.test(locator)) refuse(`must name a file under ${SECRET_FILE_ROOT}`);
   let content: Buffer;
+  let fd: number | undefined;
   try {
     const realRoot = realpathSync(root);
     const realTarget = realpathSync(join(root, ...locator.slice(SECRET_FILE_ROOT.length + 1).split('/')));
     if (!isWithin(realRoot, realTarget)) refuse(`resolves outside ${SECRET_FILE_ROOT}`);
-    const info = statSync(realTarget);
+    fd = openSync(realTarget, SECRET_FILE_OPEN_FLAGS);
+    const info = fstatSync(fd);
     if (!info.isFile()) refuse('is not a regular file');
     if (info.size > SECRET_FILE_MAX_BYTES) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
-    content = readFileSync(realTarget);
+    content = readBounded(fd, SECRET_FILE_MAX_BYTES + 1);
   } catch (error) {
     if (error instanceof BootstrapError) throw error;
     const code = (error as { code?: unknown } | null)?.code;
+    // Windows cannot open a directory (EISDIR): the same refusal as the descriptor check on POSIX.
+    if (code === 'EISDIR') return refuse('is not a regular file');
     return refuse(`could not be read (${typeof code === 'string' && /^E[A-Z]{2,15}$/.test(code) ? code : 'EIO'})`);
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
   if (content.byteLength > SECRET_FILE_MAX_BYTES) refuse(`exceeds ${SECRET_FILE_MAX_BYTES} bytes`);
   return content.toString('utf8').replace(/\r?\n$/, '');

@@ -66,9 +66,13 @@ export class PlatformPostgres {
     return this.container.getPort();
   }
 
-  /** Privileged (bootstrap-role) connection settings; the runner adds the pinned search path itself. */
-  bootstrapConnection(database: string): Omit<pg.ClientConfig, 'options'> {
-    return { host: this.host, port: this.port, user: SUPERUSER, password: this.superuserPassword, database };
+  /**
+   * Privileged (bootstrap-role) connection settings; the runner adds the pinned search path itself. A URL, because
+   * connectPrivileged refuses a config without one (PR5-SEC-14, TASK-034); the password is random base64url.
+   */
+  bootstrapConnection(database: string): { connectionString: string } {
+    const credentials = `${SUPERUSER}:${encodeURIComponent(this.superuserPassword)}`;
+    return { connectionString: `postgresql://${credentials}@${this.host}:${String(this.port)}/${encodeURIComponent(database)}` };
   }
 
   /** A privileged session with the pinned search path (SEC-P3-34 item 2). */
