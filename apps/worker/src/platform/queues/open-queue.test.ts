@@ -73,7 +73,8 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
   afterEach(async () => {
     jest.restoreAllMocks();
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  });
+    // The bounded closes add up to 7 s at most, above the 5 s default hook timeout.
+  }, 15_000);
 
   it('never prints the ACL password to console.error or stderr; the redacted logger gets class-only worker.queue_error lines', async () => {
     const consoleErrors: string[] = [];
@@ -134,7 +135,9 @@ describe('[PR64-SEC-01] worker queues and a Valkey that refuses AUTH', () => {
     expect(consoleErrors.join('\n')).not.toContain(PASSWORD);
     expect(stderrWrites.join('')).not.toContain(PASSWORD);
     expect(consoleErrors).toEqual([]);
-  });
+    // The test's own budget: up to 10 s for the first refusal plus 1.2 s of further cycles (the bounded cleanup runs in
+    // afterEach). The 5 s Jest default sat below it, so a loaded host (lane B's full parallel unit run) timed out a pass.
+  }, 30_000);
 
   it('[PR64-SEC-12] metrics() is single-flight: N scrapes against a never-ready connection leave one pending collection', async () => {
     const valkey = await fakeValkey();

@@ -27,8 +27,11 @@ const SEAM_SPECIFIER = /(?:^|\/)(?:query-counter|test-outbox)(?:\.(?:js|ts))?$|^
 const OUTBOX_WRITER = 'apps/api/src/platform/outbox/writer';
 /** The only production files that may import the writer module: the outbox barrel (it re-exports `outbox` only). */
 const OUTBOX_WRITER_IMPORTERS: ReadonlySet<string> = new Set(['apps/api/src/platform/outbox/index.ts']);
-/** `from '...'`, `import('...')`, `require('...')` and a bare `import '...'`. */
-const SPECIFIERS = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)(['"])([^'"\n]+)\1/g;
+/**
+ * `from '...'`, `import('...')`, `require('...')` and a bare `import '...'`, in single, double or back quotes (a
+ * no-substitution template literal, lint-legal under `platform/static-module-specifier`; security round 2, R2.2).
+ */
+const SPECIFIERS = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)(['"`])([^'"`$\n]+)\1/g;
 const TEST_FILE = /\.test\.tsx?$|(?:^|\/)(?:test|tests|__tests__)\//;
 
 /** Specifiers in `source` that name a test seam. */
@@ -77,8 +80,11 @@ function productionSources(roots: readonly string[] = ['apps']): string[] {
     .filter((path) => !TEST_FILE.test(path));
 }
 
-/** A path with a `test`, `tests` or `__tests__` folder segment (the test layers prune-dist removes from images). */
-const TEST_FOLDER = /(?:^|\/)(?:test|tests|__tests__)\//;
+/**
+ * A path with a `test`, `tests` or `__tests__` segment that is a folder (the test layers prune-dist removes from images):
+ * a file inside it, or the folder itself (a CommonJS directory `require`).
+ */
+const TEST_FOLDER = /(?:^|\/)(?:test|tests|__tests__)(?:\/|$)/;
 /** The test subpath of any workspace package (`@platform/<pkg>/testing`, with or without a further segment). */
 const TESTING_SUBPATH = /^@platform\/[^/]+\/testing(?:\/.*)?$/;
 
@@ -110,8 +116,14 @@ describe('test seams', () => {
       "import { createTestOutbox } from '@platform/api/testing';",
       "import { createTestEnv } from '@platform/config/testing';",
       "import '@platform/shared/testing/clock.js';",
+      'const late = await import(`../../../platform/routing/tests/timing.js`);',
+      "const dir = require('../tests');",
     ].join('\n');
-    expect(testLayerImports(file, planted)).toHaveLength(7);
+    expect(testLayerImports(file, planted)).toHaveLength(9);
+    // A packages/ form: a shared source reaching a tests folder of its own package.
+    expect(testLayerImports('packages/shared/src/events/index.ts', "export { x } from './tests/fixture.js';")).toEqual([
+      './tests/fixture.js',
+    ]);
     // The `timing.ts` case of the record: a routing file two levels down.
     expect(
       testLayerImports(
@@ -127,6 +139,8 @@ describe('test seams', () => {
       "import { d } from '@platform/api/runtime';",
       "import { e } from '@platform/api/testingx';",
       "import { f } from 'tests-helper';",
+      "import { g } from './tests.js';",
+      'const h = await import(`./tests/${name}.js`);',
     ].join('\n');
     expect(testLayerImports(file, clean)).toEqual([]);
   });

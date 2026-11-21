@@ -74,13 +74,13 @@ describe('domain event catalogue (ADR-0004 item 5; TASK-043)', () => {
       identifierPayload('a', 'b'),
       Joi.object({ shipment_id: id, locale: Joi.string().valid('en', 'es', 'fr').required() }),
       Joi.object({
-        token_enc: Joi.string().pattern(/^[A-Za-z0-9+/=]{16,512}$/),
+        token_enc: Joi.string().base64({ paddingRequired: true }),
         token_enc_key_id: Joi.string().pattern(/^[a-z0-9-]{1,40}$/),
       }),
       Joi.object({
         order: Joi.string().guid(),
         at: Joi.string().isoDate(),
-        blob: Joi.string().base64(),
+        blob_enc: Joi.string().base64(),
         n: Joi.number(),
         ok: Joi.boolean(),
       }),
@@ -90,6 +90,72 @@ describe('domain event catalogue (ADR-0004 item 5; TASK-043)', () => {
       expect(isClosedObjectSchema(payload)).toBe(true);
       expect(Object.keys(mergeEvents({ a: { 'shipment.booked': { aggregateType: 'shipment', payload } } }))).toEqual(['shipment.booked']);
     }
+  });
+
+  const ADDRESS = 'p@example.com';
+  const catalogued = (payload: Joi.ObjectSchema) => ({ aggregateType: 'shipment', payload });
+
+  // [label, schema, a payload the schema admits that stores an address or free text (undefined: no sync demonstration)].
+  // The demonstration keeps each row non-vacuous: without the walk, the shape really stores the value.
+  it.each<[string, Joi.ObjectSchema, Record<string, unknown> | undefined]>([
+    [
+      'an object-level when that switches to an open object',
+      Joi.object({ kind: Joi.string().valid('x') }).when(Joi.object({ kind: Joi.valid('x') }).unknown(), {
+        then: Joi.object({ kind: Joi.string().valid('x'), email: Joi.string() }),
+      }),
+      { kind: 'x', email: ADDRESS },
+    ],
+    ['a key-level when', Joi.object({ id: Joi.string().guid().when('b', { is: 1, then: Joi.forbidden() }), b: Joi.number() }), undefined],
+    ['ordered array items', Joi.object({ list: Joi.array().items(Joi.number()).ordered(Joi.any()) }), { list: [ADDRESS] }],
+    [
+      'a custom rule that replaces the value',
+      Joi.object({
+        id: Joi.string()
+          .guid()
+          .custom(() => ADDRESS),
+      }),
+      { id: ID },
+    ],
+    ['an inverted pattern', Joi.object({ code: Joi.string().pattern(/^[A-Z]{3}$/, { invert: true }) }), { code: ADDRESS }],
+    ['a default function', Joi.object({ n: Joi.number().default(() => ADDRESS) }), {}],
+    ['a default value', Joi.object({ id: Joi.string().guid().default(ADDRESS) }), {}],
+    ['a failover value', Joi.object({ id: Joi.string().guid().failover(ADDRESS) }), { id: 'not-a-guid' }],
+    ['an external rule', Joi.object({ n: Joi.number().external(() => ADDRESS) }), undefined],
+    ['a match-anything pattern /^.*$/', Joi.object({ code: Joi.string().pattern(/^.*$/) }), { code: ADDRESS }],
+    ['a match-anything pattern /./', Joi.object({ code: Joi.string().pattern(/./) }), { code: ADDRESS }],
+    ['base64 under a key that is not *_enc', Joi.object({ blob: Joi.string().base64() }), { blob: btoa(ADDRESS) }],
+    ['base64 beside guid under a key that is not *_enc', Joi.object({ token_encx: Joi.string().base64().guid() }), undefined],
+    ['base64 array items under a key that is not *_enc', Joi.object({ list: Joi.array().items(Joi.string().base64()) }), undefined],
+  ])('[PR043-SEC-08] mergeEvents refuses %s', (_label, schema, admitted) => {
+    if (admitted !== undefined) expect(validateEventPayload(catalogued(schema), admitted).ok).toBe(true);
+    expect(isClosedObjectSchema(schema)).toBe(false);
+    expect(() => mergeEvents({ a: { 'shipment.booked': catalogued(schema) } })).toThrow('must be a closed Joi object');
+  });
+
+  // Mutant-style negatives for the probe set: each regex refuses three probes and admits exactly the fourth, so
+  // dropping any one probe from the set turns exactly one row red.
+  it.each([
+    ['an e-mail address', /^[a-z@.]{1,40}$/, ADDRESS],
+    ['text with a space', /^[a-z ]{1,40}$/, 'free text'],
+    ['the empty string', /^[a-z]{0,8}$/, ''],
+    ['a 257-letter string', /^[a-z]+$/, 'a'.repeat(257)],
+  ])('[PR043-SEC-08] a pattern that admits only %s counts as open', (_label, regex, probe) => {
+    const others = [ADDRESS, 'free text', '', 'a'.repeat(257)].filter((value) => value !== probe);
+    expect(regex.test(probe)).toBe(true);
+    expect(others.some((value) => regex.test(value))).toBe(false);
+    expect(isClosedObjectSchema(Joi.object({ code: Joi.string().pattern(regex) }))).toBe(false);
+    expect(isClosedObjectSchema(Joi.object({ list: Joi.array().items(Joi.string().pattern(regex)) }))).toBe(false);
+  });
+
+  it('[PR043-SEC-08] accepts the controls: identifiers, a locale list, *_enc ciphertext and probe-refusing patterns', () => {
+    const accepted = [
+      identifierPayload('a', 'b'),
+      Joi.object({ locale: Joi.string().valid('en', 'es', 'fr').required() }),
+      Joi.object({ token_enc: Joi.string().base64({ paddingRequired: true }), tokens_enc: Joi.array().items(Joi.string().base64()) }),
+      Joi.object({ code: Joi.string().pattern(/^[A-Z]{3}$/i), key_id: Joi.string().pattern(/^[a-z0-9-]{1,40}$/, 'key id') }),
+      Joi.object({ id: Joi.string().guid().empty(''), n: Joi.number().optional(), ok: Joi.boolean().required() }),
+    ];
+    for (const payload of accepted) expect(isClosedObjectSchema(payload)).toBe(true);
   });
 
   it('validates a payload closed and without conversion; issues name paths and rules, never values', () => {
