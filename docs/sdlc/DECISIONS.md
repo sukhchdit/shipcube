@@ -3348,7 +3348,7 @@ Format: ID · date · who · decision · why · alternatives · reversibility
 - **Reversibility:** High.
 
 ### D-PM-068 · 2026-11-18 · product-manager · US-061 and US-062 delivery split (D-061 form): partial on TASK-037, completed by TASK-224 and TASK-231, which are no longer cuttable; both stories are partial at `v0.1.0-m0` and complete before G3
-- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-089.
+- **Numbering:** `D-PM-` continues the product-manager series (D-008 to D-067), at the orchestrator's request. The next entry is D-PM-090.
 - **Input:** the orchestrator applied the architect's recommended default of `docs/03-architecture/rulings/wave-1-batch-1.1-rulings.md` §4 (first open item; D-ARCH-152 "Open, not decided here"; D-ORCH-131 routing item 3). This entry records it and decides what it leaves open: the release each part belongs to, the tasks that become uncuttable by dependency, and the fallback.
 - **Decision:**
   - **Scenario ownership, US-061 (M0 Must, DC, 5 scenarios).** TASK-037: AT-US-061-01, the service and database halves of AT-US-061-02, the database half of AT-US-061-03. TASK-224: the response halves of AT-US-061-02 (422 `ORG_TYPE_NOT_ALLOWED`, no row) and AT-US-061-03 (400 `UNKNOWN_FIELD`), AT-US-061-04, AT-US-061-05. TASK-224 completes the story.
@@ -8912,3 +8912,148 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - then code review round 2 and security round 1.
 - The run was moved to `../.orch/laneb-queue/aside/`.
 - **Reversibility:** High.
+
+### D-PM-089 · 2026-11-21 · product-manager · Condition QG-044-C2 of D-QG-007 (rulings §7 items 1 to 7 of the TASK-044 rulings): US-042 delivery split (D-PM-082 form): TASK-044 in two parts, part 044-B completes the story, not partial at `v0.1.0-m0`; a client abort releases the stream and cancels no carrier call (REQ-API-018, AT-US-042-06 retitled, new AT-US-135-13); AT-US-042-07 is the bearer-only case; the `id` is on every event except `error` (REQ-API-017); the request timeout covers a request until its response starts (REQ-SEC-015)
+- **Input:** condition QG-044-C2 of D-QG-007, due before TASK-044 part 044-A merges. `docs/03-architecture/rulings/wave-1-task-044-rulings.md` §7 (and §3 to §6, §8), D-ARCH-217 to D-ARCH-224, ADR-0016 amendment 14, D-QG-007, D-ORCH-151 to D-ORCH-153. The TASK-044 code review round 1 (R1-M1, R1-m6, open question 2, R1-n5) and the security record (§1 to §3). Read: US-042, US-045, US-135 and US-207 in the story files; REQ-API-017, REQ-API-018, REQ-SEC-015, REQ-PLAT-022, REQ-CARR-008, REQ-CARR-009; A-078, A-114, A-117, A-118; D-ARCH-107 (5); PRD §6.1, §7 and §7.1; the map rows of AT-US-042-01 to -08; `task-map.csv` rows of TASK-044, -096, -108, -120, -141, -142, -173, -182; `tests/api/event-stream.api.test.ts` in the worktree `../Shipqube-TASK-044` as it is on disk (the head of the part 044-A fix cycle is `3b56ab54` per D-ORCH-153).
+- **Decision:**
+  1. **Item 1, the delivery split. TASK-044 does not complete US-042 with its first part.** US-042 (M0 Must, DC, 8 scenarios) is partial until part 044-B merges.
+     - **Scenario ownership.**
+
+       | Scenario | Part 044-A: fixture streams through the real pipeline slots, a test composition | Part 044-B: the default pipeline |
+       |---|---|---|
+       | AT-US-042-01 Stream format | `Content-Type`, `X-Accel-Buffering`, ids that increase strictly, named events with JSON data; the `Cache-Control` value only on a fixture stream that admits an anonymous caller | completes it: for a caller who is not anonymous the value is exactly `private, no-cache, no-store`, also when the handler set another value (rulings §5 proofs (a) and (b)) |
+       | AT-US-042-02 Completion closes the stream | yes | – |
+       | AT-US-042-03 Fatal error | yes; the `error` event has no `id` (rulings §4 A1) | – |
+       | AT-US-042-04 Heartbeat | yes | repeated in proof (c) |
+       | AT-US-042-05 Maximum duration | the module sends `error` and closes at 30 s, with the request deadline raised to 40 s for the test | completes it: with no deadline override, `error` with `SERVICE_UNAVAILABLE` at 30 s and the close within 1 s (proof (c)) |
+       | AT-US-042-06 Client abort releases the stream | yes, as retitled in item 3 | – |
+       | AT-US-042-07 Unauthenticated stream | yes, as read in item 4: the bearer-only fixture answers 401 | – |
+       | AT-US-042-08 Events contain no personal data | yes, with the fixes of review R1-m2 | – |
+
+     - **What part 044-B must contain for the story to complete:** proofs (a) and (c). Proofs (d), (e) and (i) (the end of open streams at a stop and the resume after it) belong to the REQ-API-018 and REQ-PLAT-022 notes of this entry and are checked with the requirement at P6, not with a scenario.
+     - **Both parts are inside M0.** The sentence of the rulings holds. Tags, milestone and count of US-042 are unchanged, no task is added, and no scenario moves to another story.
+     - **US-042 may not be partial at `v0.1.0-m0`.** It joins US-038, not the four stories of PRD §7 that close in R1. Part 044-B is on main before the tag, as the merge gate of D-ARCH-217 already says. R0 stays at 109 of the 113 M0 Must stories.
+     - **The Wave 2 exit.** Part 044-B merges inside Wave 2 if the `api-tx-execute` lock allows. The Wave 2 exit is not held for it. The exit text states whether part 044-B is on main. If it is, the count is unchanged: 71 of the 74 demo-critical M0 stories, with US-061, US-062 and US-080 partial. If it is not, the exit text names US-042 as partial (70 of 74), with part 044-B due before the tag. That state is agreed here and needs no new decision.
+     - **Until part 044-B merges** no stream operation is mounted (PRECONDITION PART 044-B on TASK-141 and TASK-173). New A-119.
+  2. **Item 2, REQ-API-018. Adopted, with one sharpening.**
+     - Shall-statement: "… cap stream duration at 30 s, and release the stream's own work (its subscription and timers) within 1 s when the client disconnects." The clause "cancel in-flight upstream work when the client disconnects" and the test "client abort stops carrier calls within 1 s" are withdrawn.
+     - Note: a stream starts no upstream work, so a disconnect cancels none; carrier calls started by `POST /quotes` run to their own deadlines and stay available to a reconnect, to another reader and to the fallback GET; the cap counts from the start of the stream; at the cap and at a stop the `error` event carries `SERVICE_UNAVAILABLE`; a stopping server closes an open stream within 1 s.
+     - The sharpening: the stream slot is not named in REQ-API-018. Its release at close is REQ-CARR-009 and REQ-SEC-005 (AT-US-040-16) and is built by the stream routes, so naming it here would leave REQ-API-018 unmet by the task that owns it.
+  3. **Item 3, AT-US-042-06. Retitled "Client abort releases the stream", with three steps, not four.** The scenario keeps its place (sixth), so the AT number keeps its meaning (D-065).
+     - The fourth step of the rulings, "And work that the stream did not start is not cancelled", is not taken into US-042. On a fixture stream there is no such work, so the step could only be shown by asserting that a signal the module never received was not aborted. The part 044-A test as built (`[AT-US-042-06]` in the worktree) asserts the release within 1 s and nothing about other work, and it is right to.
+     - The rule itself is kept and is proven where carrier calls exist: US-135 gains an appended scenario, **AT-US-135-13 "Closing a stream does not cancel carrier calls"** (text below). This is the optional US-135 step of the rulings, decided yes, as a scenario of its own and not as a step of AT-US-135-10: the Given of that scenario says the fan-out has finished, and a step inside it has no ID of its own in the trace.
+     - AT-US-135-13 is due before TASK-141 is dispatched. It is not part of what holds the merge of part 044-A.
+  4. **Item 4, AT-US-042-07. Two answers, by the credentials a stream accepts; both are `application/problem+json` and never an event stream.**
+     - A stream that accepts only a bearer token (authentication set `[session]`, `streamBookingProgress`) answers 401 `AUTH_REQUIRED` without one. This is AT-US-042-07. Its title is unchanged and its When-step says which stream it means (text below). The part 044-A test (D-TASK044-10) is its proof.
+     - A stream that also accepts a quote token (`[session, quote-token]`, `streamQuoteResults`) answers 404 `NOT_FOUND` when no usable credential is presented: no token, or a wrong one (D-ARCH-107 (5), A-078). This is AT-US-135-06 "Wrong guest token", whose When-step gains the case of no credential (text below). It is proven by TASK-141 on the mounted route with the real authenticators.
+     - The 404 half is not written into AT-US-042-07. No fixture can prove it before the guest-token authenticator of TASK-091 exists, and no stream with that set is mounted before TASK-141, so the step would keep US-042 open into M1.
+  5. **Item 5, `Cache-Control`. A note, no step change.** "Cache-Control no-cache" in AT-US-042-01 and in the first scenario of US-135 names the directive. The header value of a stream is `private, no-cache, no-store`. The REQ-API-017 note says so; the US-042 and US-135 notes below repeat it.
+  6. **Item 6, REQ-API-017. The shall-statement is amended, not only its note:** "a monotonically increasing `id` on every event except the stream-level `error` event (which carries none)". The note gives the reason (the resume point), states that `complete` keeps its id, that ids increase strictly, and names the two tests of rulings §4 A1.
+  7. **The gatekeeper's reading (QG-044-C2 (e)), REQ-SEC-015 and US-045. Confirmed and reworded.** The 30 s request timeout covers every request until its response starts, a request to an event-stream route included. A stream that has started is not ended or shortened by it; its bound is the 30 s cap of REQ-API-018, counted from the start of the stream. The parenthesis "(unless an event-stream route)" becomes "(an event stream that has started is bounded by REQ-API-018 instead)". The second step of AT-US-045-05 follows (text below; title unchanged).
+  8. **Item 7 (optional), REQ-PLAT-022. Note added:** an event stream open at SIGTERM gets `error` with `SERVICE_UNAVAILABLE` and is closed within 1 s; the client reconnects, to another instance where there is one, or uses the non-streaming read.
+  - **Unchanged:** every scenario ID; the scenario count of US-042 (8) and of US-045; the titles of AT-US-042-07, AT-US-135-06 and AT-US-045-05; priority, milestone and DC tag of every story named; counts 434 / 91 / 293 / DC 134. US-135 goes from 12 to 13 scenarios. US-207 is not edited: its "Permission paths" scenario already says 401 for the booking stream, and the saga half of the disconnect rule is a card test of TASK-173.
+- **Why:**
+  - **The split is real.** With part 044-A alone both stream operations of the contract would answer `private, no-store` and be reset at 20 s without a terminal event (review R1-M1, confirmed by D-ARCH-217 and D-QG-007 in the code). Two of eight scenarios pass only on an anonymous fixture with the deadline raised. "Completes" on the first merge would let a demo-critical Must story read as Implemented on a test composition (D-061, D-062, D-PM-068, D-PM-078, D-PM-082, D-PM-087).
+  - **Why not partial at R0, although R0 mounts no stream.** The four stories that are partial at R0 each wait for an M1 route. Part 044-B waits for nothing from M1. It changes the request pipeline R0 ships: a client that goes away during a sign-in or a registration no longer writes an ERROR line (D-ARCH-221, scope note), and the stop sequence gains the drain signal. The M0 story US-045 states its rule for a started stream against the stream deadline that part 044-B adds. A fifth partial story at the tag would buy nothing, because the architect's gate already orders part 044-B before the tag.
+  - **Why the Wave 2 exit is not held.** US-042 is demo-critical for the §6.2 step "results stream in". The §6.1 demo opens no stream. Part 044-B queues on `api-tx-execute` behind the first pull request of TASK-040 part 040-B, which the M0 booking needs, and it waits for QG-044-C3 and QG-044-C4. A hard checkpoint at the Wave 2 exit would put work the M0 demo does not need in front of work it does. A plan text that counts US-042 as complete at that exit without looking would be the silent drop again, so the exit text has to say which it is.
+  - **Why a reader cancels no carrier call (product side of D-ARCH-222).** The results of a quote belong to the quote, not to one connection. A guest on a phone who loses signal or reloads the page gets every price on return without a second set of carrier calls. A cancelled call has spent its carrier quota anyway. The cost is accepted in A-119: at worst the calls of one quote that nobody reads again, bounded by the admission controls.
+  - **Why the fourth step is not in US-042.** An acceptance step has to be shown by the task that owns the scenario (CLAUDE.md §8). The convention module cannot cancel work it was never handed, so a fixture test of the step proves nothing and a mutant cannot fail it. The regression the architect ruled against is a route that hands the stream's signal to the fan-out. That is caught at the quote stream, with the Mock carrier in flight, and it gets an ID of its own there.
+  - **Why the shall-statement of REQ-API-017 and not a note.** "Per event" covers `error`, which the story lists as an event. The helper now fails an `error` that has an id, so the rule is a tested property and belongs in the statement a test is written from (the D-PM-071 rule).
+  - **Why REQ-SEC-015 is reworded and not only read.** TASK-108 is not dispatched and will be written from this row. "Unless an event-stream route" invites an exemption by route kind, which leaves the time before a stream starts without the bound. The purpose of the exemption is that a healthy stream is not cut at 30 s of request time; the purpose of the timeout is that no request waits unanswered. Both hold with the new wording.
+- **Alternatives:**
+  - **Leave "completes US-042" on part 044-A and track part 044-B as a follow-up.** Rejected (first reason above).
+  - **US-042 partial at `v0.1.0-m0`, in the PRD §7 form.** Available, because R0 mounts no stream route (A-114). Not chosen (second reason). If part 044-B becomes the last item that holds the tag, this comes back to product-manager as a decision of its own; it is not granted here.
+  - **A hard checkpoint at the Wave 2 exit, as for US-038.** Rejected (third reason). US-038 has it because the M0 booking cannot be mounted without part 040-B; nothing in Waves 0 to 2 needs part 044-B.
+  - **The four steps of the rulings for AT-US-042-06.** Not chosen (fifth reason). It would also need a further commit on the part 044-A branch for an assertion without content, before reviews that are already owed.
+  - **The carrier step inside AT-US-135-10, as the rulings suggest.** Not chosen: the scenario's Given has the fan-out finished, and the trace pools by ID.
+  - **Keep the old title of AT-US-042-06 and change only its steps.** Rejected: the title "Client abort cancels upstream work" is what the map and the test report print, and it states the behaviour that was withdrawn. The map row changes once, in the commit that lands the story text.
+  - **Both answers as steps of AT-US-042-07** (the review's two-part form). Not chosen (decision item 4, last point). The two-part reading is kept, across the two scenarios that can each be proven by their owner.
+  - **A note only for REQ-API-017 and for REQ-SEC-015.** Rejected (last two reasons).
+  - **A scenario "A stop ends open streams" appended to US-042.** Not added. For a client the frame and a lost connection lead to the same reconnect (ADR-0016 amendment 14 item 8); the difference is operational (a stop within 1 s, exit code 0), and proofs (d) and (e) with the REQ-PLAT-022 note carry it.
+- **Story text, held** (story files are lane B tooling inputs; the orchestrator lands it in a window with no lane-B evidence pending, with qa-lead's map rows in the same commit). The main checkout held uncommitted changes of another agent in EPIC-06 and EPIC-16 when this was written; the text below is against the US-042, US-045 and US-135 blocks as they are on disk.
+  - **(a) US-042**, `docs/01-requirements/stories/EPIC-16-api-conventions-security.md`. Due before part 044-A merges. Append to the Notes line, after "Consumed by EPIC-08.":
+
+    > **Delivery split (D-PM-089, D-ARCH-217; TASK-044 code review R1-M1):** TASK-044 is delivered in two parts and does not complete this story with the first. Part 044-A proves the convention on fixture streams through the real pipeline slots: "Completion closes the stream", "Fatal error", "Heartbeat", "Client abort releases the stream", "Unauthenticated stream" and "Events contain no personal data" (AT-US-042-02, -03, -04, -06, -07, -08) and, of "Stream format" and "Maximum duration" (AT-US-042-01, -05), the behaviour of the stream module in a test composition (a fixture stream that admits an anonymous caller; the request deadline raised for the test). Part 044-B completes the story on the default pipeline: for a caller who is not anonymous the stream answers `Cache-Control: private, no-cache, no-store` (AT-US-042-01), and an upstream that never completes gets `error` with `SERVICE_UNAVAILABLE` at 30 s and the close within 1 s, with no deadline override (AT-US-042-05). No stream operation is mounted before part 044-B merges. Both parts are M0 work, and the story is complete before `v0.1.0-m0` is tagged (PRD §7, A-119). **Readings (D-PM-089):** "Cache-Control no-cache" names the directive; the header value of a stream is `private, no-cache, no-store` (D-ARCH-218). Event ids increase strictly on every event that has one; the `error` event carries no `id`, so it never moves a client's resume point, and `complete` keeps its id (REQ-API-017, D-ARCH-220). At the 30 s cap, and when the server is stopping, the `error` event carries `SERVICE_UNAVAILABLE` and the client reconnects or uses the non-streaming read (REQ-API-018). A stream starts no carrier call and no saga step and cancels none: a client abort releases the stream's own subscription and timers within 1 s, and carrier calls started by `POST /quotes` run to their own deadlines (REQ-API-018, D-ARCH-222); that half is proven at the quote stream ("Closing a stream does not cancel carrier calls", US-135). "Unauthenticated stream" is the case of a stream that accepts only a bearer token; a stream that also accepts a quote token answers 404 `NOT_FOUND` when no usable credential is presented (D-ARCH-107 (5), A-078), which is "Wrong guest token" in US-135.
+
+    Replace the sixth scenario (same position):
+
+    ```gherkin
+      Scenario: Client abort releases the stream
+        Given a test event stream whose producer holds a subscription
+        When the client disconnects at 1 s
+        Then the subscription is released within 1 s
+    ```
+
+    Replace the When-step of the seventh scenario (title and Then-step unchanged):
+
+    ```gherkin
+      Scenario: Unauthenticated stream
+        When a stream that accepts only a bearer token is opened without one
+        Then the response is 401 AUTH_REQUIRED problem+json and not an event stream
+    ```
+
+  - **(b) US-135**, `docs/01-requirements/stories/EPIC-06-carrier-integration.md`. Due before TASK-141 is dispatched; it may land with (a) or in a later quiet window. Append to the Notes line:
+
+    > **Readings (D-PM-089):** "Cache-Control no-cache" in the first scenario names the directive; the header value is `private, no-cache, no-store`. A reader that closes its stream cancels no carrier call: the calls belong to the fan-out of `POST /quotes`, run to their own deadlines, and their results are stored for the next open, for another reader and for the fallback GET (REQ-API-018, D-ARCH-222). A stream opened with no bearer token and no quote token is answered like a wrong token, 404 `NOT_FOUND` and never 401 (A-078, D-ARCH-107 (5)). After the stream-level `error` event with `SERVICE_UNAVAILABLE` (the 30 s cap, or a server that is stopping) the client reopens the stream or reads the fallback GET (US-042).
+
+    Replace the steps of the sixth scenario (title unchanged):
+
+    ```gherkin
+      Scenario: Wrong guest token
+        When the stream is opened with a token that does not match the quote, or with no bearer token and no quote token
+        Then the response is 404 with code NOT_FOUND and is not an event stream
+    ```
+
+    Append at the end of the block, after "Sixth concurrent stream for one authenticated user is refused" (AT-US-135-13):
+
+    ```gherkin
+      Scenario: Closing a stream does not cancel carrier calls
+        Given a quote created by POST /quotes with MOCK "latency=3000"
+        And the client has opened the stream
+        When the client closes the stream at 1 s, while the Mock carrier call is in flight
+        Then the Mock carrier call completes and its result is stored
+        And the next open of the stream replays that result and the complete event
+        And the Mock call counter shows no extra carrier call
+    ```
+
+  - **(c) US-045**, `docs/01-requirements/stories/EPIC-16-api-conventions-security.md`. Due before TASK-108 is dispatched. In the Notes line, replace "request over 30 s 503 `SERVICE_UNAVAILABLE` except event streams." with:
+
+    > request over 30 s 503 `SERVICE_UNAVAILABLE`; the timeout covers every request until its response starts, and an event stream that has started is bounded by its own 30 s cap instead (REQ-SEC-015 as amended by D-PM-089, REQ-API-018).
+
+    Replace the last step of the fifth scenario (title and first two steps unchanged):
+
+    ```gherkin
+      Scenario: Request timeout
+        Given a handler that takes 31 s
+        Then the response is 503 SERVICE_UNAVAILABLE at about 30 s
+        And an event stream that has started is not ended by this timeout and runs to its own 30 s cap
+        And a request to an event-stream route that has not started its stream after 30 s gets the same 503
+    ```
+
+- **Map rows for qa-lead** (`docs/05-quality/tests/gherkin-test-map.md` and the suite assignments are qa-lead's; each row lands in the commit that lands its story text):
+  - AT-US-042-06: title becomes "Client abort releases the stream". Suite `api`, lane B, unchanged. The part 044-A test titles carry the ID and not the scenario title, so no test is renamed.
+  - AT-US-042-07: title unchanged. Suite `api` instead of `rbac-matrix` (review R1-n5): the proof is the fixture test of `tests/api/event-stream.api.test.ts`. The 401 row that the generated matrix gives the real `streamBookingProgress` belongs to US-207.
+  - AT-US-135-06: no row change (title unchanged).
+  - AT-US-135-13: new row, `US-135 (DC)`, "Closing a stream does not cancel carrier calls", suite `api`, lane B, owner TASK-141. Any scenario total in the map rises by one.
+  - AT-US-045-05: no row change (title unchanged, suite `abuse`).
+- **Applied in:** `docs/01-requirements/REQUIREMENTS.md` 1.22 (REQ-API-017 shall-statement and note, REQ-API-018 shall-statement and note, REQ-SEC-015 shall-statement and note, REQ-PLAT-022 note), `docs/01-requirements/PRD.md` 1.23 (version row, §7 new paragraph, §11), `docs/01-requirements/ASSUMPTIONS.md` (new A-119). The "next entry" pointer in D-PM-068 now reads D-PM-090. Counts 434 / 91 / 293 / DC 134, asserted from the shape of the edits (no row added or removed in the requirement tables).
+- **Not applied here.**
+  - **The story text (a) to (c) and the map rows** (held).
+  - **`docs/sdlc/traceability.md`** (held for senior-developer's fold, QG-044-C1 (d)). REQ-API-017, Status: "Planned (partial: TASK-044 part 044-A proves the framing, the ids, the `error` event without an `id` and the resume, and the header value in a test composition; completes with part 044-B: `Cache-Control: private, no-cache, no-store` on the default pipeline for a caller who is not anonymous; D-PM-089)". REQ-API-018, Status: "Planned (partial: TASK-044 part 044-A proves the close within 1 s after `complete` and `error`, the release of the subscription within 1 s of a client abort, and the 30 s cap in a test composition; completes with part 044-B: the cap on the default pipeline with no deadline override and the end of open streams at a stop; D-PM-089)". Task(s) stay TASK-044 for both. The Design cells are principal-architect's.
+  - **For senior-developer's plan fold, beside the 21 lines of rulings §8** (no apostrophes, no backticks):
+    1. TASK-044: "STORY SPLIT (D-PM-089): US-042 is partial until part 044-B merges and is never tagged partial at v0.1.0-m0; scenario ownership as in the TWO PARTS line; AT-US-042-06 is titled Client abort releases the stream and asserts the release of the subscription within 1 s, nothing else; AT-US-042-07 is the case of a stream that accepts only a bearer token (401 AUTH_REQUIRED); the 404 of a stream that also accepts a quote token is AT-US-135-06 on TASK-141; product acceptance of US-042 reads proofs (a) and (c) of part 044-B from the test code".
+    2. TASK-141: "US-135 SCENARIOS OF D-PM-089: [AT-US-135-06] also covers an open with no bearer token and no quote token: 404 NOT_FOUND problem+json, not an event stream (A-078; D-ARCH-107 (5)); [AT-US-135-13] Closing a stream does not cancel carrier calls: the Mock latency test of the STREAM DISCIPLINE line carries this ID and asserts that the call completes, that its result is stored and replayed to the next open, and that the Mock call counter shows no extra call".
+    3. TASK-108: "US-045 STEPS OF D-PM-089 (REQ-SEC-015 as amended): [AT-US-045-05] has two stream halves: a stream that has started is not ended by the request timeout and runs to its own 30 s cap (the test of the REQUEST TIMEOUT AND EVENT STREAMS line), and a request to an event-stream route whose handler has not started the stream after 30 s gets 503 SERVICE_UNAVAILABLE like any other request; the timer does not treat a route differently by its kind".
+    4. Wave texts, PLAN.md and STATUS: the Wave 2 exit states whether part 044-B of TASK-044 is on main; if it is, 71 of the 74 M0 DC stories are complete, with US-061, US-062 and US-080 partial; if it is not, 70, with US-042 named as partial and part 044-B due before the tag. The Wave 3 exit and the v0.1.0-m0 checkpoint are unchanged: 109 of the 113 M0 Must stories, and part 044-B is on main. STATUS board, TASK-044 row: US-042 partial (D-PM-089) until part 044-B merges. No wave exception is needed while both parts are parts of the Wave 1 task.
+- **Routed:**
+  - **orchestrator:** the held text. (a) with the map rows of AT-US-042-06 and -07 is what QG-044-C2 needs before part 044-A merges. (b) and (c) have their own due points.
+  - **qa-lead:** the map rows above.
+  - **senior-developer:** the four lines above. One observation, not a rule of mine: the stream test of rulings §8 line 11 (TASK-108) runs a stream to 30 s, which the default pipeline allows only with the stream deadline of part 044-B, so TASK-108 either follows part 044-B or raises the deadline in its test composition as part 044-A does.
+  - **principal-architect:** D-ARCH-222 quotes four steps for AT-US-042-06; the story will carry three, and the fourth lives as AT-US-135-13. Nothing in the three ADR amendments depends on the difference. Under QG-044-C7: if `carrier_error` is ruled to be sent without an `id`, the REQ-CARR-009 note and the US-135 note ("each event" carries an id) come back to product-manager.
+  - **api-designer:** nothing new. The eight texts of rulings §6 agree with the rows as amended here. The description of `streamQuoteResults` may name the 404 for a missing token next to the wrong token.
+  - **security-analyst:** a refusal of D-ARCH-219 under QG-044-C3 changes the cap and returns REQ-API-018, AT-US-042-05 and A-119 to product-manager. The rewording of REQ-SEC-015 narrows an exemption and widens none.
+  - **code-reviewer (round 2 of part 044-A):** this entry asks for no code change on the branch. The `[AT-US-042-06]` and `[AT-US-042-07]` tests as built match the held text.
+  - **quality-gatekeeper:** decides whether QG-044-C2 (a) to (e) are closed; (f) closes with the commit of the orchestrator and qa-lead.
+- **Not verified by me.** This session had no shell. Nothing was run. The worktree `../Shipqube-TASK-044` was read from disk; I could not confirm that it is clean at `3b56ab54`, and I read only its api test file. Which task mounts which stream, the lock order and the wave of each task are taken from `task-map.csv`, the rulings and D-QG-007. That TASK-108 needs the stream deadline for its default-pipeline test is my reading of card line 11, not a checked dependency. The security record was read in its summary and "what holds" sections only.
+- **Validation:** the part 044-A lane B run of `event-stream.api.test.ts` green on its head; `ac-trace.json` at G3 shows AT-US-042-01 to -08 passing, and product-manager's acceptance of US-042 reads from the part 044-B test code that AT-US-042-01 runs for a caller who is not anonymous and AT-US-042-05 with no deadline override (the G3 list of D-QG-007 says the same); AT-US-135-06 with its no-credential case and AT-US-135-13 passing in the route-level suite of TASK-141; AT-US-045-05 with both stream halves in the abuse suite of TASK-108; at the `v0.1.0-m0` SHA part 044-B is merged. After launch: the share of quote streams that end without `complete` and are followed by a reopen or a fallback read within 5 s, and `api.stream_cut` by reason (TASK-214); a visible drop of first-result time or of quote → paid conversion on deploy days re-opens how a stop ends streams.
+- **Reversibility:** High until part 044-A merges (wording in three requirement rows and one note, one PRD paragraph, one assumption; the story text is not landed).
