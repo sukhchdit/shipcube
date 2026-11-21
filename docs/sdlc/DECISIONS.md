@@ -9908,3 +9908,36 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Routed:** unchanged from D-SECPR041-03: the 041-B items (PR041-SEC-02 (b), PR041-SEC-09, E1-E5), and my threat-model alignment before G3.
 - **Disclosure:** as in D-SECPR080-03 (the whole-ancestry and `c33e5e92` emulations; nothing printed or stored).
 - **Reversibility:** High (a review record).
+
+### D-CRPR044-01 · 2026-11-21 · code-reviewer · TASK-044 part 044-A round 3 (merge-only) on `33262314`: APPROVED
+- **What:** merge-only code round on the union head `33262314` (merge `c33e5e92` of `cbd590db` with main `4ba683ad`, which carries #80 to #84, #49 and #50, then the R1-m4 one-line deletion). Verdict **APPROVED** for the merge; the round-2 APPROVED_WITH_NITS items (R2-m1, R2-n1..n5, R1-n7) are carried unchanged. Record: `docs/05-quality/reviews/PR-pending-TASK-044-code-review.md`, "Round 3 (merge-only)".
+- **Proof:** `c33e5e92^{tree}` = `git merge-tree --write-tree cbd590db 4ba683ad` (`1cb6c882`). The only path both sides changed since `530629f4` is `apps/api/src/platform/errors/problem-handler.ts`; the 17 branch-only paths equal `cbd590db` and the 294 main-only paths equal `4ba683ad`. `git diff --raw 4ba683ad 33262314` = `git diff --raw 530629f4 cbd590db` except the `problem-handler.ts` row (union blob `3305466c`). The union keeps main's `renderProblem` and pre-rendered path and the branch's `next(new AppError(code))` (PR44-SEC-13). `33262314` removes only `const appError = ...`; no reference or unused import remains.
+- **Not claimed:** lint, typecheck and the suites (git, grep and reads only, per the dispatch). Merge conditions now: lane A on the head (full lint closes R1-m4; typecheck after #84's 28 bumps), lane B on `33262314` (event-stream 12 tests by title, problem-handler, declared-credentials and idempotency api), the security merge-only round, D-PM-089's held US-042 text on main, and R2-m1's part 044-B card line. A further docs-only merge of `origin/main` (`23792cbd`, merge-tree clean) needs only the same raw-diff check.
+- **Alternatives:** re-running lint and typecheck myself was excluded by the dispatch (lane B busy); the prediction rests on round 2's measured lint of the byte-identical union file.
+- **Reversibility:** High (review verdict only).
+
+### D-CRPR045-01 · 2026-11-21 · code-reviewer · TASK-045 code review round 3 (delta for fix cycle 2, `3168c194..c02dbf27`) = APPROVED_WITH_NITS at head `c02dbf27`, and cumulatively on the branch tip `77326dc5` (appended as round 3 to `docs/05-quality/reviews/PR-pending-TASK-045-code-review.md` on main)
+
+- **Decision:** APPROVED_WITH_NITS. No BLOCKER, MAJOR or MINOR finding is open in TASK-045's own scope. `3168c194` was already reviewed in round 2 (`16819e33`), so this round reviews only `c02dbf27`: two test files, +13 / -6, no production code.
+- **The fix.** The "anonymous" AT-US-037-07 calls passed an explicit `undefined`, which takes the parameter default `ORG_A`. The fixture stub therefore signed the caller in, and the anonymous-only reference route refused it with 401. A `null` sentinel, `ANONYMOUS_CALLER`, now sends no headers. Route auth, the credential gate and the fixture helpers are unchanged. The `@ts-expect-error` description now carries `TASK-045`, which is what `check-suppressions` requires. **D-TASK045-15 is accepted.**
+- **`77326dc5`** adds only the 8 files of `docs/05-quality/tests/runs/20261121T1414Z_c02dbf2/`. Lane B there is PASS on `c02dbf27`: clean tree, build clean, 0 failures, 22 pagination api cases and 9 PostgreSQL 18 cases. The report hashes reproduce. This closes round 2's lane-B condition.
+- **New NITs:**
+  - R3-n1: an explicit `undefined` still type-checks as `ORG_A` in the `get()` helper, so the sentinel works only by convention.
+  - R3-n2: the `signedIn` stub ignores `route.auth`.
+  - Both go to part 045-C, together with the still-open R2-n1.
+- **Routings confirmed on the cards:**
+  - R2-m1 = PR045-SEC-08 is on the part 045-C line (`WAVE-01.md:464`).
+  - R2-m2, R2-n2 and R2-n3 are on the TASK-073 riders (`WAVE-01.md:1425-1427`).
+  - R1-m1 has its dispatch gate, and R1-n3 is on TASK-096 (D-ORCH-150).
+- **Rate limiter of #82:** no TASK-045 test is exposed.
+  - `pagination.api.test.ts` is the only HTTP suite. It builds `createApp` without `rateLimit`, so the step-0 limiter passes through.
+  - It also passes its own pipeline: step 5 is the stub, and no denial budget is built.
+  - Its fixture routes are `rateLimit: 'none'`.
+  - The other TASK-045 suites are unit tests, or the PostgreSQL test without HTTP.
+- **Merge conditions:**
+  1. Merge with main, then lane B on the merge commit. A clean merge that touches none of the branch's 18 files needs only a partition check, not a new round.
+  2. D-TASK045-10..15 accepted by reference in DECISIONS.md (still missing; D-ORCH-149 covers only 01..09).
+  3. Hosted CI on the PR head, or the D-ORCH-162 deviation recorded for this PR.
+  4. Rename the record once the PR exists.
+  5. C5 / part 045-C carried as before.
+- **Reversibility:** High (a review record).

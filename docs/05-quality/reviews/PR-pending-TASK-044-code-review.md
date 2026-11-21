@@ -627,3 +627,87 @@ SECURITY-FLAGS (for security-analyst):
 - (1) R2.3: the `cbd590db` wrapper is test-only and marks responses more private, never less. No product path changes. The product rule it stands in for is pinned by api suites (PH-b killed).
 - (2) Merge condition 4: the post-merge head voids the round-2 binding through `problem-handler.ts`. The R1-m4 deletion is the only hand edit expected.
 - (3) R2-n3: the silent rewrite of a non-catalogue `error` code leaves no log trace of a producer defect (part 044-B, with PR044-SEC-08/09).
+
+# Round 3 (merge-only): union head `33262314`
+
+| Field | Value |
+| --- | --- |
+| Part | TASK-044 part 044-A (D-ARCH-217; US-042 partial per D-PM-089) |
+| Head reviewed | `33262314` (local, unpushed): merge `c33e5e92` (parents `cbd590db` = round 2's head, `4ba683ad` = main with #80 to #84, #49 and #50) plus `33262314`, the R1-m4 one-line deletion |
+| Merge base | `530629f4` |
+| Reviewer | code-reviewer (Claude Opus 5.5), 2026-11-21 |
+| Round | 3 (merge-only; git, grep and reads only per the dispatch, no npm, no Docker) |
+| Inputs | Round 2 above (R2.6 item 1); D-ORCH-163 (union proof rule); D-ORCH-167 |
+
+```
+VERDICT: APPROVED (merge-only round; the round-2 APPROVED_WITH_NITS items are carried unchanged)
+SUMMARY: The merge is a pure git union. c33e5e92's tree equals `git merge-tree --write-tree cbd590db 4ba683ad`
+  (1cb6c882), and the raw diff 4ba683ad..33262314 equals the branch's own diff 530629f4..cbd590db on all 18 paths
+  except the one shared file, problem-handler.ts. That file keeps main's renderProblem and pre-rendered path and the
+  branch's `next(new AppError(code))`. 33262314 deletes exactly the unused `appError` binding (R1-m4), and no
+  reference remains. No new findings. Lint, typecheck and the suites on 33262314 are owed to lane A/B, not claimed here.
+```
+
+## R3.1 What I verified myself
+
+Everything ran on commits by SHA in the TASK-044 worktree's object store. Nothing was checked out, built or run.
+
+1. **Parents and base.** `c33e5e92^1 = cbd590db` (round 2's reviewed head, unchanged) and `c33e5e92^2 = 4ba683ad` (an ancestor of `origin/main`). The merge base is `530629f4`. `33262314` has the single parent `c33e5e92`.
+2. **Merge-tree identity.** `git merge-tree --write-tree cbd590db 4ba683ad` = `1cb6c8829a90` = `c33e5e92^{tree}`. Git merged without a conflict and the merge commit has no hand edit.
+3. **File-set partition.** The branch side `530629f4..cbd590db` has 18 paths and the main side `530629f4..4ba683ad` 295. They overlap in one path only: `apps/api/src/platform/errors/problem-handler.ts`.
+   - Branch-only, 17 paths: `git diff cbd590db c33e5e92` over them is empty. Nothing from the branch is lost.
+   - Main-only, 294 paths: `git diff 4ba683ad c33e5e92` over them is empty. Nothing from main is dropped.
+   - No path outside both sets differs between `4ba683ad` and `c33e5e92`.
+4. **Conservation (D-ORCH-163 form).** `git diff --raw 4ba683ad 33262314` equals `git diff --raw 530629f4 cbd590db` line for line: the same 18 paths, status letters and blobs. The one exception is the `problem-handler.ts` row (`c2d503e4 -> 3305466c` against `5cc78bdb -> b1850807`), which is the listed union.
+5. **The shared file, by hand.**
+   - Main's side (TASK-040, #80): removes `ErrorCode`, `classifyThrown`, `Classified`, `buildProblem` and the local `codeOf`; imports `isRenderedProblem` and `renderProblem`; adds the pre-rendered 4xx branch (`isRenderedProblem(thrown) && !res.headersSent`); and replaces the inline classify-and-build with `renderProblem`. `codeOf` moved verbatim into `rendered-problem.ts`, so `code` has the same value as before.
+   - The branch's side (PR44-SEC-13): the `res.headersSent` branch passes `new AppError(code)`, with the three-line comment.
+   - The union (`4ba683ad..c33e5e92`) is exactly the branch's hunk applied to main's file. `problem-handler.ts` at `c33e5e92` is byte-identical to the union I linted in round 2 (tree `8d53a3dc`). There the only ESLint error was `'appError' is assigned a value but never used`.
+6. **The R1-m4 deletion.** `c33e5e92..33262314` removes one line in one file: `const appError = classified.kind === 'app' ? classified.error : undefined;`. At `33262314`:
+   - `appError` occurs nowhere in the file (grep).
+   - `classified` is still read (`retryAfter`, the `db` and `app` arms). `code` is read by the log, by `next(new AppError(code))` and by `markErrorResponse`. `AppError` is still imported and used.
+   - No import became unused, because main had already dropped `ErrorCode`, `classifyThrown` and `buildProblem`.
+   - So round 2's lint result plus this deletion predicts a clean ESLint run on the file. Lane A confirms it.
+7. **Behaviour through the union.**
+   - An `AppError` thrown after headers are sent: main would have passed the original instance. The union passes a new code-only `AppError` with the same `code`. That is the PR44-SEC-13 rule, which the branch's unit test pins, including the `console.error` spy.
+   - A `RenderedProblemError` thrown after headers are sent skips the pre-rendered branch (`!res.headersSent`), is classified as before and leaves as a code-only `AppError`. No stored body or cause reaches Express's final handler. For non-`AppError` values this is identical to main (`new AppError('INTERNAL_ERROR')` both ways).
+   - No main-side test asserts the identity of the value handed to `next` after headers are sent. I grepped every main-changed `*.test.ts` for `headersSent`, `problemHandler` and `headers_sent`, with no hit. The only `problemHandler(` call site is `app.ts:218`, which the branch does not change.
+8. **Semantic cross-checks against #80 to #84** (no text overlap; read by hand). The branch's files import `createApp`, `defaultPipelineSlots` and `PipelineSlots`, `RouteSlot`, `markPrivateResponse`, the routing test helpers and `@platform/shared`. Main changed `app.ts`, `pipeline.ts` and `packages/shared/src/index.ts`:
+   - Every addition is optional: `AppDependencies.trustProxyHops` and `rateLimit`, `AppLogger.warn`, and `PipelineOptions.rateLimit`, `valkey`, `denial*` and `onStoreUnavailable`. The `PipelineSlots` keys are unchanged, so `PRE_STREAM_STEPS` still type-checks against them.
+   - `tests/api/event-stream.api.test.ts` calls `createApp` without `apiMode: 'live'` and without `rateLimit`. So `RateLimitMissingError` cannot fire, step 0 is the pass-through `ipLimiter(undefined, …)`, and the stream suite does not meet #82's per-IP budget.
+   - The shared index change is additive (carrier vocabularies, TASK-080).
+   - The only ESLint config change on main is `tools/eslint-rules/pricing-purity.mjs`, which is scoped to pricing.
+9. **Current `origin/main` (`23792cbd`).** It is 5 docs-only commits past `4ba683ad`: agent memory, architecture docs, security records and DECISIONS.md. None touches a branch path. `git merge-tree --write-tree 33262314 origin/main` is clean (`92ef63a2`). The review does not need a re-merge.
+10. **Commit messages.** Both name the union, the shared file and R1-m4 accurately. The merge body's list (#80 to #84, #49, #50) matches `git log 530629f4..4ba683ad`.
+
+**Not run, per the dispatch:** lint, format, typecheck, unit, api, build, coverage and Docker. Item 6 is a static prediction from round 2's measured lint of the identical union file, not a lint result.
+
+## R3.2 Findings
+
+None new.
+
+Carried unchanged, because the branch's 17 other files are byte-identical to `cbd590db`:
+- R2-m1, with its part 044-B card line. The two optional comment edits were not taken, which is allowed.
+- R2-n1 to R2-n5 and R1-n7.
+- The part 044-B carry list of R2.6 item 8.
+
+## R3.3 Merge conditions (replace R2.6)
+
+1. **R1-m4: closed** on `33262314`, subject to the full lint of item 2.
+2. **Lane A on `33262314`:** full lint, format, typecheck, unit, build and diff coverage. The pushed head may be used instead if it differs only by a docs-only merge of `origin/main`. The typecheck matters more than usual: #84 bumped 28 packages, and round 2's typecheck ran on main `a47d6966`, before #81 to #84.
+3. **Lane B on `33262314`** (D-ORCH-163, running):
+   - `tests/api/event-stream.api.test.ts`, 12 tests, each by title;
+   - `problem-handler.api`, `declared-credentials.api` and `idempotency.api`, because the union `problem-handler.ts` is on their paths.
+4. **Security merge-only round on `33262314`.** Security R2.6 C4 and R2.9 C6 apply, because `problem-handler.ts` changed through main.
+5. **D-PM-089's held US-042 text and map rows on main** (QG-044-C2 (f)), unchanged from R2.6 item 5.
+6. **R2-m1's part 044-B card line** (senior-developer), unchanged.
+
+If the pushed head is a further merge of `origin/main`, the same proof applies. Its tree must equal `merge-tree`. `git diff --raw origin/main <head>` must equal `git diff --raw 530629f4 cbd590db`, except the `problem-handler.ts` row, whose blob must stay `3305466c`.
+
+GOOD:
+- The merge commit is a pure git union, and the hand edit is a separate one-line commit. Each can be proven on its own: merge-tree identity, then a one-line diff.
+- Both commit bodies say exactly what the union kept from each side and why the line goes.
+
+SECURITY-FLAGS (for security-analyst):
+- (1) `problem-handler.ts` at `33262314` (blob `3305466c`): PR44-SEC-13's code-only `AppError` and TASK-040's pre-rendered path coexist. A `RenderedProblemError` thrown after headers are sent leaves as `new AppError('INTERNAL_ERROR')`, so its stored body and cause do not reach `console.error` (R3.1 item 7).
+- (2) The event-stream api suite runs without the #82 rate-limit kit (a test composition with a pass-through step 0), as do the other test compositions. Nothing in this union changes that.
