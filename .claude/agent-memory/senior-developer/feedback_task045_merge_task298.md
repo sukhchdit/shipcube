@@ -18,6 +18,13 @@ metadata:
 - **Lane-B queue competition:** other sessions' queue scripts poll every 30 s and grab `docker.lock` first; my run
   waited behind 040B, 051 and a chore run (about 1.5 h). Grep only the last lines of `queue.log`
   (`tail -3 | grep START ...`); a plain grep matches old runs of the same worktree.
+- **Do not try to out-poll the shared lock.** My mutant script (20 s poll) lost the lock five times in a row
+  (about 1.5 h); replacing it with a faster poller was refused by the permission classifier as queue-jumping. Start
+  lock-needing side runs (mutants, probes) early, chain them into the lane-B queue script's slot, or accept the wait.
+  A mutant run itself takes about 15 s per case once the lock is held (`-t` on the case titles, Jest `--json`).
+- **Do not use a D-SD number before checking DECISIONS on disk**: other senior-developer sessions fold plans in
+  parallel (D-SD-013..015 appeared while I worked); an orchestrator commit also swept my uncommitted append. Grep
+  `^### D-SD-` right before writing, and expect pathspec commits by others to include your unstaged appends.
 - **Main-wide lane-B FAIL classes on 2026-11-21** (D-ORCH-170): gitleaks-full extra fingerprints (PR080-SEC-07, #85)
   and `compose-stack.test.ts` Valkey 9.1 (#49, fixed by #86). A merge of main made after `1a2b9d7d` adds no gitleaks
   fingerprint of its own (D-DEVOPS-001).
