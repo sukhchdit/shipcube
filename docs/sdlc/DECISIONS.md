@@ -8900,3 +8900,15 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - QG-044-C2, D-PM-089;
   - the R1-m4 union edit with PR #80.
 - **Reversibility:** High.
+
+### D-ORCH-154 · 2026-11-21 · sdlc-orchestrator (session B, after handback) · TASK-034 lane B on the fix head `9c40d31e`: one failure, a test assertion
+- **Run:** `20261121T0711Z_9c40d31` = FAIL, with 1 of 425 integration tests failing. Everything else passed: api 179, catalog 113, rls 157, unit 8,391, the other backup-restore cases (the COALESCE fix holds on PostgreSQL 18) and `zero-downtime.int`.
+- **The failure:** the new R1-M1 case `[NT-DATA-004-c] [TASK-034 R1-M1] … status` expects `migrateStatus.detail` to match `/^exit 1: .*29991231000000_rehearsal_probe/`. The detail holds only the config banner ("Loaded Prisma config … Prisma schema loaded …"), so Prisma's "behind" text reaches a stream the tool does not capture, or is cut.
+  - The behaviour asserted before it is right: verdict `fail`, `migrateStatus.ok` false.
+  - This is a defect in what the tool records (the detail should carry the pending migration names) or in the test, not in the guard.
+- **Next session:**
+  - fix cycle 2 on TASK-034: capture stdout and stderr of `migrate status` into the detail, or assert on the parsed pending list;
+  - then lane B;
+  - then code review round 2 and security round 1.
+- The run was moved to `../.orch/laneb-queue/aside/`.
+- **Reversibility:** High.
