@@ -3,6 +3,8 @@
  * adapter whose every operation records the call and runs an injectable `io` hook, so a test can prove the capability
  * guard never reached the adapter; and a complete, valid capability declaration to mutate.
  */
+import { zero } from '@platform/shared';
+
 import type { CarrierAdapter } from '../adapter.js';
 import type { CarrierCapabilities, OperationSupport, ServiceCapability } from '../capabilities.js';
 import { type CarrierContext, createCarrierContext } from '../context.js';
@@ -112,9 +114,9 @@ export function createFakeAdapter(options: FakeAdapterOptions = {}): FakeAdapter
     uploadCustomsDocuments: (_req, ctx) => answer('uploadCustomsDocuments', ctx, undefined),
     estimateLandedCost: (req, ctx) =>
       answer('estimateLandedCost', ctx, {
-        duties: { amountMinor: 0, currency: 'USD' },
-        taxes: { amountMinor: 0, currency: 'USD' },
-        total: { amountMinor: 0, currency: req.items[0]?.unitValue.currency ?? 'USD' },
+        duties: zero('USD'),
+        taxes: zero('USD'),
+        total: zero(req.items[0]?.unitValue.currency ?? 'USD'),
       }),
     recoverLabel: (_ref, _formats, ctx) => answer('recoverLabel', ctx, []),
   };

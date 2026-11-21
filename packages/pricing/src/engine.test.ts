@@ -8,6 +8,7 @@ import fc from 'fast-check';
 import { price, PRICING_STEPS, runPricing } from './engine.js';
 import { isPricingError, PricingError } from './errors.js';
 import { BASE_FREIGHT_CODE, baseFreightStep } from './lines/base-freight.js';
+import { marginStep } from './lines/margin.js';
 import { applyRate, type Rate } from './rounding.js';
 import { appendEntry, appendLine } from './state.js';
 import { pricingInput } from './tests/fixtures.js';
@@ -79,8 +80,8 @@ const arbitraryInput = fc
 
 describe('price (US-138)', () => {
   it('prices the base freight as one CARRIER line with exact totals and the billable weight', () => {
-    const result = price(pricingInput(2000));
-    expect(PRICING_STEPS).toEqual([baseFreightStep]);
+    const result = runPricing(pricingInput(2000), [baseFreightStep]);
+    expect(PRICING_STEPS).toEqual([baseFreightStep, marginStep]);
     expect(result.lines).toEqual([
       {
         code: BASE_FREIGHT_CODE,
@@ -100,7 +101,7 @@ describe('price (US-138)', () => {
     });
     expect(result.billableWeight).toEqual({ perPackage: [{ actualG: 2100, volumetricG: 1200, billableG: 2500 }], totalG: 2500 });
     expect(result.explanation).toEqual({
-      engineVersion: '1.0.0',
+      engineVersion: '1.1.0',
       configVersion: 'seed-2026-11-12',
       entries: [],
       rejectedCandidateCount: 0,
@@ -329,7 +330,7 @@ describe('price (US-138)', () => {
   });
 
   it.each<[string, (input: PricingInput) => PricingInput, string]>([
-    ['an empty configuration version', (input) => ({ ...input, config: { version: '' } }), 'PRICING_CONFIG_INVALID'],
+    ['an empty configuration version', (input) => ({ ...input, config: { ...input.config, version: '' } }), 'PRICING_CONFIG_INVALID'],
     ['a local time instead of UTC', (input) => ({ ...input, now: '2026-11-12T10:00:00+01:00' }), 'PRICING_INPUT_INVALID'],
     ['an unknown sell currency', (input) => ({ ...input, request: { ...input.request, sellCurrency: 'ABC' } }), 'CURRENCY_UNKNOWN'],
     [

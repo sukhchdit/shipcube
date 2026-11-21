@@ -8,8 +8,11 @@
 // org_id) and the descending `ix_invitations__org_status_created`, the domain triggers
 // (`trg_organisations__type_immutable`, `trg_organisations__personal_owner_immutable`,
 // `trg_organisations__personal_delete_guard`, `trg_membership_roles__scope_matches_org`, `trg_invitations__role_scope`,
-// `trg_memberships__lifecycle_guard`), the RLS blocks and the std-columns guards. The tenant-bound composite keys
-// (`fk_membership_roles__membership_id`, `fk_memberships__invitation_id`, D-ARCH-154) are expressed below.
+// `trg_memberships__lifecycle_guard`, whose operator and INVITED rules come from 20261120210000_operator_staff_grants:
+// a membership of an OPERATOR organisation needs an `operator_staff_grants` row when it is inserted and when it
+// becomes ACTIVE), the CHECK `ck_operator_staff_grants__version`, the RLS blocks and the std-columns guards. The
+// tenant-bound composite keys (`fk_membership_roles__membership_id`, `fk_memberships__invitation_id`, D-ARCH-154) are
+// expressed below.
 
 /// The tenant itself (its `id` is the tenant key). `type` never changes; exactly one OPERATOR organisation exists.
 model Organisation {
@@ -120,4 +123,20 @@ model Invitation {
   @@unique([orgId, id], map: "ux_invitations__org_id_id")
   @@unique([tokenHash], map: "ux_invitations__token_hash")
   @@map("invitations")
+}
+
+/// The users who may hold a membership of an OPERATOR organisation (D-ARCH-165, TASK-051). GLOBAL and read-only at
+/// runtime: platform_app holds SELECT, the provisioning lane writes it as platform_migrator. `userId` is a logical
+/// reference without a relation (a grant for an id that is no user grants nothing).
+model OperatorStaffGrant {
+  id        String   @id(map: "pk_operator_staff_grants") @default(dbgenerated("uuidv7()")) @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  createdBy String   @map("created_by") @db.Uuid
+  updatedBy String   @map("updated_by") @db.Uuid
+  version   Int      @default(1)
+  userId    String   @map("user_id") @db.Uuid
+
+  @@unique([userId], map: "ux_operator_staff_grants__user_id")
+  @@map("operator_staff_grants")
 }

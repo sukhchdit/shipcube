@@ -24,6 +24,10 @@ import { DbError } from '../db/index.js';
 import { dbErrorMapping } from '../db/map-db-error.js';
 import { createWithTenantTx } from '../db/with-tenant-tx.js';
 import { healthRoutes } from '../health/router.js';
+import { createRateLimitCounter, type RateLimitCounter } from '../rate-limit/counter.js';
+import { createDenialBudget } from '../rate-limit/denial-budget.js';
+import { closeServedApps, request } from '../rate-limit/tests/serve.js';
+import { FakeValkey } from '../rate-limit/tests/fake-valkey.js';
 import { defineRoute, type Principal, type RouteDescriptor, type RouteSpec } from '../routing/define-route.js';
 import { defaultPipelineSlots, type PipelineSlots } from '../routing/pipeline.js';
 import { ANONYMOUS, markPrivateResponse, readonlySet, setPrincipal } from '../routing/route-state.js';
@@ -873,5 +877,152 @@ describe('[PR #42 R1-n5] the capture takes DB_AUDIT_LOCK_TIMEOUT_MS from the con
     expect(() => createApp({ ...deps, modules: [{ name: 'reference', routes: [gatedNone] }] })).toThrow(
       /cannot honour PERMISSION_DENIED entries on listCountries/,
     );
+  });
+});
+
+describe('[T-39] [PR56-SEC-03] [D-SECT39-01] the per-actor denial budget through the real capture', () => {
+  const THRESHOLD = 2;
+
+  afterAll(closeServedApps);
+  const PERMISSION = 'address_book:read';
+  const VAULT_ROWS_PER_ENTRY = 2;
+  let valkey: FakeValkey;
+  let counter: RateLimitCounter;
+  let app: ReturnType<typeof createApp>;
+
+  /** An app over the real capture and a budget on the shared fake Valkey; `trustProxyHops` lets each request choose its IP. */
+  function composeBudgeted(): ReturnType<typeof createApp> {
+    runner = runnerWith();
+    const ipIndex = { keyId: 'audit-index-v1', hash: (ip: string) => new Uint8Array(32).fill(ip.length) };
+    const capture = createAuditCapture({
+      config: { DB_AUDIT_LOCK_TIMEOUT_MS: 250 },
+      tenantTx: runner,
+      writer: { store, tokeniser, ipIndex },
+      parseUserAgent,
+      log: captureLog,
+    });
+    const denialBudget = createDenialBudget({ threshold: THRESHOLD, valkey, counter, now: () => valkey.time });
+    return createApp({
+      health: healthRoutes({ probe: { readiness: () => Promise.reject(new Error('not probed')) } } as never),
+      modules: [{ name: 'addresses', routes }],
+      tenantTx: runner,
+      logger: { info: () => undefined, debug: () => undefined, error: () => undefined },
+      trustProxyHops: 1,
+      pipeline: { ...defaultPipelineSlots({ tenantTx: runner, capture, denialBudget }), authenticate: signedIn },
+    });
+  }
+
+  const denied = (n: number) =>
+    request(app)
+      .get('/api/v1/address-book')
+      .set({ 'X-Forwarded-For': `203.0.113.${String(n)}`, 'User-Agent': `Agent/${String(n)}` });
+
+  beforeEach(() => {
+    valkey = new FakeValkey();
+    counter = createRateLimitCounter();
+    app = composeBudgeted();
+    principal = session(VIEWER, []);
+  });
+
+  it('[SEC-TC-15] N+2 denials: N individual entries, one aggregated entry, two 429 answers; the next window opens with the carry', async () => {
+    const statuses: number[] = [];
+    for (let denial = 1; denial <= THRESHOLD + 2; denial += 1) statuses.push((await denied(denial)).status);
+    expect(statuses).toEqual([403, 403, 429, 429]);
+    expect(entries()).toHaveLength(THRESHOLD + 1);
+    expect(appendAttempts).toBe(THRESHOLD + 1);
+    valkey.time += 60_001;
+    const next = await denied(9);
+    expect(next.status).toBe(403);
+    expect(entries().at(-1)?.details).toEqual({ required_permission: PERMISSION, suppressed_in_previous_window: 1 });
+  });
+
+  it('the stored details are the closed sets: plain, crossing (aggregated, no count) and window opener with a carry', async () => {
+    for (let denial = 1; denial <= THRESHOLD + 1; denial += 1) await denied(denial);
+    const [first, second, crossing] = entries();
+    expect(first?.details).toEqual({ required_permission: PERMISSION });
+    expect(second?.details).toEqual({ required_permission: PERMISSION });
+    expect(crossing?.details).toEqual({
+      required_permission: PERMISSION,
+      aggregated: true,
+      threshold: THRESHOLD,
+      window_seconds: 60,
+      window_ends_at: '2027-01-15T08:01:00Z',
+    });
+    expect(crossing).toMatchObject({ entityId: null, action: 'PERMISSION_DENIED', outcome: 'DENIED' });
+    await denied(7);
+    valkey.time += 60_001;
+    await denied(8);
+    expect(entries().at(-1)?.details).toEqual({ required_permission: PERMISSION, suppressed_in_previous_window: 1 });
+  });
+
+  it('N+K denials from K distinct IPs and user agents add vault and ip_hash rows for the N+1 entries only', async () => {
+    const attempts = THRESHOLD + 5;
+    for (let denial = 1; denial <= attempts; denial += 1) await denied(denial);
+    expect(entries()).toHaveLength(THRESHOLD + 1);
+    expect(tokenised).toHaveLength((THRESHOLD + 1) * VAULT_ROWS_PER_ENTRY);
+    expect(entries().filter((entry) => entry.ipHash !== null && entry.ipHash !== undefined)).toHaveLength(THRESHOLD + 1);
+    expect(tokenised.map((value) => value.value)).not.toContain(`203.0.113.${String(attempts)}`);
+  });
+
+  it('every Valkey key under the two prefixes matches the key grammar, and the budget key always has a TTL of 1..60000 ms', async () => {
+    await denied(1);
+    const budgetKey = `rl:authz-denial:${ORG}:${VIEWER}`;
+    expect(valkey.pttl(budgetKey)).toBeGreaterThanOrEqual(1);
+    expect(valkey.pttl(budgetKey)).toBeLessThanOrEqual(60_000);
+    for (let denial = 2; denial <= THRESHOLD + 3; denial += 1) await denied(denial);
+    const grammar = new RegExp(`^rl:authz-denial(-carry)?:(system|${ORG}):(${VIEWER}|signature)$`);
+    const keys = valkey.keys();
+    expect([...keys].sort()).toEqual([`rl:authz-denial-carry:${ORG}:${VIEWER}`, budgetKey].sort());
+    for (const key of keys) expect(key).toMatch(grammar);
+    expect(JSON.stringify(keys)).not.toMatch(/203\.0\.113|Agent|address_book/);
+  });
+
+  it('the 429 answers carry Retry-After and the three RateLimit-* headers; a failed write answers 5xx, never a silent 403', async () => {
+    await denied(1);
+    await denied(2);
+    const crossing = await denied(3);
+    expect(crossing.status).toBe(429);
+    expect(crossing.body).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(crossing.headers['retry-after']).toBe('60');
+    expect(crossing.headers['ratelimit-limit']).toBe(String(THRESHOLD));
+    expect(crossing.headers['ratelimit-remaining']).toBe('0');
+    expect(crossing.headers['ratelimit-reset']).toBe('60');
+    valkey.time += 60_001;
+    storeFailure = new Error('store down');
+    const failed = await denied(4);
+    expect([500, 503]).toContain(failed.status);
+  });
+
+  it('the carry claimed by the window opener is restored when its entry is not written, and reported by the next opener', async () => {
+    for (let denial = 1; denial <= THRESHOLD + 2; denial += 1) await denied(denial);
+    const carryKey = `rl:authz-denial-carry:${ORG}:${VIEWER}`;
+    expect(valkey.value(carryKey)).toBe(1);
+    valkey.time += 60_001;
+    storeFailure = new Error('store down');
+    storeFailsOnce = true;
+    expect([500, 503]).toContain((await denied(10)).status);
+    expect(valkey.value(carryKey)).toBe(1);
+    valkey.time += 60_001;
+    expect((await denied(11)).status).toBe(403);
+    expect(entries().at(-1)?.details).toEqual({ required_permission: PERMISSION, suppressed_in_previous_window: 1 });
+    expect(valkey.value(carryKey)).toBeUndefined();
+  });
+
+  it('a permitted request never spends the budget; the counter has no organisation or actor label', async () => {
+    principal = session(SHIPPER, ['address_book:manage', 'address_book:read']);
+    for (let call = 0; call < THRESHOLD + 3; call += 1) expect((await denied(call + 1)).status).toBe(200);
+    expect(valkey.calls).toBe(0);
+    principal = session(VIEWER, []);
+    for (let denial = 1; denial <= THRESHOLD + 3; denial += 1) await denied(denial);
+    expect(counter.snapshot()).toEqual({ 'authz-denial': 3 });
+    expect(JSON.stringify(counter.snapshot())).not.toMatch(new RegExp(`${ORG}|${VIEWER}|203\\.0\\.113`));
+  });
+
+  it('[outage] with Valkey down the same shape holds per instance and nothing is written above N+1', async () => {
+    valkey.failure = new Error('connect ECONNREFUSED valkey:6379');
+    const statuses: number[] = [];
+    for (let denial = 1; denial <= THRESHOLD + 4; denial += 1) statuses.push((await denied(denial)).status);
+    expect(statuses).toEqual([403, 403, 429, 429, 429, 429]);
+    expect(entries()).toHaveLength(THRESHOLD + 1);
   });
 });

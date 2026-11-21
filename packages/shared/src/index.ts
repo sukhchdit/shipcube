@@ -104,6 +104,22 @@ export {
   roundHalfAwayFromZero,
   type Ratio,
 } from './money/ratio.js';
+// Carrier canonical vocabularies that leave the carrier layer (ADR-0010 am. 12 item 2, D-ARCH-168; TASK-080);
+// packages/carriers re-exports them from canonical/codes.ts.
+export {
+  CARRIER_ERROR_CODES,
+  DOCUMENT_FORMATS,
+  SURCHARGE_CODES,
+  TRACKING_STATUSES,
+  isCarrierErrorCode,
+  isDocumentFormat,
+  isSurchargeCode,
+  isTrackingStatus,
+  type CarrierErrorCode,
+  type DocumentFormat,
+  type SurchargeCode,
+  type TrackingStatus,
+} from './vocabularies/carrier.js';
 // Units and billable weight (ADR-0009 §4, DR-B05/B06, REQ-PRICE-004; TASK-076): shared by the API and the quote widget.
 export {
   GRAMS_PER_POUND,
