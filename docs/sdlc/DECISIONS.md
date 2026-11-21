@@ -10387,3 +10387,9 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **QG-041B-C7 (c): answered here, for quality-gatekeeper to close.**
 - **Applied in:** `docs/05-quality/TEST-STRATEGY.md` 1.6 (header, §7.8, §10.4, §15 item 25); this file.
 - **Reversibility:** High (strategy text; the rules bind harness tasks that have not merged yet).
+
+### D-ORCH-170 · 2026-11-21 · sdlc-orchestrator (session C) · Main is red in lane B for two main-wide causes; one chore PR fixes both; TASK-044 lane B FAIL classified
+- **TASK-044 lane B `20261121T1512Z_3326231` = FAIL**, 3 failures, none in TASK-044's paths: gitleaks-full (2 cases; main's history now has fingerprints beyond the 17-line baseline, PR080-SEC-07, D-ORCH-168) and `compose-stack.test.ts` (Valkey 9.1 in `compose.yaml` from Dependabot #49 against the 8.1 harness digest, D-SECPOST-01 O-1). api 252/0, catalog, RLS all green. Classed as main-wide, not a TASK-044 defect; security C3 (event-stream tests by title) is read from the api suite once main is green.
+- **Fix:** devops-engineer, branch `chore/main-red-gitleaks-valkey-baseline`: the exact extra fingerprints added to the baseline with security notes; compose back on the harness digest and a Dependabot `ignore` for Valkey majors. PR left ready for the user (CI billing-blocked). Every lane-B run of a branch merged with main stays red on these 3 cases until it lands; such runs are read as "PASS except PR080-SEC-07/O-1" only if the failures are exactly these.
+- **D-SECPOST-01** (post-merge security review of #80–#84) = PASS_WITH_CONDITIONS; its C1 is the main lane-B run, which will also show these 3 failures.
+- **Reversibility:** High.
