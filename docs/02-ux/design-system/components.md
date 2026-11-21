@@ -223,7 +223,7 @@ These are the shared six-state components (US-104, US-105). Each route uses them
 | `PermissionDeniedState` | Lock icon, title "You don't have access to this page", a non-revealing explanation (never confirms that the resource exists) | "Go home". "Switch organisation" only with 2 or more memberships (US-070). | none |
 | `NotFoundState` | Title "Page not found", explanation | "Go home", plus a context link (for example "View your shipments") | none |
 | `OfflineBanner` | Page-level warning banner "You're offline. We'll keep what you've entered." | "Try again" appears when the connection returns. Network submits are disabled with `aria-disabled` and a reason. | `role="status"` |
-| `RateLimitedState` | Variant of `PermissionDeniedState` for 429 on public pages (US-248): "Too many lookups. Try again in {seconds} s." with a live countdown (no announcements per tick) | "Try again" enabled when the countdown ends | none |
+| `RateLimitedState` | Variant of `PermissionDeniedState` for a `RATE_LIMITED` answer that reaches a route with nothing rendered (F10 §1.1, D-UX-037). Public pages (US-248): "Too many lookups. Try again in {seconds} s." Guarded routes (token refresh or first data request, W00 §3.9): title `common:rateLimited.title`, text `errors:RATE_LIMITED`. A visible countdown, never announced per tick; one polite "You can try again now." (`common:retry.available`) through the Announcer when it ends. Never repeats by itself. | "Try again" `aria-disabled` with `aria-describedby` → the message until the countdown ends, then available; it re-issues the refused request (on guarded routes the single-flight refresh or the data request) | none (title is the route `h1`) |
 
 ## 5. Overlays
 

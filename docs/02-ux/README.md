@@ -313,4 +313,4 @@ Check: 110 UI + 108 non-UI = 218 Must stories (PRD v1.3 §7: 218 Must; per-epic 
 
 ## 6. Decisions
 
-Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-036 (D-UX-030..036 are the v1.1 reconciliation for G2-C4). Architecture resolutions of §5: D-ARCH-011..D-ARCH-016.
+Logged in `docs/sdlc/DECISIONS.md` as D-UX-001..D-UX-037 (D-UX-030..036 are the v1.1 reconciliation for G2-C4; D-UX-037 answers the client rule for `RATE_LIMITED` of D-ARCH-233, F10 §1.1). Architecture resolutions of §5: D-ARCH-011..D-ARCH-016.
