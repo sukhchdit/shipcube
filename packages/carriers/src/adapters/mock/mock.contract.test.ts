@@ -29,8 +29,8 @@ afterEach(() => {
 });
 
 const SERVICES = ['MOCK_EXPRESS', 'MOCK_STANDARD', 'MOCK_ECONOMY'];
-const totals = (quotes: readonly { serviceCode: string; totalCharge: { amountMinor: number } }[]): Map<string, number> =>
-  new Map(quotes.map((quote) => [quote.serviceCode, quote.totalCharge.amountMinor]));
+const totals = (quotes: readonly { serviceCode: string; totalCharge: { amount: number } }[]): Map<string, number> =>
+  new Map(quotes.map((quote) => [quote.serviceCode, quote.totalCharge.amount]));
 
 describe('Mock carrier (US-122)', () => {
   it('[AT-US-122-01] three services priced deterministically, within their transit ranges, byte-identical on repeat', async () => {
@@ -43,7 +43,7 @@ describe('Mock carrier (US-122)', () => {
     expect(transit).toEqual({ MOCK_EXPRESS: [1, 3], MOCK_STANDARD: [3, 5], MOCK_ECONOMY: [5, 9] });
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
     for (const quote of first.quotes) {
-      expect(quote.totalCharge.amountMinor).toBe(quote.baseCharge.amountMinor + (quote.surcharges[0]?.amount.amountMinor ?? 0));
+      expect(quote.totalCharge.amount).toBe(quote.baseCharge.amount + (quote.surcharges[0]?.amount.amount ?? 0));
       expect(quote.totalCharge.currency).toBe('USD');
     }
     // a 2 kg parcel (volumetric 1.2 kg) on the long lane: express > standard > economy

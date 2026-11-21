@@ -84,8 +84,8 @@ describe('authzParityStep', () => {
 });
 
 describe('reference seed definition', () => {
-  it('has no datasets yet and verifies authz parity as its only step', () => {
-    expect(REFERENCE_DATASETS).toEqual([]);
+  it('seeds the TASK-080 sample pricing version as its only dataset and verifies authz parity as its only step', () => {
+    expect(REFERENCE_DATASETS.map((dataset) => dataset.name)).toEqual(['pricing_config_versions']);
     expect(REFERENCE_STEPS.map((step) => step.name)).toEqual(['authz-parity']);
   });
 });

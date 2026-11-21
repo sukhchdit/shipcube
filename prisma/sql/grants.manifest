@@ -28,6 +28,10 @@ platform_app INSERT public.idempotency_keys
 platform_app UPDATE public.idempotency_keys
 platform_app DELETE public.idempotency_keys
 
+# pricing configuration versions (TASK-080, migration 20261121000000_pricing_config_versions): GLOBAL, SELECT only; the
+# reference seed as platform_migrator (owner) is the single writer (data-model §3.9, §9.1; insert-only dataset).
+platform_app SELECT public.pricing_config_versions
+
 # job idempotency ledger (TASK-039, migration 20261119000000_job_executions): SYSTEM, module worker; insert-only.
 platform_app SELECT public.job_executions
 platform_app INSERT public.job_executions
