@@ -120,9 +120,9 @@ describe('[B1] the wrapper around the authentication slot', () => {
   }
 
   /** Runs the wrapped slot once and resolves with what it passed on. */
-  const run = (slot: RouteSlot, k: ReturnType<typeof kit>, req = request()) =>
+  const run = (slot: RouteSlot, k: ReturnType<typeof kit>, req = request(), res = response) =>
     new Promise<unknown>((resolve) => {
-      withAuthnFailedBudget(slot, k.composed)(route)(req, response, ((error?: unknown) => resolve(error)) as NextFunction);
+      withAuthnFailedBudget(slot, k.composed)(route)(req, res, ((error?: unknown) => resolve(error)) as NextFunction);
     });
 
   const refusing: RouteSlot = () => (_req, _res, next) => next(new AppError('AUTH_REQUIRED'));
@@ -164,12 +164,12 @@ describe('[B1] the wrapper around the authentication slot', () => {
 
   it('[R1-m1] a promise rejected with a falsy value, and a falsy throw, are passed on as errors and spend nothing', async () => {
     const k = kit();
-    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the falsy rejection under test
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- TASK-041 the falsy rejection under test (R1-m1)
     const rejectsUndefined: RouteSlot = () => () => Promise.reject(undefined);
-    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the falsy rejection under test
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- TASK-041 the falsy rejection under test (R1-m1)
     const rejectsFalse: RouteSlot = () => () => Promise.reject(false);
     const throwsUndefined: RouteSlot = () => () => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error -- the falsy throw under test
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- TASK-041 the falsy throw under test (R1-m1)
       throw undefined;
     };
     const passed = [await run(rejectsUndefined, k), await run(rejectsFalse, k), await run(throwsUndefined, k)];
@@ -214,6 +214,44 @@ describe('[B1] the wrapper around the authentication slot', () => {
     expect(heldAtNext).toEqual([0, 0]);
     // The refusal's unit was still held while its spend was issued: no step-0 reading in between can miss it.
     expect(heldDuringSpend).toEqual([1]);
+  });
+
+  it('[R2-M1] [D-ARCH-226] the unit is entered before the slot is called, so a close while the slot runs does not free it', async () => {
+    const k = kit();
+    const ip = '203.0.113.7';
+    const holder = {} as Response;
+    expect(k.composed.inFlight.admit(ip, 0, 2, holder)).toBe(true);
+    let heldAfterClose = -1;
+    const leaving: RouteSlot = () => (_req, res, next) => {
+      // The client disconnects while the authentication runs: step 0's close handler fires.
+      k.composed.inFlight.releaseUnentered(res);
+      heldAfterClose = k.composed.inFlight.held(ip);
+      next(new AppError('AUTH_REQUIRED'));
+    };
+    expect(await run(leaving, k, request(), holder)).toMatchObject({ code: 'AUTH_REQUIRED' });
+    expect(heldAfterClose).toBe(1);
+    expect(k.composed.inFlight.held(ip)).toBe(0);
+  });
+
+  it('[D-TASK041-20] a request whose unit the close released before the slot is not authenticated and goes no further', async () => {
+    const k = kit();
+    const gone = {} as Response;
+    expect(k.composed.inFlight.admit('203.0.113.7', 0, 2, gone)).toBe(true);
+    k.composed.inFlight.releaseUnentered(gone);
+    let entered = 0;
+    let passed = 0;
+    const counting: RouteSlot = () => (_req, _res, next) => {
+      entered += 1;
+      next();
+    };
+    withAuthnFailedBudget(counting, k.composed)(route)(request(), gone, (() => {
+      passed += 1;
+    }) as NextFunction);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect([entered, passed]).toEqual([0, 0]);
+    // A request step 0 did not hold for is authenticated as before.
+    expect(await run(counting, k)).toBeUndefined();
+    expect(entered).toBe(1);
   });
 
   it('an accepted request, a refusal without a declared credential and a server fault spend nothing', async () => {

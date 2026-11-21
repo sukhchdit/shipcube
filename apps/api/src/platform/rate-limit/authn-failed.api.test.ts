@@ -1,11 +1,13 @@
 /**
  * The failed-authentication budget through the real createApp (PR041-SEC-02 (b), PR041-SEC-09; ADR-0016 amendment 12
  * items 3, 4 and 6, amendment 13 items 1 to 3; rulings B1 tests (1) to (7) and (9) to (13), B2; conditions E4 and E5;
- * TASK-041 part 041-B; the parallel burst of R1-M1 and D-TASK041-18, the replaced pipeline of R1-m2). Valkey is the script-interpreting fake shared by every "replica"; the real Lua is proved in
+ * TASK-041 part 041-B; the parallel burst of R1-M1 and D-TASK041-18, the replaced pipeline of R1-m2; the release rule
+ * and the hold label of ADR-0016 amendment 13 item 6, rulings section 9.3 tests H1 to H5). Valkey is the
+ * script-interpreting fake shared by every "replica"; the real Lua (and H6, the reply order) is proved in
  * rate-limit.int.test.ts, the startApi half (B1 (8)) in start-api.denial-budget.api.test.ts.
  */
-import { request as httpRequest } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { Server } from 'node:http';
+import { type AddressInfo, connect, type Socket } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { AppError, presentedKinds } from '@platform/shared';
@@ -22,8 +24,10 @@ import type { RouteSlot } from '../routing/slot.js';
 import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { closeLoopbackServer } from '../routing/tests/loopback.js';
 import { createRateLimitCounter } from './counter.js';
+import { createInFlightLedger, type InFlightLedger } from './in-flight.js';
 import type { RateLimitDependencies } from './kit.js';
 import { RefreshCookiePathError } from './limits.js';
+import { clientIpKey } from './policy.js';
 import { FakeValkey } from './tests/fake-valkey.js';
 import { closeServedApps, request } from './tests/serve.js';
 import { DEFAULT_RATE_LIMIT_SETTINGS } from './tests/settings.js';
@@ -129,6 +133,8 @@ interface Harness {
   readonly valkey: FakeValkey;
   readonly logged: [string, Readonly<Record<string, unknown>>][];
   readonly counter: ReturnType<typeof createRateLimitCounter>;
+  /** The in-flight ledger of the apps of this harness (one per harness, like the counter). */
+  readonly inFlight: InFlightLedger;
   readonly seam: Seam;
   app(overrides?: Partial<RateLimitDependencies['settings']>, options?: Partial<AppDependencies>): ReturnType<typeof createApp>;
 }
@@ -136,6 +142,7 @@ interface Harness {
 function harness(valkey = new FakeValkey()): Harness {
   const logged: [string, Readonly<Record<string, unknown>>][] = [];
   const counter = createRateLimitCounter();
+  const inFlight = createInFlightLedger();
   const authn = seam();
   const logger: AppLogger = {
     info: () => undefined,
@@ -147,6 +154,7 @@ function harness(valkey = new FakeValkey()): Harness {
     valkey,
     logged,
     counter,
+    inFlight,
     seam: authn,
     app: (overrides = {}, options = {}) =>
       createApp({
@@ -155,7 +163,7 @@ function harness(valkey = new FakeValkey()): Harness {
         logger,
         authenticate: authn.slot,
         trustProxyHops: 1,
-        rateLimit: { settings: { ...DEFAULT_RATE_LIMIT_SETTINGS, ...overrides }, valkey, counter },
+        rateLimit: { settings: { ...DEFAULT_RATE_LIMIT_SETTINGS, ...overrides }, valkey, counter, inFlight },
         ...options,
       }),
   };
@@ -465,14 +473,19 @@ describe('[E5] [ADR-0016 am. 13 item 3] the exp pre-check in front of the verifi
   });
 });
 
-/** A seam that answers after `delayMs` (a stand-in for a verification or a lookup) and records its peak concurrency. */
-function slowSeam(delayMs: number): Seam & { active: number; peak: number } {
+/**
+ * A seam that answers after `delayMs` (a stand-in for a verification or a lookup) and records its peak concurrency and
+ * the `X-Probe` header of every request it was entered for.
+ */
+function slowSeam(delayMs: number): Seam & { active: number; peak: number; readonly probes: Set<string> } {
   const state = {
     entered: 0,
     active: 0,
     peak: 0,
+    probes: new Set<string>(),
     slot: (() => (req: Request, res: Response, next: NextFunction) => {
       state.entered += 1;
+      state.probes.add(req.get('x-probe') ?? '');
       state.active += 1;
       state.peak = Math.max(state.peak, state.active);
       setTimeout(() => {
@@ -503,6 +516,55 @@ async function until(done: () => boolean, deadlineMs = 30_000): Promise<void> {
   }
 }
 
+/** Listens on an ephemeral loopback port for the raw clients of the H rows. */
+async function listening(app: ReturnType<typeof createApp>): Promise<{ readonly server: Server; readonly port: number }> {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  return { server, port: (server.address() as AddressInfo).port };
+}
+
+interface RawClient {
+  readonly socket: Socket;
+  /** True once any byte of a response arrived. */
+  answered(): boolean;
+}
+
+/** A raw HTTP/1.1 client on loopback: writes the request head (and `body`, which may be short of its length). */
+function rawClient(port: number, head: readonly string[], body = ''): RawClient {
+  const socket = connect(port, '127.0.0.1');
+  let answered = false;
+  socket.on('data', () => {
+    answered = true;
+  });
+  socket.on('error', () => undefined);
+  socket.write(`${[...head, 'Host: 127.0.0.1'].join('\r\n')}\r\n\r\n${body}`);
+  return { socket, answered: () => answered };
+}
+
+/** A junk bearer to the [session] route from IP A, tagged with `probe`. */
+const junkBearerHead = (probe: string): readonly string[] => [
+  'GET /api/v1/me HTTP/1.1',
+  `X-Forwarded-For: ${IP_A}`,
+  'Authorization: Bearer junk',
+  `X-Probe: ${probe}`,
+];
+
+/** A junk provider signature from IP A whose JSON body announces 1,000 bytes and sends 6: it stays in the body parser. */
+const slowBody = (port: number): RawClient =>
+  rawClient(
+    port,
+    [
+      'POST /api/v1/webhooks/mock HTTP/1.1',
+      `X-Forwarded-For: ${IP_A}`,
+      'X-Mock-Signature: junk',
+      'Content-Type: application/json',
+      'Content-Length: 1000',
+    ],
+    '{"a":1',
+  );
+
+const KEY_A = clientIpKey(IP_A);
+
 describe('[R1-M1] [D-TASK041-18] a parallel burst is bounded by the budget (the in-flight ledger)', () => {
   it('60 parallel junk bearers with limit 5: the authenticator is entered 5 times (per-instance slack 0), 5 x 401 and 55 x 429', async () => {
     const h = harness();
@@ -520,7 +582,13 @@ describe('[R1-M1] [D-TASK041-18] a parallel burst is bounded by the budget (the 
       expect(reply.headers['ratelimit-remaining']).toBe('0');
     }
     expect(h.valkey.value(failedKey(IP_A))).toBe(5);
-    expect(h.counter.snapshot()).toEqual({ 'step0-authn-failed': 55 });
+    // [H5] A refusal by the hold (Retry-After 1 here, the fake window is 60 s) is counted under its own label; one by
+    // the spent budget under step0-authn-failed. Together they are the 55.
+    const held = refused.filter((reply) => reply.headers['retry-after'] === '1').length;
+    expect(h.counter.snapshot()).toEqual({
+      ...(held > 0 ? { 'step0-authn-inflight': held } : {}),
+      ...(held < 55 ? { 'step0-authn-failed': 55 - held } : {}),
+    });
     expect(securityEvents(h, 'rate_limit_auth')).toHaveLength(1);
     // The window is spent: the next request is refused before the authenticator, valid or not.
     expect((await request(app).get('/api/v1/me').set(fromIp(IP_A)).set('Authorization', 'Bearer valid')).status).toBe(429);
@@ -557,7 +625,7 @@ describe('[R1-M1] [D-TASK041-18] a parallel burst is bounded by the budget (the 
     expect(await junkBearers(app, IP_A, 5)).toEqual([401, 401, 401, 401, 401]);
   });
 
-  it('a credentialed request that never reaches the authentication slot (404) releases its unit when the response closes', async () => {
+  it('[H3] a credentialed request that never reaches the authentication slot (404) releases its unit when the response closes', async () => {
     const h = harness();
     const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 2 });
     for (let call = 0; call < 5; call += 1) {
@@ -566,27 +634,99 @@ describe('[R1-M1] [D-TASK041-18] a parallel burst is bounded by the budget (the 
     expect(await junkBearers(app, IP_A, 3)).toEqual([401, 401, 429]);
   });
 
-  it('a request whose client went away before step 0 answered is never admitted, so an abort cannot skip the hold', async () => {
+  it('[H3] a client that leaves while its body is read releases its unit at the close; the slot is never entered', async () => {
+    const h = harness();
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 });
+    const { server, port } = await listening(app);
+    try {
+      const client = slowBody(port);
+      await until(() => h.inFlight.held(KEY_A) === 1);
+      client.socket.destroy();
+      await until(() => h.inFlight.held(KEY_A) === 0);
+      expect(h.seam.entered).toBe(0);
+      expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+      expect(await junkBearers(app, IP_A, 5)).toEqual([401, 401, 401, 401, 401]);
+    } finally {
+      await closeLoopbackServer(server);
+    }
+  });
+
+  it('[R2-n1] a request whose client went away before step 0 answered is not admitted and is counted under no label', async () => {
     const h = harness();
     h.valkey.hang = true;
     const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 });
-    const server = app.listen(0, '127.0.0.1');
-    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    const { server, port } = await listening(app);
     try {
-      const outgoing = httpRequest({
-        host: '127.0.0.1',
-        port: (server.address() as AddressInfo).port,
-        path: '/api/v1/me',
-        agent: false,
-        headers: { ...fromIp(IP_A), Authorization: 'Bearer junk' },
-      });
-      outgoing.on('error', () => undefined);
-      outgoing.end();
+      const client = rawClient(port, junkBearerHead('gone'));
       // Step 0 has sent its store call (it hangs until the 250 ms bound); then the client goes away.
       await until(() => h.valkey.calls === 1);
-      outgoing.destroy();
-      await until(() => h.counter.snapshot()['step0-authn-failed'] === 1);
+      client.socket.destroy();
+      // The bound ends in the outage report; step 0 then decides and answers with no I/O in between.
+      await until(() => securityEvents(h, 'rate_limit_store_unavailable').length === 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(h.counter.snapshot()).toEqual({});
+      expect(h.inFlight.held(KEY_A)).toBe(0);
       expect(h.seam.entered).toBe(0);
+    } finally {
+      await closeLoopbackServer(server);
+    }
+  });
+});
+
+describe('[R2-M1] [D-ARCH-226] [D-ARCH-227] the release rule and the hold label (ADR-0016 am. 13 item 6)', () => {
+  it.each(['destroy', 'half-close'] as const)(
+    '[H2] 60 staggered junk bearers whose clients leave (%s) after admission: the authenticator is entered 5 times, nothing stays held',
+    async (leave) => {
+      const h = harness();
+      const slow = slowSeam(400);
+      const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 }, { authenticate: slow.slot });
+      const { server, port } = await listening(app);
+      try {
+        const clients: Promise<void>[] = [];
+        for (let probe = 0; probe < 60; probe += 1) {
+          const id = String(probe);
+          const client = rawClient(port, junkBearerHead(id));
+          // The client leaves once its request is in the authenticator (admitted, not answered), or once refused.
+          clients.push(
+            until(() => client.answered() || slow.probes.has(id)).then(() => {
+              if (leave === 'destroy') client.socket.destroy();
+              else client.socket.end();
+            }),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 3));
+        }
+        await Promise.all(clients);
+        await until(() => slow.active === 0 && h.inFlight.held(KEY_A) === 0);
+        expect(slow.entered).toBe(5);
+        expect(h.valkey.value(failedKey(IP_A))).toBe(5);
+        const snapshot = h.counter.snapshot();
+        expect((snapshot['step0-authn-inflight'] ?? 0) + (snapshot['step0-authn-failed'] ?? 0)).toBe(55);
+      } finally {
+        await closeLoopbackServer(server);
+      }
+    },
+  );
+
+  it('[H4] [H5] with 5 units held on unfinished bodies, an accepted credential is 429 (Retry-After 1) under step0-authn-inflight, no event, no authentication; once the clients leave it is served', async () => {
+    const h = harness();
+    const app = h.app({ RATE_LIMIT_PUBLIC_PER_MIN: 5 });
+    const { server, port } = await listening(app);
+    try {
+      const clients = Array.from({ length: 5 }, () => slowBody(port));
+      await until(() => h.inFlight.held(KEY_A) === 5);
+      const valid = () => request(app).get('/api/v1/me').set(fromIp(IP_A)).set('Authorization', 'Bearer valid');
+      const refused = await valid();
+      expect([refused.status, refused.headers['retry-after']]).toEqual([429, '1']);
+      expect(h.seam.entered).toBe(0);
+      expect(securityEvents(h, 'rate_limit_auth')).toEqual([]);
+      expect(h.counter.snapshot()).toEqual({ 'step0-authn-inflight': 1 });
+      for (const client of clients) client.socket.destroy();
+      await until(() => h.inFlight.held(KEY_A) === 0);
+      expect((await valid()).status).toBe(200);
+      expect(h.seam.entered).toBe(1);
+      expect(h.valkey.value(failedKey(IP_A))).toBeUndefined();
+      expect(h.counter.snapshot()).toEqual({ 'step0-authn-inflight': 1 });
+      expect(securityEvents(h, 'rate_limit_auth')).toEqual([]);
     } finally {
       await closeLoopbackServer(server);
     }

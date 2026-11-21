@@ -155,8 +155,11 @@ interface Started {
   lines(): Record<string, unknown>[];
 }
 
-/** `seam: false` keeps the production authentication slot (the TASK-020 stub, which refuses every declared credential). */
-async function start(options: { readonly seam?: boolean } = {}): Promise<Started> {
+/**
+ * `seam: false` keeps the production authentication slot (the TASK-020 stub, which refuses every declared credential).
+ * `breakerClock` replaces the clock of the store breaker the kit composes (R2-n2: a frozen cool-down).
+ */
+async function start(options: { readonly seam?: boolean; readonly breakerClock?: () => number } = {}): Promise<Started> {
   const valkey = new FakeValkey();
   const services = {
     valkey,
@@ -192,10 +195,15 @@ async function start(options: { readonly seam?: boolean } = {}): Promise<Started
     },
     processEvents: new EventEmitter(),
     createRuntimeServices: () => services,
-    // The one test seam: the authentication slot. Every other dependency is what startApi composed.
+    // The test seams: the authentication slot and, for one row, the breaker's clock. Every other dependency is what
+    // startApi composed.
     createApp: (deps) => {
       composed = deps;
-      app = createApp(options.seam === false ? deps : { ...deps, authenticate: signedIn });
+      const clocked =
+        options.breakerClock === undefined || deps.rateLimit === undefined
+          ? deps
+          : { ...deps, rateLimit: { ...deps.rateLimit, breakerClock: options.breakerClock } };
+      app = createApp(options.seam === false ? clocked : { ...clocked, authenticate: signedIn });
       return { listen: (_port, callback) => (callback(), server) };
     },
     modules: [{ name: 'addresses', routes: [gated] }],
@@ -298,7 +306,8 @@ describe('[PR041-SEC-02] [B1 (8)] startApi composes the failed-authentication bu
 
 describe('[R1-m2] [B3] [K1] [K2] the composition shares one store breaker between the limiters and the denial budget', () => {
   it('with a hanging store the first request waits the 250 ms bound once; during the cool-down step 5 and the denials make no store call', async () => {
-    const { app, valkey } = await start();
+    // The breaker's clock stands still, so the cool-down cannot end during the row however slow the host is (R2-n2).
+    const { app, valkey } = await start({ breakerClock: () => 0 });
     valkey.hang = true;
     const started = Date.now();
     expect((await request(app).get('/api/v1/address-book').set('X-Forwarded-For', '203.0.113.60')).status).toBe(403);

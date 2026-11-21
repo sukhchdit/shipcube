@@ -15,8 +15,11 @@
  *   settled (bounded by the store timeout and the breaker; a store failure uses the per-instance fallback).
  * - The spend that reaches the limit emits `rate_limit_auth` with `class: 'authn-failed'` and `key_type: 'ip'`, once per
  *   key and window (ADR-0016 am. 12 item 6). Step 0 reads the budget (limits.ts `ipLimiter`).
- * - Once the slot's outcome is known (after the spend, when there is one) the wrapper releases the in-flight unit step 0
- *   holds for the request (in-flight.ts; R1-M1, D-TASK041-18), so a parallel burst is bounded by the budget too.
+ * - The in-flight unit step 0 holds for the request (in-flight.ts; R1-M1, D-TASK041-18) is marked as entered before
+ *   the slot is called, so a client that disconnects no longer frees it (D-ARCH-226, R2-M1). Once the slot's outcome is
+ *   known (after the spend, when there is one) the wrapper releases it, whether or not the client is still there, so a
+ *   parallel burst is bounded by the budget too. A request whose unit the close already released (its client left
+ *   between step 0 and the slot) is not authenticated and goes no further (D-TASK041-20).
  */
 import { isAppError, presentedKinds } from '@platform/shared';
 import type { NextFunction, Request, Response } from 'express';
@@ -50,9 +53,14 @@ export function withAuthnFailedBudget(slot: RouteSlot, kit: RateLimitKit): Route
     const inner = slot(route);
     const declared: readonly string[] = route.auth;
     return function authenticate(req: Request, res: Response, next: NextFunction): void {
+      // From here only the outcome releases the unit (D-ARCH-226). A unit the close already released means the client
+      // left after admission: the response is closed and nobody waits for it, so the slot is not entered at all, else
+      // it would run outside the hold (D-TASK041-20). The access line recorded the abort at the close.
+      if (!kit.inFlight.enter(res)) return;
       let settled = false;
       // The outcome is known: the in-flight unit step 0 holds for this request (in-flight.ts) is released, after the
-      // spend has landed when there is one, so the next step-0 reading counts this refusal either way.
+      // spend has landed when there is one, so the next step-0 reading counts this refusal either way. This holds
+      // whether or not the client is still connected.
       const done = (error?: unknown): void => {
         // Only the first outcome counts; a later call or a rejection that arrives after it is dropped on purpose.
         if (settled) return;

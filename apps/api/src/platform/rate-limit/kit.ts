@@ -1,15 +1,15 @@
 /**
  * Composition of the rate limiter (TASK-041): the Valkey store over the runtime's client, the limiter with its
  * per-instance fallback, the process breaker of the store (ADR-0016 am. 12 item 7; shared with the denial budget, which
- * createApp hands it to), the outage report (once a minute per scope), the counter and the in-flight ledger of the failed-authentication gate. createApp calls it from the
- * `rateLimit` dependency startApi passes; the denial budget is composed separately by the pipeline (it travels with the
- * audit capture, D-SECT39-01 item 6).
+ * createApp hands it to), the outage report (once a minute per scope), the counter and the in-flight ledger of the
+ * failed-authentication gate. createApp calls it from the `rateLimit` dependency startApi passes; the denial budget is
+ * composed separately by the pipeline (it travels with the audit capture, D-SECT39-01 item 6).
  */
 import type { SecurityEventSink } from '@platform/shared/logging';
 
 import { createStoreBreaker } from './breaker.js';
 import { createRateLimitCounter, type RateLimitCounter } from './counter.js';
-import { createInFlightLedger } from './in-flight.js';
+import { createInFlightLedger, type InFlightLedger } from './in-flight.js';
 import { createOutageReporter, createRateLimiter } from './limiter.js';
 import type { RateLimitKit } from './limits.js';
 import type { RateLimitSettings } from './policy.js';
@@ -22,6 +22,10 @@ export interface RateLimitDependencies {
   readonly valkey?: ScriptClient | undefined;
   /** The refusal counter (tests read it); default a fresh one. The export owner is TASK-214. */
   readonly counter?: RateLimitCounter | undefined;
+  /** The in-flight ledger (tests read it); default a fresh one per kit. */
+  readonly inFlight?: InFlightLedger | undefined;
+  /** The clock of the store breaker (tests freeze its cool-down); default `Date.now`. */
+  readonly breakerClock?: (() => number) | undefined;
 }
 
 export function createRateLimitKit(
@@ -30,7 +34,7 @@ export function createRateLimitKit(
   counter: RateLimitCounter = deps.counter ?? createRateLimitCounter(),
 ): RateLimitKit {
   const report = createOutageReporter((scope) => events.emit('rate_limit_store_unavailable', { store: 'valkey', scope }));
-  const breaker = createStoreBreaker();
+  const breaker = createStoreBreaker(deps.breakerClock === undefined ? {} : { now: deps.breakerClock });
   return {
     limiter: createRateLimiter({
       store: deps.valkey === undefined ? createMemoryStore() : createValkeyStore(deps.valkey, { breaker }),
@@ -40,7 +44,7 @@ export function createRateLimitKit(
     counter,
     events,
     breaker,
-    inFlight: createInFlightLedger(),
+    inFlight: deps.inFlight ?? createInFlightLedger(),
   };
 }
 

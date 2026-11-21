@@ -2,8 +2,8 @@
  * The Lua scripts of the rate limiter and the denial budget against a real Valkey 8 (Testcontainers; lane B): the
  * fake client of the unit suites interprets the same scripts in JavaScript, this suite proves the real semantics
  * (atomic INCR + PEXPIRE, PTTL of the budget key, GETDEL of the carry, the concurrency slots, two clients sharing one
- * counter, the hit-and-peek script of the failed-authentication budget). US-040 AT-US-040-05; T-39, D-SECT39-01 item 3;
- * PR041-SEC-02 (b); TASK-041.
+ * counter, the hit-and-peek script of the failed-authentication budget, and the reply order its in-flight hold rests on:
+ * rulings section 9.3 H6). US-040 AT-US-040-05; T-39, D-SECT39-01 item 3; PR041-SEC-02 (b); D-ARCH-225; TASK-041.
  */
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { Redis } from 'ioredis';
@@ -11,6 +11,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 
 import { createValkeyClient } from '../valkey/client.js';
 import { createDenialBudget, denialKeys, RESTORE_SCRIPT, type DenialSubject } from './denial-budget.js';
+import { createInFlightLedger } from './in-flight.js';
 import { createRateLimiter } from './limiter.js';
 import { AUTHN_FAILED_RULE } from './policy.js';
 import { createValkeyStore } from './store.js';
@@ -191,5 +192,53 @@ describe('[PR041-SEC-02] [B1] the failed-authentication budget over a real Valke
     const ttl = await probe.pttl('rl:step0:authn-failed:203.0.113.99');
     expect(ttl).toBeGreaterThanOrEqual(1);
     expect(ttl).toBeLessThanOrEqual(60_000);
+  });
+
+  it('[H6] [D-ARCH-225] the limiter and the in-flight ledger over one client: limit 5, 60 gated calls and 60 more while the spends are in flight; 5 of 120 are admitted', async () => {
+    const valkey = client('rl-hold');
+    const limiter = createRateLimiter({
+      store: createValkeyStore(valkey, { timeoutMs: LOAD_TIMEOUT_MS }),
+      onStoreUnavailable: () => undefined,
+    });
+    const ledger = createInFlightLedger();
+    const ip = '203.0.113.120';
+    const gate = { name: AUTHN_FAILED_RULE, key: ip, limit: 5, windowMs: 60_000 };
+    const step = { name: 'step0:credentialed', key: ip, limit: 6_000, windowMs: 60_000 };
+    const spends: Promise<void>[] = [];
+    const second: Promise<void>[] = [];
+    let admitted = 0;
+    let landed = 0;
+    let landedWhenSecondIssued: number | undefined;
+    /** One gated call; an admitted one spends (its authentication refused) and then releases its unit, as the wrapper does. */
+    const gatedCall = async (): Promise<void> => {
+      const holder = {};
+      const decision = await limiter.consumeGated(step, gate, {
+        onStoreFailure: 'fail-open',
+        scope: 'it',
+        admit: (settled) => ledger.admit(ip, settled, gate.limit, holder),
+      });
+      if (!decision.allowed) return;
+      admitted += 1;
+      spends.push(
+        limiter.spend(gate, 'it').then(() => {
+          landed += 1;
+          ledger.release(holder);
+        }),
+      );
+      // The limit is admitted and the last spend was only just sent: the second wave is issued while it is in flight.
+      if (admitted === gate.limit && landedWhenSecondIssued === undefined) {
+        landedWhenSecondIssued = landed;
+        for (let call = 0; call < 60; call += 1) second.push(gatedCall());
+      }
+    };
+    await Promise.all(Array.from({ length: 60 }, () => gatedCall()));
+    await Promise.all(second);
+    await Promise.all(spends);
+    expect(landedWhenSecondIssued).toBeLessThan(gate.limit);
+    expect(second).toHaveLength(60);
+    expect(admitted).toBe(5);
+    expect(ledger.held(ip)).toBe(0);
+    expect(await valkey.get(`rl:step0:authn-failed:${ip}`)).toBe('5');
+    expect(await valkey.get(`rl:step0:credentialed:${ip}`)).toBe('120');
   });
 });

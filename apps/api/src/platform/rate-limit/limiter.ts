@@ -41,6 +41,11 @@ export type RateDecision =
       readonly retryAfterSeconds: number;
       /** The first refusal of this key and window (the hit whose count is the limit plus one; ADR-0016 am. 12 item 6). */
       readonly first: boolean;
+      /**
+       * Present on a refusal by the in-flight hold of a gated call (the admission said no, D-ARCH-227), absent on a
+       * refusal by a spent gate or by the rule. `retryAfterSeconds` cannot tell them apart: a spent window can end in 1 s.
+       */
+      readonly held?: true;
     };
 
 export type StoreFailureMode = 'fail-open' | 'fallback';
@@ -60,8 +65,8 @@ export interface SpendResult {
 export interface GatedConsumeOptions extends ConsumeOptions {
   /**
    * The admission of a request `rule` allowed (in-flight.ts; D-TASK041-18): called with the gate's settled count in the
-   * same synchronous step as the store reply is judged; false refuses the request with the gate's reading and a
-   * one-second retry. Absent, every allowed request is admitted.
+   * same synchronous step as the store reply is judged; false refuses the request with the gate's reading, a
+   * one-second retry and `held: true`. Absent, every allowed request is admitted.
    */
   readonly admit?: ((settled: number) => boolean) | undefined;
 }
@@ -126,7 +131,7 @@ async function evaluate(store: RateLimitStore, rules: readonly RateRule[]): Prom
 }
 
 /** A refusal by the gate: its reading with no unit left, and a retry after `resetSeconds`. */
-function gateRefusal(gate: RateRule, resetSeconds: number): RateDecision {
+function gateRefusal(gate: RateRule, resetSeconds: number): Extract<RateDecision, { allowed: false }> {
   return {
     allowed: false,
     reading: { rule: gate.name, limit: gate.limit, remaining: 0, resetSeconds },
@@ -143,7 +148,7 @@ function gateRefusal(gate: RateRule, resetSeconds: number): RateDecision {
 function gated(gate: RateRule, peek: WindowPeek, decision: RateDecision, admit: GatedConsumeOptions['admit']): RateDecision {
   if (peek.count >= gate.limit) return gateRefusal(gate, seconds(peek.resetMs));
   if (!decision.allowed || admit === undefined || admit(peek.count)) return decision;
-  return gateRefusal(gate, 1);
+  return { ...gateRefusal(gate, 1), held: true };
 }
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {

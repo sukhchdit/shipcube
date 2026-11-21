@@ -120,6 +120,7 @@ export function selectsCredentialedRule(req: Pick<Request, 'method' | 'path' | '
 /** The counter label of a step-0 refusal (TASK-214 exports them). */
 function stepZeroLabel(credentialed: boolean, decision: RateDecision): StepZeroLabel {
   if (!credentialed) return 'unauthenticated';
+  if (!decision.allowed && decision.held === true) return 'step0-authn-inflight';
   return decision.reading?.rule === AUTHN_FAILED_RULE ? 'step0-authn-failed' : 'step0-credentialed';
 }
 
@@ -131,10 +132,13 @@ function stepZeroLabel(credentialed: boolean, decision: RateDecision): StepZeroL
  * takes the anonymous budget, whatever headers it carries, and is never refused by the failed-authentication budget.
  *
  * A parallel burst would read the same settled count, so a credentialed request is also admitted against the IP's
- * in-flight ledger (in-flight.ts; R1-M1, D-TASK041-18): it holds one unit from here until the authentication slot's
- * outcome is known (authn-failed.ts releases it, after a spend has landed) or, if the slot is never reached, until the
- * response closes. While `settled + held` reaches the limit it is answered 429 with `Retry-After: 1`. A request whose
- * response closed before the store answered (an aborted client) is never admitted, so an abort cannot skip the hold.
+ * in-flight ledger (in-flight.ts; R1-M1, D-TASK041-18, D-ARCH-225/226): it holds one unit from here until the
+ * authentication outcome is known (authn-failed.ts releases it, after a spend has landed). The close of the response
+ * releases the unit only when the slot was never entered (a 404, a body that never arrived, a refusal before the slot);
+ * once the wrapper has entered the slot, a client that disconnects leaves the unit held until the outcome. While
+ * `settled + held` reaches the limit the request is answered 429 with `Retry-After: 1` and counted under
+ * `step0-authn-inflight` (D-ARCH-227), with no security event. A request whose response closed before the store
+ * answered (its client left before step 0 answered) is not admitted and is counted under no label.
  */
 export function ipLimiter(kit: RateLimitKit | undefined, options: StepZeroOptions): RequestHandler {
   if (kit === undefined) return passThrough();
@@ -147,20 +151,27 @@ export function ipLimiter(kit: RateLimitKit | undefined, options: StepZeroOption
     const ip = clientIpKey(req.ip);
     const rule = stepZeroRule(ip, credentialed, kit.settings);
     const consumeOptions = { onStoreFailure: 'fail-open', scope: 'rate-limit' } as const;
+    // Set only for a credentialed request, whose close is watched.
+    let closed = false;
     let decided: Promise<RateDecision>;
     if (credentialed) {
       const gate = authnFailedRule(ip, kit.settings);
-      let closed = false;
       res.once('close', () => {
         closed = true;
-        kit.inFlight.release(res);
+        // Only a unit whose request never entered the slot (D-ARCH-226); an entered one is released by its outcome.
+        kit.inFlight.releaseUnentered(res);
       });
       const admit = (settled: number): boolean => !closed && kit.inFlight.admit(ip, settled, gate.limit, res);
       decided = kit.limiter.consumeGated(rule, gate, { ...consumeOptions, admit });
     } else {
       decided = kit.limiter.consume([rule], consumeOptions);
     }
-    decided.then((decision) => answer(decision, res, next, () => kit.counter.refused(stepZeroLabel(credentialed, decision)))).catch(next);
+    // A request whose client left before step 0 answered refused nobody, so it is counted under no label (D-ARCH-227).
+    // The decision is judged and answered with no I/O in between: `closed` here is its value at the admission.
+    const refused = (decision: RateDecision) => (): void => {
+      if (!closed) kit.counter.refused(stepZeroLabel(credentialed, decision));
+    };
+    decided.then((decision) => answer(decision, res, next, refused(decision))).catch(next);
   };
 }
 

@@ -44,6 +44,38 @@ describe('[R1-M1] [D-TASK041-18] the in-flight ledger', () => {
     expect(ledger.admit(IP, 0, 1, holder)).toBe(false);
     expect(ledger.admit(IP, 1, 1, {})).toBe(false);
   });
+
+  it('[R2-M1] [D-ARCH-226] once entered, the close no longer releases the unit; only the outcome does', () => {
+    const ledger = createInFlightLedger();
+    const holder = {};
+    expect(ledger.admit(IP, 0, 2, holder)).toBe(true);
+    expect(ledger.enter(holder)).toBe(true);
+    ledger.releaseUnentered(holder);
+    expect(ledger.held(IP)).toBe(1);
+    expect(ledger.admit(IP, 1, 2, {})).toBe(false);
+    ledger.release(holder);
+    ledger.release(holder);
+    ledger.releaseUnentered(holder);
+    expect(ledger.held(IP)).toBe(0);
+  });
+
+  it('[D-TASK041-20] the close releases a unit that never entered; that holder can neither enter nor be admitted again', () => {
+    const ledger = createInFlightLedger();
+    const [gone, other] = [{}, {}];
+    expect(ledger.admit(IP, 0, 2, gone)).toBe(true);
+    expect(ledger.admit(IP, 0, 2, other)).toBe(true);
+    ledger.releaseUnentered(gone);
+    ledger.releaseUnentered(gone);
+    expect(ledger.held(IP)).toBe(1);
+    expect(ledger.enter(gone)).toBe(false);
+    expect(ledger.admit(IP, 0, 2, gone)).toBe(false);
+    ledger.release(gone);
+    expect(ledger.held(IP)).toBe(1);
+    // A holder that was never gated (step 0 did not hold for it) may enter, and holds nothing.
+    expect(ledger.enter({})).toBe(true);
+    ledger.release(other);
+    expect(ledger.held(IP)).toBe(0);
+  });
 });
 
 describe('[R1-M1] consumeGated admits in the same step as the store reply', () => {
@@ -62,6 +94,7 @@ describe('[R1-M1] consumeGated admits in the same step as the store reply', () =
       reading: { rule: AUTHN_FAILED_RULE, limit: 3, remaining: 0, resetSeconds: 1 },
       retryAfterSeconds: 1,
       first: false,
+      held: true,
     });
     expect(ledger.held(IP)).toBe(3);
   });
@@ -94,7 +127,10 @@ describe('[R1-M1] consumeGated admits in the same step as the store reply', () =
     expect((await limiter.consumeGated(tight, gate, { ...OPEN, admit })).allowed).toBe(true);
     expect((await limiter.consumeGated(tight, gate, { ...OPEN, admit })).allowed).toBe(false);
     for (let spend = 0; spend < 3; spend += 1) await limiter.spend(gate, 'rate-limit');
-    expect(await limiter.consumeGated(step, gate, { ...OPEN, admit })).toMatchObject({ allowed: false, retryAfterSeconds: 60 });
+    // [H5] A refusal by the spent gate is not a refusal by the hold.
+    const spent = await limiter.consumeGated(step, gate, { ...OPEN, admit });
+    expect(spent).toMatchObject({ allowed: false, retryAfterSeconds: 60 });
+    expect(spent).not.toHaveProperty('held');
     expect(asked).toEqual([0]);
     expect((await limiter.consumeGated(step, { ...gate, key: 'other' }, OPEN)).allowed).toBe(true);
   });
@@ -113,6 +149,7 @@ describe('[R1-M1] consumeGated admits in the same step as the store reply', () =
       allowed: false,
       reading: { rule: AUTHN_FAILED_RULE, remaining: 0 },
       retryAfterSeconds: 1,
+      held: true,
     });
     expect(await limiter.consumeGated(step, gate, { onStoreFailure: 'fallback', scope: 'rate-limit', admit: refuse })).toMatchObject({
       allowed: false,
