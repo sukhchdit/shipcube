@@ -7638,3 +7638,54 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Done this session:** TASK-043 at `3ba1eb53`: code review round 4 APPROVED_WITH_NITS (`81bdc81e`) and security round 3 PASS_WITH_FOLLOW-UPS (D-SECPR043-03, `298cea31`). TASK-051 is built at `203d02eb` and TASK-080 at `4a0faee3`.
 - **Housekeeping:** this session's primary directory points at the TASK-041 worktree, so three agents wrote their memory notes there. The notes were moved to main (`673d9771`, `530629f4`), and that worktree is clean at `3a6b4c8b` again for the user's `.env.example` commit. Briefs now name the main checkout's memory directory.
 - **Reversibility:** High.
+
+### D-SECPR080-01 · 2026-11-21 · security-analyst · TASK-080 security round 1 (pre-push, `e245e6e6..4a0faee3`: margin step, sample pricing configuration, `pricing_config_versions` migration and seed, PR076-SEC-07 edits 2 and 4, carrier Money, vocabulary move) = PASS_WITH_CONDITIONS at head `4a0faee3` (record `docs/05-quality/security/PR-pending-TASK-080-security-review.md` on main; rename per D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium. One LOW and four INFO findings, one of them merge-relevant.
+  - **Method.** Single-process Node 24 probes on `git archive` extracts of `4a0faee3` and `e245e6e6`:
+    - ESLint with the real configuration (type-aware rules off);
+    - `ts.createProgram` with the pricing compiler options;
+    - the PR's own seed statements and migration on PGlite 0.4.3 (PostgreSQL 17.5);
+    - type-stripped money and migration-linter probes;
+    - the head suppression checker;
+    - 5 targeted unit suites (48 tests);
+    - a gitleaks v8.30.1 emulation.
+  - Not used: Docker, PostgreSQL 18, the TASK-080 worktree.
+- **Owned paths.** 17 against main (`--base e245e6e6 --head 4a0faee3`). The classifier selects `security-integration` (11 paths). `git merge-tree` with origin main `530629f4` is clean.
+- **Database side holds:**
+  - `platform_app` has SELECT only: INSERT, UPDATE, DELETE and TRUNCATE give 42501, and a direct call of the trigger function is refused.
+  - A published row is immutable for its owner (P0001 on update, no-op update, un-publish, delete and upsert); drafts stay editable.
+  - The table is GLOBAL with no RLS. `TenantDb` exposure is read-only by grant (D-TASK080-09: concur).
+  - Seed insert-only holds: 1, then 0, then 1 changed row for a changed hash or changed notes, which the runner refuses.
+  - `carrierDecimalToMoney` echoes neither value nor currency (39 inputs, 0 leaks) and is linear at 1 MB (D-TASK080-10/-11: concur).
+- **PR076-SEC-07: closed** for every listed form. The residuals get new IDs:
+  - **PR080-SEC-01 (LOW, CWE-693).** `platform/pricing-purity` is not in `PROTECTED_RULES`, so an inline disable with any TASK ID passes `check-suppressions` (the `money-arith` control is refused). Pre-existing since TASK-076. Fix: one line plus a test row.
+  - **PR080-SEC-02 (INFO, CWE-693).** Three shadowing spellings: `declare const { Date }`, `import type { Money as Date }`, and a type-only `namespace Date`. TypeScript accepts them, and the emitted code calls the real clock. The first two are lint-clean; the third is held only by the unprotected `no-namespace`. This extends code review R1-m3.
+  - **PR080-SEC-03 (INFO, CWE-693).** Template-literal `import()` of `@platform/shared/queues`, of the root, or of a test helper is lint-clean. This is code review R1-m1.
+  - Validated patch for 02 and 03 (`staticSpecifier` plus a by-name binding refusal): all 25 fixtures and 10 sources unchanged, all 11 bypasses reported.
+- **PR080-SEC-04 (INFO, CWE-471).** No TRUNCATE arm on the immutability guard. Owner only; the next seed restores the row and reports `drift-restored`. This is code review R1-n7. A statement-level guard was validated on PGlite.
+- **PR080-SEC-05 (INFO, merge-relevant, CWE-710).** Catalog C9 will fail: the 3-value `ck_pricing_config_versions__source` deparses to `= ANY` and is not in `ENUM_CHECKS`. Neither the brief's literal list nor the code review has it. Any R1-M1 option with 2 or more values keeps it.
+- **Code review twin (`222fdf54`, CHANGES_REQUESTED):**
+  - R1-M1 (`ADMIN` contradicts data-model §1.7): concur, no security objection to either option.
+  - R1-m2, R1-m4: no security finding.
+- **Simulation.** Main's real checker at `0e74c983`, merge-ref form, the record as `PR-9999-…`, `--pr 9999`: 8 of 8 as expected.
+  - **Pass:** the record merged with `4a0faee3`; a later `packages/pricing`-only commit.
+  - **Fail:** no record; a later `grants.manifest` commit; a later FAIL verdict row; a Head row naming a main commit; the placeholder name only; a later C1-fix commit to `c01-c12.int.test.ts`.
+- **Conditions:**
+  - **C1.** PR080-SEC-05 fixed, with the source list as it ships after R1-M1.
+  - **C2.** Lane B on PostgreSQL 18 green at the final head, as listed in record §7:
+    - `pricing-sample.int.test.ts`;
+    - C1, C5, C8, C9, C10, C11, C13, C15, C16 and rule 16;
+    - up-down-up, split-statements, concurrent-index and shadow-init;
+    - `seed.int.test.ts` and the `organisations` reseed.
+  - **C3.** A delta round on the fix head. R1-M1 and C1 change owned paths. A union merge with TASK-043 or TASK-051 on owned paths needs a merge-only round.
+  - **C4.** Rename the record and check the merge ref.
+- **Routed:**
+  - **senior-developer.** PR080-SEC-01 to -04 in this PR's fix cycle, preferred, because C3 forces a round anyway. Otherwise:
+    - -01 before the next `packages/pricing/src` change;
+    - -02 and -03 before US-141;
+    - -04 with the US-152 migration.
+  - **Card lines:**
+    - TASK-221: the reconciler covers `pricing_config_versions`, the first audited dataset.
+    - TASK-083 / TASK-101: explanation entries stay operator-side (INT).
+    - M2 pricing admin: `notes` stays non-personal, or the column is reclassified.
+- **Reversibility:** High (a review record).
