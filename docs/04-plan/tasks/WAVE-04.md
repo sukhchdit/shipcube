@@ -623,7 +623,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-135 **DC** (M1 Must) Streaming rate results (SSE) with fallback GET<br>US-040 (M0 Must) Redis-backed rate limiting and headers |
 | REQs | REQ-CARR-009, REQ-API-014, REQ-SEC-005, REQ-SEC-006 |
 | NFRs | NFR-PERF-002, NFR-PERF-003 |
-| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005, D-ARCH-217, D-ARCH-219, D-ARCH-220, D-ARCH-222, D-ARCH-223, D-SECPR044-01, D-QG-007, D-PM-089, D-SD-012 |
+| Spikes / security / decisions | SEC-P3-02, D-ARCH-018, D-PM-078, D-SD-005, D-ARCH-217, D-ARCH-219, D-ARCH-220, D-ARCH-222, D-ARCH-223, D-SECPR044-01, D-QG-007, D-PM-089, D-SD-012, D-PM-091, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-083, TASK-136, TASK-044, TASK-041 |
@@ -645,6 +645,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - STREAM SLOT ACQUIRE AND RELEASE (D-SECPR044-01 F2, PR044-SEC-05 LOW, CWE-770; D-QG-007 QG-044-C1 (c)): the route takes its stream slot from the kit of TASK-041 (streamSlotRule, acquire, release) in the pipeline step before execute and releases it on res.once close however the stream ends (complete, error, cap, drain, cut or client disconnect); the TTL of the STREAM SLOT TTL line is only the crash backstop; the per-user cap is one counter shared with streamBookingProgress (TASK-173); tests: the over-cap stream of one user and of one IP is refused before the stream starts, and a closed stream frees its slot at once (the next open is admitted without waiting for the TTL)
 - REPLAY AND RESUME CONDITIONS (D-SECPR044-01 F4, PR044-SEC-07 INFO items 1, 2 and 4; TASK-044 code review R1-n3; D-QG-007 QG-044-C1 (c)): the replay is keyed by the authorised quote and read under RLS in the short replay transaction, never by an id the client names alone; event ids are per-stream sequence numbers of the persisted results of that quote (the sequence of the PERSISTED EVENT SEQUENCE gate on TASK-087), never a table-wide sequence; a Last-Event-ID above the persisted maximum of the quote is treated as absent, so the replay starts from the first result, and never ends the stream with INTERNAL_ERROR (at the TASK-044 head Last-Event-ID 9999999999 does); one api row for each of the three
 - DISPATCH GATE, PERSISTED EVENT SEQUENCE (D-QG-007 QG-044-C7 and QG-044-C6): the ruling of the PERSISTED EVENT SEQUENCE line on TASK-087 exists before this task is dispatched, because the STREAM DISCIPLINE line (live events carry their persisted sequence id) and the two-instance resume test rest on it; the two-instance test also follows the QG-044-C6 ruling of the TASK-083 card (which instance ran createQuote, and what complete reports for carriers cut by a stop)
+- DISPATCH GATE (D-PM-091): AT-US-135-13 is in the US-135 block and in gherkin-test-map.md before this task is dispatched; a test that carries the ID before the map has the row fails quality:trace (qa-lead owns that commit: the scenario, the assignment, the regenerated map and the two test totals, D-PM-091 decision 6)
 - AT-US-135-01 … AT-US-135-12: all 12 scenarios of US-135, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-040-01 … AT-US-040-17: US-040 completes here under the delivery split of D-PM-078: this task proves the scenarios that the card lines above assign to it and TASK-041, TASK-049, TASK-052, TASK-091 the rest, with the IDs in the test titles; the story is accepted when all 17 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -685,7 +686,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-160 **DC** (M1 Must) Progressive results with skeletons and partial notice |
 | REQs | REQ-QUOTE-008 |
 | NFRs | NFR-WEB-003 |
-| Spikes / security / decisions | D-UX-008, D-UX-012, D-ARCH-219, D-ARCH-220, D-SD-012 |
+| Spikes / security / decisions | D-UX-008, D-UX-012, D-ARCH-219, D-ARCH-220, D-SD-012, D-ARCH-228, D-ARCH-239, D-QG-010, D-SD-015 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-141, TASK-125 |
@@ -699,7 +700,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-160 scenarios (focus never moves; CLS <= 0.1)
-- CLIENT RESUME (ADR-0016 amendment 14 items 2, 4 and 8; D-ARCH-219, D-ARCH-220; flow F01): after error with SERVICE_UNAVAILABLE (the cap or a stopping server), and after a stream that ends without a terminal event, the client reopens the stream once, after a random delay of up to 1 s, with Last-Event-ID set to the reader lastEventId (the last result received; the error event has no id), and falls back to polling getQuote when the reopened stream ends the same way; after error with INTERNAL_ERROR it goes to getQuote at once; results are keyed by carrier, so a replayed result replaces its row; test with the fetch reader: a stream that ends with error after one result is reopened with that result id, and the page shows every carrier once
+- CLIENT RESUME (ADR-0016 amendment 14 items 2, 4 and 8; D-ARCH-219, D-ARCH-220; flow F01): after error with SERVICE_UNAVAILABLE (the cap or a stopping server), and after a stream that ends without a terminal event, the client reopens the stream once, after a random delay of up to 1 s, with Last-Event-ID set to the reader lastEventId (the last result received; the error event has no id), and falls back to polling getQuote when the reopened stream ends the same way; after error with INTERNAL_ERROR it goes to getQuote at once; results are keyed by carrier, so a replayed result replaces its row; test with the fetch reader: a stream that ends with error after one result is reopened with that result id, and the page shows every carrier once; the random delay of up to 1 s before the stream is reopened is also what keeps the reconnects of one address after a server stop below the in-flight room of step 0 (ADR-0016 amendment 13 item 6; amendment 14 item 4; D-ARCH-228); it is not removed or shortened
+- POLL AFTER RATE_LIMITED (ADR-0016 amendment 13 item 6 Answer; D-ARCH-239; D-QG-010 QG-041B-C8; flow F10 section 1.1): the fallback poll of this screen, and on the confirmation page the reads of its documents, use the helper of the query layer (the card line RATE_LIMITED IN THE QUERY LAYER) and hold no timer of their own for a refused poll; a RATE_LIMITED answer to a poll is not a poll failure: the results or the progress already shown stay, no alert and no error panel is shown, and nothing is announced; test with fake timers on this screen: a poll answered 429 RATE_LIMITED with Retry-After 30 leaves the rendered rows unchanged and shows no alert, no poll is sent during the next 30 s, and the poll resumes within one interval after them
 - AT-US-160-01 … AT-US-160-08: all 8 scenarios of US-160, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

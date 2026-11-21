@@ -17,7 +17,7 @@ Tasks: **27** (S 7 / M 20; opus 13 / sonnet 14; demo-critical 0) in **7** batche
 | 3.1 | TASK-095 Logout and immediate revocation incl. revoke_sessions_for_user with DB fallback<br>TASK-096 ETags and optimistic concurrency<br>TASK-097 Mock scenario directives and production exclusion<br>TASK-098 Light and dark themes with contrast verification | identity-session<br>api-etag, api-tx-execute, api-routing<br>pkg-carriers-mock<br>ui-theme |
 | 3.2 | TASK-099 Password reset<br>TASK-100 Soft delete and optimistic locking<br>TASK-101 Shared adapter contract test suite<br>TASK-102 Offline handling and outcome toasts | identity-core<br>prisma-ext<br>pkg-carriers-contract<br>ui-feedback |
 | 3.3 | TASK-103 Progressive delay and account lockout<br>TASK-104 Permission-denied audit and cross-tenant 404<br>TASK-105 Saga compensation on permanent failure and saga fault-matrix generator<br>TASK-106 Accessibility gate | identity-core<br>api-authz<br>mod-orders-saga<br>e2e-a11y |
-| 3.4 | TASK-107 Unverified-account expiry<br>TASK-108 Input hardening<br>TASK-109 createShipment retry, definitive rejection and ambiguous outcome handling<br>TASK-110 Pseudo-locale overflow tests and logical CSS | identity-core<br>api-input<br>mod-orders-saga<br>i18n-pseudo |
+| 3.4 | TASK-107 Unverified-account expiry<br>TASK-108 Input hardening<br>TASK-109 createShipment retry, definitive rejection and ambiguous outcome handling<br>TASK-110 Pseudo-locale overflow tests and logical CSS | identity-core<br>api-input, api-ratelimit<br>mod-orders-saga<br>i18n-pseudo |
 | 3.5 | TASK-111 Security headers, HSTS and hash-based Content-Security-Policy<br>TASK-112 Static safeguards<br>TASK-113 SSRF-safe outbound HTTP client and security-event catalogue<br>TASK-114 Fail-closed sensitive reads and downloads | api-headers, infra-nginx<br>lint<br>api-egress<br>api-audit-mw |
 | 3.6 | TASK-115 Data representation rules<br>TASK-116 Chain verification job, hourly ECDSA-signed anchors and health degradation<br>TASK-117 Password-reset screens and delay/lockout messages<br>TASK-118 Query-plan registry and N+1 guard | api-repr<br>worker-audit-maint, db-tools-backup<br>web-auth<br>tests-perf-db |
 | 3.7 | TASK-119 Release workflow<br>TASK-121 M0 exit-demo journeys<br>TASK-281 ZAP baseline configuration and rules file | ci-workflows<br>e2e-demo<br>security-dast |
@@ -160,7 +160,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-021 (M0 Must) Password reset |
 | REQs | REQ-AUTH-011, REQ-AUTH-012 |
 | NFRs | NFR-SEC-003 |
-| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37, D-PM-088, D-SD-012 |
+| Spikes / security / decisions | SEC-P3-06, D-050, D-ARCH-184, D-ARCH-185, R-ARCH-37, D-PM-088, D-SD-012, D-ARCH-241, D-QG-010, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-059, TASK-086 |
@@ -176,6 +176,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - SEC-TC-47 (reset part): a successful reset sets email_verified_at
 - EVENT TYPE SEQUENCING (ADR-0004 amendment 2 item 12; D-ARCH-184): the event file packages/shared/src/events/<module>.ts merges only after outbox-relay has its processor (TASK-047); the TASK-043 worker test fails otherwise; and the PUBLISH RULE (ADR-0004 amendment 2 item 14; R-ARCH-37; D-ARCH-185): outbox.publish is called after the write that locks the aggregate row (the UPDATE of the transition or the INSERT of a new aggregate), or after SELECT ... FOR UPDATE on that row when the transaction only adds child rows; code-reviewer checks each publisher against it
 - STORE OUTAGE CASE (REQ-SEC-006; D-PM-088 card line 4; D-SD-012): the service of requestPasswordReset consumes emailSendRules (the per-address rule of the email-send class) with onStoreFailure fallback; api test through the mounted requestPasswordReset route with the store failing: the request that exceeds the per-address limit of the email-send class on one instance answers 429 RATE_LIMITED; if the route is ruled to have no per-address rule, the PR says so and this line is void
+- LIMIT BEFORE EFFECT (ADR-0016 amendment 13 item 6 Answer, Before any effect; D-ARCH-241; D-QG-010 follow-up 2): the limit is consumed before the first effect of the request, that is before a call phase, before a message or a job is queued and before a write that would stay, or it is counted inside the one transaction that holds the only effect of the request and that the refusal rolls back; the refusal is thrown as 429 RATE_LIMITED with Retry-After, so nothing is stored under an Idempotency-Key; the one thing that may be spent by then is the re-authentication proof of a route with reauth metadata (changePassword, disableTotp, regenerateRecoveryCodes, requestPrivacyExport), and the same request sent again is then answered 401 REAUTH_REQUIRED; test: a request that the limit refuses leaves no row, no outbox event and no audit entry, makes no provider call and queues no job or message (spies and row counts), and the same request is served after the wait, with the same Idempotency-Key where the operation takes one and with a fresh proof where the route has reauth metadata Placed here (D-SD-015): the per-address rule of email-send on requestPasswordReset.
 - AT-US-021-01 … AT-US-021-07: all 7 scenarios of US-021, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -413,16 +414,17 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-045 (M0 Must) Input hardening: unknown fields, body size, content types, timeouts |
 | REQs | REQ-SEC-007, REQ-SEC-015 |
 | NFRs | NFR-SEC-009, NFR-SEC-011 |
-| Spikes / security / decisions | D-ARCH-219, D-PM-089, D-ARCH-227, D-SECPR041B-01, PR041-SEC-11, D-SD-012 |
+| Spikes / security / decisions | D-ARCH-219, D-PM-089, D-ARCH-227, D-SECPR041B-01, PR041-SEC-11, D-SD-012, D-ARCH-230, D-ARCH-234, D-QG-008, D-SECPR041B-03, D-CRPR041B-01, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-036, TASK-020, TASK-278 |
-| Batch · locks | 3.4 · api-input |
+| Batch · locks | 3.4 · api-input, api-ratelimit |
 | Branch | `feat/TASK-108-input-hardening-unknown-fields-body` |
 | Priority | Must |
 
 **Files / modules**
 - apps/api/src/platform/http/hardening.ts
+- apps/api/src/platform/rate-limit/authn-failed.ts and its unit and api tests (the MERGE PREREQUISITE line only; lock api-ratelimit; D-SD-015)
 
 **Acceptance tests to write**
 - All US-045 scenarios
@@ -431,6 +433,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PART 044-B FIRST (D-PM-089 routing to senior-developer; D-SD-012): the stream rows of this task run on the default pipeline, which gives a stream more than 20 s only with the stream deadline and the drain signal of TASK-044 part 044-B; dispatch this task after part 044-B is on main, or build it stacked on the approved part 044-B head (D-ORCH-150) and merge after it; no test raises the call deadline to pass
 - REQUEST TIMEOUT AND THE STEP-0 HOLD (ADR-0016 amendment 13 item 6; R-ARCH-36 (d)): the 30 s request timeout also ends a request whose body stalls, and until this task the bound is the Node default of 300 s; test: a credentialed request that sends its headers and never completes its body is ended at the timeout, its in-flight unit is released, and a following credentialed request of the address is served
 - DECLARED-OVERSIZE BODY (D-SECPR041B-01 security addition (a) to ADR-0016 amendment 13 item 6; PR041-SEC-11 LOW): the request timeout runs from the arrival of the request, and a credentialed request that declares a Content-Length above the body limit and sends no body is ended by it like a stalled body (body-parser answers 413 only after the request ends), with its in-flight unit released; test row beside the stalled-body row
+- REQUEST TIMER AND THE AUTHENTICATION SLOT (ADR-0016 amendment 13 item 6 Release; D-ARCH-230): the timer counts from the arrival of the request and may answer 503 while the authentication slot of that request is still running; that answer releases no in-flight unit of a request that entered the slot, the outcome of the slot does, and a refusal that lands afterwards is still spent; test with a limit of 5 and an authenticator that refuses later than the timer answers: five junk credentials are answered 503 by the timer, five more are sent while the first five are still in authentication and are answered 429 with Retry-After 1, the authenticator is entered 5 times and 5 units are spent; a request the timer answered before its body completed does not enter the slot when the rest of the body arrives (D-TASK041-20)
+- REFUSED BODY AND THE STEP-0 HOLD (D-QG-008 QG-041B-C5 (c); fix cycle 3 of part 041-B did not take it; D-SD-015): beside the DECLARED-OVERSIZE BODY row, a row for a refused body of a credentialed request (malformed JSON, and a 413): the in-flight unit is released and the authentication slot is not entered
+- MERGE PREREQUISITE, THE WRAPPER OF PART 041-B (D-SECPR041B-03 PR041-SEC-17 INFO, CWE-362 = code review R4-n2; D-CRPR041B-01 R4-n1, R4-n3 and R4-n4; D-ARCH-234; D-SD-015): unless an earlier commit that touches apps/api/src/platform/rate-limit/authn-failed.ts has taken them, this task carries before it merges, with a security delta round on that file: (1) the PR041-SEC-17 guard in the form principal-architect picks, guard C (a response already started when the wrapper is entered is treated like a closed one: the unit is released and the slot is not entered) or guard D (startedBefore = res.headersSent recorded right after enter, and answered itself read at the return only when headersSent is true and startedBefore is false); verification: a row in which the response is started before the wrapper is entered, with a callback-form seam, gives at most limit entries and limit spends (D) or 0 entries (C), and the mutant without the guard fails it; (2) R4-n1: a unit row in the H7 shape in which the slot answers 401 and then calls next with AUTH_REQUIRED from a 1 ms timer: nothing passes, nothing is spent, the unit is released once; (3) R4-n3: the line api.authn_slot_unreported is written last (after release or done), or writeLine is guarded like the event sink, so that a throwing logger cannot become an unhandled rejection that leaves the unit held; (4) R4-n4: the sentence of D-ARCH-234 item 7 and rulings section 11.3 on the limit of the callback form, in the module header and the JSDoc of withAuthnFailedBudget
 - AT-US-045-01 … AT-US-045-07: all 7 scenarios of US-045, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -782,7 +787,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-COMPAT-002, NFR-QUAL-006 |
-| Spikes / security / decisions | PRD §6.1, D-006 |
+| Spikes / security / decisions | PRD §6.1, D-006, D-QA-023, D-SD-015 |
 | Specialist · model | e2e-test-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-081, TASK-094, TASK-072, TASK-093, TASK-089 |
@@ -796,6 +801,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - PRD §6.1 all five scenarios green on Chromium, Firefox, WebKit at 360 and 1280 px (lane B wave profile)
+- ONE CLIENT ADDRESS IN THE JOURNEYS (TEST-STRATEGY 1.6 section 10.4 rules 2 to 7 as the harness of TASK-279 implements them; D-QA-023): the rate-limited UI states are served by page.route with a Retry-After above 1, refused credentials run only in the serial @authn-refusal project with their keys cleared afterwards, sign-ins reuse the per-worker storage state, and the run records every 429 in e2e-429.json with its limit values named; the step0-authn-inflight delta is read once TASK-214 exports it (Wave 7)
 
 **DoD notes**
 - Suites tagged (`@security` where applicable) and registered in `tools/quality/required-suites.json` with `min_tests`; deterministic (fake clock, seeded RNG); flake < 1 % over 20 runs.

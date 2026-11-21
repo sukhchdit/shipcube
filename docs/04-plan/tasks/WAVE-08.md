@@ -160,7 +160,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-228, TASK-228) | US-026 (M1 Should) Customer TOTP settings, re-authentication and staff recovery-code regeneration<br>US-028 (M1 Should) Change password |
 | REQs | REQ-AUTH-019, REQ-AUTH-020, REQ-ADMIN-008, REQ-AUTH-023 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | SEC-COND-01 |
+| Spikes / security / decisions | SEC-COND-01, D-ARCH-241, D-QG-010, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-187, TASK-061 |
@@ -174,6 +174,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - API scenarios of US-026 and US-028
+- LIMIT BEFORE EFFECT (ADR-0016 amendment 13 item 6 Answer, Before any effect; D-ARCH-241; D-QG-010 follow-up 2): the limit is consumed before the first effect of the request, that is before a call phase, before a message or a job is queued and before a write that would stay, or it is counted inside the one transaction that holds the only effect of the request and that the refusal rolls back; the refusal is thrown as 429 RATE_LIMITED with Retry-After, so nothing is stored under an Idempotency-Key; the one thing that may be spent by then is the re-authentication proof of a route with reauth metadata (changePassword, disableTotp, regenerateRecoveryCodes, requestPrivacyExport), and the same request sent again is then answered 401 REAUTH_REQUIRED; test: a request that the limit refuses leaves no row, no outbox event and no audit entry, makes no provider call and queues no job or message (spies and row counts), and the same request is served after the wait, with the same Idempotency-Key where the operation takes one and with a fresh proof where the route has reauth metadata Placed here (D-SD-015): the per-account rule of auth on changePassword, disableTotp and regenerateRecoveryCodes, three of the four operations of the named exception (a refused request has spent its re-authentication proof).
 - Covers the scenarios of AT-US-026-01 … AT-US-026-07 that belong to its layer; US-026 closes in TASK-228
 - Covers the scenarios of AT-US-028-01 … AT-US-028-05 that belong to its layer; US-028 closes in TASK-228
 
@@ -471,7 +472,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-165 (M1 Should) Share a quote by link |
 | REQs | REQ-QUOTE-015 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | SEC-P3-32, SEC-P3-10, D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-191 |
+| Spikes / security / decisions | SEC-P3-32, SEC-P3-10, D-ARCH-162, D-ARCH-163, D-SD-003, D-ARCH-191, D-ARCH-241, D-QG-010, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-234 |
@@ -489,6 +490,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - quote_shares AS AMENDED 2026-11-19 (D-ARCH-162, D-ARCH-163; data-model 3.10): the owner-bound pair; ux_quote_shares__org_quote_active and ux_quote_shares__guest_quote_active replace ux_quote_shares__quote_active; ux_quote_shares__share_token_hash is an entry of TENANT_UNIQUE_EXCEPTIONS with its reason; the claim statement gains the quote_shares update in this PR, with a test that a claim leaving a share behind fails with 23001 fk_quote_shares__guest_token_hash_quote_id on PostgreSQL 18 (D-ARCH-211)
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: revokeQuoteShare (optional) (D-SD-007)
 - DUPLICATE CASE ON THE REAL TABLE (QG-051-C1 (b); D-ARCH-215; rulings section 8.12): on quote_shares as platform_app a second active share of the same quote is refused with 23505 on the index of its owner, ux_quote_shares__guest_quote_active for a guest row and ux_quote_shares__org_quote_active for an organisation row, and the first active share is accepted (cases S3 and S4 of rulings section 2.7); every relation this task adds states onDelete: Restrict and onUpdate: Restrict
+- LIMIT BEFORE EFFECT (ADR-0016 amendment 13 item 6 Answer, Before any effect; D-ARCH-241; D-QG-010 follow-up 2): the limit is consumed before the first effect of the request, that is before a call phase, before a message or a job is queued and before a write that would stay, or it is counted inside the one transaction that holds the only effect of the request and that the refusal rolls back; the refusal is thrown as 429 RATE_LIMITED with Retry-After, so nothing is stored under an Idempotency-Key; the one thing that may be spent by then is the re-authentication proof of a route with reauth metadata (changePassword, disableTotp, regenerateRecoveryCodes, requestPrivacyExport), and the same request sent again is then answered 401 REAUTH_REQUIRED; test: a request that the limit refuses leaves no row, no outbox event and no audit entry, makes no provider call and queues no job or message (spies and row counts), and the same request is served after the wait, with the same Idempotency-Key where the operation takes one and with a fresh proof where the route has reauth metadata Placed here (D-SD-015): the route-specific limit of createQuoteShare (the mint cap, which counts inside its transaction).
 - AT-US-165-01 … AT-US-165-12: all 12 scenarios of US-165, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -969,7 +971,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-228 (M1 Should) Email documents to the account address |
 | REQs | REQ-DOC-010 |
 | NFRs | — |
-| Spikes / security / decisions | D-051, D-ARCH-191 |
+| Spikes / security / decisions | D-051, D-ARCH-191, D-ARCH-241, D-QG-010, D-SD-015 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-179, TASK-162 |
@@ -983,6 +985,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-228 scenarios
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: emailShipmentDocuments (optional) (D-SD-007)
+- LIMIT BEFORE EFFECT (ADR-0016 amendment 13 item 6 Answer, Before any effect; D-ARCH-241; D-QG-010 follow-up 2): the limit is consumed before the first effect of the request, that is before a call phase, before a message or a job is queued and before a write that would stay, or it is counted inside the one transaction that holds the only effect of the request and that the refusal rolls back; the refusal is thrown as 429 RATE_LIMITED with Retry-After, so nothing is stored under an Idempotency-Key; the one thing that may be spent by then is the re-authentication proof of a route with reauth metadata (changePassword, disableTotp, regenerateRecoveryCodes, requestPrivacyExport), and the same request sent again is then answered 401 REAUTH_REQUIRED; test: a request that the limit refuses leaves no row, no outbox event and no audit entry, makes no provider call and queues no job or message (spies and row counts), and the same request is served after the wait, with the same Idempotency-Key where the operation takes one and with a fresh proof where the route has reauth metadata Placed here (D-SD-015): the route-specific limit of emailShipmentDocuments.
 - AT-US-228-01 … AT-US-228-09: all 9 scenarios of US-228, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1132,7 +1135,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004, D-SECPR041B-01, D-SECPR041B-02, PR041-SEC-16, D-SD-012 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004, D-SECPR041B-01, D-SECPR041B-02, PR041-SEC-16, D-SD-012, D-ARCH-230, D-ARCH-234, D-QG-009, D-QA-023, D-SD-015 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1150,8 +1153,9 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
 - SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
-- AUTHENTICATION SLOT OUTCOME (PR041-SEC-16 (a) LOW, CWE-772; D-SECPR041B-02; D-ORCH-159; code review n8 widened by D-SECPR041B-01): the authentication slot reports its outcome only by calling next once, throwing or rejecting, and never writes the response; one api row per refused shape: failed count +1, held count back to 0; every refused presented credential is a 4xx AppError (here: a failed or missing carrier signature, 401)
+- AUTHENTICATION SLOT OUTCOME (PR041-SEC-16 (a) LOW, CWE-772; D-SECPR041B-02; D-ORCH-159; code review n8 widened by D-SECPR041B-01): the authentication slot reports its outcome only by calling next once, throwing or rejecting, and never writes the response; one api row per refused shape: failed count +1, held count back to 0; every refused presented credential is a 4xx AppError (here: a failed or missing carrier signature, 401); ASYNC SLOT (ADR-0016 amendment 13 item 6 Release; D-ARCH-230; PR041-SEC-16): the authenticator is an async function that awaits its work and reports before it returns (next once, a throw or a rejection); it never starts or ends the response (setting a header such as Set-Cookie or Cache-Control is allowed) and starts no work that reports after its promise has settled; the wrapper of TASK-041 answers 500 for a slot whose promise fulfils without an outcome and writes api.authn_slot_unreported, so each row per refused shape also asserts that this line was not written; optional: an ESLint restriction on res.status, json, send, end, redirect, write, writeHead and flushHeaders in the authenticator module of this task; NO CALLBACK FORM (ADR-0016 amendment 13 item 6 Release, the callback form; D-ARCH-234; D-QG-009 QG-041B-C7 (b)): the authenticator never returns without a promise before it has reported, because the wrapper waits for such a slot without a limit and cannot end it, so a unit it never reports stays held until the process restarts; that form is for test seams only; a unit row calls the handler of the slot for each accepted and each refused shape and asserts that the outcome has been reported when the handler returns or, when the handler returns a promise, when that promise fulfils
 - BOUNDED SLOT LATENCY (D-SECPR041B-01 security addition (b) to ADR-0016 amendment 13 item 6; D-SD-012): if this authenticator does I/O (for example a session or key lookup after verification), the BOUNDED SLOT LATENCY line of TASK-055 applies: it settles within a bounded time when the store or database does not answer, with a test; an authenticator without I/O states so in its PR
+- ONE CLIENT ADDRESS (TEST-STRATEGY 1.6 section 10.4 rule 1; D-QA-023; QG-041B-C7 (c)): the limiter rows of this task run in process with a fresh limiter per harness (a new FakeValkey and counter, its own address through fromIp, rateLimit passThrough where a suite does not test limits); no limiter, Valkey key space or app instance is shared across test files, and a case that proves a listed limit sends in sequence or in groups that fit the in-flight room; code-reviewer checks it
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
