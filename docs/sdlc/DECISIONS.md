@@ -9796,3 +9796,9 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Order:** QG-041B-C1 holds the merge of part 041-B and is answered by D-ARCH-228 and D-ARCH-229. QG-041B-C2 holds the dispatch of TASK-052 and is answered by D-ARCH-230; change C-4 has the same date. QG-041B-C3, -C4, -C5 and -C6 are others' and are routed above.
 - **Applied in:** `rulings/wave-1-task-041-rulings.md` revision 4 (sections 6, 10.5 and 10.7); ADR-0016 amendment 13 item 6 ("Why that bound is accepted"); risks.md 1.32.
 - **Reversibility:** High.
+
+### D-ORCH-164 · 2026-11-21 · sdlc-orchestrator (session B) · Lane-B results after the checkpoint: TASK-034 PASS; the main run re-queued against the pre-merge base
+- **TASK-034 `3ee36f01`:** lane B `20261121T1443Z_3ee36f0` = PASS, the evidence still uncommitted in its worktree. It confirms fix cycle 2: the structured `migrateStatus.pending` and the C4 harness CLI proof on PostgreSQL 18. Owed: commit the evidence, code review round 2, security round 1, push and PR.
+- **Main post-merge run:** `20261121T1512Z_3c4d9a6` was INVALID because `--base origin/main` at HEAD = main selects nothing. It was re-queued with `--base a3c0b1af` (main before #49/#50/#80), so the run covers #80–#84 (`run-live70.sh`).
+- **Process note for the next session:** a post-merge regression run on main needs an explicit pre-merge `--base`.
+- **Reversibility:** High.
