@@ -7760,3 +7760,111 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **qa-lead.** SEC-TC-79..81 rows and manifest; SEC-TC-07 and SEC-TC-76 text.
   - **Mine, before G3.** Threat model T-35 cites the grant and the PR051-SEC-03 residual.
 - **Reversibility:** High (a review record).
+
+### D-ARCH-207 · 2026-11-21 · principal-architect · TASK-051 code review round 1, question 1 (D-TASK051-03): a foreign key that holds both owner columns is a C16 (a) finding and nobody's sibling
+- **Trigger:** `docs/05-quality/reviews/PR-pending-TASK-051-code-review.md` (CHANGES_REQUESTED at `203d02eb`), section 4 item 1; finding R1-n1.
+- **Decision:** confirmed. On a table with `guest_token_hash`, a foreign key whose referencing columns include both `org_id` and `guest_token_hash` is reported by C16 (a). It is neither member of an owner-bound pair, and no exception entry can name it (D-ARCH-209). The planted probe of R1-n1 (`c16_g_both`) is required in the fix cycle.
+- **Why:** the owner CHECK leaves one owner column NULL on every row. `MATCH SIMPLE` skips a key with a NULL column, so such a key is never checked; `MATCH FULL` refuses every row.
+- **Checked (PGlite 0.4.3 = PostgreSQL 17.5, single process, scratchpad; rulings file §8.7 rows Q1a and Q1b):** under `MATCH SIMPLE` a row of another organisation, a row of another guest and a row naming an unknown id were all accepted; under `MATCH FULL` an owner's own row was refused.
+- **Alternative rejected:** read it as a sibling of both members. It would let a pair be "completed" by a key that checks nothing.
+- **Gatekeeper:** not needed. No ADR text changes; the catalog test that verifies ADR-0005 amendment 14 item 31 becomes stricter.
+- **Applied in:** data-model §4.6 C16 (a), §4.7 (T2-G), A40; rulings file `docs/03-architecture/rulings/wave-1-r-arch-34-operator-rulings.md` §2.6 and §8.1.
+- **Card line:** rulings file §8.9 (TASK-051).
+- **Reversibility:** High (a test rule; no table has such a key).
+
+### D-ARCH-208 · 2026-11-21 · principal-architect · TASK-051 code review R1-M1 (MAJOR), question 2: an owner column counts in a unique key only when it separates owners; both shapes are enforced by C16 (b); the two indexes of rule U2 are `NULLS DISTINCT` (ADR-0005 amendment 15 item 38)
+- **Trigger:** review section 4 item 2. C16 (b) at `203d02eb` accepts any unique index or exclusion constraint that has an owner column among its key columns.
+- **Decision:**
+  1. **B1, unique index:** the owner column counts when it is `NOT NULL` or the index is `NULLS DISTINCT` (`pg_index.indnullsnotdistinct` false).
+  2. **B2, exclusion constraint:** the owner column counts when its operator at that key position (`pg_constraint.conexclop`) is the equality member of a btree operator family (`pg_amop`, strategy 3), whatever access method the constraint uses.
+  3. An index or constraint in which no owner column counts is a finding. **The exclusion half is enforced; it does not become a third stated limit.**
+  4. **Exceptions stay literal:** an entry of `TENANT_UNIQUE_EXCEPTIONS` is live only for an index with no owner key column at all. An index whose owner column does not count cannot be excepted.
+  5. **U2:** the two indexes of a uniqueness rule on a GUEST_CAPABLE table are `NULLS DISTINCT`, the default. One index over both owner columns is not an alternative.
+  6. **Fail closed, stated:** `UNIQUE NULLS NOT DISTINCT` over both owner columns is reported although it separates owners under the owner CHECK. It is the alternative D-ARCH-163 rejected, and the rule stays one fact per column.
+- **Why:**
+  - `NULLS NOT DISTINCT` treats every row whose owner column is NULL as one owner. On a GUEST_CAPABLE table both owner columns are nullable, so the index answers `23505` for a value another organisation holds and `23503` for a free one: the PR65-SEC-01 channel that D-ARCH-163 closed.
+  - `EXCLUDE … (org_id WITH <>, …)` conflicts only across owners: `23P01` against `23503`.
+  - C16 (b) reads exclusion constraints since D-ARCH-163 to close PR293-SEC-03 (c). Accepting `<>` there would make that reading a false assurance, `btree_gist` is installed by the bootstrap, and the check costs one catalog fact. C16 is the gate of TASK-087.
+- **Checked (PGlite 17.5 with `btree_gist`; rulings file §8.7 rows Q2a to Q2g):** both channels reproduced; the single index over both owner columns separates owners under `NULLS NOT DISTINCT` and enforces nothing under `NULLS DISTINCT`; a catalog query that returns the facts, with rules B1 and B2, classified 16 planted shapes as intended, an equality operator through gist included. No committed migration holds `NULLS NOT DISTINCT` or `EXCLUDE`.
+- **Not verified:** PostgreSQL 18. Lane B of TASK-051 at the fix head is the evidence.
+- **Alternatives rejected:**
+  - **The exclusion half as a stated limit** (offered by the review): a known hole in an isolation gate, for the price of one catalog fact.
+  - **Allow one `NULLS NOT DISTINCT` index over both owner columns:** safe only through the owner CHECK, about 80 bytes wide, and a second accepted shape for the same rule.
+  - **Refuse `NULLS NOT DISTINCT` on every scoped table:** on a TENANT table `org_id` is `NOT NULL` and the clause concerns other columns.
+- **Gatekeeper:** needed. ADR-0005 amendment 15 item 38 narrows item 33 of amendment 14 (CLAUDE.md §5). The fix cycle does not wait for it; the merge does.
+- **Applied in:** ADR-0005 amendment 15 item 38 (pointer at item 33); data-model §3.10, §4.6 C16 (b), §4.7 (U1, U2), A40; risks.md R-ARCH-34 (version 1.28); rulings file §2.4, §2.6 and §8.2 (with the query sketch and the planted probes).
+- **Card lines:** rulings file §8.9 (TASK-051, TASK-087).
+- **Reversibility:** High (a test rule; no committed index is affected).
+
+### D-ARCH-209 · 2026-11-21 · principal-architect · TASK-051 code review R1-m1, question 3: a T2-O exception entry names its CHECK, and C16 (a) verifies the kind of the key and the CHECK
+- **Trigger:** review section 4 item 3. At `203d02eb` an entry of `TENANT_REFERENCE_EXCEPTIONS` hides any reported key, whatever the finding and whether or not the CHECK exists.
+- **Decision:**
+  1. An entry names the key, the CHECK and the reason.
+  2. **Kind:** it applies only to a key reported as org-bound without a guest-bound sibling, on a table with `guest_token_hash`, whose referencing columns are `org_id` and exactly one other column. For any other finding the key is reported and the entry is itself a finding.
+  3. **CHECK:** the named constraint on the referencing table is a CHECK, is validated, and its definition equals that of the T2-O predicate, `<c> IS NULL OR org_id IS NOT NULL`, as `pg_get_constraintdef` prints it. The predicate is the rule; the pinned text is what PostgreSQL 18 prints for it.
+  4. An entry whose CHECK fails hides nothing: the key and the entry are both reported.
+  5. Owner: TASK-051, in this fix cycle, with four planted cases on `c16_g_org_only`. The committed map stays empty until TASK-087.
+- **Why:**
+  - Without the CHECK a guest row can hold the reference, and `MATCH SIMPLE` never checks it (the shape of case L5 of the rulings file §2.7).
+  - A test on the columns of the CHECK is not enough: `<c> IS NULL OR org_id IS NULL` names the same two columns and admits the guest row.
+  - The CHECK name cannot be derived from the key name: the first instance is `fk_quotes__requote_of_quote_id` with `ck_quotes__requote_org_only`.
+- **Checked (PGlite 17.5; rulings file §8.7 row Q3):** the definition texts of the T2-O CHECK, of the same predicate `NOT VALID` and of the inverse predicate.
+- **Alternatives rejected:** a CHECK name derived by convention (see above); a behaviour probe that inserts a guest row with the reference (not generic over tables; TASK-051 has it for the probe table as case R4).
+- **Gatekeeper:** not needed (no ADR text changes).
+- **Applied in:** data-model §4.6 C16, §4.7 (T2-O), A40; rulings file §2.3, §2.6 and §8.3.
+- **Card lines:** rulings file §8.9 (TASK-051, TASK-087).
+- **Reversibility:** High.
+
+### D-ARCH-210 · 2026-11-21 · principal-architect · TASK-051 code review question 4 (D-TASK051-06): `42501` is the database answer when the claim runs in a context with the guest hash and no organisation; on the real tables the standard-columns guard answers first
+- **Decision:** acknowledged. The expectation of AT-US-080-06 (database half) on the `gc_` probe tables stands: `42501`, the RLS `WITH CHECK`, nothing changed.
+- **Two things written down with it:**
+  - **It is the answer of the class block.** The real quote tables also carry `trg_<t>__std_columns` (C15), a `BEFORE` trigger, which runs before `WITH CHECK`. Without an actor the guard expects the anonymous actor in `updated_by`, and the claim writes the claiming user. On the real tables the statement is therefore refused by the guard first (`P0001 STD_COLUMNS_VIOLATION`). TASK-146 expects that.
+  - **No route reaches it.** `claimQuote` declares `bearerAuth` only, so a request without a bearer is answered 401 `AUTH_REQUIRED` by the authentication slot before a transaction opens. AT-US-080-06 is that 401; the database answer is the backstop.
+- **Checked:** `42501` on 17.5 (the review's replay) and on 18 (lane B `20261121T0336Z_203d02e`). The order guard-then-`WITH CHECK` on a reduced schema on PGlite 17.5 (rulings file §8.7 rows Q4a and Q4b). `authorise.ts` and `std-columns-guard.sql` read.
+- **Not verified:** the real quote tables do not exist; TASK-146 proves the line on PostgreSQL 18.
+- **Gatekeeper:** not needed.
+- **Applied in:** rulings file §8.4. **Card lines:** §8.9 (TASK-051, TASK-146).
+- **Reversibility:** High.
+
+### D-ARCH-211 · 2026-11-21 · principal-architect · TASK-051 lane B observation L-1, question 5: on PostgreSQL 18 a refused `RESTRICT` action is `23001`, so cases C2 and C6 expect `23001`; the keys stay `RESTRICT` (ADR-0005 amendment 15 item 37)
+- **Trigger:** lane B run `20261121T0336Z_203d02e` at `203d02eb`: C2 and C6 of the rulings file §2.7 answered `23001` on the expected constraints where the ruling, probed on 17.5, said `23503`. The developer reported it and did not adapt the expectations, as the ruling asked. This is the trigger of risks.md R-ARCH-34 and the open item of D-ARCH-162.
+- **Fact:** PostgreSQL 18 reports a refused `RESTRICT` action, the change or deletion of a referenced key while a row still names it, as `23001` `restrict_violation` (PostgreSQL commit 086c84b23). Up to 17 it was `23503`. A row that names a missing parent is `23503` in every version.
+- **Decision:**
+  1. Rulings file §2.7: C2 is `23001 fk_quote_packages__guest_token_hash_quote_id` and C6 is `23001 fk_quote_shares__guest_token_hash_quote_id` on PostgreSQL 18. Every other case, the one-statement claim included, reproduced on 18 as written and is unchanged.
+  2. Rulings file §2.3, data-model §4.3 and ADR-0005 amendment 14 item 32: a claim that leaves a child table out fails with `23001` on PostgreSQL 18. Separate statements fail with `23001` when the quote is updated first and with `23503` when a child is updated first. This amends decision 4 of D-ARCH-162.
+  3. The keys stay `ON DELETE RESTRICT ON UPDATE RESTRICT`. No migration changes.
+  4. The developer changes the two expectations and cites this entry in the commit. The claim repository of TASK-146 handles neither code (D-ARCH-212).
+- **Why the design stands:** the one-statement claim passed on 18 with `RESTRICT` keys, and the constraint that refuses is the one the ruling names. Only the SQLSTATE of the refused action moved.
+- **Checked:** the lane B summary and log (C2 and C6, each with the expected and the received string); the 17.5 behaviour in the probe (rulings file §8.7 row Q5).
+- **Alternatives rejected:**
+  - **`NO ACTION` keys, to keep one SQLSTATE:** every merged migration uses `RESTRICT` and applied files are immutable; nothing in the application branches on the code.
+  - **An expectation that accepts either code:** lane B runs PostgreSQL 18 only, and it would hide the next change of this kind.
+- **Gatekeeper:** needed. ADR-0005 amendment 15 item 37 revises the last sentence of item 32 (CLAUDE.md §5).
+- **Applied in:** ADR-0005 amendment 15 item 37 (pointer at item 32); data-model §4.3, A40; risks.md R-ARCH-34 (trigger fired; version 1.28); rulings file §2.3, §2.7, §6 (two rows marked) and §8.5.
+- **Card lines:** rulings file §8.9 (TASK-051, TASK-146, TASK-237).
+- **Reversibility:** High.
+
+### D-ARCH-212 · 2026-11-21 · principal-architect · TASK-051 code review R1-m4, question 6: D-ARCH-164 E1 and E2 cover `23001` beside `23503` and `P2003`; one response for a refused reference (ADR-0005 amendment 15 item 37)
+- **Decision:**
+  1. **E1.** A refused reference is SQLSTATE `23503` or `23001`. `mapDbError` gives both the same response, 500 `INTERNAL_ERROR` with reason `DB_ERROR`, not retryable. The mappings differ only in `sqlState`, which is logged and is not part of the response body. The code at `203d02eb` does this already through its fall-through: no product code changes.
+  2. **E2.** No service, repository or module catalogue maps a refused reference to a client-visible answer by constraint name, field name, message or detail, and no file under `apps/` or `packages/` other than the mapper and its test names `P2003`, `23503` or `23001`.
+  3. **Tests, TASK-051 fix cycle:** the deep-equal pin runs for both SQLSTATEs, each under `P2010` and `P2003`, and asserts that the two mappings under one Prisma code differ in `sqlState` only; the repository tripwire looks for the three tokens.
+- **Why:** every foreign key of the Platform is `RESTRICT`, so on PostgreSQL 18 a refused reference arrives under two SQLSTATEs (D-ARCH-211). A branch on `23001` in a repository would be invisible to a pin and a tripwire that know `23503` only.
+- **Checked (read, not run):** `@prisma/adapter-pg` 7.10.1 maps `23503` to `ForeignKeyConstraintViolation` and `23001` to `RestrictViolation`; `@prisma/client` 7.10.1 reports both kinds as `P2003`, and a raw query reports either under `P2010`. This is why the pin has four combinations and not the three the review proposed. `git grep -w 23001` finds nothing under `apps/` or `packages/` at `203d02eb` or on main. The problem handler reads neither `sqlState` nor `prismaCode`.
+- **Alternative rejected:** a reason of its own for `23001` in `DbErrorReason`. It would be a second answer for the same class of defect.
+- **Gatekeeper:** needed, with D-ARCH-211: ADR-0005 amendment 15 item 37 extends item 34.
+- **Applied in:** ADR-0005 amendment 15 item 37 (pointer at item 34); data-model §4.7, A40; risks.md R-ARCH-34; rulings file §2.5 and §8.6. This extends D-ARCH-164.
+- **Card lines:** rulings file §8.9 (TASK-051, TASK-146).
+- **Reversibility:** High.
+
+### D-ARCH-213 · 2026-11-21 · principal-architect · TASK-051 developer decision D-TASK051-07 and merge condition 6 of the review: the route-side guest binding and the HTTP halves of US-080 go to TASK-091 and TASK-146; the pipeline seam for two of the three binding cases is owed before TASK-091 is dispatched
+- **Decision:**
+  1. **Agreed with the review:** the deferral stands, and the rule goes on the TASK-091 and TASK-146 cards.
+  2. **The rule.** The transaction context carries a non-empty `guestTokenHash` in three cases only: (a) `getQuote` and `streamQuoteResults` for a guest principal; (b) `createQuote` for an anonymous caller, with the hash of the token minted for the request; (c) the claim operations `claimQuote`, `saveQuote` and `createShipment`, for a session principal that presents a well-formed `X-Quote-Token`. Every other request binds the empty string. The hash is derived server-side and put into the context by the pipeline; no handler, service or repository supplies it. A test over the mounted route table proves the "every other request" half.
+  3. **HTTP halves:** AT-US-080-01 and -02 on TASK-091 (`getQuote`); AT-US-080-04 to -07 on TASK-146 (`claimQuote`); AT-US-080-03 has none (a database property, complete on TASK-051).
+- **Found while ruling:** cases (b) and (c) have no seam. `tenantContextOf` copies the value of the principal, and only the quote-token authenticator of case (a) is designed to set one. Nothing puts a minted or a presented token into the context of an anonymous or a session principal, and the files that would are under `apps/api/src/platform/**`, outside the `mod-quotes` lock of both tasks.
+- **Owed by me before TASK-091 is dispatched:** the seam, as a note on the route descriptor of ADR-0003, with security-analyst (case (c) puts a value derived from a header into the context of an authenticated caller). It will need a gatekeeper check. I did not design it here: it touches `execute.ts` as TASK-040 is rewriting it, and TASK-051 does not wait for it.
+- **Not decided by me:** whether US-080, marked complete on TASK-051 in the task map, stays open until TASK-146. That is a delivery split for product-manager and senior-developer, as D-PM-078 was for US-040. The suite column of the gherkin map is qa-lead's (review R1-n5).
+- **Gatekeeper:** not needed for this entry (no ADR text changes).
+- **Applied in:** rulings file §8.8. **Card lines:** §8.9 (TASK-091 with a dispatch gate, TASK-146, TASK-234).
+- **Reversibility:** High (card lines; nothing is built).
