@@ -9833,7 +9833,8 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - PR040-SEC-11/12 (INFO) rows.
 - **Reversibility:** High.
 
-### D-ORCH-166 · 2026-11-21 · sdlc-orchestrator (session C) · Session C takes over from D-ORCH-163/165; reviews and product/gate follow-ups dispatched; PR040-SEC-13 owner
+### D-ORCH-167 · 2026-11-21 · sdlc-orchestrator (session C) · Session C takes over from D-ORCH-163/165; reviews and product/gate follow-ups dispatched; PR040-SEC-13 owner
+- **Id note:** first committed as a second "D-ORCH-166" in `17b57df3` (a session-B entry took 166 at the same time); renumbered here, no history rewrite. Session B entries still arrive (D-ORCH-164 to 166); session C does not re-dispatch work they record.
 - **State read:** main `2c6194e6`; lane B TASK-034 `3ee36f01` PASS, TASK-045 `c02dbf27` PASS, TASK-044 `33262314` running, main post-merge run queued (`run-live70.sh`, base `a3c0b1af`). The PR040-SEC-10 lease ruling is already in flight (D-ORCH-165), not re-dispatched; the 040-B and 041-B stacked merges and D-SECPOST-01 are still with session B's agents.
 - **Dispatched (read-only rounds, no heavy commands):** code review round 2 and security round 1 on TASK-034 `3ee36f01`; code delta review on TASK-045 `3168c194..c02dbf27` (head `77326dc5` = evidence only), with a rate-limit exposure list for the merge with #82; merge-only code and security rounds on TASK-044 `33262314`.
 - **Dispatched (docs):** product-manager: the D-PM for QG-041B-C3 from D-ARCH-231 texts, and landing of the held D-PM-088/089 story texts and map rows (QG-044-C2 (f)); it also identifies the unowned uncommitted EPIC-04/06/10/16 edits found in the main checkout. quality-gatekeeper: closing entry for QG-041B-C1/C2.
