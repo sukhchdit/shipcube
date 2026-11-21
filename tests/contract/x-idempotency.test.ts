@@ -83,6 +83,100 @@ describe('[SEC-TC-53] x-idempotency of the ADR-0014 one-time-secret routes', () 
   });
 });
 
+/**
+ * PR040-SEC-07 (TASK-040 part 040-B; D-SECPR040-01): three sets the acceptances of the idempotency store rest on. Each
+ * is pinned exactly; changing one needs a security decision. Idempotent = `x-idempotency` other than `not-applicable`.
+ */
+const isIdempotent = (op: ContractOperation): boolean => op.operation['x-idempotency'] !== 'not-applicable';
+
+/** (a) Public: an operation-level `security` that is empty or has an empty requirement (no credential needed). */
+const isPublic = (op: ContractOperation): boolean => {
+  const security = op.operation['security'];
+  return (
+    Array.isArray(security) &&
+    (security.length === 0 || security.some((requirement) => isRecord(requirement) && Object.keys(requirement).length === 0))
+  );
+};
+
+const isViewOrDownload = (op: ContractOperation): boolean => {
+  const audit = op.operation['x-audit'];
+  return isRecord(audit) && (audit['action'] === 'VIEW' || audit['action'] === 'DOWNLOAD');
+};
+
+/**
+ * (c) A schema (dereferenced; `allOf`/`oneOf`/`anyOf`, nested properties and items included) that declares a
+ * `client_secret` property. Examples are not schemas and are skipped; a reference cycle is visited once.
+ */
+function declaresClientSecret(schema: unknown, seen: Set<unknown> = new Set()): boolean {
+  if (typeof schema !== 'object' || schema === null || seen.has(schema)) return false;
+  seen.add(schema);
+  if (Array.isArray(schema)) return schema.some((item) => declaresClientSecret(item, seen));
+  const node = schema as Loose;
+  if (isRecord(node['properties']) && Object.hasOwn(node['properties'], 'client_secret')) return true;
+  return Object.entries(node).some(([name, value]) => name !== 'example' && name !== 'examples' && declaresClientSecret(value, seen));
+}
+
+/** The 2xx response schemas of an operation contain a `client_secret` property. */
+const returnsClientSecret = (op: ContractOperation): boolean =>
+  Object.entries(op.operation.responses ?? {})
+    .filter(([status]) => /^2(?:\d\d|XX)$/u.test(status))
+    .some(([, response]) => isRecord(response) && declaresClientSecret(response['content']));
+
+const idempotentIdsWhere = (all: readonly ContractOperation[], predicate: (op: ContractOperation) => boolean): string[] =>
+  all
+    .filter((op) => isIdempotent(op) && predicate(op))
+    .map((op) => op.operationId)
+    .sort();
+
+/** A copy of an operation under another id with other metadata (planted negatives). */
+const planted = (op: ContractOperation, changes: Loose): ContractOperation => ({
+  ...op,
+  operationId: 'planted',
+  operation: { ...op.operation, ...changes },
+});
+
+describe('[PR040-SEC-07] the idempotent operation sets the store relies on (a security decision to change)', () => {
+  it('(a) the public idempotent operations are exactly {recordConsent} (the only network-scoped keys)', () => {
+    expect(idempotentIdsWhere(operations, isPublic)).toEqual(['recordConsent']);
+  });
+
+  it('(a) planted: a bearer operation made public is named; a public not-applicable one is not', () => {
+    expect(idempotentIdsWhere([...operations, planted(byId('createOrder'), { security: [] })], isPublic)).toEqual([
+      'planted',
+      'recordConsent',
+    ]);
+    expect(idempotentIdsWhere([planted(byId('createOrder'), { security: [{}, { bearerAuth: [] }] })], isPublic)).toEqual(['planted']);
+    expect(idempotentIdsWhere([planted(byId('createQuote'), { security: [] })], isPublic)).toEqual([]);
+  });
+
+  it('(b) the idempotent operations with a VIEW or DOWNLOAD audit action are exactly {emailShipmentDocuments}', () => {
+    expect(idempotentIdsWhere(operations, isViewOrDownload)).toEqual(['emailShipmentDocuments']);
+  });
+
+  it('(b) planted: an idempotent operation whose audit action becomes VIEW is named', () => {
+    const op = byId('createOrder');
+    const view = planted(op, { 'x-audit': { ...(op.operation['x-audit'] as Loose), action: 'VIEW' } });
+    expect(idempotentIdsWhere([...operations, view], isViewOrDownload)).toEqual(['emailShipmentDocuments', 'planted']);
+  });
+
+  it('(c) the idempotent operations whose 2xx schema has client_secret are exactly {checkoutOrder, confirmPayment, createPaymentMethodSetup}', () => {
+    expect(idempotentIdsWhere(operations, returnsClientSecret)).toEqual(['checkoutOrder', 'confirmPayment', 'createPaymentMethodSetup']);
+  });
+
+  it('(c) planted: a 2xx schema gaining a nested client_secret under allOf is named; an example or a 4xx schema alone is not', () => {
+    const secret = { type: 'object', properties: { intent: { type: 'object', properties: { client_secret: { type: 'string' } } } } };
+    const nested = { '201': { content: { 'application/json': { schema: { allOf: [secret] } } } } };
+    expect(idempotentIdsWhere([...operations, planted(byId('createOrder'), { responses: nested })], returnsClientSecret)).toContain(
+      'planted',
+    );
+    const exampleOnly = { '200': { content: { 'application/json': { schema: { type: 'object' }, example: { client_secret: 'x' } } } } };
+    const errorOnly = { '409': { content: { 'application/json': { schema: secret } } } };
+    for (const responses of [exampleOnly, errorOnly]) {
+      expect(idempotentIdsWhere([planted(byId('createOrder'), { responses })], returnsClientSecret)).toEqual([]);
+    }
+  });
+});
+
 describe('[REQ-API-009] x-idempotency modes of the contract', () => {
   it.each(REQUIRED)('%s requires an Idempotency-Key and declares the header', (id) => {
     const op = byId(id);
