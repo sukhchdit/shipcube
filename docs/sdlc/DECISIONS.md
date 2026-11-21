@@ -10806,3 +10806,24 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - a fresh merge plus a merge-only round if main moves in code;
   - hosted CI with the `security-integration` and `migration-lint` extras, then the rename of the record.
 - **Reversibility:** High.
+
+### D-DEVOPS-002 · 2026-11-21 · devops-engineer · Follow-up to D-DEVOPS-001: PR #85 takes the three branch-only merge fingerprints (baseline 19 to 22, head `72249e40`); new chore PR #87 reverts Dependabot #50's Node 26 base images to the Node 24 digest and ignores node semver-major
+- **PR #85 (`ci/gitleaks-baseline-pr080-sec-07`): new commit `72249e40` on `518a8075`, fast-forward push, no rewrite.** The commit adds exactly three D-SEC-PR45-01 lines to `tools/quality/gitleaks-baseline.txt`, each with an ids-only comment and no value:
+  - `c33e5e927f903847daf59ca5f2aa5440562401ef:docs/sdlc/DECISIONS.md:generic-api-key:7697`: the TASK-044 merge of main `4ba683ad`.
+  - `0ccdd009acfe4eab53adb2bb69064aa0d537a6d9:docs/sdlc/DECISIONS.md:generic-api-key:7697`: the 040-B merge of main `4ba683ad`.
+  - `aade267273af4bb868a4e4c4578aeb4f7378a261:docs/sdlc/DECISIONS.md:generic-api-key:7697`: the 041-B merge of main `3d54cef8`.
+  - `BASELINE_COUNT` goes from 19 to 22. The PR25-SEC-01 pin in `tools/ci/sec-static.test.ts` follows: 22 lines, the prefixes `0ccdd00`, `aade267` and `c33e5e9`, and exactly these three full lines. The unit and int counts, titles and comments of `gitleaks-full` follow (22 lines give 0 findings, 21 give 1). The int test drops the first line, which is a main commit, so it still holds on main. The PR title and body are updated.
+  - **The merges are final.** `git merge-base --is-ancestor` shows each merge commit in exactly one head: TASK-044 `33262314` (local only), 040-B `9d1687b1` and 041-B `214ec79b` (both pushed). None is in `origin/main`. A later head cannot remove a merge from its branch's ancestry, because there is no rewrite.
+  - **The line is the same in all four commits.** Line 7697 of `DECISIONS.md` has the same content hash in `d7585e78` and in all three merges, and no first parent of a merge has it. Nothing was printed.
+  - **Security convention.** The convention is PR-0081 R3.2 (PR080-SEC-07) and the existing comment blocks of the baseline file. #85 has no security record of its own yet: the orchestrator has requested one for `tools/quality/**`.
+  - **Scope.** This fixes lane B for the three branches once they gate against a main that contains #85. It does not change lane A's range scan, which never reads the baseline, so route (c) of PR080-SEC-07 still applies there.
+- **PR #87 (`chore/node24-base-images-revert` from `origin/main` `88fd7360`, head `0ccac6bf`).**
+  - The five `FROM` lines (api, worker, web, admin, prisma) are back on `node:24.22.3-trixie-slim@sha256:af02d57b…154f124a0`. The five files are byte-identical to `7db3b8b5`, the parent of #50.
+  - The `docker` ecosystem in `.github/dependabot.yml` ignores `node` `version-update:semver-major`. Node 24.x minor and patch bumps still arrive in the single `docker-images` group together with the debian runtime base, so D-ARCH-116 rule 3 holds.
+  - The PR25-SEC-02 `docker` pin in `tools/ci/sec-static.test.ts` follows. No other dependency changes, and #86 is not touched.
+- **Checks.**
+  - **#85:** ESLint and Prettier on the five files pass. Unit Jest for `sec-static.test.ts` and `gitleaks-full.test.ts`: 2/2 suites, 33/33 tests, run after the commit because the tests read `git show HEAD:`. commitlint passes.
+  - **#87:** `check-dockerfiles --root .` reports 5 files and 0 findings. Unit Jest for `sec-static`, `check-dockerfiles` and `check-install-flags`: 3/3 suites, 155/155 tests. Prettier and commitlint pass.
+  - **Not yet run:** the api image build. `.orch/laneb-queue/prep-chore-node24.sh` waits for `.orch/docker.lock` (held by the #86 lane-B run), then runs `npm ci` and the api `docker build` under the lock, releases the lock, and queues `run-live76.sh` (a copy of `run-live69.sh`) on `Shipqube-NODE24`. The result goes into the #87 body. Lane B `--profile pr` builds no images.
+- **Alternatives:** keep Node 26 and widen `engines` (rejected: it contradicts ADR-0001 and needs a superseding ADR); ignore `node` in Dependabot completely (rejected: it would stop the 24.x security patches and split node from debian); a squash supersede of each of the three branches instead of baseline lines (rejected by the dispatch; still open as route (c) for lane A).
+- **Reversibility:** High.
