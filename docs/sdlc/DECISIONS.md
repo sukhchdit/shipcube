@@ -8323,3 +8323,25 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Routing:** senior-developer C1 with PR042-SEC-03 (m1) and PR042-SEC-05 in the same fix cycle, PR042-SEC-04 with n2 there or with qa-lead at the `i18n-parity` activation; orchestrator C2-C4 and the PR042-SEC-02 lines on the react-i18next task and TASK-062; principal-architect for information only (the bump stays inside ADR-0001's i18next 27 line; D-ARCH-014 pins the ICU packages, not i18next).
 - **Binding:** simulation with main's real checker, 11 of 11 as expected (the C1 bump and a main merge carrying TASK-041's lock void it; the m1 fix in `create-i18n.ts` and docs commits keep it).
 - **Reversibility:** High.
+
+### D-ORCH-150 · 2026-11-21 · sdlc-orchestrator (session B) · PR #82 (TASK-041 041-A) ready; dependent parts built stacked while CI billing blocks merges; TASK-045 review routings; TASK-042 fix held for the i18next cooldown
+- **PR #82 (TASK-041 part 041-A):**
+  - Lane B `20261121T0547Z_0614a90` = PASS: unit 8,357, integration 421 (the real-Valkey rate-limit cases and gitleaks-full included), api 210, catalog 113, rls 157. It was committed on the branch as `be843ae1` and pushed.
+  - The records were renamed `PR-0082-…` (`99f6e45f`). After a close and reopen, the merge ref `c7639481` (first parent `99f6e45f`) contains them, and the PR is ready.
+  - The ready run (44874391948) again shows "The job was not started because recent account payments have failed or your spending limit needs to be increased". Slot 1 now waits only on CI.
+- **Stacked builds (decision):**
+  - Merges cannot happen until GitHub billing allows jobs, and the plan's gates say "after X is on main". So a part whose only missing gate is "predecessor on main" is built on a branch cut from the predecessor's approved, pushed head.
+  - It is reviewed and run through lane B there. It opens its own PR only after the predecessor merges: main is merged into it first, as a union of identical trees, followed by a merge-only security round.
+  - **Applied now:** TASK-041 part 041-B on `feat/TASK-041-part-b-rate-limit-rulings-rev2` from `be843ae1`. It is on the critical path to TASK-048 and TASK-052.
+  - **Candidate next:** TASK-040 part 040-B PR 1 on PR #80's head (D-QG-004 gate "040-A on main").
+  - **Why:** it keeps the critical path moving. Risk: if a predecessor changes before it merges, the stacked part re-merges it. Both predecessors are fully approved.
+  - **Alternative rejected:** idle build slots until billing returns.
+  - **Reversible:** a stacked branch can be dropped.
+- **TASK-045 routings (code review round 2 `16819e33`, APPROVED_WITH_NITS):**
+  - R1-m1 (sort keys that can change between pages) goes to principal-architect, with a **dispatch gate on the first task whose list sorts on a mutable column**. TASK-073 is not gated, because `occurred_at` is immutable.
+  - The module side of R1-n3 / PR045-SEC-07 goes to the next task that changes `define-route.ts`: TASK-096, which holds `api-routing` in batch 3.1 (D-SD-010).
+  - R2-m2, R2-n2 and R2-n3 are TASK-073 contract and rider lines.
+  - R2-m1 (smallint columns against the int4 default) is decided after the security delta round (D-SECPR045-02): either fixed in TASK-045 or carried by part 045-C.
+- **TASK-042:** D-SECPR042-01 = PASS_WITH_CONDITIONS. The one MEDIUM is PR042-SEC-01: i18next 27.1.1 falls inside GHSA-q76c-gcvw-89x9; it is not reachable in our setup. The bump to ≥ 27.1.3 clears `min-release-age` at 2026-11-23T05:54Z, so the TASK-042 fix cycle is held until then. That cycle carries the bump, code review m1 (with the SEC-03 logging constraints), SEC-05, m2/m3/n2 with SEC-04, and D-TASK042-10 (the bundle numbers). One delta round instead of two; merges are blocked anyway.
+- **TASK-034:** code review round 1 CHANGES_REQUESTED (`530bf62f`: M1 the `--migration` verification can never pass; M2 the PR293-SEC-04 (a) fallback is hidden by comments). The fix cycle is running, and security round 1 reviews the fix head. The Compose CLI evidence run (code review C4) is the orchestrator's, in the lane-B lock.
+- **Reversibility:** High.
