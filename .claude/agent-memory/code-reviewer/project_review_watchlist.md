@@ -631,3 +631,8 @@ TASK-040 supersede round (2026-11-20; main c83e059e): v2 branch 2abd665f (parent
 - Open, due before TASK-049 (first catalogued event): R4-m1 MINOR unanchored/prefix `pattern` passes the probe set (`/^ORD-/`, `/[0-9]/` store an address) -> require `^...$` anchoring; R4-n1 `Joi.extend` keeping type name `string`/`number` with any rule name or type-level validate passes the walk -> rule allow-list + refuse extend in events/.
 - Lint-twin card (next lint-lock holder): comment inside `import(/* c */ '...')`, relative import into `packages/config/src/testing/`, `@platform/api/modules/*` wildcard reaching `tests/`; plus back-quoted `import()`.
 - Merge conditions R4-C1..C4: lane B on final head (incl. open-queue + up-down-up), env parity after user lines, security record covering 3ba1eb53.
+
+TASK-080 (pre-push, r1 CHANGES_REQUESTED at 4a0faee3, 2026-11-21; record `PR-pending-TASK-080-code-review.md`, commit 222fdf54 on main). Re-check at the delta review:
+- R1-M1: `ck_pricing_config_versions__source` must drop ADMIN (SEED/SAMPLE, or + OPERATOR per data-model §1.7); D-TASK080-05 text amended.
+- R1-m1 template-literal specifiers in pricing-purity `checkSource`; R1-m2 sample config hash over insertion-order JSON (re-pins 3 literals if fixed); R1-m3 WATCHED_GLOBALS only Date-pinned; R1-m4 `carrierDecimalToMoney` no carrier/operation.
+- Lane B (pricing-sample.int, C5/C10/C15, up-down-up) had not run; TASK-051 migration 20261120210000 sorts before 080's 20261121000000 (second merger re-times).
