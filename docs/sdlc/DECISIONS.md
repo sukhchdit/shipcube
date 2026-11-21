@@ -8285,3 +8285,27 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - PLAN.md: the decisions row, the Wave 2 and Wave 3 rows, the M0 checkpoint paragraph and the counts note (298 tasks).
   - traceability.md v1.16: the REQ-RLS-013 row per D-PM-087.
 - **Reversibility:** High (plan text; nothing built).
+
+### D-ORCH-149 · 2026-11-21 · sdlc-orchestrator (session B) · Session state after the D-SD-011 fold: PR #81 ready, the TASK-051 v2 supersede, developer decisions accepted by reference, a lane-B rule breach
+- **PR #81 (TASK-080):**
+  - Lane B `20261121T0450Z_3d3a777` = PASS, including gitleaks-full in the integration suite. It is committed on the branch as `a5935281`.
+  - Code review round 2 APPROVED_WITH_NITS (`965a5a34`); security round 2 PASS_WITH_CONDITIONS (D-SECPR080-02).
+  - The records were renamed `PR-0081-…` (`35daad8c`). After a close and reopen, the merge ref `0aaf8791` (first parent `7f7dcf52`) contains them, and the PR is ready.
+  - It waits only on hosted CI (D-ORCH-146).
+- **TASK-051:**
+  - Fix cycle 1 was done on the old branch (`a79facce`), then superseded by `feat/TASK-051-guest-capable-tables-atomic-claim-v2` at `c1c8a6ec`: one squash commit on main `530629f4` whose tree equals the merge of `a79facce` with that main. The D-SECPR040-02 route (2); nothing was pushed or rewritten.
+  - Code review round 2 APPROVED_WITH_NITS bound to `c1c8a6ec` (`d99ccfc9`). R2-m1 (the SEC-TC-79/80 tags missing from test titles) is taken on v2 before the final lane-B run, so evidence and the security delta and supersede rounds bind to one head.
+  - QG-051-C1 closed in text (D-ARCH-215; the gatekeeper confirms); C2 folded (D-SD-011, `41bcb54a`); C3 decided (D-PM-087); C4 = lane B on the final v2 head.
+  - New TASK-298 (C16 arms (c) and (d)) must merge before TASK-087 opens its PR.
+- **TASK-041:** merge-only security round 3 = PASS_WITH_FOLLOW-UPS at `0614a90f` (D-SECPR041-03): a pure union, and `.env.example` is not an owned path. Lane B on `0614a90f` is queued.
+- **Built ahead (merges blocked):** TASK-044 SSE convention at `dc64193f` (D-TASK044-01..13; three open questions on the cache header, the 20 s slot deadline and AT-US-042-07, routed with its reviews).
+- **Reviewed:**
+  - TASK-042: code review round 1 APPROVED_WITH_NITS (`7f7dcf52`); its security round 1 is running.
+  - TASK-045: code review CHANGES_REQUESTED (`d12c22fd`) and security PASS_WITH_CONDITIONS (D-SECPR045-01); its fix cycle is running.
+  - TASK-034: code review round 1 is running.
+- **Developer decisions accepted by reference:** D-TASK043-13..15, D-TASK051-01..15, D-TASK080-01..19, D-TASK042-01..09, D-TASK045-01..09 and D-TASK034-01..08, as ruled in their code-review and security records.
+  - The texts are in the commit bodies, the same practice as D-ORCH-142, which pasted them here; this entry cites them instead, to keep DECISIONS.md smaller. Where a review amended a decision (D-TASK080-05 → -14, D-TASK045-03 wording), the amended decision governs.
+  - D-SD-011 names the owners of the open items: part 045-B → TASK-081, codec wiring → part 045-C, PR080-SEC-06 → TASK-192, i18n-parity → qa-lead.
+- **Rule breach, no harm found:** for its QG-051-C6 probes, principal-architect started a throwaway `postgres:18` container without taking `../.orch/docker.lock`, while the TASK-080 re-run held it. That re-run passed. Briefs now state that only the orchestrator's lane-B queue runs Docker, and agents ask for a probe slot.
+- **Process note:** the PR #80 merge-ref check of D-ORCH-146 needs a `+` refspec, and a close and reopen to refresh a stale merge ref. Both worked for PR #81.
+- **Reversibility:** High.
