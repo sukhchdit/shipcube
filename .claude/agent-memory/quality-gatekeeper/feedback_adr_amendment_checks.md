@@ -1,11 +1,11 @@
 ---
 name: adr-amendment-verification-heuristics
-description: Nineteen checks that found real gaps when verifying an ADR amendment under CLAUDE.md §5 (D-QG-001 to D-QG-009); apply them to every later amendment verification
+description: Twenty-one checks that found real gaps when verifying an ADR amendment under CLAUDE.md §5 (D-QG-001 to D-QG-010); apply them to every later amendment verification
 metadata:
   type: feedback
 ---
 
-When verifying an ADR amendment, do these nineteen checks beyond reading the amended ADR.
+When verifying an ADR amendment, do these twenty-one checks beyond reading the amended ADR.
 
 1. **Find the other Accepted text the amendment makes an exception to.** The architect adds dated pointers inside the ADR being amended, but a rule stated in a different ADR (or the threat model row, or the brief) is often left without one. D-QG-002: ADR-0004 am. 2 named a T-83 exception while ADR-0005 am. 11 item 17 ("binding", no queue call in a tenant transaction) had no note. D-QG-001: brief §3.2 and CLAUDE.md §2.
 2. **Grep the code for universal claims** ("every advisory lock is transaction-level", "the only hatch", "no caller produces"). D-QG-002: `tools/db/bootstrap.ts` held a session-level lock the new key registry omitted.
@@ -32,6 +32,9 @@ When verifying an ADR amendment, do these nineteen checks beyond reading the ame
 
 18. **When a rule is made universal to answer an observation, grep the UX flows and the stories for the per-case behaviour it replaces.** D-QG-009: "one client rule for every `RATE_LIMITED` answer: send again after `Retry-After`, three times" was right for the hold (always 1 s) and contradicted flows F01, F04 and F10 (show the retry time, the user retries) for class windows of a minute to an hour. The earlier card line had the limit ("Retry-After 1") and the replacement dropped it; compare the replaced clause with its replacement.
 19. **A fix ruled in a decision entry can leave a shape that only the entry names.** D-QG-009: change C-4 ends a slot without an outcome, except one that returns no promise and answers from a callback; D-ARCH-230 and the probe table say so, the ADR and the risk row do not. Read the probe table row by row and look for each "held for good" cell in the Accepted text. Also read the seams of the committed tests against a new contract sentence ("must return a promise"): the tests can break the contract they prove.
+
+20. **When a table claims to list every case of a window, look in the same ADR for a step that is placed in that window and not built yet.** D-QG-010: ADR-0014 amendment 18 listed six stretches of the idempotency lease, complete for the code at the fix head; amendment 7 of the same ADR puts the re-authentication check (TASK-187, its own transaction) between the claim and `load`, and with it two route shapes run past the lease. Enumerate the cases from the control flow yourself, then add each planned step from the order tables and the cards of later tasks. A test that types the table's rows cannot notice a new phase.
+21. **Read the "also decided" part of an entry that answers a ruling against the ruling.** D-QG-010: D-UX-037 confirmed all four defaults of the client rule and added, "with no ADR text change", that a poll goes on after `Retry-After` with no state shown; item 6 said "the client sends nothing more by itself" and "no component repeats one on a timer". The answering agent adds per-case behaviour after the rule is written, and the confirming agent (D-PM-092) had not opened the flows.
 
 Also read the security record's last round for findings that postdate the amendment commit (D-QG-008: PR041-SEC-16 and a developer decision in a commit body, D-TASK041-20, were premises of sentences in the Accepted text). "At the architect's next touch" is a routing without a date.
 

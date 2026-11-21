@@ -1,23 +1,22 @@
 ---
 name: qg-041b-adr-0016-amendment-13-item-6-conditions
-description: D-QG-008 and its closing entry D-QG-009 (2026-11-21) on ADR-0016 amendment 13 item 6 (in-flight hold, R-ARCH-36 (d)) for TASK-041 part 041-B; which of QG-041B-C1..C7 are open and what to re-verify at the next entry, at the merge and at G3
+description: D-QG-008, D-QG-009 and D-QG-010 (2026-11-21) on ADR-0016 amendment 13 item 6 (in-flight hold, R-ARCH-36 (d), the RATE_LIMITED client rule, the callback slot form) for TASK-041 part 041-B; which of QG-041B-C1..C8 are open and what to re-verify at the next entry, at the merge and at G3
 metadata:
   type: project
 ---
 
-D-QG-008 (`8553b002`) = PASS_WITH_CONDITIONS on the in-flight hold. D-QG-009 (`7c6d3654`, not pushed by me) is the closing entry for the architect's answer D-ARCH-228..231 (`e306a60f`). Next free id is D-QG-010.
+D-QG-008 (`8553b002`) = PASS_WITH_CONDITIONS on the in-flight hold. D-QG-009 (`7c6d3654`) closed C1 and C2 on D-ARCH-228..231. D-QG-010 (`7c1fad4a`, not pushed by me) verified the touch for C7 (D-ARCH-233, D-ARCH-234, `76d5e46b`; D-UX-037, D-PM-092, D-QA-023). Next free id is D-QG-011.
 
-State after D-QG-009:
-- QG-041B-C1 CLOSED (cost restated as a bound on concurrency; two alerts; trigger (iv); stream reconnects assessed).
-- QG-041B-C2 CLOSED_WITH_FOLLOW_UP: the text is complete. Owed by code before TASK-052 is dispatched: change C-4 in `authn-failed.ts` and tests H7 to H10 (rulings file section 10.4, fix cycle 3 on `aade2672`), code review round 4 with five mutants, a security delta round that closes or keeps PR041-SEC-16.
-- QG-041B-C3 CLOSED_WITH_FOLLOW_UP on D-PM-090 (`f7b6b1a4`; US-040 note landed in `3acebd35`). The acceptance lapses if PR041-SEC-11 is rated above LOW, and it rests on the client rule of card line 24.
-- QG-041B-C4 OPEN (security-analyst): PR041-SEC-11 re-rated with the burst case, in the delta round; threat model before G3.
-- QG-041B-C5 OPEN: (a) H6 on a real Valkey in lane B on the merge head; (b) and (c) may ride fix cycle 3.
-- QG-041B-C6 OPEN: card line 25 at the fold; load-run measurement before G3.
-- QG-041B-C7 NEW: (a) principal-architect with ux-designer, product-manager confirms, before card line 24 is folded and TASK-065 is dispatched: the "one client rule for every RATE_LIMITED" repeats automatically after `Retry-After`, while the UX flows (F10 R14, F01, F04, US-248 screen states) show the retry time and class windows run to an hour; (b) principal-architect before TASK-052: item 6 and the risk row name the slot shape C-4 does not end (no promise, answers from a callback later) and what the wrapper does with a slot that returns no promise and has not reported; (c) qa-lead before the first suite that signs in runs against Compose: TEST-STRATEGY.md says that all suites share one address, one failed-authentication budget and one room.
-- The fold of card lines 20 to 26 was not done at D-QG-009 (`plan-data.mjs` at D-SD-012); lines 18 and 19 as folded are stale.
+State after D-QG-010:
+- QG-041B-C1 CLOSED. QG-041B-C2 CLOSED_WITH_FOLLOW_UP: change C-4 and H7 to H10 are on the branch at `214ec79b` (read, not run; H8 asserts `api.authn_slot_unreported`); code review round 4 is APPROVED_WITH_NITS (D-CRPR041B-01); the security delta round on `214ec79b` was running.
+- QG-041B-C3 CLOSED_WITH_FOLLOW_UP on D-PM-090 as amended by D-PM-092. The acceptance lapses if PR041-SEC-11 is rated above LOW, if item 6 changes again, or if the number of repeats changes.
+- QG-041B-C4 OPEN (security-analyst): PR041-SEC-11 with the burst case, and what remains of PR041-SEC-16 (rows 5a and 5b of rulings 11.3). It gets its own closing entry; threat model before G3.
+- QG-041B-C5 OPEN: (a) H6 on a real Valkey in lane B on the merge head, with H7 to H9. QG-041B-C6 OPEN: card line 25 at the fold; load-run measurement before G3.
+- QG-041B-C7 (a) CLOSED_WITH_FOLLOW_UP, (b) CLOSED, (c) CLOSED_WITH_FOLLOW_UP. The client rule: an automatic repeat only for `Retry-After: 1`, three times at most; a longer wait is shown and the user repeats. No superseding ADR.
+- QG-041B-C8 NEW (principal-architect, with ux-designer if the flow changes; before TASK-065 is dispatched): item 6 and card line 24 say "the client sends nothing more by itself" and "no component repeats one on a timer"; F10 §1.1 (D-UX-037) lets a poll of data on screen go on after `Retry-After` with no state shown. The developer text must say what a poll does, with a test row, plus rows for the same key on the repeat, a missing `Retry-After`, and the requests that waited for a rate-limited refresh.
+- Follow-ups of D-QG-010: (1) senior-developer folds card lines 20 to 26 (line 21 before TASK-052, line 24 before TASK-065; not folded at `3b807c24`); (2) api-designer: the client sentence of rulings 11.6 in api/README §7, with one sentence on whether every `RATE_LIMITED` answer comes before any effect of its request; (3) qa-lead: TEST-STRATEGY §10.4 rules 2 and 6 were written before D-ARCH-233 (a served 429 for a UI state needs `Retry-After` above 1; J-M1-04 c must not depend on the last second of a window), before TASK-279; (4) the JSDoc sentence in `authn-failed.ts` (R4-n4).
 
-Residual merge conditions of part 041-B from this gate: QG-041B-C4 rating LOW or below; QG-041B-C5 (a); if fix cycle 3 is on the branch, round 4 and the security delta on that head plus lane B with H7 to H9; the "bound on concurrency" sentence in api/README section 7; the records' own conditions.
+Residual merge conditions of part 041-B from this gate: QG-041B-C4 rating LOW or below; QG-041B-C5 (a); the security delta round on `214ec79b`; the "bound on concurrency" sentence in api/README §7; the records' own conditions.
 
-**Why:** a touch of item 6 for QG-041B-C7 (a) or (b) is Accepted text again and needs one more closing entry together with QG-041B-C4; G4 needs every condition closed.
-**How to apply:** At the next entry read item 6 "Answer" and "Release" on main, then the UX flows; check that C-4 exists as TypeScript and that H8 asserts the error line `api.authn_slot_unreported`. I withdrew one sentence of D-QG-008: a synchronous slot is refused too, because the admission runs inside `consumeGated` and the request moves on in a later `.then`. At G3 look for the QG-041B-C5 (b) row and the C6 figures. Related: [[qg-041-adr-0016-amendment-12-conditions]], [[adr-amendment-verification-heuristics]].
+**Why:** G4 needs every condition closed; C8 and follow-up 2 gate TASK-065, card line 21 gates TASK-052.
+**How to apply:** At the closing entry for C4 read the security record's rating of rows 5a and 5b and of PR041-SEC-11, then check whether item 6 was touched for C8 (it need not be if a card line follows my reading: "Not before the time" binds a poll). At G3 read the TASK-065 tests against card line 24 (a) to (g) and F10 §1.1, the QG-041B-C5 (b) row and the C6 figures. Related: [[qg-041-adr-0016-amendment-12-conditions]], [[adr-amendment-verification-heuristics]].
