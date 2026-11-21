@@ -214,3 +214,247 @@ No `.env*` file is in the delta, and none was opened.
 - Mine, before G3: threat model R-13, T-11, T-39 and T-93 aligned with ADR-0016 amendments 12 and 13 (item 6 included), and PR041-SEC-06 in §10.4 H.
 
 | Verdict | **PASS_WITH_CONDITIONS.** Round 1 of part 041-B at `83a85739`: 0 Critical, 0 High, 0 Medium. QG-041-C4 second half: concurrence on ADR-0016 amendment 12 items 4, 7 and 8 and amendment 13 items 1 to 3; amendment 13 item 6 / R-ARCH-36 (d) wording concurred with three additions; residual (d) rated LOW (cost, PR041-SEC-11) and INFO (bound, PR041-SEC-12), so trigger (vi) does not fire. New: PR041-SEC-10 LOW (= code review R2-M1: a client that disconnects after admission frees its unit; probe 13 and 84 entries at limit 5; fix shape validated: 5 and 5), ruled by D-ARCH-226 into fix cycle 2; PR041-SEC-11 LOW (accepted cost: valid credentials 429 while the hold is full; a quiet hold by unfinished bodies, including a declared oversize body, up to Node's 300 s); PR041-SEC-12, -13, -14 INFO. Closed: PR041-SEC-09; PR041-SEC-03 on the HTTP side. Conditions: C1 fix cycle 2 (C-1, C-2, C-3, H2 to H5) with a security delta round before merge; C2 lane B on the merge head including H6; C3 merge-only round after #82 merges, proving by old-and-new blob equality that the 16 conflicts a squash of #82 causes resolve to the part-B head (record binding simulated with main's checker, 13 of 13 as expected); C4 rename and merge-ref check |
+
+# Round 2: delta `83a85739..12b8a10a` (fix cycle 2)
+
+| Field | Value |
+|---|---|
+| PR | Not opened. Branch `feat/TASK-041-part-b-rate-limit-rulings-rev2`, stacked on PR #82's head `be843ae1`, not pushed, upstream unset. Fix cycle 2 is one commit on `83a85739` (D-ORCH-158). Its body carries developer decisions D-TASK041-19 to D-TASK041-22 |
+| Head | 12b8a10a6e193d44ec26ee0694c94468ef00f6d1 |
+| Delta reviewed | `83a85739..12b8a10a`: 12 files, 420+/73-. 10 are security-owned: `authn-failed{,.test,.api.test}.ts`, `counter.ts`, `in-flight{,.test}.ts`, `kit.ts`, `limiter.ts`, `limits.ts`, `rate-limit.int.test.ts`. 2 are unowned: `start-api.denial-budget.api.test.ts` and api/README §7. `be843ae1..12b8a10a` changes no lockfile, no `package.json`, no `packages/config/src/schema.ts`, no lint configuration and no tool |
+| Owned paths, whole part B | 21 under main's checker (`--base be843ae1 --head 12b8a10a`). It is the same set as in round 1, so the 26-file delta and the 21 owned paths are unchanged |
+| Lane A / lane B evidence | None for this head; round 1's C2 stands. D-ORCH-158 reports these host results: ESLint clean, check-suppressions 0, unit tests 956/956, the three api files 54/54. I did not re-run them |
+| Binding items checked | Rulings §9.3 C-1 to C-3 and tests H1 to H6; D-ARCH-225 to D-ARCH-227; ADR-0016 amendment 13 item 6 as it stands on main `f2055342`; D-TASK041-19 to D-TASK041-22 (commit body); D-ORCH-158; my round 1 (C1 and the section 4 additions); code review rounds 2 (`86cdef9a`) and 3 (`f49a7ff1`, APPROVED_WITH_NITS). Round 3 landed on local main while this round was being written. I read it before finalising: its R3-n2 is the twin of PR041-SEC-15, its R3-n3 concerns the seams (R2.6), and its probe P9 is the hang case of PR041-SEC-16 |
+| Reviewer / date | security-analyst, 2026-11-21. Round 2 of part 041-B: a delta round, condition C1 of round 1. Same host rule and method as round 1: nothing was run in the part-B worktree, no Docker, no Jest. I ran single-process Node 24.22.3 probes on `git archive` extracts of `12b8a10a` (head) and `83a85739` (positive control), and on seven scratch copies of the head: six mutants and one candidate hardening. Every probe went through the real `createApp`, with the branch's `FakeValkey` and raw loopback sockets |
+
+## R2.1 Summary
+
+- **PR041-SEC-10 is closed.** C-1 is built as ruled.
+  - `enter` marks the holder before the slot. The close of the response calls `releaseUnentered`. The outcome calls `release`, after the spend has landed.
+  - The abort probe (PA2) gives 5 authenticator entries at limit 5 in all six shapes: a reset, a destroy or a half-close, 5 ms after sending or once inside the slot, with a 20 ms, 200 ms or 400 ms slot.
+  - The ledger is empty after every run.
+  - The previous head gives 11 to 117 entries. A mutant that restores the release at every close gives 9, 98 and 60.
+- **PR041-SEC-02 (b) is closed** by the same control. With part A's (a), PR041-SEC-02 is closed in full.
+- **C-2 holds** (probe PC):
+  - a refusal by the hold is counted under `step0-authn-inflight` and carries `held: true`;
+  - a refusal by the spent budget is counted under `step0-authn-failed`;
+  - a request whose client left before step 0 answered is counted under neither label;
+  - the hold emits no event;
+  - mutants M4 and M5 each move a count.
+- **C-3 is verbatim.** The sentence of rulings §9.3 appears once, directly after "whether its own credential is valid or not.".
+- **D-TASK041-20 holds, and it carries weight in production.**
+  - The window is real: the JSON parser inflates `gzip` request bodies asynchronously between step 0 and the slot.
+  - Through that window the head enters the authenticator 0 times.
+  - The previous head, and the two mutants that drop the guard, enter it 31, 20 and 28 times at limit 5.
+  - Nothing is left hanging: the client had already gone, the server ends with 0 connections, and every response object is garbage-collected.
+  - Only unit rows test it: **PR041-SEC-15** (INFO), the twin of code review R3-n2.
+- **The new test seams cannot be reached from production.** `startApi` passes the literal `{ settings: config, valkey }`.
+- **New: PR041-SEC-16** (LOW). C-1 makes the outcome the only release of an entered unit. An authentication slot that answers the client itself, or never reports, therefore keeps its unit until the process restarts. Five such answers lock the address's credentialed requests on that instance (probe PH). The previous head released the unit at the close.
+  - Pre-existing since `5164fd03`, and missed in round 1: such a refusal spends nothing.
+  - The only production slot today is the TASK-020 stub, which always calls `next`.
+  - The fix is a contract sentence and test rows on the authenticator cards. A cheap hardening in the wrapper, release at `finish`, was validated on a scratch copy and is offered to the architect.
+- **My round-1 additions (a) and (b) to the (d) wording are not folded yet** at `f2055342`. D-ORCH-158 routes them to the architect's next touch of amendment 13 item 6. They are not a merge condition.
+
+0 Critical, 0 High, 0 Medium. **PASS_WITH_CONDITIONS**: C1 is discharged, and C2 (lane B on the merge head, including H6), C3 (the merge-only round after #82) and C4 (the rename) remain.
+
+## R2.2 Round-1 items at this head
+
+| ID | State |
+|---|---|
+| PR041-SEC-10 (LOW) | **Closed.** C-1 (`in-flight.ts:71-82`, `limits.ts:159-163`, `authn-failed.ts:59`). PA2 gives 5 entries in every shape and an empty ledger. Mutant M1 (release at every close) gives 9, 98 and 60. Mutant M3 (no `enter` call) gives 12, 33 and 60. The api row H2 exists (both ways of leaving). The fail-before-fix claim of the commit body (49 and 60 entries on `83a85739`) is consistent with my control runs |
+| PR041-SEC-02 (b) | **Closed**: the budget is bounded on one instance for clients that stay and clients that leave. Part A's round 2 closed (a), so PR041-SEC-02 is closed |
+| PR041-SEC-11 (LOW, accepted) | (a) **done**: the label of C-2 (probe PC; the hold of probe PB is now counted under `step0-authn-inflight`). (b) the TASK-108 card line (timeout from arrival, declared-oversize body), (c) TASK-214 and (d) the product-manager sentence stay routed |
+| PR041-SEC-12 (INFO, accepted) | Unchanged. PD re-run on the head: 12 of 12 runs exactly 5 (a synchronous refusal, 1, 3 and 8 microtask hops, `setImmediate`, a 1 ms timer; batched and direct replies). H6 against a real Valkey stays lane B's (C2). Its model releases after the spend lands, as the wrapper does |
+| PR041-SEC-13, -14 (INFO) | Unchanged (TASK-214; TASK-052, optional) |
+| PR041-SEC-03 | Closed on the HTTP side (round 1); carrier side TASK-190 |
+| PR041-SEC-04, -06, -07 (INFO) | Unchanged |
+
+## R2.3 Probes
+
+**PA2, abort after admission** (limit 5; a seam authenticator that refuses a junk bearer after the slot delay; authenticator entries; "in the slot" means the client leaves once its request is in the authenticator, or once it is answered, which is the H2 shape):
+
+| Shape | `12b8a10a` | `83a85739` (control) | M1: release at every close | M3: no `enter` |
+|---|---|---|---|---|
+| 60, one every 2 ms, reset 5 ms after sending, slot 20 ms | **5** | 12 | 9 | 12 |
+| 200, one every 1 ms, reset at 5 ms, slot 200 ms | **5** | 117 | 98 | 33 |
+| 60, one every 2 ms, half-close at 5 ms, slot 20 ms | **5** | 11 | n/a | n/a |
+| 60, one every 3 ms, destroy in the slot, slot 400 ms (H2 "destroy") | **5** | 52 | 60 | 60 |
+| As above, half-close in the slot (H2 "half-close") | **5** | 60 | n/a | n/a |
+| As above, reset in the slot | **5** | 60 | n/a | n/a |
+
+On the head the peak concurrency in the authenticator was 5 and the ledger was empty after every run. Mutants M2 and M6 (the D-TASK041-20 guard dropped) also give 5 in these shapes, because a body-less `GET` reaches the slot in the same tick as step 0's answer. The guard matters only where the pipeline waits between the two (probe PG).
+
+**PG, the window of D-TASK041-20.** `POST` with a junk bearer and a `gzip` JSON body: 918 bytes on the wire, 900 kB inflated, under the 1 MB limit. The client leaves 0 to 12 ms after sending. body-parser's `inflate` is on by default, and `jsonBodyParser` does not turn it off. A load hook counted the wrapper's early return; it observes only and changes no behaviour.
+
+- **Sequential, 65 attempts per way of leaving** (the slot refuses with `ACCESS_TOKEN_EXPIRED`, so nothing is spent and the gate stays open):
+
+  | Leave | Early returns (slot not entered) | Slot entered | Other | Ledger after | Server connections after | Responses collected / created | Access lines `aborted: true` with `route: null` | Error lines |
+  |---|---|---|---|---|---|---|---|---|
+  | reset | 50 | 12 | 3 | 0 | 0 | 63 / 63 | 50 | 0 |
+  | destroy | 46 | 19 | 0 | 0 | 0 | 66 / 66 | 46 | 0 |
+
+- **Burst** (120 junk bearers with that body, one every 1 ms, reset 10 ms after sending, slot 200 ms, limit 5): the head enters the authenticator **0** times, with 74 early returns. The control `83a85739` enters it **31** times. M2 (`enter`'s false ignored) enters it **20** times, M6 (`enter` true for a released holder) **28** times. With a reset 2 or 6 ms after sending, few requests get into the window (0 or 1 entries in every build).
+
+**PC, the label split** (C-2):
+
+| Case | Head | M4: no `held` flag | M5: count when gone | `83a85739` |
+|---|---|---|---|---|
+| Hold full (5 valid bearers with unfinished bodies), then a valid `GET` | 429, `Retry-After: 1`, `step0-authn-inflight` +1 | `step0-authn-failed` +1 | as head | `step0-authn-failed` +1 |
+| Budget spent (5 × 401), then a valid `GET` | 429, `Retry-After: 60`, `step0-authn-failed` +1 | as head | as head | as head |
+| Client leaves before step 0 answered (store hangs to its 250 ms bound) | no label, slot not entered, ledger 0 | as head | `step0-authn-inflight` +1 | `step0-authn-failed` +1 |
+
+One `rate_limit_auth` event was emitted in every build, for the spend that reached the limit. The hold emitted none.
+
+**PB, release matrix** (head): the 11 outcomes of round 1 leave the ledger empty, with one exception. A hung slot whose client left keeps 1 unit. That is the case D-ARCH-226 item 3 accepts: no timer, and the gauge shows it. In the hold part, a valid `GET` from the held address gets 429 with `Retry-After: 1`. Another address gets 200, and sign-in with a stale cookie gets 200. There is no event and no spend.
+
+**PH, a slot that answers the client itself** (PR041-SEC-16): five junk bearers are answered `401` by the slot with `res.status(401).json(…)` and no `next`.
+
+| Build | Units held after | Failed count | Valid bearer at 0 s / 1.5 s / 3 s |
+|---|---|---|---|
+| `12b8a10a` | **5, for good** | 0 | 429 `Retry-After: 1` / 429 / 429 |
+| `83a85739` | 0 (the close released them) | 0 | 200 / 200 / 200 |
+| Candidate F (head plus a release at `finish`) | 0 | 0 | 200 / 200 / 200 |
+
+Candidate F passes PA2 in four shapes (reset at 5 ms with slots of 20 ms and 200 ms; destroy and half-close in the slot): 5 entries each. Its PB matrix is the same as the head's.
+
+**Gitleaks** (emulated, v8.30.1 default rules as pinned in `ci.yml`), over the 420 added lines of `12b8a10a`:
+
+- the over-approximation (keyword and regex only, 221 rules) gives 0;
+- `generic-api-key` with its entropy, allowlists and 1,446 stopwords gives 0;
+- the runtime positive controls fire.
+
+No `.env*` file is in the delta, and none was opened.
+
+## R2.4 Findings of this round
+
+| ID | Severity | CWE / OWASP 2021 | Where (`12b8a10a`) | Title | Owner, due |
+|---|---|---|---|---|---|
+| PR041-SEC-15 | INFO | CWE-307 / A07 | `authn-failed.ts:59`; tests `authn-failed.test.ts` `[D-TASK041-20]`, `in-flight.test.ts` `[D-TASK041-20]` | The D-TASK041-20 guard carries weight in production (`gzip` bodies) and has unit rows only (= code review R3-n2) | senior-developer: next fold, or with TASK-052's disconnect rows (card line 16); optional, as R3-n2 |
+| PR041-SEC-16 | LOW (MEDIUM if an authenticator shipped with the shape) | CWE-772 / A04 | `authn-failed.ts:64-94` (only `done` releases an entered unit), `limits.ts:159-163` (the close releases only an unentered one) | An authentication slot that never reports its outcome keeps its unit until the process restarts, and its refusal spends nothing | Card lines for TASK-052, -055, -091, -171, -261 (senior-developer, next fold). The optional hardening is principal-architect's call (amendment 13 item 6 "Release") |
+
+### PR041-SEC-15 (INFO): the D-TASK041-20 guard has unit rows only (= code review R3-n2)
+
+The wrapper's `if (!kit.inFlight.enter(res)) return;` is what keeps a request that its client left during body inflation out of the authenticator. Probe PG shows the gap it closes: 20 to 31 entries at limit 5 without it, 0 with it. Its tests are two unit rows with plain objects as holders. The api rows of H3 cover a slow body whose client leaves. body-parser turns that case into an error, so the request never reaches the wrapper. By my reading, the unit rows kill M2 (`[entered, passed]` would be `[1, 1]`) and M6 (`enter(gone)` would be true). I did not run Jest. A change in how the holder reaches the wrapper (a proxied `res`, a different holder object) would pass both unit rows.
+
+Code review round 3 reached the same result independently: its probe P8 got 20 of 20 early returns with a complete `gzip` body and an immediate disconnect, and its R3-n2 asks for the same api row, as optional. I keep its owner and fix form.
+
+**Recommendation.** One api row through `createApp`: limit 5, a `POST` with a `gzip` JSON body and a junk bearer, the client leaves before the body is inflated. Expect 0 authenticator entries, ledger 0, and the address served afterwards. Mutant M2 must fail it. Probe PG shows that a reset 10 ms after sending a 900 kB-inflating body reaches the window reliably on this host.
+
+### PR041-SEC-16 (LOW): a slot that never reports its outcome keeps its unit for good
+
+**What changed.** Before C-1, every close of the response released the unit. Now an entered unit is released only by the wrapper's `done`. `done` runs only when the slot calls `next` (with or without an error), throws, or returns a promise that rejects. Two slot shapes never get there:
+
+- a slot that writes the answer itself (`res.status(401).json(…)`, a redirect) and returns;
+- a slot that awaits something that never settles, or catches an error and returns without `next`.
+
+**Probe PH.** Five junk bearers are answered 401 by the slot itself. They keep 5 units for good. The valid credentials of that address are then refused with 429 and `Retry-After: 1` on that instance, at 0 s, at 1.5 s and at 3 s, until the process restarts. `83a85739` released the units at the close and served the valid bearer.
+
+**Second half (pre-existing since `5164fd03`, missed in round 1).** The same refusal spends nothing (failed count 0 on both heads). Amendment 12 item 4 says every refusal of the slot spends. The wrapper sees only refusals passed on through `next`, a throw or a rejection. Code review n8 and my round-1 route cover raw errors, not answers written by the slot.
+
+**Rating.**
+
+- **At this head: LOW.** The only production authentication slot is the TASK-020 stub, which always calls `next`. `startApi` passes no `authenticate` and no `pipeline` seam.
+- **Impact Medium.** A per-instance lock of every credentialed request of an address, valid ones included, NAT neighbours included, until restart. Once a slot with the shape exists, honest refusals alone fill it: `limit` refused credentials of the address on an instance.
+- **Likelihood Low.** It needs an authenticator that breaks the slot's implicit contract, and the slot contract (`routing/slot.ts`) does not state it.
+- **MEDIUM if it shipped in an authenticator.** The hang variant is D-ARCH-226 item 3's accepted defect class (the gauge shows it; code review round 3 probe P9 shows the same lock and rules it by design). Round 1's addition (b) bounds it for I/O. The direct-answer variant is not a hang: the client got its answer, so nothing but the gauge would show it.
+
+**Remediation.**
+
+- **(a) Required, as card lines** (TASK-052, -055, -091, -171, -261; this extends round 1's route "every refused presented credential is a 4xx `AppError`").
+  - The authentication slot reports its outcome only by calling `next` once, with or without an error, by throwing, or by rejecting. It never writes the response.
+  - Each task adds one api row per refused shape: the failed count rises by 1, and the held count is back to 0 after the response.
+  - Optional: a lint restriction on response writes (`res.status`, `.json`, `.send`, `.end`, `.redirect`) under `apps/api/src/platform/authn/**`.
+  - The sentence belongs in the JSDoc of `RouteSlot` or of `authenticate.ts` when TASK-052 replaces the stub.
+- **(b) Optional hardening, the architect's call**, because it adds a release to amendment 13 item 6 "Release". The wrapper also treats the response's `finish` before an outcome as the outcome and releases the unit there. A client cannot cause `finish` by leaving, so R2-M1 does not come back.
+  - Validated on a scratch copy by registering `res.once('finish', …)` right after `let settled = false;`: if the outcome has not settled, mark it settled and release. Results: PH 0 units and 200; PA2 5 in four shapes; PB unchanged.
+  - Whether that path should also spend, or log a defect line, is a design question I leave to the architect. I would at least log it.
+
+**Verification test.** An api row with a seam slot that answers 401 itself, `limit` times. With (b), a valid credential is then served. With (a) alone, the authenticator tasks' rows catch the shape before it ships.
+
+## R2.5 D-TASK041-20: a holder released before the slot does not enter
+
+The orchestrator asked four questions about the early return. The answers are below.
+
+- **When `enter` returns false.** Only when `releaseUnentered` has already run (`GONE`), which is step 0's handler for the response `close`. In Node 24 that event fires once the response has finished or the connection has gone (destroyed, reset, half-closed and ended, or Node's own request timeout, which writes a 408 when nothing was written yet and destroys the socket).
+  - Between step 0 and the slot, nothing finishes a response and then continues the chain. The request context, the access log, CORS preflight, the JSON parser and the context slot either call `next` or end the request themselves (`OPTIONS`, preflight and docs are never credentialed).
+  - So on this pipeline a false `enter` means the client has gone. The access line was written at the close (`aborted: true`, `route: null`).
+- **Is the request left hanging?** No. Nobody waits for it. Probe PG: 96 early returns over two ways of leaving, 0 server connections afterwards and no error line. Nothing writes to the closed response, because the wrapper calls neither the slot nor `next`.
+- **Resource leak?** None found.
+  - Every response object, the early returns included, was garbage-collected: 63 of 63 and 66 of 66 under `FinalizationRegistry` after forced GC.
+  - The ledger keeps a `GONE` mark in a `WeakMap` keyed by the response, which goes with it.
+  - No step before the slot starts a timer, a transaction or a stream slot that a later step would release. `contextSlot` only sets the descriptor and the deprecation headers.
+  - The address is served normally afterwards.
+- **Counting.** The early return is counted under no label. It was admitted, not refused, and the access line records the abort. I agree.
+- **TASK-108 note.** If the 30 s timeout of REQ-SEC-015 answers a stalled request itself, its `finish` and `close` release the unentered unit, and a body that completes later stops at the wrapper. That is correct. If the timeout fires after the slot was entered, the outcome releases the unit. TASK-108 needs no new card line for this.
+
+## R2.6 The test seams of D-TASK041-22
+
+`RateLimitDependencies.inFlight` and `.breakerClock` default to a fresh ledger and to the breaker's own `Date.now` (`kit.ts:37`, `:47`). The only production composition is `startApi` → `createApp`. `startApi` passes the object literal `rateLimit: { settings: config, valkey: services.valkey }` (`start-api.ts:147`), so neither seam is set.
+
+- `config` is the env-derived, Joi-validated `Config`. It sits under `settings`, so it can reach neither seam, and it holds no functions.
+- No other production file calls `createApp`, `createRateLimitKit`, `createInFlightLedger` or `createStoreBreaker` (`git grep` excluding tests and `tests/`).
+- `startApi`'s own `createApp` injection, used by `start-api.denial-budget.api.test.ts` to set the clock, is the part-A test seam. It is unchanged.
+
+**Concur.** Code review R3-n3 (optional) asks the startApi row to assert that `rateLimit` carries only `settings` and `valkey`, and notes that unlike `authenticate` these seams are not refused in live mode. I concur with that row as a regression pin. Refusing the seams in live mode would also be acceptable, but it is not needed while `startApi` builds the literal.
+
+## R2.7 My round-1 additions to the (d) wording
+
+| Addition | State on main `f2055342` |
+|---|---|
+| (a) A declared `Content-Length` above the body limit with no bytes sent belongs to "a body that it never completes"; the TASK-108 timeout runs from the arrival of the request | **Not folded.** Amendment 13 item 6 still reads "a body that it never completes" and "becomes the 30 s of REQ-SEC-015 with TASK-108". The card line (TASK-108, round 1 routes) carries the substance |
+| (b) "No timer" rests on bounded authenticators: a card line for TASK-055 and every later authenticator that does I/O | **Not folded** into the ADR text. The JSDoc of `in-flight.ts` at this head says it ("every authenticator is bounded by its own timeouts, and one that never answers shows as a unit that stays held") |
+| (c) No security event for the hold | Concurred in round 1; built so (probe PC) |
+
+`f8794de2` predates my round. D-ORCH-158 records that the architect folds (a) and (b) into amendment 13 item 6 at its next touch. The PR041-SEC-16 contract sentence belongs in the same "Release" paragraph. None of this is a merge condition of part 041-B, because the code is right either way. I check the fold in my G3 threat-model alignment (round 1 route).
+
+## R2.8 Record binding, simulation and the merge-only checklist
+
+- **Binding.** The `Head` row of this round names `12b8a10a`. The file now has two `Head` rows: round 1's `83a85739` and this one. The checker passes on any named commit of the PR after which no owned path changed. That is `12b8a10a`, because the fix cycle changed owned paths after `83a85739`. This round's `Verdict` row is the last row of the file.
+- **What voids it.**
+  - A fix cycle 3 that touches an owned path.
+  - A main-side change to one of the 21 owned paths that the merge keeps.
+  - A #82 squash that differs from `be843ae1` on a file part B also changes.
+  - A lane-B evidence commit on the branch keeps it.
+- **The merge-only round after #82 (C3).** Round 1's items 1 to 7 stand. Item 3 now reads: `git diff --raw <main> <merge>` equals `git diff --raw be843ae1 12b8a10a`, old and new blob of every path. If a further fix cycle follows, the bound head replaces `12b8a10a` there. In the simulation below, the merge still has **16 conflicts** (11 add/add, 5 content), the same set as round 1, because fix cycle 2 touched no file outside it.
+
+**Simulation.** Main's real `tools/ci/check-security-owned-paths.mjs` ran in a `--shared` sparse clone of the main checkout. The record with this round appended was placed as `PR-9999-TASK-041B-security-review.md` on a simulated main, where #82 is squash-merged as one commit on `origin/main` `f2055342` with tree `git merge-tree --write-tree origin/main be843ae1`. The part-B head `12b8a10a` was then merged into it, with conflicts resolved to the branch blob unless a row says otherwise. The checker ran `--pr 9999 --base <simulated main with the record> --head <merge>`. "Item 3" is the old-and-new-blob equality of the merge-only round.
+
+| Scenario | Expected | Checker | Item 3 |
+|---|---|---|---|
+| S1 The merge ref: the record (rounds 1 and 2) on main after the squash, `12b8a10a` merged (16 conflicts, all to the branch blob) | pass | pass (`12b8a10a`, 21 owned; a note says that `83a85739` is followed by owned changes) | equal (26 files) |
+| S2 Control: no record | fail | `missing` | equal |
+| S3 Control: the placeholder name only | fail | `missing` | equal |
+| S4 Control: this round's `Verdict` row `FAIL` | fail | `missing` (verdict FAIL) | equal |
+| S5a Control: the round-1 record only (its row names `83a85739`) | fail | `missing` (owned paths changed after it) | equal |
+| S5b Control: this round's head row names `83a85739` | fail | `missing` | equal |
+| S6 Control: a fix cycle 3 changes `in-flight.ts` after the head | fail | `missing` | differs |
+| S7a Control: main changes `policy.ts`, and the merge keeps both changes | fail | `missing` | differs |
+| S7b Main changes `policy.ts`, and the merge drops main's edit | checker pass, item 3 catches | pass | **differs** |
+| S8 A docs-only main commit after the record | pass | pass | equal |
+| S9 A lane-B evidence commit on the branch after the head | pass | pass | equal (with the evidence commit as branch head) |
+| S10 The head row with the 8-character SHA | pass | pass | equal |
+| S11 One conflict (`limits.ts`) resolved to the squash side, which drops part B there | checker pass, item 3 catches | pass (20 owned) | **differs** |
+| S12 Main changes the unowned `app.ts`, and the merge drops main's edit | checker pass, item 3 catches | pass | **differs** |
+
+14 of 14 as expected. #82's simulated squash equals `be843ae1` on every part-A file, and the merge carries the blob of `12b8a10a` for each of the 26 part-B files.
+
+The record has two `Head` rows (rounds 1 and 2) and two `Verdict` rows; the last row of the file is this round's `Verdict` row.
+
+## R2.9 Conditions and routes
+
+**Conditions (merge of part 041-B).**
+
+- **C1 of round 1 is discharged**: fix cycle 2 passed this delta round.
+- **C2 stands.** Lane B runs on the merge head after #82: H6 against a real Valkey, the api project with the new H rows, `in-flight.test.ts`, the generated project and gitleaks-full. Hosted lane A and `security-integration` run when billing allows.
+- **C3 stands.** The merge-only round after #82 merges covers items 1 to 7 of round 1 section 8, with item 3 bound to `12b8a10a`. It is not a pure merge (16 conflicts).
+- **C4 stands.** The rename and the merge-ref check (D-ORCH-136/138).
+- If code review round 3 leads to a further commit that touches an owned path, a delta round of mine binds that head before C3.
+
+**Routes (card lines, for senior-developer's next fold unless stated).**
+
+- TASK-052, TASK-055, TASK-091, TASK-171, TASK-261 (extends round 1's route): the authentication slot reports its outcome only through `next` once, a throw or a rejection, and never writes the response. One api row per refused shape: the failed count rises by 1, and the held count is back to 0 after the response (PR041-SEC-16 (a)).
+- principal-architect (optional, amendment 13 item 6 "Release"): the wrapper releases an entered unit at `finish` when no outcome has been reported, and possibly logs a defect line or spends. Candidate validated (PR041-SEC-16 (b)). Folding round 1's additions (a) and (b) is already routed by D-ORCH-158.
+- senior-developer (next fold or with TASK-052's disconnect rows): the `gzip`-body api row for D-TASK041-20 (PR041-SEC-15).
+- Round 1's routes stand unchanged: TASK-108, TASK-055 bounded slot latency, TASK-214 event-loop gauge, TASK-052 cap, product-manager R-16 sentence, and mine before G3.
+
+| Verdict | **PASS_WITH_CONDITIONS.** Round 2 of part 041-B (delta `83a85739..12b8a10a`, fix cycle 2) at `12b8a10a`: 0 Critical, 0 High, 0 Medium. Closed: PR041-SEC-10 (C-1 verified; abort probe 5 entries in six shapes at limit 5, ledger empty; control 11 to 117, mutants 9 to 98) and PR041-SEC-02 (b), so PR041-SEC-02 is closed in full. C-2 verified (label `step0-authn-inflight`, `held` flag, an early abort counted under no label, no event), C-3 verbatim, D-TASK041-20 confirmed (0 authenticator entries through the `gzip` window against 20 to 31 without the guard; no hang, no leak), the D-TASK041-22 test seams unreachable from production. New: PR041-SEC-15 INFO (the D-TASK041-20 guard has unit rows only), PR041-SEC-16 LOW (a slot that never reports its outcome keeps its unit until restart, and its refusal spends nothing; card lines, optional hardening validated). Round 1's additions (a) and (b) to the (d) wording not folded yet (D-ORCH-158 routes them; not a merge condition). C1 discharged; conditions C2 (lane B on the merge head with H6), C3 (merge-only round after #82, item 3 bound to `12b8a10a`, 16 conflicts) and C4 (rename and merge-ref check) remain |

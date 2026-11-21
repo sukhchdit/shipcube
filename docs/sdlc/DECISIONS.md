@@ -9205,3 +9205,45 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **Rule:** resolve every conflicted file to the stacked head's blob, then prove `git diff --raw <main> <merge>` = `git diff --raw <predecessor-head> <stacked-head>` (old and new blobs) before the merge-only security round.
   - **Alternative:** merge #82 and #80 with a merge commit, which avoids the conflicts. It deviates from the squash-only practice, so it is the next session's choice and needs a recorded decision.
 - **Reversibility:** High.
+
+### D-SECPR041B-02 · 2026-11-21 · security-analyst · TASK-041 part 041-B security round 2 (delta `83a85739..12b8a10a`, fix cycle 2; condition C1 of D-SECPR041B-01) = PASS_WITH_CONDITIONS at `12b8a10a`. The round is appended to `docs/05-quality/security/PR-pending-TASK-041B-security-review.md` on main; the rename to `PR-<NNNN>-…` is still owed (D-ORCH-136/138)
+- **Trigger:** D-ORCH-158.
+  - Fix cycle 2 is one commit on `83a85739` (12 files, 10 security-owned). It carries C-1 to C-3 of rulings §9.3, tests H1 to H6, and developer decisions D-TASK041-19 to D-TASK041-22.
+  - The round checks PR041-SEC-10, C-2, C-3, D-TASK041-20, the test seams, PR041-SEC-02 (b), and whether my round-1 additions (a) and (b) are folded.
+  - Code review round 3 (`f49a7ff1`, APPROVED_WITH_NITS) landed on local main during this round, and I read it before finalising. Its R3-n2 is PR041-SEC-15, I concur with its R3-n3 on the seams, and its probe P9 is the hang case of PR041-SEC-16.
+- **Decision:** 0 Critical, 0 High, 0 Medium.
+  1. **PR041-SEC-10 closed (C-1 verified).** Probe PA2 ran through the real `createApp` at limit 5 in six shapes: reset, destroy or half-close, 5 ms after sending or once inside the slot, with slots of 20, 200 and 400 ms. Results:
+     - the head enters the authenticator 5 times in every shape, and the ledger is empty afterwards;
+     - the control `83a85739` enters it 11 to 117 times;
+     - the mutants that restore the release at every close, or drop the `enter` mark, enter it 9 to 98 times.
+  2. **PR041-SEC-02 (b) closed.** With part A's (a), PR041-SEC-02 is closed in full.
+  3. **C-2 verified** (probe PC; mutants M4 and M5 each move a count):
+     - a refusal by the hold is counted under `step0-authn-inflight` and carries `held: true`;
+     - a refusal by the spent budget is counted under `step0-authn-failed`;
+     - a client that left before step 0 answered is counted under no label;
+     - the hold emits no event.
+  4. **C-3** is verbatim in api/README §7, in the ruled place.
+  5. **D-TASK041-20 concurred.** It carries weight in production: the JSON parser inflates `gzip` bodies asynchronously between step 0 and the slot.
+     - Through that window the head enters the authenticator 0 times. The previous head enters it 31 times, and the guard-dropping mutants 20 and 28 times, all at limit 5.
+     - Nothing is left hanging: the client has gone, the server ends with 0 connections, and every response object is collected by GC.
+     - The guard has unit rows only: **PR041-SEC-15** INFO (= code review R3-n2), an optional api row with a `gzip` body (senior-developer).
+  6. **The D-TASK041-22 seams (`inFlight`, `breakerClock`) are unreachable from production**, because `startApi` passes the literal `{ settings: config, valkey }`.
+  7. **New PR041-SEC-16 LOW (CWE-772).** With C-1, only the outcome releases an entered unit.
+     - An authentication slot that answers the client itself, or never reports, keeps its unit until restart. Probe PH: 5 answers locked the address's valid credentials (429, `Retry-After: 1`) for good on that instance. `83a85739` released them at the close.
+     - Pre-existing and missed in round 1: such a refusal spends nothing.
+     - It is latent: the only production slot is the TASK-020 stub, which always calls `next`. It would be MEDIUM if it shipped in an authenticator.
+     - Remedy (a): card lines for TASK-052, -055, -091, -171 and -261. The slot reports only through `next` once, a throw or a rejection, and never writes the response; one api row per refused shape (failed count +1, held count back to 0).
+     - Remedy (b), optional and the architect's call: release at `finish` when no outcome was reported. Validated on a scratch copy: PH fixed, PA2 still 5.
+  8. **Round 1's additions (a) and (b) to the (d) wording are not folded** into ADR-0016 amendment 13 item 6 at `f2055342`. D-ORCH-158 routes them to the architect's next touch. They are not a merge condition. The PR041-SEC-16 contract sentence belongs in the same "Release" paragraph.
+- **Method:** single-process Node 24.22.3 probes on `git archive` extracts of `12b8a10a` and `83a85739`, plus seven scratch copies of the head (six mutants and candidate F). PA2, PB and PD were re-run, and PG, PC and PH are new. Gitleaks v8.30.1 rules were emulated over the 420 added lines: 0 findings. No Docker, no Jest, nothing run in the part-B worktree, `.env*` not opened.
+- **Binding:** the new round's `Head` row names `12b8a10a6e193d44ec26ee0694c94468ef00f6d1`; round 1's row (`83a85739`) stays, and the checker skips it because owned paths changed after it.
+  - Main's checker ran in a shared sparse clone against a simulated squash of #82: 14 of 14 scenarios as expected.
+  - S1 passes with 21 owned paths and 16 conflicts resolved to the branch blob.
+  - The controls fail as they should: no record, FAIL verdict, round-1 record only, a fix cycle 3, a kept main edit.
+  - The item-3 equality catches the dropped-change resolutions that the checker passes.
+- **Conditions (merge of part 041-B):** C1 discharged. C2 (lane B on the merge head including H6), C3 (merge-only round after #82, item 3 bound to `12b8a10a`) and C4 (rename and merge-ref check) remain. A further commit that touches an owned path needs a delta round of mine first.
+- **Routed:**
+  - senior-developer (next fold): the PR041-SEC-16 (a) card lines; the PR041-SEC-15 api row.
+  - principal-architect (optional): PR041-SEC-16 (b), and the fold of round 1's (a) and (b) (already routed by D-ORCH-158).
+  - Round 1's routes stand.
+- **Reversibility:** High (a review record).
