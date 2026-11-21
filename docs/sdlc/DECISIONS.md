@@ -9819,3 +9819,16 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - api-designer §7 sentences riding the TASK-041 PR;
   - the PR040-SEC-10 lease ruling for 040-B (dispatched now, the architect is free).
 - **Reversibility:** High.
+
+### D-ORCH-166 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-040 040-B PR 1 merged with main and pushed at `2c9cc41c`
+- **Merge** (`0ccdd009`): 14 conflicts, 12 resolved to the stacked blobs and 2 to main (files 040-B never touched); no hand union.
+- **Proof:** `git diff --raw origin/main 0ccdd009` = `git diff --raw 0f0d92a0 a4aadd2e` (15 paths).
+- **Fix commit `2c9cc41c`:** the migration is re-timed to `20261121120000_idempotency_keys_completed_body`, which sorts last; NITs n2 and n5. 771 unit tests pass.
+- **Lane B** on `2c9cc41c` is queued (`run-live71.sh`).
+- **Owed:**
+  - the PR040-SEC-10 lease ruling (architect, running);
+  - the fix commit for it;
+  - merge-only code review and security rounds;
+  - opening the PR;
+  - PR040-SEC-11/12 (INFO) rows.
+- **Reversibility:** High.

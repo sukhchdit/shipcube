@@ -70,3 +70,4 @@
 - [TASK-034 fc2](feedback_task034_fc2.md) — Prisma banner on stderr/status on stdout, never tail joined streams, Compose-prefix rewrite harness CLI proof
 - [TASK-044 lane B private](feedback_task044_laneb_private.md) — anonymous fixture for non-anonymous op: pre-handler problems lack private; error-only mark wrapper
 - [PR #80 unions](feedback_pr80_unions.md) — shared origin/main moves mid-merge (check parent SHA), coordinator takeover, merge subject vs commitlint
+- [TASK-040B1 stacked merge](feedback_task040b1_stacked_merge.md) — three-blob conflict classification + raw-diff proof; DbError hides constraint names
