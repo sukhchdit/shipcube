@@ -9285,3 +9285,102 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Next, staggered for host load:** the TASK-044 security delta round and code review round 2; code review and security round 1 for TASK-040 040-B PR 1; the held story patches in a lane-B-quiet window; the TASK-042 fix cycle after 2026-11-23T05:54Z.
 - TASK-043 stays parked at `3ba1eb53`.
 - **Reversibility:** High.
+
+### D-SD-012 · 2026-11-21 · senior-developer · Plan fold for QG-044-C1 of D-QG-007 (the 21 card lines of the TASK-044 rulings §8, the US-042 split of D-PM-089, the D-SECPR044-01 routings, the QG-044-C4/C6/C7 gates, TASK-120 placed), the D-PM-088 and D-PM-089 card lines, QG-051-C7 of D-QG-006, the TASK-045 routings (D-ORCH-150/151, D-SECPR045-02), the TASK-041 part 041-B lines (rulings §6 lines 15 to 19, PR041-SEC-15/16, the security additions, n7) and the TASK-034 owners (plan regenerated: 298 tasks, 82 batches, 0 errors, 0 warnings; IDs, titles and branches unchanged; TASK-120 moved from batch 3.7 to 4.6)
+- **Input:**
+  - D-QG-007 (QG-044-C1 (a) to (d)); `docs/03-architecture/rulings/wave-1-task-044-rulings.md` §8 (21 lines) and §9; D-ARCH-217 to D-ARCH-224; D-SECPR044-01 (F2, F4).
+  - D-PM-088 (card lines 1 to 4, the REQ-SEC-006 row); D-PM-089 (four lines, the REQ-API-017/018 rows).
+  - D-QG-006 (QG-051-C7); D-SECPR051-02 (PR051-SEC-06, the O7 tag).
+  - D-ORCH-150, D-ORCH-151, D-SECPR045-02 and the TASK-045 code review round 2 (`16819e33`).
+  - `docs/03-architecture/rulings/wave-1-task-041-rulings.md` revision 3 §6 lines 15 to 19; D-ARCH-225 to D-ARCH-227; D-SECPR041B-01; D-SECPR041B-02; D-ORCH-158; D-ORCH-159; the 041-B code review rounds 1 to 3.
+  - D-ORCH-151 and D-ORCH-154 for TASK-034; its code review round 1 (`530bf62f`, m4) and D-TASK034-04/05 in the branch commit body.
+- **Method:** the scratch `fold.mjs` (text surgery on the HEAD copy of `plan-data.mjs`, checked with `cmp` against `git show HEAD:`). Every verbatim line is read from its source by the script, never retyped: rulings 044 §8 (21 lines), rulings 041 §6 lines 15 to 19 (the quoted text), D-PM-088 lines 1 to 3 and D-PM-089 lines 1 to 3. A check script finds all 27 placements on their cards.
+- **Decision, per item:**
+  - **1. QG-044-C1:**
+    - The 21 lines of rulings §8 are on their cards verbatim: TASK-044 lines 1 to 6, TASK-040 line 7, TASK-083 line 8, TASK-091 line 9, TASK-096 line 10, TASK-108 line 11, TASK-141 lines 12 to 14, TASK-173 lines 15 to 17, TASK-214 lines 18 and 19, TASK-142 line 20 and TASK-182 line 21.
+    - **TASK-044 is in two parts** in the D-SD-007 form: `inPart: {US-042: 044-B}`. `task-map.csv` now lists US-042 as partial on TASK-044 until part 044-B merges. "All US-042 scenarios" becomes US-042 BY PART. The task gains the STORY SPLIT line of D-PM-089.
+    - **Part 044-B locks** are named in card line 4 and taken at dispatch. They are not in `lk`: `api-tx-execute`, `api-routing` and `api-platform-core` belong to part 044-B only, and `lk` would claim them for part 044-A as well (the D-SD-007 form, as for part 040-B). The lock order is card lines 6 and 10: the first PR of part 040-B, then part 044-B, then TASK-096.
+    - **The QG-044 gates are placed where the gatekeeper puts them.** The principal-architect text for C4, C6 and C7 does not exist yet, so each line carries the gatekeeper's text and says that the ruling replaces it.
+      - TASK-044 gets PART 044-B PROOF (j), THE DEADLINE CUT (QG-044-C4, a dispatch gate of part 044-B) and GATES FROM D-QG-007. The second names C1 and C2 for the 044-A merge, C3 and C4 for the 044-B dispatch, and C5 for the 044-B merge.
+      - TASK-083 gets DISPATCH GATE, A STOP AND A FAN-OUT IN FLIGHT (QG-044-C6).
+      - TASK-087 gets DISPATCH GATE, PERSISTED EVENT SEQUENCE (QG-044-C7). TASK-141 gets a pointer to it, which also ties its two-instance test to the C6 ruling.
+    - **D-SECPR044-01 F2 and F4, and code review R1-n3** (QG-044-C1 (c)) are on TASK-141 and TASK-173:
+      - STREAM SLOT ACQUIRE AND RELEASE: acquire before `execute`, release on close, TTL as the backstop, one per-user counter shared by both stream operations.
+      - REPLAY AND RESUME CONDITIONS on TASK-141: the authorised resource under RLS, per-stream sequence ids, a resume point above the maximum treated as absent.
+      - REPLAY CONDITIONS on TASK-173: the booking stream has no resume (card line 21), so `Last-Event-ID` is ignored and never ends the stream.
+    - **TASK-120 is placed** (D-ARCH-224 O-5): moved from batch 3.7 to batch 4.6 with `idAt: [3, 7]`, so its ID is kept. It gains the dependency TASK-141 and a PLACEMENT line. Batch 4.6 now holds four tasks, and no other holder of `tests-load`.
+  - **2. D-PM-088 and D-PM-089:**
+    - STORE OUTAGE CASE verbatim on TASK-052, TASK-049 and TASK-091.
+    - D-PM-088 line 4 ("every other card whose service consumes … the same line with its route"): the scan of `x-rate-limit-class` × `x-requirements` × `task-map.csv` finds three more `email-send` routes. TASK-059 (`resendVerificationEmail`), TASK-063 (`requestTotpEnrolmentCode`) and TASK-099 (`requestPasswordReset`) each get the line with their route and a void clause if the route is ruled to have no per-address rule.
+      - No card names another consumer of `authAccountRule` or `quoteCreateRules`. A dispatch brief that adds one copies the line.
+      - The REQ-SEC-006 Task(s) cell stays exactly as D-PM-088 held it.
+    - D-PM-089 lines 1 to 3 verbatim: STORY SPLIT on TASK-044; US-135 SCENARIOS on TASK-141; US-045 STEPS on TASK-108.
+    - Line 4 changes the exit texts:
+      - Wave 2: 71 of 74 when part 044-B is on main, otherwise 70 with US-042 partial, and the exit record states which.
+      - Wave 3 and the M0 checkpoint: part 044-B on main, US-042 complete.
+    - D-PM-089's observation on TASK-108 becomes PART 044-B FIRST: dispatch TASK-108 after part 044-B, or stack it on the approved head; no test raises the call deadline.
+  - **3. QG-051-C7, on TASK-298:**
+    - (a) PR051-SEC-06: the column pairs as an array, with the quoted `"a=x"` plant.
+    - (b) and (c), O7 TAG AND POSTGRESQL 18 MUTANTS: TASK-298 adds the `[SEC-TC-79]` title tag of O7 in `prisma/tests/organisations/organisations.int.test.ts`, after TASK-051 is on main, and runs the O1 and O7 mutants on PostgreSQL 18 in its lane B slot. Both are due before G3.
+    - Why TASK-298: it is the one open card that starts after TASK-051 merges, works in `prisma/tests`, has a lane B slot before G3, and is dispatched before TASK-087 opens its PR. The test file is added to its `f`.
+  - **4. TASK-045 routings:**
+    - Part 045-C (TASK-045 card): PART 045-C ALSO CARRIES:
+      - (1) PR045-SEC-08 = R2-m1 (a required range for integer filters, `INT4_RANGE` and `SMALLINT_RANGE` spelled out, the `smallint` row, SEC-TC-83 to qa-lead);
+      - (2) the PR045-SEC-05 rotation-runbook line (devops-engineer writes the entry).
+    - TASK-073: AUDIT LIST ON THE KEYS PATH gains PR045-SEC-09 (= R2-n2 widened) and R2-n3. CONTRACT RIDERS gains item (4), R2-m2 (the `INVALID_CURSOR` restart wording and the wider binding).
+    - **R1-m1 dispatch gate:**
+      - The contract scan puts the first list that sorts on a mutable column on TASK-070: `listCountries` and `listSubdivisions` sort by `name`, in batch 1.9. The full gate line is on TASK-070. It allows the ruling to say that a dataset-versioned name suffices.
+      - Pointer lines go on TASK-183 (`updated_at`), TASK-186 (`last_used_at`), TASK-231 (`display_name`), TASK-264 (`label`, `updated_at`) and TASK-219 (`updated_at`). The prohibited-items list is named without a task, because no card maps to it unambiguously.
+      - TASK-073 is not gated.
+    - R1-n3 / PR045-SEC-07, the module half, goes on TASK-096 as LIST CEILING CHECKED AT DECLARATION. Part 044-B edits `define-route.ts` first, but its scope is fixed by the rulings, so TASK-096 stays the holder (D-ORCH-150).
+  - **5. TASK-041 part 041-B:**
+    - Lines placed verbatim:
+      - line 15 on TASK-041 (in `a`; the card has no `dod`);
+      - line 16 PARALLEL BURST on TASK-052 and TASK-055;
+      - line 17 on TASK-108;
+      - line 18 appended to RATE-LIMIT METRICS on TASK-214;
+      - line 19 appended to 429 IS NOT AN AUTHENTICATION FAILURE on TASK-065.
+    - **PR041-SEC-16 (a)** is AUTHENTICATION SLOT OUTCOME on TASK-052, TASK-055, TASK-091, TASK-171 and TASK-261. It carries the routed sentence verbatim plus "every refused presented credential is a 4xx AppError" (n8 widened), and names the refused shapes of each card.
+    - **Security addition (a)** is DECLARED-OVERSIZE BODY on TASK-108, beside line 17: the timeout counts from the arrival of the request.
+    - **Security addition (b)** is BOUNDED SLOT LATENCY:
+      - in full on TASK-055;
+      - as a conditional "if this authenticator does I/O" line on TASK-052, TASK-171 and TASK-261. TASK-052 is added beyond "TASK-055 and later", because a session lookup after verification would have the same defect.
+      - TASK-091 does not get it, because its authenticator does no I/O by GUEST TOKEN COST.
+    - Also placed:
+      - PR041-SEC-13: EVENT-LOOP DELAY GAUGE on TASK-214;
+      - PR041-SEC-14: OPTIONAL PRE-CHECK CAP on TASK-052, routed by D-SECPR041B-01;
+      - PR041-SEC-15: OPTIONAL API ROW, GZIP BODY on TASK-041. It is not a merge condition. If it is not taken before the merge, it rides the TASK-052 burst rows, because a 041-B commit would need a delta round.
+    - **n7 goes to TASK-215, not TASK-214.** No task in this run introduces a clustered Valkey (`platform.md` lists cluster mode only for 100x), and cluster mode is a Terraform setting. The line pins cluster mode off with a policy test and asks principal-architect to name the two-key scripts and the hash-tag change on the 100x line.
+  - **6. TASK-034:**
+    - DEFERRED ITEMS AND OWNERS:
+      - the image-level NT-AVAIL-003-b k6 probe goes to TASK-119;
+      - the RustFS copy and the document SHA-256 go to TASK-147;
+      - the audit chain and anchors go to TASK-116;
+      - the marker stream and the `/health/ready` smoke go to the restore-rehearsal CI job, which TASK-119 builds;
+      - the two NT IDs stay partial (the orchestrator marks them).
+    - MARKER MISMATCH: qa-lead fixes `required-suites.json:168` in the activation PR; principal-architect fixes the NT-REC-003-a cell.
+    - TASK-119 gains RESTORE-REHEARSAL AND PREVIOUS-IMAGE JOBS and the dependency TASK-280 (the k6 harness, batch 2.6; no schedule effect).
+    - TASK-116 and TASK-147 gain their rehearsal checks and the lock `db-tools-backup`, because they extend `tools/db/verify-restore.ts`.
+    - Why TASK-119 for the job: it is the devops task that publishes the main images (the previous image the probe needs), and its guard already requires lane C `release-candidate` green, where NT-REC-003-a runs.
+- **Alternatives:**
+  - A late task for the restore-rehearsal job and the image probe. Rejected: TASK-119 already owns the release-candidate guard and the images. A new task would add a fourth devops item to Wave 3.
+  - TASK-120 kept in Wave 3 with a non-stream profile. Rejected: its title and NFR-PERF-003 measure the stream.
+  - The R1-m1 gate on TASK-183, the first list on an obviously mutable column. Not taken: the review names "any `name` sort", and TASK-070 is earlier. The ruling can release it.
+  - n7 on TASK-214. Not taken: metrics cannot keep cluster mode off.
+- **Validation:**
+  - `gen.mjs .` gives 0 errors and 0 warnings, then `--write`. The critical paths (all, M0, Must, days) are unchanged. The only summary change is the TASK-120 move: Wave 3 has 27 tasks and Wave 4 has 25.
+  - The per-column diff of `task-map.csv` against the pre-fold copy changes only:
+    - `refs` on 37 rows;
+    - `completes_stories` and `partial_stories` on TASK-044 (US-042);
+    - `depends_on` on TASK-119 (+TASK-280) and TASK-120 (+TASK-141);
+    - `wave` and `batch` on TASK-120 (3 → 4, 3.7 → 4.6).
+  - IDs, titles, branches, DC and every other row are unchanged.
+- **Also updated:**
+  - traceability.md v1.17: REQ-SEC-006 per D-PM-088; REQ-API-017 and -018 per D-PM-089, with Design cells naming ADR-0016 amendment 14; REQ-PLAT-022 with Task(s) `TASK-044, TASK-214`.
+  - PLAN.md: the decisions row, the Wave 2 and Wave 3 rows, the counts note and the M0 checkpoint paragraph.
+- **Not folded, for the orchestrator:**
+  - STATUS: the TASK-044 row as US-042 partial until part 044-B merges; the NT-REC-003-a and NT-AVAIL-003-b partial marks of TASK-034. STATUS is the orchestrator's file.
+  - The held story texts of D-PM-088 and D-PM-089 and the map rows; no story file, no file under `docs/03-architecture/api/**` and not the gherkin map is changed here.
+  - The briefs of built tasks are not regenerated. TASK-044 part 044-B, part 045-C and TASK-298 get their briefs at dispatch.
+  - For principal-architect: the C4, C6 and C7 texts, which replace the gatekeeper text on the cards; the R1-m1 ruling; the NT-REC-003-a cell; the n7 line in `platform.md`.
+- **Reversibility:** High (plan text; nothing built).

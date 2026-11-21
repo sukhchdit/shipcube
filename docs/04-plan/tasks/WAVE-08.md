@@ -39,7 +39,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-014 (M0 Should) Feature-flag evaluation and audited changes |
 | REQs | REQ-PLAT-020, REQ-PLAT-021 |
 | NFRs | — |
-| Spikes / security / decisions | D-ARCH-191 |
+| Spikes / security / decisions | D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-029, TASK-039 |
@@ -54,6 +54,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-014 scenarios
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createFeatureFlag, updateFeatureFlag (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listFeatureFlags sorted by updated_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-014-01 … AT-US-014-06: all 6 scenarios of US-014, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1131,7 +1132,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-252 (M1 Should) Accept signed carrier push notifications |
 | REQs | REQ-TRACK-006 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
+| Spikes / security / decisions | PR6-SEC-08, D-ARCH-110, PR32-SEC-14, D-ORCH-039, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004, D-SECPR041B-01, D-SECPR041B-02, PR041-SEC-16, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-172, TASK-113 |
@@ -1149,6 +1150,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the carrier signature authenticator reads X-Carrier-Signature itself (signature is not a presentable kind) and only on routes whose auth set is [signature], never authorization, cookie or x-quote-token; the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, replayed, oversized body, unknown carrier code alike) and private, no-store on every 401 and 404 comes from the descriptor test; x-carrier-signature is in CREDENTIAL_HEADER_NAMES, so the push route cannot declare it in schema.headers (020-C PR38-SEC-03) and the handler reads the hint from the verified body only; api tests: markCredentialsRead called once per request, a valid Mock signature plus a bearer is accepted with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
 - SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
+- AUTHENTICATION SLOT OUTCOME (PR041-SEC-16 (a) LOW, CWE-772; D-SECPR041B-02; D-ORCH-159; code review n8 widened by D-SECPR041B-01): the authentication slot reports its outcome only by calling next once, throwing or rejecting, and never writes the response; one api row per refused shape: failed count +1, held count back to 0; every refused presented credential is a 4xx AppError (here: a failed or missing carrier signature, 401)
+- BOUNDED SLOT LATENCY (D-SECPR041B-01 security addition (b) to ADR-0016 amendment 13 item 6; D-SD-012): if this authenticator does I/O (for example a session or key lookup after verification), the BOUNDED SLOT LATENCY line of TASK-055 applies: it settles within a bounded time when the store or database does not answer, with a test; an authenticator without I/O states so in its PR
 - AT-US-252-01 … AT-US-252-09: all 9 scenarios of US-252, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -1221,7 +1224,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-262 (M1 Should) Address book create, edit, delete and search<br>US-263 (M1 Should) Default sender address |
 | REQs | REQ-ACCT-008, REQ-ACCT-009 |
 | NFRs | NFR-PERF-006 |
-| Spikes / security / decisions | D-PLAN-006, D-ARCH-191 |
+| Spikes / security / decisions | D-PLAN-006, D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-100, TASK-159 |
@@ -1236,6 +1239,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - All US-262 and US-263 scenarios; US-175 address-book selection scenario now runs
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: createAddressBookEntry, replaceAddressBookEntry, deleteAddressBookEntry (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listAddressBookEntries sorted by label and updated_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-262-01 … AT-US-262-12: all 12 scenarios of US-262, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-263-01 … AT-US-263-08: all 8 scenarios of US-263, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

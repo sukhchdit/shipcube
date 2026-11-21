@@ -1389,7 +1389,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-AVAIL-003, NFR-DATA-004, NFR-REC-003 |
-| Spikes / security / decisions | CLAUDE.md §5 Database, PR5-SEC-14, PR11-SEC-11, SPK-08, D-ARCH-079, PR293-SEC-04, D-SECPR293-02, D-ORCH-139, D-SD-002, D-ARCH-172, D-TASK293-10, D-SD-004 |
+| Spikes / security / decisions | CLAUDE.md §5 Database, PR5-SEC-14, PR11-SEC-11, SPK-08, D-ARCH-079, PR293-SEC-04, D-SECPR293-02, D-ORCH-139, D-SD-002, D-ARCH-172, D-TASK293-10, D-SD-004, D-ORCH-151, D-ORCH-154, D-SD-012 |
 | Specialist · model | database-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-003, TASK-014 |
@@ -1410,6 +1410,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - RULE 14 REFUSES CREATE CAST AND CREATE AGGREGATE (D-ARCH-172; D-TASK293-10; PR293-SEC-01 rows 4 and 5): add both statement starts to REFUSED_OBJECTS of tools/db/lint-migrations.ts with one failing fixture each; the two stated limits and their pin rows go; attribute notation stays a stated limit
 - DATA-MODEL TEXT FOR RULE R (D-TASK034-01; D-SD-011): data-model 8.3 gains rule R (a data-changing: yes migration needs a fresh rehearsal.json: sha256 of migration.sql, backup head = the previous migration, a passed verification of the same manifest) and 8.6 step 6 names rehearsal.json; principal-architect writes both at the next architecture fold
 - SUITE ACTIVATION AFTER MERGE (D-SD-011): after this task merges qa-lead activates restore-rehearsal in tools/quality/required-suites.json in a manifest-only pull request, never in this PR
+- DEFERRED ITEMS AND OWNERS (D-TASK034-04, D-TASK034-05; TASK-034 code review round 1 m4; D-ORCH-151, D-ORCH-154; D-SD-012): [NT-REC-003-a] and [NT-AVAIL-003-b] stay in the test titles and are partial here (the orchestrator marks them partial in the trace or STATUS); the image-level NT-AVAIL-003-b probe (the previous api image, the last release tag or before the first tag the previous main image, against the migrated schema under the 20 rps k6 probe) is TASK-119; the RustFS bucket copy and the document SHA-256 check are TASK-147; the audit chain and anchors are TASK-116; the marker stream (NFR-REC-001, informational) and the /health/ready smoke of the restored stack are the restore-rehearsal CI job, which TASK-119 builds; rule R does not cover bootstrap files (D-TASK034-04, accepted by the review)
+- MARKER MISMATCH (TASK-034 code review round 1 m4; qa-lead; D-SD-012): tools/quality/required-suites.json line 168 adds restore-rehearsal when a migration contains the marker -- @data-changing, but rule R and rule 10 key on the header -- data-changing: yes, so the conditional selection never fires; qa-lead changes the trigger to the header that rule R reads, in the manifest-only pull request of SUITE ACTIVATION AFTER MERGE, and principal-architect changes the NT-REC-003-a cell of nfr-traceability.md at the next architecture fold; no change in this task
 
 **DoD notes**
 - Expand-only migration with `down.sql`, linter header and RLS rendered from the module manifest `tools/db/table-classes/<module>.json`; every new tenant table is listed there (RLS generator coverage); classification registry updated for new columns; catalog tests green; no data-changing migration without the backup/restore rehearsal.
