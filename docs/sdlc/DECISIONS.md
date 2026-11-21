@@ -10277,3 +10277,84 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - The reading of "the statement that next protects the row" rests on the conditional writes on `version` under READ COMMITTED. I ran no takeover race.
 - **Applied in:** ADR-0014 amendment 18 and the dated note in amendment 10. data-model.md, api/README.md and risks.md are unchanged: they name the floor and the rule and no figure.
 - **Reversibility:** High (one expression and its test; no route takes a key yet, so no row was written with either lease).
+
+### D-SECPOST-01 · 2026-11-21 · security-analyst · Post-merge security review of #80–#84 on main (D-ORCH-162 (b)) = PASS_WITH_CONDITIONS at `3c4d9a6d` (record `docs/05-quality/security/POST-MERGE-2026-11-21-security-review.md`)
+- **Trigger:** D-ORCH-162. The user merged #80–#84 while hosted CI was billing-blocked. Item (b) asks for one post-merge security review: the three unions, and #84's 28 bumps.
+- **Decision:** 0 Critical, 0 High, 0 Medium open. Findings:
+  - one new LOW, POST-SEC-03;
+  - four new INFO, POST-SEC-01, -02, -04 and -05.
+- **Method:**
+  - Git plumbing on the main checkout's object store, and a `--shared` sparse clone at `3c4d9a6d` running main's own dependency gates.
+  - The registry (integrity, tarball, licence, time, signatures against the npm keys), OSV `querybatch`, and `gh api` repository advisories.
+  - `npm pack` diffs for express-rate-limit, cookie, bullmq and swagger-ui-dist.
+  - No Docker, Jest, ESLint or `npm ci`. Nothing ran in any worktree.
+  - Read only: the lane-B queue log, and the version fields of one lane-B checkout's `node_modules`.
+  - No `.env*` file was opened.
+- **(a) Squashes and unions:**
+  - Each squash tree equals the clean `merge-tree` of its parent and its PR head: `763800f3`, `339b29d6`, `61c53b5e`, `a93a6113` and `3c4d9a6d`.
+  - Each union head equals the merge-tree of its parents, except the named conflict.
+  - The named resolutions are pure unions:
+    - `grants.manifest` (#81): both blocks kept;
+    - the `pipeline-guards.test.ts` imports (#82);
+    - the C5 test title (#83): exactly the clean token-level three-way merge.
+  - Every other two-sided path is byte-equal to `merge-file --union`.
+  - `diff --raw <main parent> <union>` equals `diff --raw <merge base> <PR head>` for every one-sided path.
+  - Owned paths are unchanged: #80 39, #81 27, #82 27, #83 21.
+  - Controls: an ours-only resolution and a one-sided title are both detected.
+- **Merge-only rounds owed on the union heads:**
+  - `2805c809` closed by D-SECPR080-03, `22f69a82` by D-SECPR041-04 (both `934bb0f1`, reused, and confirmed by my own run);
+  - #83's `05e1e9da` and `93a14e44` closed by this entry;
+  - PR-0080 needs none, because only evidence files followed its round-3 head `2abd665f`.
+- **(b) #84** (151 new tuples, 67 of them in the production closure):
+  - **Licences:** MIT, Apache-2.0, "Apache-2.0 AND MIT", plus BlueOak-1.0.0 (2 dev tuples) and MIT-0 (nodemailer, already MIT-0 before). The last two are admitted by D-ARCH-003 rev 2.
+  - **Advisories:**
+    - npm audit: 0 Critical/High; its 31 moderates are the two watched dev advisories.
+    - OSV: the same 4 tuple hits; both controls fired.
+  - **Release age:** the youngest tuple was 7.72 days old at merge. `check-dep-age` passes at merge time; its control at 2026-11-18 gives 61 findings.
+  - **Install scripts:** none newly enabled. `@swc/core` and `msgpackr-extract` had scripts before, and `.npmrc` and the rebuild allow-list are unchanged.
+  - **Registry match:** 151 of 151 integrities and tarball URLs equal the registry's; 151 of 151 signatures verify; a tampered control fails.
+  - **Lockfile merge:** GitHub merged the lockfile (built on `0b1efbb2`) into `a93a6113`. The result is the exact leaf union of #84 (868 leaves) and #82 (7 leaves).
+  - **`npm ls --package-lock-only`:** only TASK-295's `effect` override artefact, unchanged from base.
+  - **Bumps that need a test:** none needs a new test now. The bullmq, S3 SDK, swagger-ui-dist and lint-stack bumps rest on named lane-B suites (C1).
+  - **express-rate-limit:** `ipKeyGenerator` is byte-identical.
+  - **jose and cookie:** neither is imported by production code yet. The TASK-052 notes are in record §3.3.
+- **Findings:**
+  - **POST-SEC-01 INFO** (CWE-1321): express-rate-limit ≤ 8.7.4 has repository advisory GHSA-cppf-2hm6-mrvm (Medium). It is not reachable here, because `rateLimit()` is never called. Bump to ≥ 8.7.5 after 2026-11-25T23:01Z.
+  - **POST-SEC-02 INFO** (CWE-835): cron-parser 5.10.4 is likely affected by GHSA-7jm7-f8vg-h8wf (Medium; it hangs on crafted expressions). It is not reachable: the scheduler port takes `{ every }` only. Bump bullmq to ≥ 6.7.8 after 2026-11-26T04:24Z.
+  - **POST-SEC-03 LOW** (CWE-1395, A06:2021): lane A's advisory gate sees only the reviewed global database.
+    - Repository-only advisories reached main unseen: vite Critical GHSA-p4f5-76q4-ffq7, `@opentelemetry/resources` High GHSA-qrww-3xmv-qhgm, and two nodemailer Mediums. TASK-042's i18next was the same class.
+    - #84 fixed all of them, and there was no exposure, because no dev server is network-exposed and neither package is imported.
+    - Fix: `tools/ci/repo-advisories.mjs` in lane C, owner devops-engineer, due before G3.
+  - **POST-SEC-04 INFO:** main's migration history is out of name order (#83's two 20261120 migrations landed after #81's 20261121 one).
+    - The three are independent, so fresh and migrated databases converge.
+    - TASK-034's `migrations/added-out-of-order` rule closes this.
+  - **POST-SEC-05 INFO** (CWE-532): bullmq 6.7.5+ calls `span.recordException(err)` when telemetry is set. TASK-214 must redact exception events, or pass a tracer that records the error name and code only.
+- **Conditions:**
+  - **C1:** lane B PASS on `3c4d9a6d` or a later main head. The re-queued `run-live70.sh` had not finished when this entry was written. The JUnit must show, by title:
+    - catalog C1-C14 and `rls-cross-tenant` on the combined schema;
+    - the TASK-035 and TASK-039 Valkey cases;
+    - the TASK-019 RustFS storage cases;
+    - AT-US-035;
+    - the unit project with `negative-fixtures`;
+    - `migrations`;
+    - gitleaks-full showing only PR080-SEC-07's two fingerprints beyond the baseline.
+  - **C2:** hosted lane A on main, with the `security-integration` job, once billing returns.
+  - **C3:** POST-SEC-03 before G3.
+  - A red C1 becomes a P5 fix task (D-ORCH-162).
+- **Interim evidence** (read from the queue log): lane B `20261121T1512Z_3326231` on TASK-044's union `33262314`. That head holds main `4ba683ad`, so #80–#84, #49 and #50, and it ran with #84's versions installed.
+  - Passes: api 252/252, catalog C1-C14 121/121, `rls-cross-tenant` 162/162, generated 188/188, integration 503/505, unit 8,687/8,690 (`negative-fixtures` included).
+  - Its reds come from outside #84:
+    - gitleaks-full: 3 fingerprints of the PR080-SEC-07 class;
+    - `compose-stack.test.ts:95`.
+- **Observation O-1 (outside #80–#84):** Dependabot #49 (`7db3b8b5`) moved `compose.yaml` to Valkey 9.1-alpine. The Testcontainers harness and CLAUDE.md's fixed stack stay on Valkey 8.1, and `compose-stack.test.ts` fails on it.
+  - Route to devops-engineer: put compose back on the harness digest, and add a Dependabot `ignore` for Valkey majors. A move to Valkey 9 goes through a superseding ADR and moves the harness and compose together.
+- **Routed:**
+  - POST-SEC-01 and -02 to the next Dependabot group after the cooldowns (devops-engineer);
+  - POST-SEC-04 to TASK-034;
+  - POST-SEC-05 to the TASK-214 card;
+  - the jose and cookie test notes to the TASK-052 card.
+  - senior-developer folds these card lines into the plan.
+- **Alternatives:**
+  - Re-running the round-2 P1 purity matrix under the new lint stack was not done. It needs an install of the bumped ESLint stack, and lane B's `negative-fixtures` covers every security rule's fixtures.
+  - A revert of #84 was not warranted: it removes more advisories than it carries.
+- **Reversibility:** High (a review record).
