@@ -7892,3 +7892,47 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Card line:** rulings file §8.9 (TASK-051, "OPERATOR RULE ON UPDATE").
 - **Routed:** security-analyst (whether O7 joins SEC-TC-79; T-35 wording); product-manager (EPIC-B-207: grant removal is tied to the membership by the M2 amendment).
 - **Reversibility:** High until the migration merges; afterwards the clause is removed by another function replacement.
+
+### D-SECPR080-02 · 2026-11-21 · security-analyst · TASK-080 security round 2 (delta, condition C3; `4a0faee3..3d3a7775`: source CHECK, TRUNCATE guard, canonical hash, purity hardening, money context) = PASS_WITH_CONDITIONS at head `3d3a7775` (appended to `docs/05-quality/security/PR-pending-TASK-080-security-review.md` on main; rename per D-ORCH-136/138)
+- **Decision:** nothing Critical, High or Medium. PR080-SEC-01..05 are closed (05 in code; its PostgreSQL 18 proof is C2). One new INFO, PR080-SEC-06.
+  - **Method.** Single-process Node 24 probes on a `git archive 3d3a7775` extract, with the `4a0faee3` rule swapped in as the positive control:
+    - ESLint with the real configuration (type-aware rules off), 49 cases, every pricing-purity fixture and every pricing source;
+    - `ts.createProgram` with the pricing options;
+    - the head suppression checker;
+    - the migration on PGlite 0.4.3 (PostgreSQL 17.5) with bootstrap `00`/`01`/`02`;
+    - the migration linter with 4 mutants;
+    - type-stripped money and `canonicalJson` probes (20,000 fuzz values against an RFC 8785 library);
+    - targeted Jest suites;
+    - a gitleaks v8.30.1 emulation;
+    - a plumbing record simulation with main's checker.
+  - Not used: Docker, PostgreSQL 18, the TASK-080 worktree (lane B was running there).
+- **Binding.** 27 owned paths against main (`--base 965a5a34 --head 3d3a7775`; round 1 had 17), of which the delta changes 20. The classifier gives 12 `security-integration` paths; the new one is `c01-c12.int.test.ts`. `git merge-tree` with main `965a5a34` is clean.
+- **Closure:**
+  - **PR080-SEC-01.** `platform/pricing-purity` is protected. All four directive forms are refused.
+  - **PR080-SEC-02.** The by-name binding pass reports all 13 rebuilt round-1 bypasses. The old rule reports 0 of them. It fails closed for parameters, overloads, catch clauses, enum members and type-only imports.
+  - **PR080-SEC-03.** `staticSpecifier` reads template specifiers, escapes included.
+  - **PR080-SEC-04.** The BEFORE TRUNCATE statement trigger gives P0001 for `TRUNCATE`, `ONLY`, `CASCADE` and `RESTART IDENTITY` while a published row exists; drafts may be truncated. Its function is INVOKER, owned by the migrator, has a fixed `search_path` and has no PUBLIC EXECUTE. `down.sql` is clean twice and up re-applies.
+  - **PR080-SEC-05.** C9's own query selects `['OPERATOR', 'SAMPLE', 'SEED']`, equal to the new `ENUM_CHECKS` entry.
+  - Fixtures: 30/30 `bad-*` reported, each exactly once; the 4 new ones are missed by the old rule.
+- **Other probes in the delta:**
+  - Money context: 375 refusals, 0 value or currency echoes; context fields are shape-validated.
+  - `canonicalJson`: the sample hash equals both literals; 0 differences from RFC 8785 on accepted values; 15 refusal rows give `PRICING_CONFIG_INVALID` with no echo.
+  - Gitleaks: 0 over `e245e6e6..3d3a7775`. The 3 new 64-hex digest lines carry no keyword.
+  - Jest: unit 65/68; the 3 others are CLI rows that need a git root (21/21 after `git init`). Pricing fixture rows: 36/36.
+- **New: PR080-SEC-06 (INFO, CWE-693).** Pricing-purity skips `import x = require('…')` and computed `import()` specifiers. TypeScript 6 accepts both under the pricing options and emits a working load. Each is held only by an unprotected rule: `@typescript-eslint/no-require-imports` or `platform/static-module-specifier`. With an inline disable of that rule and a TASK ID, `@platform/shared/queues` or the root (`uuidv7`) loads lint-clean, and `check-suppressions` accepts it. Pre-existing since TASK-076. A validated 8-line patch inside the protected rule reports every form, with all other rows, fixtures and sources unchanged.
+- **Erratum to round 1:** `platform_app` has `USAGE` on `platform`. The direct call of the trigger function is refused because the bootstrap default privileges revoke `EXECUTE` (42501); for the owner it is 0A000.
+- **Code review twin (round 2, `965a5a34`, APPROVED_WITH_NITS):**
+  - R2-n1 and R2-n3: concur.
+  - R2-n2: concur with a qualifier. `canonicalJson` matches RFC 8785 for well-formed strings only: it escapes lone surrogates, which a JCS library refuses (4,893 of 20,000 fuzz values).
+- **Simulation.** Main's real checker on plumbing merges with main `965a5a34`, the record as `PR-9999-…`, `--pr 9999`: 10 of 10 as expected.
+  - **Pass:** the record merged with `3d3a7775`; a later `packages/pricing`-only commit; a later docs-only commit.
+  - **Missing:** no record; round 1 only; a FAIL verdict row; the Head row naming a main commit; a later `grants.manifest` commit; a later `pricing-purity.mjs` commit; the pending name only.
+- **Conditions:**
+  - **C1:** closed.
+  - **C2:** open. Lane B on PostgreSQL 18 must be green at the final head, for the round-1 §7 cases plus the new TRUNCATE case and C11 on the new function.
+  - **C3:** closed for `3d3a7775`. It stands for any later owned-path change, which needs a delta round, and for a TASK-043 or TASK-051 union merge, which needs a merge-only round.
+  - **C4:** open (rename).
+- **Routed:**
+  - senior-developer: PR080-SEC-06, with the next `pricing-purity.mjs` change and before US-141. If taken in this PR, another delta round follows.
+  - sdlc-orchestrator: when recording D-TASK080-15 with R2-n2, say "RFC 8785 for well-formed strings".
+- **Reversibility:** High (a review record).
