@@ -10779,3 +10779,30 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Brief `docs/04-plan/briefs/TASK-040B1.md`:** lines 23 and 35 restated (amendment 18 formula, 38.25 s, 40 s as composed, the 5 to 120 s table and the property test); the verbatim card copy (LEASE RULE, PART 040-B SECURITY CONDITIONS, the new PR040-SEC-13 item) synced from the regenerated WAVE-01.md by script.
 - **Regenerated:** `tasks/WAVE-01.md` (TASK-040), `tasks/WAVE-07.md` (TASK-214). IDs, waves, batches, titles and branches unchanged.
 - **Reversibility:** High.
+
+### D-CRPR040B1-01 · 2026-11-21 · code-reviewer · TASK-040 part 040-B first pull request, code review round 2 (stacked merge `0ccdd009`, `2c9cc41c`, fix cycle 1 `9d1687b1`) = APPROVED_WITH_NITS at head `9d1687b1` (appended as round 2 to `docs/05-quality/reviews/PR-pending-TASK-040B1-code-review.md`)
+
+- **Decision:** APPROVED_WITH_NITS. No BLOCKER, MAJOR or MINOR is open. R1-m1 (= PR040-SEC-10), R1-m2 and R1-n2 to R1-n5 are closed. R1-n1 is routed to the second pull request as PR040-SEC-13 (D-TASK040-25, D-SD-013), and that routing is accepted.
+- **Stacked merge (D-ORCH-163 rule):** pure.
+  - `git merge-tree --write-tree --merge-base=0f0d92a0 a4aadd2e 4ba683ad` writes `206bfdfb`, which equals `0ccdd009^{tree}`.
+  - The raw diffs `4ba683ad..0ccdd009` and `0f0d92a0..a4aadd2e` are identical on 15 paths.
+  - D-ORCH-166's 14 conflicts are confirmed blob by blob: 12 resolved to the stacked blob, where main's blob equals `0f0d92a0`'s; 2 resolved to main, where the stacked blob equals `0f0d92a0`'s.
+  - Since `4ba683ad`, main has moved in `docs/` and `.claude/` only.
+- **`2c9cc41c`:** a 100 % rename of `migration.sql` to `20261121120000_idempotency_keys_completed_body`, which sorts after every directory on `origin/main`. Otherwise four comment lines and the 23514 `DbError` assertion. Nothing else.
+- **Fix cycle 1 (`9d1687b1`):**
+  - The lease expression and the six-stretch model are D-ARCH-232's fix-cycle line verbatim, and ADR-0014 amendment 18.
+  - The formula dominates every stretch by at least the 5 s margin, with equality on the failed `call` at the defaults.
+  - The pins (38250, 60750, 546000, 96004, 30000, 40000) re-derive by hand.
+  - The 8 mutants the developer reports killed die by inspection.
+  - PR040-SEC-11 (pin (d) plus two API rows) and PR040-SEC-12 (effective security, keyword-only `example` skip) are as recorded in D-TASK040-23 and -24.
+- **New NITs:**
+  - R2-n1: the writing-route `text/html` row asserts the rollback only through ordering (`not.toContain('audit 201')`); it should pin `rollback` in the event order.
+  - R2-n2: pin (d) ignores a `default` response.
+  - Both may ride any later commit.
+- **Merge conditions:**
+  - the security delta round C2 on `9d1687b1`, then the gatekeeper check of amendment 18;
+  - lane B PASS on PostgreSQL 18 on `9d1687b1` (`run-live75`). This round ran no Jest, npm or Docker, per the dispatch;
+  - the migration still sorts last at merge;
+  - a fresh merge plus a merge-only round if main moves in code;
+  - hosted CI with the `security-integration` and `migration-lint` extras, then the rename of the record.
+- **Reversibility:** High.

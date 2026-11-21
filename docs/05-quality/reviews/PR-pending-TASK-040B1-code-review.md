@@ -148,3 +148,121 @@ No BLOCKER and no MAJOR.
   - R1-n1: the owner named by the orchestrator.
   - PR 2: pass `DB_TENANT_ADMISSION_WAIT_MS` to `ExecuteOptions.admissionWaitMs` from `createApp`, next to proof (g) (one `problemTypeBase` source).
   - The NITs R1-n2 to R1-n5 may ride the R1-m1/R1-m2 fix commit.
+
+## Round 2 (delta review at `9d1687b1`; D-CRPR040B1-01)
+
+| Field | Value |
+|---|---|
+| Head | `9d1687b1` (pushed; `git ls-remote` matches). Branch clean in the worktree |
+| Delta reviewed | `a4aadd2e..9d1687b1`: merge `0ccdd009` (stacked merge with main `4ba683ad`, D-ORCH-166), `2c9cc41c` (R1-m2, R1-n2, R1-n5), `9d1687b1` (fix cycle 1: PR040-SEC-10 = R1-m1 per D-ARCH-232 / ADR-0014 amendment 18; PR040-SEC-11 = R1-n4; PR040-SEC-12 = R1-n3) |
+| Bindings read | D-ARCH-232 (with its fix-cycle line, read verbatim), ADR-0014 amendment 18 (text at `origin/main`), D-ORCH-166, D-TASK040-23 to -25, D-SD-013, brief `TASK-040B1.md` lines 23, 35, 105, 111 |
+| Host rule | Dispatch: git, grep and reads only; no npm, Jest or Docker. Nothing was run in the worktree. Lane B `run-live75` on `9d1687b1` is the test evidence (merge condition R2-C3) |
+
+```
+VERDICT: APPROVED_WITH_NITS (zero BLOCKER, zero MAJOR, zero MINOR; R1-m1 and R1-m2 closed)
+SUMMARY: The stacked merge is pure by the D-ORCH-163 rule: a merge-tree from the predecessor head writes the merge's tree
+         byte for byte, and the raw diffs match on 15 paths. 2c9cc41c is a 100 % rename plus four comment lines and one
+         assertion. The lease expression and its stretch model are amendment 18 to the letter; every pin re-derives by
+         hand, the formula dominates all six stretches, and the eight reported mutants die by inspection. Two NITs.
+```
+
+### R2.1 Stacked merge `0ccdd009` (D-ORCH-163 rule)
+
+| Check | Command | Result |
+|---|---|---|
+| Parents | `git log -1 --format=%P 0ccdd009` | `a4aadd2e` (stacked head), `4ba683ad` (`origin/main` at merge time) |
+| Re-merge from the predecessor | `git merge-tree --write-tree --merge-base=0f0d92a0 a4aadd2e 4ba683ad` | `206bfdfb…`, equal to `0ccdd009^{tree}`; no conflict |
+| Raw-diff equality | `cmp` of `git diff --raw --no-renames 4ba683ad 0ccdd009` and `git diff --raw --no-renames 0f0d92a0 a4aadd2e` | identical, 15 paths |
+| D-ORCH-166's 14 conflicts | `git merge-tree --name-only a4aadd2e 4ba683ad` (natural base `f65d7955`), then blob comparison per file | 12 files: main's blob = `0f0d92a0`'s blob and the merge = the stacked blob. 2 files (`routing/pipeline-guards.test.ts`, `prisma/sql/grants.manifest`): stacked = `0f0d92a0` and the merge = main's blob. Exactly as recorded; no file needed a hand union |
+| Main after the merge | `git diff --name-only 4ba683ad origin/main` | only `docs/` and `.claude/` paths, so no code moved under the branch. `git merge-tree origin/main 9d1687b1` is clean; the PR's three-dot file set is the 15 paths of part 040-B |
+
+The merge is a pure union. No listed exception was needed.
+
+### R2.2 `2c9cc41c` (migration re-time and NITs)
+
+- `migration.sql`: rename at 100 % similarity, to `20261121120000_idempotency_keys_completed_body`.
+- `down.sql`, `tests/memory-keys.ts:60` and `idempotency-keys.int.test.ts:235`: the name in a comment. `store.ts:47`: the JSDoc names `idempotencyLeaseMs` (R1-n2).
+- `store.int.test.ts:213`: `.rejects.toMatchObject({ name: 'DbError', reason: 'DB_ERROR', sqlState: '23514' })` (R1-n5). `mapDbError` maps a 23514 without audit text to `DB_ERROR` with `sqlState` (`map-db-error.ts:224-238`), and it never carries the driver message, so the constraint name staying with the raw-SQL case is right.
+- No other change.
+- **Order:** the directory sorts after `20261121000000_pricing_config_versions`, the last directory on `origin/main` today. **R1-m2 closed; C3 met. C4 stays a check at merge.**
+
+### R2.3 Fix delta `2c9cc41c..9d1687b1` (4 files)
+
+**`execute.ts:122` against amendment 18 item 2.** The code is `transaction.timeout + Math.max(callDeadlineMs + oneTransaction, 3 * oneTransaction) + FAILED_ENTRY_WAIT_MS`, then the floor and the 5 s margin. That is the verbatim expression of the fix-cycle line. `oneTransaction`, the floor, `LEASE_SKEW_MARGIN_MS` and the `admissionWaitMs` default are unchanged. The JSDoc states the six stretches from the write and the 38.25 s figure.
+
+**Dominance.** Let L be the lease minus the margin, which is timeout + max(D + T, 3T) + F. For each stretch, L minus the stretch is:
+
+| Stretch | L minus stretch |
+|---|---|
+| `load` | ≥ T + F |
+| `call` | ≥ F |
+| failed `call` | ≥ 0 (exact when D + T ≥ 3T, as at the defaults) |
+| handler | ≥ 2T + F |
+| failure | ≥ T |
+| read-only | ≥ F |
+
+So every stretch keeps at least 5 s, and the floor only adds to that. The R1-m1 cases (8, 9, 12 and 120 s) now all hold.
+
+**Pins re-derived by hand:**
+
+| Pin | Derivation |
+|---|---|
+| 38250 | 5 + 27.25 + 1 + 5 |
+| 60750 | 12 + 42.75 + 1 + 5 |
+| 546000 | 120 + 420 + 1 + 5 |
+| 96004 | 0.001 + 90.003 + 1 + 5 |
+| 30000 | floor over 6.01 |
+| 40000 | 5 + 29 + 1 + 5, with the admission wait taken as `maxWait` |
+
+All of these equal the test. Amendment 18's 492.75 s at 120 s (maxWait 2 s, admission 0.25 s) also matches.
+
+**Test model (`idempotency-lease.test.ts`).** The six stretches are written independently of the function, as amendment 18's table. The table runs 5, 6, 7, 8, 9, 12 and 120 s, each at 250 ms and at `maxWait`. The fast-check property covers the bounds of the fix-cycle line (2,000 runs, timeout from `DB_TX_TIMEOUT_BOUNDS`). The formula-equality clause in the property re-implements the function, so it is a restatement; the concrete pins and the independent stretch model are what carry the weight.
+
+**Mutants, by inspection (not re-run here; D-TASK040-23..25 report 8/8 killed by script).**
+
+| Mutant | Killed by |
+|---|---|
+| Timeout term dropped | The failed-`call` margin becomes 5 s − timeout |
+| F dropped | The failed-`call` margin becomes 4 s |
+| 3 → 2 | At 12 s the lease is 52.25 s against a read-only stretch of 54.75 s |
+| The `a4aadd2e` expression | Fails the 38250 pin |
+| Document fallback removed | The `inheriting` row under the real document is named |
+| Empty-requirement-only predicate | The planted `receiveStripeWebhook` (`stripeSignature`) is not named |
+| `properties` not walked | Neither the planted `example`/`examples` property is walked, nor any nested `properties` |
+| Non-JSON never found | The planted `text/csv` 200 |
+
+All eight kills hold.
+
+**PR040-SEC-12 = R1-n3 (a) and (c) (`x-idempotency.test.ts`).**
+- `isNetworkScoped` reads the operation's `security`, or else the document's. An absent or empty list counts as network-scoped, and so does any alternative without `bearerAuth` or `quoteToken`. That is wider than "public", which is the safe direction for a pin, and the set is still `{recordConsent}`.
+- `Array.isArray(documentSecurity)` guards against the fallback being silently undefined.
+- `declaresClientSecret` walks the values of `properties` and skips only the keywords `example`/`examples`.
+- **R1-n3 closed.**
+
+**PR040-SEC-11 = R1-n4.** Pin (d) and its planted negatives are in place in both directions. There are two API rows:
+- The writing route answers 500 problem+json, writes one FAILED 500 entry, releases the key, leaves no row, and the retry runs again.
+- The VIEW route pins the residual on purpose: the 200 is sent, then the VIEW entry, `complete 200` and `release` happen in order, with one WARN `{error: 'RangeError', status: 200}` (class and status only, no personal data), no row, and the retry runs again.
+- The recording capture now treats VIEW as read-only. That matches `audit/capture.ts:249` (`readOnlyHandler: compiled.mode !== 'write'`). No other route in the file uses VIEW, so no existing row changes.
+- **R1-n4 closed.**
+
+**R1-n1 (configuration text).** Routed as PR040-SEC-13 to the second pull request of part 040-B (D-TASK040-25, D-SD-013). The reason holds: `packages/config` is held by TASK-041 part 041-B. Accepted.
+
+**Scope.** Only the four files named. The fix-cycle line's item (3) restricts the R1-m1 change to `execute.ts` and its test; the contract and API test changes belong to PR040-SEC-11/-12, which the line does not forbid. Brief lines 23, 35, 105 and 111 carry 38.25 s and the amendment 18 formula, so code, brief and ADR agree.
+
+### R2.4 Findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R2-n1 | NIT | `apps/api/src/platform/idempotency/idempotency.api.test.ts:825` | The row's title says "rolled back", and it asserts that through `not.toContain('audit 201')`. That holds by ordering alone: the completion runs before the in-transaction entry (`:388`), so a refused completion never reaches the entry even without a rollback. `keys.rows.size === 0` is what actually shows the rollback. The double records `rollback` (`:465`). | Assert the order `complete 201`, `rollback`, `failed-entry 500`, `release` (probe P1 of round 1), as the VIEW row does with `indexOf` |
+| R2-n2 | NIT | `tests/contract/x-idempotency.test.ts:146-148` | Pin (d) filters `2xx`/`2XX` keys only. A `default` response (which OpenAPI applies to any status not listed, 2xx included) with a non-JSON body would not be named. The contract uses no `default` on idempotent operations today, so nothing is missed now. | Include `default` in the filter, or add a pin that no idempotent operation declares `default` |
+
+No BLOCKER, MAJOR or MINOR. R1-m1, R1-m2 and R1-n2 to R1-n5 are closed. R1-n1 is routed (PR040-SEC-13, PR 2).
+
+### R2.5 Merge conditions (replace §6 C1 to C4; C5 to C8 stand)
+
+- **R2-C1. Security delta round C2 on `9d1687b1`.** PR040-SEC-10 against amendment 18, probe P2 re-run from the write, and PR040-SEC-11/-12 closure. Then the gatekeeper's check of amendment 18 (D-ARCH-232).
+- **R2-C2. C4 at merge.** `20261121120000_idempotency_keys_completed_body` still sorts after every directory on `origin/main`.
+- **R2-C3. Lane B PASS on PostgreSQL 18 on `9d1687b1`** (`run-live75`). It is the first full run of `store.int.test.ts:213` (the 23514 assertion), of the up/down/up of the re-timed migration, of the new API rows and of the property test. This round re-ran none of them.
+- **R2-C4. If main moves in code before the PR merges:** a fresh merge, with the same raw-diff proof against this head, and a merge-only round. A docs-only move needs no new round (the `git merge-tree` clean check is enough).
+- **R2-C5.** Hosted CI on the PR, with lane A extras `security-integration` and `migration-lint` (from C6.4). Then C7, the rename of this record.
+- R2-n1 and R2-n2 may ride any later commit, or the second pull request.
