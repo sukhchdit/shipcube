@@ -61,3 +61,6 @@
 - [TASK-044 SSE](feedback_task044_sse.md) — slot 20 s deadline caps streams, Cache-Control overwrite, Express env=test hides console.error, origin_time_zone PII false positive
 - [TASK-051 R2-m1 tags](feedback_task051_tags.md) — unique commit-msg file names, never Write+commit in one parallel block; SEC-TC tag order
 - [TASK-045 fc1](feedback_task045_fc1.md) — RLS policy in bare-PG int tests via released helper migration, heredoc/sed backslash traps, Joi helpers.original
+- [TASK-041 part B stacked](feedback_task041b_stacked.md) — unset upstream on stacked branch, host api-run limit, heredoc parse fails, breaker/wrapper notes
+- [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
+- [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes

@@ -8801,3 +8801,61 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **For G3** (added to the list of D-QG-005 and D-QG-006): AT-US-042-01 and AT-US-042-05 each with a passing test on the default pipeline, for a caller that is not anonymous and with no deadline override, read from the test code of part 044-B; the resume test of part 044-A and proof (i); the `deadline`, `end_grace` and `buffer_limit` cuts in the JUnit with their log assertions; the drain proofs (d) and (e); the two-instance resume of TASK-141 on the sequence of QG-044-C7; the disconnect tests of TASK-091, TASK-141 and TASK-173 with their carrier and saga halves; US-042 no longer partial.
 - **No evidence note:** as for D-QG-001 to D-QG-006, this entry is the record.
 - **Reversibility:** High (a verification record; it changes no artefact).
+
+### D-ORCH-151 · 2026-11-21 · sdlc-orchestrator (session B) · Session B checkpoint: four PRs ready and blocked only by CI billing; stacked parts; routings and queue for the next session
+- **Ready PRs; only hosted CI is outstanding (billing, D-ORCH-146):**
+
+  | PR | Task | Evidence head | Lane B | Reviews |
+  |---|---|---|---|---|
+  | #80 | TASK-040 040-A | `0f0d92a0` | `20261121T0248Z_2abd665` | CR supersede round; D-SECPR040-03 |
+  | #81 | TASK-080 | `a5935281` | `20261121T0450Z_3d3a777` | CR round 2; D-SECPR080-02 |
+  | #82 | TASK-041 041-A | `be843ae1` | `20261121T0547Z_0614a90` | CR round 2; D-SECPR041-03 |
+  | #83 | TASK-051 | `57e8ad62` | `20261121T0607Z_39cac6e` | CR round 2; D-SECPR051-02; QG-051-C1..C4 closed by D-QG-006 |
+
+  - Merge order once CI runs: #82 first (slot 1; it unblocks 041-B), then #80, #81, #83. Whichever of #80/#43/#51/#80-B second-touches `grants.manifest`, `grants-manifest.test.ts`, `registry.ts`, `tenant-db.real-client.test.ts`, `negative-fixtures.test.ts` or `c01-c12.int.test.ts` does the union and a merge-only security round.
+  - Re-check each PR for P1 overlap and a fresh merge ref before merging.
+- **TASK-041 part 041-B** (stacked on `be843ae1`; `feat/TASK-041-part-b-rate-limit-rulings-rev2` at `e7354249`, unpushed):
+  - Code review round 1 = CHANGES_REQUESTED (`596cbfc3`). R1-M1: the failed-authentication budget is read at step 0 but spent after the slot, so a parallel burst is not limited. Option (a), recommended: an in-flight count. Option (b): an architect residual.
+  - The fix cycle waits for a build slot. It also carries m1 (a falsy rejection), m2 (the composition wiring tests) and the NITs.
+  - Its lane B on `e7354249` was VOID: two unit timeouts under load, in files it does not touch. The credited run is the one after #82 merges.
+  - Security round: QG-041-C4 second half. D-PM-088 (`52b988ce`) closed QG-041-C2 in text; the gatekeeper confirms it.
+  - **Developer decisions** (C6 of that review; the text exists only in the developer's handoff, recorded here verbatim in short form):
+    - D-TASK041-10: the breaker wraps the bounded store call and its reply check; one per process, shared with the denial budget.
+    - D-TASK041-11: `hitAndPeek` / `peek`; on a store failure the budget is read from the per-instance fallback.
+    - D-TASK041-12: a refusal spends only for a 4xx `AppError` from the slot, except `ACCESS_TOKEN_EXPIRED`.
+    - D-TASK041-13: the wrapper wraps whichever authentication slot is in effect; only the first outcome passes on.
+    - D-TASK041-14: cookie routes must have literal paths, otherwise exit 78 at boot.
+    - D-TASK041-15: the E1–E3 pre-check is a pure helper, and TASK-052 adopts it.
+    - D-TASK041-16: an injected breaker clock, and the B3 timing test.
+    - D-TASK041-17: the `<ttl?>` sentinel. It closes the D-ORCH-148 line, which TASK-284 and 015-C drop.
+    - All are accepted by code review round 1.
+  - Routed: n7 (the two-key scripts under Valkey cluster) to data-architect and devops; n8 (every forged-token shape answers 401) to TASK-052.
+- **TASK-040 part 040-B, first PR:** building stacked on `0f0d92a0` (`feat/TASK-040-part-b-idempotency-production`).
+- **TASK-044:**
+  - Part 044-A fix cycle running (D-ARCH-217..224, D-QG-007).
+  - Before 044-A merges: QG-044-C1 (the plan fold) and QG-044-C2 (D-PM-089, product-manager running).
+  - Part 044-B is gated by QG-044-C3/C4 and must merge before TASK-141.
+- **TASK-045** (`3168c194`): code review round 2 AWN, security round 2 PWC; lane B queued.
+  - R2-m1 / PR045-SEC-08 goes to part 045-C; SEC-09 to the TASK-073 rider; the SEC-05 runbook line to 045-C.
+- **TASK-034** (`9c40d31e`): fix cycle done (the COALESCE defect found by lane B, M1, M2); lane B queued.
+  - Code review round 2 and security round 1 follow.
+  - C4, the Compose CLI run, needs the local bootstrap passwords in a shell. Agents must not read raw secrets, so it is done by the user, or replaced by a harness-only proof (decision for the next session).
+- **TASK-042:** fix cycle held until the i18next 27.1.3 cooldown clears (2026-11-23T05:54Z), D-ORCH-150.
+- **Next plan fold (senior-developer)** carries:
+  - QG-044-C1 (21 lines of `rulings/wave-1-task-044-rulings.md` §8, US-042 partial, the TASK-141/173 preconditions, TASK-120 placement);
+  - D-PM-088 card lines (STORE OUTAGE CASE on TASK-049/052/091) and the traceability row;
+  - D-PM-089 when it lands;
+  - QG-051-C7;
+  - the TASK-045 routings (045-C: SEC-08 and the SEC-05 runbook; TASK-073: SEC-09, R2-m2, R2-n2, R2-n3; the m1 dispatch gate on the first list sorting on a mutable column; the n3 / SEC-07 module half on TASK-096);
+  - TASK-034's deferred-item owners and the `-- @data-changing` marker mismatch (qa-lead).
+- **Held story texts** (`../.orch/held/`):
+  - `D-PM-085-stories.patch` + `D-PM-086-epic10.patch` as qa-lead's commit `61b4bda7` on `docs/stories-d-pm-085-086` (needs a rebase onto main);
+  - `D-PM-087-stories.note.md`;
+  - `D-PM-088-us040-note.md`;
+  - D-PM-089 when it lands.
+  - Land them in a window with no lane-B evidence pending, together with a map regeneration where a title changes.
+- **User-only inputs:**
+  - (1) GitHub Actions billing: every merge.
+  - (2) Two `OUTBOX_RELAY_*` lines in `.env.example` on `feat/TASK-043-transactional-outbox-writer-at-least` (head `3ba1eb53`, pushed).
+  - (3) Optionally, the TASK-034 C4 Compose run, which needs local secrets.
+- **Reversibility:** High.
