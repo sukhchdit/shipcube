@@ -7566,3 +7566,18 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **Void runs:** none. If the engine restarts again during this run, the run is void and re-queued.
 - **TASK-041 `.env.example`:** the user reports the commit as made. There is none on any local ref: the branch is still at `3a6b4c8b`, and both TASK-041 worktrees are clean. The branch is not on the remote either. The coordinator has asked the user to commit and push. Slot 1 stays blocked; nothing is worked around.
 - **Reversibility:** High.
+
+### D-ORCH-145 · 2026-11-21 · sdlc-orchestrator (session B) · Void lane-B run on TASK-040; three stalled build agents resumed under a cap of two
+- **Void run (rule of D-ORCH-144):** `20261120T1622Z_2abd665` (TASK-040 part 040-A, supersede head `2abd665f`) took 10 h 25 min, 16:22Z to 02:47Z.
+  - The Docker engine answered `(HTTP code 500) server error` through docker-modem in `store.int.test.ts`. `migrations` ran 27,126 s and `integration` 10,141 s, and both ended in errors, not assertion failures. The unit lane errored, so every coverage row was missing.
+  - api 209/209, catalog 113/113 and rls-cross-tenant 157/157 passed before the engine degraded.
+  - This was an engine fault during a period of host load, not a finding. It is not a fix cycle and no defect is filed. The run dir and log were moved to `../.orch/laneb-queue/aside/…_VOID*`, and the void is logged in `queue.log`.
+  - A clean re-run was queued at once (`run-live48.sh`). Before the re-run the lock was free: there was no `docker.lock`, and no Testcontainers container was left. The lock owner the coordinator saw ("orchestrator-A lane-B queue …16:22:35Z") was this session's own queue run; "orchestrator-A" is the script's fixed label.
+- **Stalled agents (600 s stream watchdog, host load):** TASK-043's final fix cycle, the TASK-080 build and the TASK-051 build.
+  - None of their partial work was discarded. TASK-043 has 4 modified files and 1 new file in its worktree. TASK-080 has 7 modified files and 6 new paths. TASK-051 has 3 local commits up to `7be618aa` plus `prisma/tests/catalog/tenant-keys.ts` modified.
+  - TASK-043 and TASK-080 were re-dispatched with briefs that list the files already done. Each agent works alone (no nested developer), and each long command runs in the foreground with an explicit timeout.
+  - TASK-051 waits for the first free slot: **at most 2 concurrent build agents until the host is calmer** (the coordinator's instruction; D-ORCH-010 allowed 3). About 47 containers of other projects are running on the same engine.
+- **Committed:** the briefs `docs/04-plan/briefs/TASK-051.md` and `TASK-080.md` (written by the stalled senior-developer runs), and qa-lead's memory note.
+- **qa-lead's story commit** is `61b4bda7` on `docs/stories-d-pm-085-086`. The orchestrator shortened its subject to 96 characters for commitlint. It stays held until part 040-A merges.
+- **TASK-041:** still waiting on the user's `.env.example` commit and push. Slot 1 stays blocked.
+- **Reversibility:** High.
