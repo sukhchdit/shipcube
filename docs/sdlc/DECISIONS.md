@@ -9247,3 +9247,25 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - principal-architect (optional): PR041-SEC-16 (b), and the fold of round 1's (a) and (b) (already routed by D-ORCH-158).
   - Round 1's routes stand.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-159 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-041 041-B batch settled: code review round 3 APPROVED_WITH_NITS and security round 2 PASS_WITH_CONDITIONS at `12b8a10a`
+- **Code review round 3** (`f49a7ff1`) = APPROVED_WITH_NITS. R2-M1, R2-m1, R2-n1..n3 are closed. D-TASK041-19..22 are accepted; D-TASK041-20 is confirmed safe (probe P8). R3-n1..n3 are optional.
+- **Security delta round 2** (`17085083`, D-SECPR041B-02) = PASS_WITH_CONDITIONS. PR041-SEC-10 and PR041-SEC-02 (b) are closed, and PR041-SEC-02 is now closed in full.
+  - **New PR041-SEC-16 (LOW):** a slot that writes the response itself, or swallows an error, keeps its in-flight unit for good, and the refusal spends nothing.
+    - It is latent: the only production slot is the TASK-020 stub, which always calls `next`.
+    - Remedy (a) is a card line on TASK-052/055/091/171/261 (the slot reports only through `next`, a throw or a rejection), with an api row per refused shape. It goes to the next fold.
+    - Remedy (b), releasing at `finish` when no outcome was reported, is optional and principal-architect's call.
+  - **PR041-SEC-15 (INFO):** an optional api row for the D-TASK041-20 guard with a gzip body.
+- **Part 041-B merge conditions still open:**
+  - (1) gatekeeper verification of ADR-0016 am. 13 item 6 (D-ARCH-225..227; not yet dispatched);
+  - (2) after #82 merges: merge main in (16 conflicts resolved to the `12b8a10a` blobs) and prove `git diff --raw <main> <merge>` = `git diff --raw be843ae1 12b8a10a`;
+  - (3) lane B on that merge head, including H6 against real Valkey;
+  - (4) a merge-only security round, then the record rename and the merge-ref check;
+  - (5) hosted CI (billing, D-ORCH-146);
+  - (6) product-manager's sentence for PRD §9 R-16 and A-112 (rulings §9.5).
+- **For the next fold:**
+  - code review rulings §6 card lines 15 to 19;
+  - the security route lines (TASK-108 oversize-body row; TASK-055 and later authenticators with bounded slot latency; refusals on TASK-052/055/091/171/261 as 4xx `AppError` that report only through `next`; the TASK-214 event-loop gauge);
+  - PR041-SEC-15;
+  - security's (a)–(b) additions to the (d) wording, for the architect.
+- **Reversibility:** High.
