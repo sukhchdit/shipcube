@@ -203,6 +203,8 @@ describe('TenantDb on the real Prisma 7.10 runtime (PR #11 M1, PR11-SEC-01; reco
       'invitation',
       'membership',
       'membershipRole',
+      // TASK-051: the GLOBAL, runtime read-only operator staff grants (D-ARCH-165), beside the authz catalogue models.
+      'operatorStaffGrant',
       'organisation',
       'user',
       '$queryRaw',

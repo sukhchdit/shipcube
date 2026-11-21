@@ -1,10 +1,11 @@
 {
-  "$comment": "Organisations module (data-model §3.2; REQ-ORG-001..004, DR-A05/A06/A14; TASK-037). TENANT tables. organisations is keyed on id (its own tenant key, C2 special case) with the DR-A14 organisations set; memberships keeps the tenant block plus the DR-A14 own-read branch; both are read by the SECURITY DEFINER platform.app_is_operator() and the §4.5 functions (definerRead). invitations is the whole pending state of an invitation (D-ARCH-123), read by invitation_lookup (definerRead). Every table carries the full standard-column set and is runtime-writable (stdColumns: trg_<table>__std_columns, C15).",
+  "$comment": "Organisations module (data-model §3.2; REQ-ORG-001..004, DR-A05/A06/A14; TASK-037). TENANT tables. organisations is keyed on id (its own tenant key, C2 special case) with the DR-A14 organisations set; memberships keeps the tenant block plus the DR-A14 own-read branch; both are read by the SECURITY DEFINER platform.app_is_operator() and the §4.5 functions (definerRead). invitations is the whole pending state of an invitation (D-ARCH-123), read by invitation_lookup (definerRead). Every TENANT table carries the full standard-column set and is runtime-writable (stdColumns: trg_<table>__std_columns, C15). operator_staff_grants (TASK-051; D-ARCH-165, data-model §3.2) names the users who may hold a membership of an OPERATOR organisation: GLOBAL, no RLS, SELECT for platform_app only (runtimeReadOnly; the provisioning lane writes it as platform_migrator), read by platform.memberships_lifecycle_guard(); not in the C15 scope.",
   "module": "organisations",
   "tables": [
     { "name": "invitations", "class": "TENANT", "definerRead": true, "stdColumns": true },
     { "name": "membership_roles", "class": "TENANT", "stdColumns": true },
     { "name": "memberships", "class": "TENANT", "policySet": "dr-a14-memberships", "definerRead": true, "stdColumns": true },
+    { "name": "operator_staff_grants", "class": "GLOBAL", "runtimeReadOnly": true },
     { "name": "organisations", "class": "TENANT", "policySet": "dr-a14-organisations", "definerRead": true, "stdColumns": true }
   ]
 }
