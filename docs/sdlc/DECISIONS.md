@@ -7694,7 +7694,7 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **TASK-043 `3ba1eb53` (`20261121T0315Z_3ba1eb5`):** FAIL, only on the three `.env.example` parity rows. Every other suite passed: integration 433 (including both up-down-up copies), migrations 30, catalog 113, rls 157, api 179, unit 8,368 (including `open-queue`). D-TASK043-14 and -15 are confirmed. The run is diagnostic and was moved aside; a PASS needs the user's two `OUTBOX_RELAY_*` lines. The branch is pushed, so the user can commit on it. No PR is open: CI is blocked (D-ORCH-146).
 - **TASK-080 `4a0faee3` (`20261121T0357Z_4a0faee`):** FAIL on catalog C9 only, which security PR080-SEC-05 predicted (`ck_pricing_config_versions__source` is missing from `ENUM_CHECKS`). The fix cycle that is running carries it, with code review R1-M1 (`ADMIN`). gitleaks-full passed on this run.
 - **TASK-051 `203d02eb` (`20261121T0336Z_203d02e`):** FAIL on C2/C6 (`23001` on PostgreSQL 18; with principal-architect) and on gitleaks-full (one finding beyond the 17-line baseline).
-  - **Triage (orchestrator, code review L-2):** `gitleaks-full` was run on `203d02eb`. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys.ts:75` in TASK-051's own commit `b34f954e`. That line is a doc comment, "The other key columns, `child=parent` in key order". It is a false positive with no secret.
+  - **Triage (orchestrator, code review L-2):** `gitleaks-full` was run on `203d02eb`. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys.ts:75` in TASK-051's own commit `b34f954e`. That line is a doc comment, "The other key columns, a child-equals-parent pair in backticks in key order". It is a false positive with no secret.
   - TASK-080 has the same base (`e245e6e6`) and its gitleaks-full passed, so main is clean.
   - **Handling:** the D-SECPR040-02 route (2). The fix cycle rewords the comment, and the branch is then superseded by `feat/TASK-051-guest-capable-tables-atomic-claim-v2`, one squash commit on main. Nothing is pushed or rewritten, and the baseline does not change. security-analyst confirms this in the TASK-051 record.
 - **Built:**
@@ -7738,7 +7738,7 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - SEC-TC-07 gains the same-organisation round. SEC-TC-76's text follows C16 as amended.
 - **Lane B at `203d02eb` (FAIL).**
   - **L-1.** C2/C6 answer `23001` on PostgreSQL 18. This goes to the architect, unadapted.
-  - **L-2: the D-ORCH-147 attribution is confirmed.** It is a false positive at `prisma/tests/catalog/tenant-keys.ts:75` in this PR's commit `b34f954e`: the keyword "key columns", a comma, then a backticked `child=parent`, entropy about 3.58.
+  - **L-2: the D-ORCH-147 attribution is confirmed.** It is a false positive at `prisma/tests/catalog/tenant-keys.ts:75` in this PR's commit `b34f954e`: the keyword "key columns", a comma, then a backticked a child-equals-parent pair in backticks, entropy about 3.58.
     - Corrected emulation: over the full 610-commit ancestry of `203d02eb` it gives exactly the 17 baseline fingerprints plus this one.
     - **Fact:** gitleaks v8.30.1 has no "generic secret needs a digit" check. My earlier emulators assumed one, and that hid this finding in the first run.
     - The D-ORCH-147 handling stands: reword in the fix cycle, a v2 squash supersede, baseline unchanged. The new wording must avoid the keyword-operator-token shape. The v2 range and the v2 gitleaks-full must be clean.
@@ -9956,4 +9956,14 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - gatekeeper closing entry for C1/C2;
   - lane B on the final head, including H6 and gitleaks;
   - open the PR.
+- **Reversibility:** High.
+
+### D-ORCH-168 · 2026-11-21 · sdlc-orchestrator (session B) · PR080-SEC-07: a quoted false-positive literal in DECISIONS.md trips gitleaks-full; quote reworded, baseline update routed
+- **Finding (D-SECPR080-03 / D-SECPR041-04, LOW):** D-ORCH-147 (line 7697) and D-SECPR051-01 (line 7741) quoted the TASK-051 doc-comment phrase that lane B flagged. Gitleaks-full over main's history now reports 2 fingerprints beyond the 17-line baseline:
+  - `d7585e78…:docs/sdlc/DECISIONS.md:generic-api-key:7697`
+  - `ed156913…:.claude/agent-memory/security-analyst/project_p5_task051.md:generic-api-key:23`
+  - Every lane-B run on a head that contains them fails gitleaks-full.
+- **Done (route a):** both quotes are reworded to "a child-equals-parent pair in backticks", so future unions add no new instance. The history keeps the old lines; no rewrite is made.
+- **Routed (b):** devops-engineer, with a security record, adds the 2 exact fingerprints to `tools/quality/gitleaks-baseline.txt` (`BASELINE_COUNT` 19, `sec-static.test.ts` pin). Until then, a lane-B gitleaks-full failure that shows exactly these 2 fingerprints is classed as PR080-SEC-07, not a new finding.
+- **TASK-044 `33262314`** (unpushed): its union `c33e5e92` re-adds the line from main's history. Redo the union after the reword, or rely on (b) before pushing.
 - **Reversibility:** High.
