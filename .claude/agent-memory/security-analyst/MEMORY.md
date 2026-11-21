@@ -72,7 +72,7 @@
 - [P5 TASK-293 lexfu](project_p5_task293.md) — r1 @85afc70 + r2 @c618d8a PASS_W_COND (b0f5396); SEC-01/02 closed; R3-M1 mark-drop regression; INFO 03/04 open
 - [T-39 denial budget ruling](project_t39_denial_budget_ruling.md) — D-SECT39-01 (f3c581f/631cbc4): closed details set, key grammar, carry claim; card lines + api-platform-core lock pending fold
 - [P5 TASK-075 carrier contract](project_p5_task075.md) — r1-r4 final @28044845 PASS_W_F-U (96672d8e); 01-14 closed; INFO 15 + routed items to TASK-113/132/128
-- [P5 TASK-041 rate limiting](project_p5_task041.md) — r1 @e6f484a + r2 @3a6b4c8b PASS_W_F-U (343f9dc3, rename!); 01/02a/05/08 closed; new LOW 09 authn-failed lock scope; 041-B round owed
+- [P5 TASK-041 rate limiting](project_p5_task041.md) — r1 @e6f484a, r2 @3a6b4c8b, r3 merge-only @0614a90f PASS_W_F-U (ca85cc9d, rename!); 09 ruled D-ARCH-182; 041-B round owed
 - [P5 TASK-076 pricing+lint](project_p5_task076.md) — r1 @e01979b (2b8f51e) + r2 @82b5023 (c6bbed87) PASS_W_F-U; 01-05/08 closed; 07 INFO (shared subpath, declare) open; TS6 TypeFlags
 - [P5 TASK-039 jobs/schedulers](project_p5_task039.md) — r1 @64eefab, r2 @766ae52, r3 @f08948e PASS_W_F-U (16274d79); PR64-SEC-11 closed (lane B); D-TASK039-01 conds (i)-(iv)
 - [P5 audit effect waiver](project_p5_audit_effect_waiver.md) — D-SECAUDIT-02 to 2026-12-18 (f2fd4eeb, PR pending, 67c4c04 unpushed); Prisma pins effect 3.20.0; picomatch GHSA withdrawn
@@ -84,4 +84,6 @@
 - [P5 TASK-080 margin + pricing config](project_p5_task080.md) — r2 @3d3a7775 PASS_W_COND (f44c4aed); 01-05 closed; INFO 06 import=require/computed import(); C2, C4 open
 
 - [P5 TASK-043 outbox](project_p5_task043_outbox.md) — R1-R3 PASS_W_F-U (R3 @3ba1eb53, 298cea31); SEC-09 LOW/10 INFO TASK-049 prereqs; Joi walk facts; sim kit
-- [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb PASS_W_COND (5749097f, unpushed); LOW 01-03, INFO 04/05; SEC-TC-79..81; gitleaks has NO digit check
+- [P5 TASK-051 guest claim + staff grants](project_p5_task051.md) — r1 @203d02eb + r2 delta/supersede @39cac6e5 PASS_W_COND (a385cc9c); 01/02a/03 closed; INFO 06 TASK-298; O7 in SEC-TC-79
+- [P5 TASK-045 cursors/keyset](project_p5_task045.md) — r1 @b380f429 + r2 @3168c194 PASS_W_COND (658d9918); C1-C3 closed; LOW 08 smallint (045-C), INFO 09; C4 lane B
+- [P5 TASK-042 i18n](project_p5_task042.md) — r1 @b8ba7788 PASS_W_COND (35f8ef0a); MED 01 i18next repo advisory -> bump >=27.1.3 (C1, delta round); INFO 02-05

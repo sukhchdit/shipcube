@@ -57,3 +57,7 @@
 - [TASK-045 pagination](feedback_task045_pagination.md) — apps/api int tests can't import prisma harness; .binding lint, app.* literal lint, stray tsc emits, shared $ref
 - [TASK-080 fc1](feedback_task080_fc1.md) — lane B log in .orch/laneb-queue, background lock wait, C9 IN-list pin, canonical JSON oracle, escape mangling
 - [TASK-034 rehearsal](feedback_task034_rehearsal.md) — scratchpad Write refusal, require-await fakes, lintRepository-only rules, open-loop probe must yield
+- [TASK-051 fc1](feedback_task051_fc1.md) — shared scratchpad collisions, commitlint footer trap, gitleaks emulator, merge-tree supersede
+- [TASK-044 SSE](feedback_task044_sse.md) — slot 20 s deadline caps streams, Cache-Control overwrite, Express env=test hides console.error, origin_time_zone PII false positive
+- [TASK-051 R2-m1 tags](feedback_task051_tags.md) — unique commit-msg file names, never Write+commit in one parallel block; SEC-TC tag order
+- [TASK-045 fc1](feedback_task045_fc1.md) — RLS policy in bare-PG int tests via released helper migration, heredoc/sed backslash traps, Joi helpers.original
