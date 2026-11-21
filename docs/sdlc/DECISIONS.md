@@ -11060,3 +11060,10 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - orchestrator: record the two exit-2 signatures of PR-0085 R1-m1 as an expected class.
   - devops-engineer: PR-0085 R1-n1..n3, PR-0086 R1-m1/n1, PR-0087 R1-m1/n1.
 - **Reversibility:** High (review records).
+
+### D-ORCH-172 · 2026-11-21 · sdlc-orchestrator (session C) · Lane-B reading rules while the chore PRs are open; review results
+- **Expected lane-B classes (not defects of the branch under test):** (1) D-ORCH-170: gitleaks-full x2 with only PR080-SEC-07 fingerprints, and `compose-stack.test.ts` on the Valkey digest; (2) PR-0085 R1-m1: gitleaks-full stopping with exit 2 "holds 17 fingerprints, exactly 22 expected" on #85's own run, and "holds 22, exactly 17 expected" on any branch that has not merged a main containing #85; (3) a Jest 5 s timeout when the unit suite runs far above its normal ~250 s (host load), re-run once. Anything else fails the branch.
+- **Chore reviews:** #85, #86, #87 code APPROVED_WITH_NITS (D-CRCHORE-01, `ccc944b3`); merge order #85 then #86/#87; security records owed (running). Lane-A route (c) for the three merge-commit fingerprints is a fourth chore PR (devops, dispatched).
+- **040-B PR1** `9d1687b1`: security round 2 PASS_WITH_CONDITIONS (D-SECPR040B1-02); PR040-SEC-14 INFO to PR 2; owed: lane B (`run-live75`), lane-A route (c), PR, record rename.
+- **041-B** `214ec79b`: code r4 AWN (D-CRPR041B-01), security r3 PWC with QG-041B-C4 discharged (D-SECPR041B-03); PR041-SEC-17 INFO + R4-n3 to the TASK-108 card line 22 (guard C or D, architect to choose); owed: lane B, README §7 rider from the held patch (an owned-path commit needs a security delta first; README is docs), gatekeeper D-QG-011 for C4/C5 (a), PR.
+- **Reversibility:** High.
