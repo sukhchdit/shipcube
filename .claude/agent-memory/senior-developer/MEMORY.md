@@ -60,10 +60,11 @@
 - [TASK-051 fc1](feedback_task051_fc1.md) — shared scratchpad collisions, commitlint footer trap, gitleaks emulator, merge-tree supersede
 - [TASK-044 SSE](feedback_task044_sse.md) — slot 20 s deadline caps streams, Cache-Control overwrite, Express env=test hides console.error, origin_time_zone PII false positive
 - [TASK-051 R2-m1 tags](feedback_task051_tags.md) — unique commit-msg file names, never Write+commit in one parallel block; SEC-TC tag order
-- [TASK-045 fc1](feedback_task045_fc1.md) — RLS policy in bare-PG int tests via released helper migration, heredoc/sed backslash traps, Joi helpers.original
+- [TASK-045 fc1/fc2](feedback_task045_fc1.md) — RLS in bare-PG int tests, heredoc/sed traps, Joi helpers.original, explicit-undefined default arg 401
 - [TASK-041 part B stacked](feedback_task041b_stacked.md) — unset upstream on stacked branch, host api-run limit, heredoc parse fails, breaker/wrapper notes
 - [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
 - [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes
 - [TASK-044 fc1](feedback_task044_fc1.md) — unhandledRejection spy vacuous in Jest, equal-work ratio pins, id-less SSE frame helper ripple, scan the wire
 - [TASK-041B fc2](feedback_task041b_fc2.md) — entered-marker release rule + admission-to-slot gap, check-suppressions 0 every cycle, sed mutation proof
 - [TASK-041B fc1](feedback_task041b_fc1.md) — in-flight hold for read-then-spend gates (atomic admit, abort trap), wiring-pin api rows, heredoc parse kills whole cmd
+- [TASK-034 fc2](feedback_task034_fc2.md) — Prisma banner on stderr/status on stdout, never tail joined streams, Compose-prefix rewrite harness CLI proof

@@ -1,6 +1,6 @@
 ---
 name: plan-fold-dsd001
-description: Plan fold mechanics added 2026-11-18 (idAt to move tasks without renumbering, waveExceptions for delivery splits, merge-prereq lines vs edges, D-SD series, pull --rebase blocked by others' dirty memory files)
+description: Plan fold mechanics D-SD-001..012 (idAt moves, waveExceptions, inPart splits, merge-prereq lines vs edges, fold.mjs text surgery, verbatim extraction, stats.json key map, HEAD-blob staging)
 metadata:
   type: feedback
 ---
@@ -24,6 +24,11 @@ A story that must complete outside its wave band (for example an M0 Must DC stor
 - D-SD-007 (2026-11-20): a task delivered in parts under one ID (TASK-040 040-A/B, TASK-041 041-A/B) uses the card field `inPart: {story: part}`, which I added to gen.mjs. The story still counts as completed for validation, and task-map.csv lists it as partial. Locks a later part needs from another task in the same batch go into an acceptance line, not `lk`, because gen refuses two holders of one lock in a batch. To find which cards mount a contract operation, map openapi `x-requirements` × the task-map `req_ids` column, then read each card. Cards rarely name operationIds, and a pure fan-out over-matches. Heredoc scripts lose their backslashes: write regex-bearing scripts with the Write tool.
 - D-SD-010 (2026-11-20): rulings landed three times mid-fold (D-ARCH-205/206, D-SECPR040-04, D-PM-086). Keep the fold re-runnable: a scratch `lines.json` plus `fold.mjs` applied to a saved copy of `plan-data.mjs` taken at HEAD (check it with `cmp` against `git show HEAD:`), so each new ruling is a patch to the lines followed by a clean re-run. Run `git log` for new entries in DECISIONS.md just before committing. Another agent's commit can sweep your uncommitted DECISIONS.md entry into main, because they stage the whole file. Then your commit only updates that entry.
 - D-SD-011 (2026-11-21): a reusable text-surgery tool worked well. `fold.mjs` takes ops (append, replaceItem, editItem, appendToItem, set field, unique text replace). It decodes array items to match them and rewrites only the touched items, then is run against a HEAD copy. A per-column diff script over task-map.csv (refs and story columns only) proved the fold. Two reviews landed mid-fold again. Before you append to DECISIONS, check `git log` for new review files: the TASK-051 round-2 review changed one line. The Edit tool sometimes fails to match on long scratch .mjs lines. Patch them with a small node script written with Write. Docs are in .prettierignore, so no prettier check is needed on PLAN or traceability.
+- D-SD-012 (2026-11-21): the scratchpad was wiped again, so fold.mjs had to be rebuilt (about 1 hour). Ops: append, replaceItem, appendToItem, editItem, setRaw, replaceText. The card walker skips `'`, `"` and backtick strings and finds fields at depth 1.
+  - **Verbatim lines:** read them from their sources in ops.mjs, never retype them: numbered `^(\d+)\. ` lines of a rulings section, the `"…"` text after a bold label, `    n. TASK-xxx: "…"` inside one decision block. Then a verify script counts each placement on its card.
+  - **Key-to-ID map:** `gen.mjs . --write --stats` run from the scratchpad writes `stats.json` (`ids`). `--stats` only works with `--write`, and the outputs are identical when nothing has changed.
+  - **Contract scans:** in openapi.yaml, `x-requirements` comes after the parameters. Collect them per operationId, then map the result to the `task-map` `req_ids`.
+  - **Moved task:** to move a task, set `w` and `b`, add `idAt`, and add the new dependency. The summary diff then shows only the wave counts.
 - Commit bodies: wrap lines under 100 characters (commitlint body-max-line-length). Amend only while the commit is unpushed.
 
 Related: [[plan-generation-workflow]]
