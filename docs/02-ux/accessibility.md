@@ -58,7 +58,9 @@ One `Announcer` per app provides a polite and an assertive region (components.md
 | Toasts | `role="status"` (success, info) / `role="alert"` (error) | Toast text | n/a |
 | Offline / back online | `role="status"` | Banner text | n/a |
 | Copy actions | polite | "Copied" | n/a |
-| Countdown timers (cut-off, rate limit, lockout) | **none** | The text contains the absolute time; no per-tick announcements | — |
+| Countdown timers (cut-off, lockout) | **none** | The text contains the absolute time; no per-tick announcements | — |
+| Rate-limit and `ACCOUNT_DELAYED` countdowns (F10 §1.1, D-UX-037) | message: its alert role after the user's own action, otherwise the route `h1`; end: polite | Once when the message appears (with the retry time); once when the control becomes available: "You can try again now." No focus move at the end | no per-tick announcements; 2 messages per refusal |
+| API client's silent repeats of a `RATE_LIMITED` answer with `Retry-After: 1` (F10 R19) | none | The loading state keeps `aria-busy`; nothing else | — |
 | Admin idle warning (W00 §2.1) | alertdialog on open (role-based announcement); then polite | Open: title + "we'll sign you out at {time}"; at 1 minute left: "1 minute left before you're signed out."; after Extend: "Session extended" | 2 timed messages per warning |
 | CVC field appears after the server flag (W08 §5) | polite (`role="status"` notice) | "For your security, enter the security code for {card}." | once |
 | Track result (S-W03) | polite | "{status}. Estimated delivery {date}" | once per lookup |

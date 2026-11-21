@@ -108,6 +108,8 @@ Address forms: **es uses "tú"** (informal, matching the friendly English "you")
 | `common:notFound.title` | Page not found | Página no encontrada | Page introuvable |
 | `common:goHome` | Go home | Ir al inicio | Retour à l'accueil |
 | `common:copied` | Copied | Copiado | Copié |
+| `common:rateLimited.title` | Wait a moment | Espera un momento | Patientez un instant |
+| `common:retry.available` | You can try again now. | Ya puedes volver a intentarlo. | Vous pouvez réessayer maintenant. |
 | `validation:summary.title` | {count, plural, one {There is # problem to fix} other {There are # problems to fix}} | {count, plural, one {Hay # problema que corregir} many {Hay # de problemas que corregir} other {Hay # problemas que corregir}} | {count, plural, one {# problème à corriger} many {# de problèmes à corriger} other {# problèmes à corriger}} |
 | `address:field.postcode.pin.required` | Enter a PIN code | Introduce un código PIN | Saisissez un code PIN |
 

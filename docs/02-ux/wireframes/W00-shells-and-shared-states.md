@@ -284,6 +284,20 @@ Out-of-scope paths (`/account/wallet`, `/orders` in admin) render this state (US
 ### 3.8 Signed-out notice (US-020)
 On the sign-in page after a revoked or expired session (`SESSION_REVOKED`, `AUTH_REQUIRED`, or `SESSION_EXPIRED` when the 30-day web cap or the 12 h admin cap is reached, ADR-0006 am. 12): a neutral InlineAlert "You were signed out. Sign in again to continue." in the active locale, above the form. Admin idle sign-out (`?reason=idle`) uses its own text, "You were signed out for inactivity. Sign in again to continue." (§2.1, W15 §1).
 
+### 3.9 Rate limited on a route with nothing rendered (F10 §1.1, D-UX-037)
+```
++------------------------------------------+
+|              (clock icon)                |
+|  # Wait a moment                         |   h1 of the route (route-change focus lands here)
+|  Too many requests. Try again in         |
+|  30 seconds.                             |   errors:RATE_LIMITED; seconds from Retry-After
+|  [Try again]  (aria-disabled until 0)    |   aria-describedby → the message
++------------------------------------------+
+At 0: "Try again" becomes available and the Announcer says once (polite) "You can try again now."
+Nothing is sent by itself. "Try again" re-issues the refresh (single-flight) or the data request.
+```
+`RateLimitedState` (components §4) rendered by `RouteStates` when a guarded route's token refresh (F10 R4, R10) or its first data request ends as `RATE_LIMITED` after the API client's own repeats. The shell renders as usual; the account menu keeps its loading skeleton while `me` is unknown. The session is kept and there is no redirect to sign-in. The countdown is the component's own and is never announced per tick; no focus moves when it ends. Public pages keep their own wording (W10, W14).
+
 ## 4. Toasts (US-105)
 ```
 360 (bottom, above sticky bar)         1280 (block-end, inline-end)
