@@ -119,10 +119,13 @@ describe('typed configuration (US-002, REQ-PLAT-004, NFR-OPS-005)', () => {
   describe('[AT-US-002-02] invalid and missing keys are all listed, names only', () => {
     it('[AT-US-002-02] lists DATABASE_URL and the access-token TTL and prints no configured value', () => {
       const jwtSecret = randomSecret();
+      // D-ORCH-148: the rendered error holds a stack path, so the sentinel must never be a path substring. '<', '>' and
+      // '?' are not allowed in Windows file names and do not occur in the paths of a POSIX checkout.
+      const notANumber = '<ttl?>';
       const env: Record<string, string | undefined> = {
         ...createTestEnv(),
         DATABASE_URL: undefined,
-        AUTH_ACCESS_TOKEN_TTL_SECONDS: 'abc',
+        AUTH_ACCESS_TOKEN_TTL_SECONDS: notANumber,
         JWT_SECRET: jwtSecret,
       };
       const error = rejection(() => loadConfig(env, { service: 'api' }));
@@ -132,7 +135,7 @@ describe('typed configuration (US-002, REQ-PLAT-004, NFR-OPS-005)', () => {
       const output = rendered(error);
       expect(output).toContain('DATABASE_URL');
       expect(output).toContain('ACCESS_TOKEN_TTL_SECONDS');
-      for (const value of [jwtSecret, 'abc', ...SECRET_KEY_NAMES.map((name) => env[name])]) {
+      for (const value of [jwtSecret, notANumber, ...SECRET_KEY_NAMES.map((name) => env[name])]) {
         if (value !== undefined) expect(output).not.toContain(value);
       }
     });
