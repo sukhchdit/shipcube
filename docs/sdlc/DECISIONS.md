@@ -7616,3 +7616,25 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
     - PR043-SEC-11 (b) in the tripwire, optionally earlier.
   - **principal-architect:** nothing new.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-146 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-040 part 040-A is PR #80; hosted CI refuses to start jobs (billing / spending limit), so no PR can merge; builds continue
+- **PR #80 (TASK-040 part 040-A):**
+  - Branch `feat/TASK-040-idempotency-keys-v2` was pushed with the evidence commit `0f0d92a0`.
+    - Lane B `20261121T0248Z_2abd665` = PASS: unit 8,327, integration 429, api 209, catalog 113, migrations 30, rls 157; merged coverage 99.49 % / 97.21 %.
+    - gitleaks-full over the ancestry of `2abd665f` (config and baseline from main): 0 findings.
+  - The records were renamed to `PR-0080-…` (`04ddc032`).
+  - The merge ref was confirmed to contain the rename (`3c804a2e`, first parent `04ddc032`) before the PR was marked ready.
+  - Tooling note: the merge ref is force-updated by GitHub, so it must be fetched with a `+` refspec. The first wait loop of this session missed the rename for that reason.
+- **Blocker (user-only):** every job of runs 44859867450, 44860275183 and 44860716079 on PR #80 failed before its first step. Annotation: "The job was not started because recent account payments have failed or your spending limit needs to be increased."
+  - The free 2,000 Actions minutes of the billing period are spent (R-CI-MIN, D-ORCH-117), or the account has a payment problem. The spending limit is $0 (CLOUD_BUDGET_MONTHLY_USD 0).
+  - CLAUDE.md §5 requires passing CI for a merge to `main`, so **no PR can merge** until the minutes reset at the next billing cycle or the user changes the account. The options are the user's:
+    - (a) wait for the monthly reset (recommended default; nothing is spent);
+    - (b) make the repository public, which gives free hosted minutes, but the code becomes public;
+    - (c) raise the spending limit, which contradicts budget 0;
+    - (d) register a self-hosted runner on this host, which needs admin registration and a workflow change and is not free of risk on a shared developer machine.
+  - The run does not wait for the answer. Build, reviews and lane B go on, and PRs are prepared up to "ready". Pushes are limited to what the merge procedure needs, because each push records a failed run.
+- **Built ahead while merges are blocked (cap 2 build agents, D-ORCH-145):** TASK-042 (i18n; the start of the frontend chain to the sign-in screens) and TASK-045 (cursor pagination; feeds TASK-073).
+- **Reviews in flight:** TASK-080 code review and security round 1. TASK-051 reviews follow when those finish, to keep host load down.
+- **Done this session:** TASK-043 at `3ba1eb53`: code review round 4 APPROVED_WITH_NITS (`81bdc81e`) and security round 3 PASS_WITH_FOLLOW-UPS (D-SECPR043-03, `298cea31`). TASK-051 is built at `203d02eb` and TASK-080 at `4a0faee3`.
+- **Housekeeping:** this session's primary directory points at the TASK-041 worktree, so three agents wrote their memory notes there. The notes were moved to main (`673d9771`, `530629f4`), and that worktree is clean at `3a6b4c8b` again for the user's `.env.example` commit. Briefs now name the main checkout's memory directory.
+- **Reversibility:** High.
