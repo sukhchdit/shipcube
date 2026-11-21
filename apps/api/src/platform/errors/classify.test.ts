@@ -99,6 +99,15 @@ describe('classifyThrown: AppError Retry-After (PR #44 R1-M1)', () => {
     ]);
   });
 
+  it('[AT-US-038-05] 409 IDEMPOTENCY_IN_PROGRESS keeps its Retry-After (api/README §5); other 409 codes do not', () => {
+    const inProgress = new AppError('IDEMPOTENCY_IN_PROGRESS', { retryAfterSeconds: 1 });
+    const reused = new AppError('IDEMPOTENCY_KEY_REUSED', { retryAfterSeconds: 1 });
+    expect([classifyThrown(inProgress), classifyThrown(reused)]).toStrictEqual([
+      { kind: 'app', error: inProgress, retryAfterSeconds: 1 },
+      { kind: 'app', error: reused },
+    ]);
+  });
+
   it.each([0, -1, 1.5, Number.NaN, 3601])('drops an out-of-range AppError Retry-After %p', (seconds) => {
     const error = new AppError('SERVICE_UNAVAILABLE', { retryAfterSeconds: seconds });
     expect(classifyThrown(error)).toStrictEqual({ kind: 'app', error });

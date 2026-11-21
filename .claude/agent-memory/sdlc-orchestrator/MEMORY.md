@@ -1,4 +1,4 @@
 - [Run scope & publishing](project_run_scope_and_publishing.md) — run 1 = M0+M1, no sandbox creds, tag+GHCR release, v0.1.0-m0 pre-release
 - [User decision style](user_decision_style.md) — accepts recommended defaults; wants autonomous runs
 - [Host resource limits](project_host_resource_limits.md) — RAM/disk caps: ≤3 build agents, docker.lock, clear merged worktrees' node_modules, keep ≥20 GB free
-- [CI minutes budget](project_ci_minutes_budget.md) — 2,000 free Actions min, $0 limit; union/docs-push discipline P1–P4
+- [CI minutes budget](project_ci_minutes_budget.md) — 2,000 free min, $0 limit; EXHAUSTED 2026-11-21 (billing refusal blocks merges); push discipline

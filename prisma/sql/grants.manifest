@@ -20,6 +20,14 @@ platform_app SELECT public.roles
 # platform_migrator (owner) is the single writer (data-model §3.5, §4.4; PR13-SEC-04, D-ARCH-075).
 platform_app SELECT public.reference_dataset_versions
 
+# HTTP idempotency keys (TASK-040, migration 20261120100000_idempotency_keys; data-model §3.5, §4.4, §6.2): SYSTEM,
+# module idempotency, hard-delete allow-list. UPDATE for the lease takeover and the completion; DELETE for the release
+# of a 5xx/429 or failed outcome, an expired key before it is claimed again, and the purge of expired rows.
+platform_app SELECT public.idempotency_keys
+platform_app INSERT public.idempotency_keys
+platform_app UPDATE public.idempotency_keys
+platform_app DELETE public.idempotency_keys
+
 # pricing configuration versions (TASK-080, migration 20261121000000_pricing_config_versions): GLOBAL, SELECT only; the
 # reference seed as platform_migrator (owner) is the single writer (data-model §3.9, §9.1; insert-only dataset).
 platform_app SELECT public.pricing_config_versions

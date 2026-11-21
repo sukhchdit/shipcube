@@ -266,6 +266,8 @@ sequenceDiagram
 
 *Amended 2026-11-13 (D-ARCH-106, ADR-0010 amendment 5, ADR-0003 amendment of the same date).* The fan-out is started by `createQuote` after its transaction committed and the 201 was sent, which in the route-descriptor model is the `afterCommit` phase (best-effort, in process); the stream drawn above only replays persisted `quote_options` and subscribes (ADR-0016 amendment 3), it never calls a carrier. Each result is persisted in its own short tenant transaction as it arrives, and no tenant transaction is open while a carrier is called. A fan-out lost to a crash must end as per-carrier timeouts at the 5 s deadline, never as a stream that does not complete.
 
+*Amended 2026-11-21 (D-ARCH-219, D-ARCH-220, D-ARCH-222; ADR-0016 amendment 14; ADR-0010 amendment 14).* The last note of the diagram ("Client disconnect → AbortSignal cancels outstanding calls") is withdrawn. A stream that loses its client releases its own subscription within 1 s and cancels no carrier call: the calls belong to the fan-out of `createQuote` and run to their own deadlines, and their results are persisted for every reader. Two more rules for the stream drawn above: when the server is stopping, an open stream gets `error` with `SERVICE_UNAVAILABLE` and is closed within 1 s, and the client resumes on another replica with `Last-Event-ID`; and `error` carries no `id`, so the resume point stays at the last result the client received.
+
 ### 7.2 Checkout and booking saga with compensation (ADR-0014, DR-B03/B04)
 
 ```mermaid
