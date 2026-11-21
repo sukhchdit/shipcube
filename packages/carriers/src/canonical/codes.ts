@@ -4,75 +4,31 @@
  * message depend on them, never on carrier wording. The lists are the single source the normalisers validate their
  * mapping tables against (AT-US-124-05); codes.test.ts pins them to the DR-B30 row of REQUIREMENTS.md, so the catalogue
  * and the requirement cannot drift apart silently.
+ *
+ * The surcharge codes, carrier error codes, tracking statuses and document formats live in `@platform/shared` (the
+ * browser-safe root; ADR-0010 am. 12 item 2, D-TASK075-02, D-ARCH-168; TASK-080), because the API and the apps read them
+ * too. They are re-exported here unchanged, so no adapter import changes.
  */
+import type { CarrierErrorCode } from '@platform/shared';
+
+export {
+  CARRIER_ERROR_CODES,
+  type CarrierErrorCode,
+  DOCUMENT_FORMATS,
+  type DocumentFormat,
+  isCarrierErrorCode,
+  isDocumentFormat,
+  isSurchargeCode,
+  isTrackingStatus,
+  SURCHARGE_CODES,
+  type SurchargeCode,
+  TRACKING_STATUSES,
+  type TrackingStatus,
+} from '@platform/shared';
 
 /** DR-B30 service tiers. */
 export const SERVICE_TIERS = ['EXPRESS', 'STANDARD', 'ECONOMY'] as const;
 export type ServiceTier = (typeof SERVICE_TIERS)[number];
-
-/** DR-B30 surcharge codes. `CARRIER_OTHER` is the landing code of an unmapped carrier surcharge (raw label kept). */
-export const SURCHARGE_CODES = [
-  'FUEL',
-  'REMOTE_AREA',
-  'RESIDENTIAL',
-  'OVERSIZE',
-  'OVERWEIGHT',
-  'PEAK',
-  'EMERGENCY',
-  'SIGNATURE',
-  'ADDITIONAL_HANDLING',
-  'PICKUP_FEE',
-  'DUTIES_TAXES_ESTIMATE',
-  'CARRIER_OTHER',
-] as const;
-export type SurchargeCode = (typeof SURCHARGE_CODES)[number];
-
-/** DR-B30 error codes. `CARRIER_UNKNOWN_ERROR` is the landing code of an unmapped carrier error. */
-export const CARRIER_ERROR_CODES = [
-  'INVALID_ADDRESS',
-  'POSTCODE_INVALID',
-  'SERVICE_UNAVAILABLE',
-  'WEIGHT_EXCEEDED',
-  'DIMENSION_EXCEEDED',
-  'PROHIBITED_ITEM',
-  'CUSTOMS_DATA_INVALID',
-  'AUTH_FAILED',
-  'RATE_LIMITED',
-  'TIMEOUT',
-  'CARRIER_UNAVAILABLE',
-  'CARRIER_BUSY',
-  'DUPLICATE_SHIPMENT',
-  'CANNOT_VOID',
-  'PICKUP_UNAVAILABLE',
-  'CAPABILITY_NOT_SUPPORTED',
-  'CARRIER_UNKNOWN_ERROR',
-] as const;
-export type CarrierErrorCode = (typeof CARRIER_ERROR_CODES)[number];
-
-/** DR-B18 / data-model `tracking_status`: the canonical tracking taxonomy. */
-export const TRACKING_STATUSES = [
-  'INFO_RECEIVED',
-  'PICKED_UP',
-  'DROPPED_OFF',
-  'IN_TRANSIT',
-  'CUSTOMS_HOLD',
-  'CUSTOMS_CLEARED',
-  'OUT_FOR_DELIVERY',
-  'DELIVERY_ATTEMPTED',
-  'DELIVERED',
-  'EXCEPTION',
-  'RETURN_INITIATED',
-  'RETURNED_TO_SENDER',
-  'CANCELLED',
-] as const;
-export type TrackingStatus = (typeof TRACKING_STATUSES)[number];
-
-/**
- * Data-model `document_format` (REQ-DOC-002/015). The only formats a `LabelDocument` may carry: raster carrier output
- * (GIF, PNG, EPL, SPL) never leaves an adapter except as a raw-payload `$blob` (ADR-0010 am. 11 item 3).
- */
-export const DOCUMENT_FORMATS = ['PDF_4X6', 'PDF_A4', 'PDF_LETTER', 'ZPL'] as const;
-export type DocumentFormat = (typeof DOCUMENT_FORMATS)[number];
 
 /** Data-model `direction` (REQ-BOOK-027). */
 export const DIRECTIONS = ['EXPORT', 'IMPORT', 'DOMESTIC'] as const;
@@ -108,10 +64,6 @@ const memberOf =
     typeof value === 'string' && (values as readonly string[]).includes(value);
 
 export const isServiceTier = memberOf(SERVICE_TIERS);
-export const isSurchargeCode = memberOf(SURCHARGE_CODES);
-export const isCarrierErrorCode = memberOf(CARRIER_ERROR_CODES);
-export const isTrackingStatus = memberOf(TRACKING_STATUSES);
-export const isDocumentFormat = memberOf(DOCUMENT_FORMATS);
 export const isDirection = memberOf(DIRECTIONS);
 export const isContentType = memberOf(CONTENT_TYPES);
 export const isCarrierEnvironment = memberOf(CARRIER_ENVIRONMENTS);
