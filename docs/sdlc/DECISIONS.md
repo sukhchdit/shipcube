@@ -9182,3 +9182,26 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - code-reviewer: C3's "pure merge" exemption does not apply.
   - mine before G3: threat model R-13, T-11, T-39 and T-93 aligned with amendments 12 and 13 (item 6 included), and PR041-SEC-06.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-158 · 2026-11-21 · sdlc-orchestrator (session B) · TASK-041 041-B fix cycle 2 at `12b8a10a`; D-TASK041-19..22; the merge of a squashed predecessor into a stacked branch is not a pure union
+- **Fix cycle 2:** head `12b8a10a`, one commit on `83a85739`. It is stacked, unpushed and its upstream is unset.
+  - It takes the architect's change list (rulings §9.3): C-1 the release rule (`enter` / `releaseUnentered` / `release`), C-2 the `step0-authn-inflight` label and the `held` flag, C-3 the README §7 sentence, and tests H1–H5. H6 (real Valkey) is lane B's.
+  - It also takes code review R2-n2 (a `breakerClock` seam) and R2-n3, and fixes three suppression descriptions.
+  - On the host: ESLint is clean over the whole repo, check-suppressions reports 0, unit tests 956/956, the three api files 54/54.
+- **Decisions accepted by reference** (text in the commit body):
+  - D-TASK041-19: the release rule.
+  - D-TASK041-20: a holder released before the slot cannot enter, so no authenticator runs outside the hold. Code review round 3 and the security delta round confirm it.
+  - D-TASK041-21: the label and the `held` flag.
+  - D-TASK041-22: the test seams and the NITs.
+- **Security round 1 (D-SECPR041B-01, `e8067a31`)** = PASS_WITH_CONDITIONS at `83a85739`.
+  - PR041-SEC-10 is the same finding as code review R2-M1 and D-ARCH-226; fix cycle 2 carries its fix.
+  - PR041-SEC-11 (LOW): the cost of residual (d), including a declared-oversize body that holds a unit.
+  - SEC-12..14 are INFO.
+  - D-TASK041-18 is rated: INFO across instances, LOW for the cost.
+  - Security concurs with the (d) wording and adds (a) the oversize body and a TASK-108 timeout counted from arrival, and (b) a bounded slot latency for TASK-055 and other authenticators that do I/O.
+  - Those additions and its route lines (TASK-108, TASK-055 and later authenticators, TASK-052/055/091/171/261 refusals as 4xx `AppError`, the TASK-214 event-loop gauge) go to the next fold. The architect folds (a)–(b) into amendment 13 item 6 at its next touch.
+- **Dispatched:** code review round 3 on `83a85739..12b8a10a` and security delta round 2 on `12b8a10a`. The gatekeeper verification of ADR-0016 am. 13 item 6 (D-ARCH-225..227) is a merge condition of 041-B and has not been dispatched yet.
+- **Merge mechanics of stacked branches (security C3):** the repository squash-merges. Once #82 is squashed, merging main into 041-B conflicts in 16 files (11 add/add and 5 content). The same holds for 040-B after #80.
+  - **Rule:** resolve every conflicted file to the stacked head's blob, then prove `git diff --raw <main> <merge>` = `git diff --raw <predecessor-head> <stacked-head>` (old and new blobs) before the merge-only security round.
+  - **Alternative:** merge #82 and #80 with a merge commit, which avoids the conflicts. It deviates from the squash-only practice, so it is the next session's choice and needs a recorded decision.
+- **Reversibility:** High.

@@ -73,6 +73,7 @@
 - [T-39 denial budget ruling](project_t39_denial_budget_ruling.md) — D-SECT39-01 (f3c581f/631cbc4): closed details set, key grammar, carry claim; card lines + api-platform-core lock pending fold
 - [P5 TASK-075 carrier contract](project_p5_task075.md) — r1-r4 final @28044845 PASS_W_F-U (96672d8e); 01-14 closed; INFO 15 + routed items to TASK-113/132/128
 - [P5 TASK-041 rate limiting](project_p5_task041.md) — r1 @e6f484a, r2 @3a6b4c8b, r3 merge-only @0614a90f PASS_W_F-U (ca85cc9d, rename!); 09 ruled D-ARCH-182; 041-B round owed
+- [P5 TASK-041 part 041-B](project_p5_task041b.md) — r1 @83a85739 PASS_W_COND (e8067a31); SEC-10 abort releases hold; delta round owed; #82 squash => 16 conflicts
 - [P5 TASK-076 pricing+lint](project_p5_task076.md) — r1 @e01979b (2b8f51e) + r2 @82b5023 (c6bbed87) PASS_W_F-U; 01-05/08 closed; 07 INFO (shared subpath, declare) open; TS6 TypeFlags
 - [P5 TASK-039 jobs/schedulers](project_p5_task039.md) — r1 @64eefab, r2 @766ae52, r3 @f08948e PASS_W_F-U (16274d79); PR64-SEC-11 closed (lane B); D-TASK039-01 conds (i)-(iv)
 - [P5 audit effect waiver](project_p5_audit_effect_waiver.md) — D-SECAUDIT-02 to 2026-12-18 (f2fd4eeb, PR pending, 67c4c04 unpushed); Prisma pins effect 3.20.0; picomatch GHSA withdrawn

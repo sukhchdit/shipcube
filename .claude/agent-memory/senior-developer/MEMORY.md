@@ -65,3 +65,5 @@
 - [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
 - [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes
 - [TASK-044 fc1](feedback_task044_fc1.md) — unhandledRejection spy vacuous in Jest, equal-work ratio pins, id-less SSE frame helper ripple, scan the wire
+- [TASK-041B fc2](feedback_task041b_fc2.md) — entered-marker release rule + admission-to-slot gap, check-suppressions 0 every cycle, sed mutation proof
+- [TASK-041B fc1](feedback_task041b_fc1.md) — in-flight hold for read-then-spend gates (atomic admit, abort trap), wiring-pin api rows, heredoc parse kills whole cmd
