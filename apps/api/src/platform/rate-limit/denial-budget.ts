@@ -19,7 +19,8 @@
 import type { DenialMark } from '../audit/capture.js';
 import { BoundedMap } from './bounded-map.js';
 import { AUTHZ_DENIAL_BUDGET, type RateLimitCounter } from './counter.js';
-import { MEMORY_MAX_ENTRIES, type ScriptClient, STORE_TIMEOUT_MS, withStoreTimeout } from './store.js';
+import type { StoreBreaker } from './breaker.js';
+import { MEMORY_MAX_ENTRIES, RateLimitStoreError, type ScriptClient, STORE_TIMEOUT_MS, withStoreTimeout } from './store.js';
 
 export const DENIAL_WINDOW_SECONDS = 60;
 const WINDOW_MS = DENIAL_WINDOW_SECONDS * 1000;
@@ -111,23 +112,35 @@ redis.call('EXPIRE', KEYS[1], ARGV[2])
 return 1
 `;
 
-function valkeyDenialStore(client: ScriptClient, timeoutMs: number): DenialStore {
+/** The checked reply of TAKE_SCRIPT. */
+function takeResult(reply: unknown): TakeResult {
+  const [count, pttlMs, claimed] = Array.isArray(reply) ? (reply as unknown[]) : [];
+  if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1) throw new RateLimitStoreError('malformed-reply');
+  if (typeof pttlMs !== 'number' || !Number.isFinite(pttlMs)) throw new RateLimitStoreError('malformed-reply');
+  return { count, pttlMs: Math.min(Math.max(pttlMs, 1), WINDOW_MS), claimed: typeof claimed === 'number' ? claimed : -1 };
+}
+
+/** The Valkey side: each call bounded by `timeoutMs` and guarded, with its reply check, by the process breaker. */
+function valkeyDenialStore(client: ScriptClient, timeoutMs: number, breaker: Pick<StoreBreaker, 'run'>): DenialStore {
   return {
-    async take(budgetKey, carryKey, threshold) {
-      const reply = await withStoreTimeout(
-        client.eval(TAKE_SCRIPT, 2, budgetKey, carryKey, String(WINDOW_MS), String(threshold), String(CARRY_TTL_SECONDS)),
-        timeoutMs,
-      );
-      const [count, pttlMs, claimed] = Array.isArray(reply) ? (reply as unknown[]) : [];
-      if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1) throw new Error('malformed reply');
-      if (typeof pttlMs !== 'number' || !Number.isFinite(pttlMs)) throw new Error('malformed reply');
-      return { count, pttlMs: Math.min(Math.max(pttlMs, 1), WINDOW_MS), claimed: typeof claimed === 'number' ? claimed : -1 };
-    },
-    async restore(carryKey, suppressed) {
-      await withStoreTimeout(client.eval(RESTORE_SCRIPT, 1, carryKey, String(suppressed), String(CARRY_TTL_SECONDS)), timeoutMs);
-    },
+    take: (budgetKey, carryKey, threshold) =>
+      breaker.run(async () =>
+        takeResult(
+          await withStoreTimeout(
+            client.eval(TAKE_SCRIPT, 2, budgetKey, carryKey, String(WINDOW_MS), String(threshold), String(CARRY_TTL_SECONDS)),
+            timeoutMs,
+          ),
+        ),
+      ),
+    restore: (carryKey, suppressed) =>
+      breaker.run(async () => {
+        await withStoreTimeout(client.eval(RESTORE_SCRIPT, 1, carryKey, String(suppressed), String(CARRY_TTL_SECONDS)), timeoutMs);
+      }),
   };
 }
+
+/** A pass-through guard: a budget composed without the process breaker (unit compositions). */
+const UNGUARDED: Pick<StoreBreaker, 'run'> = { run: (call) => call() };
 
 /** The per-instance fallback: the same atomic step over two bounded maps (O(1) per new actor, PR041-SEC-01). */
 export function memoryDenialStore(now: () => number = Date.now, maxEntries: number = MEMORY_MAX_ENTRIES): DenialStore {
@@ -185,6 +198,11 @@ export interface DenialBudgetOptions {
   readonly log?: DenialBudgetLog | undefined;
   readonly now?: (() => number) | undefined;
   readonly timeoutMs?: number | undefined;
+  /**
+   * The process breaker of the rate-limit store (ADR-0016 am. 12 item 7; createApp passes the kit's): while it is open
+   * the budget skips Valkey and takes the per-instance fallback at once. Absent, calls are not guarded.
+   */
+  readonly breaker?: Pick<StoreBreaker, 'run'> | undefined;
 }
 
 /** RFC 3339 UTC, rounded UP to the second (the budget key's expiry). */
@@ -204,7 +222,10 @@ export function createDenialBudget(options: DenialBudgetOptions): DenialBudget {
   const { threshold } = options;
   const now = options.now ?? Date.now;
   const memory = memoryDenialStore(now);
-  const valkey = options.valkey === undefined ? undefined : valkeyDenialStore(options.valkey, options.timeoutMs ?? STORE_TIMEOUT_MS);
+  const valkey =
+    options.valkey === undefined
+      ? undefined
+      : valkeyDenialStore(options.valkey, options.timeoutMs ?? STORE_TIMEOUT_MS, options.breaker ?? UNGUARDED);
 
   async function step(budgetKey: string, carryKey: string): Promise<{ result: TakeResult; store: DenialStore }> {
     if (valkey !== undefined) {

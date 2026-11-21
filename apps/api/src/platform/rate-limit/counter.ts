@@ -7,7 +7,9 @@
 import type { RateLimitClass } from '../routing/define-route.js';
 
 export const AUTHZ_DENIAL_BUDGET = 'authz-denial';
-export type RateLimitLabel = RateLimitClass | typeof AUTHZ_DENIAL_BUDGET | 'unauthenticated' | 'step0-credentialed';
+/** The step-0 refusals: the unauthenticated budget, the credentialed ceiling and the spent failed-authentication budget. */
+export type StepZeroLabel = 'unauthenticated' | 'step0-credentialed' | 'step0-authn-failed';
+export type RateLimitLabel = RateLimitClass | typeof AUTHZ_DENIAL_BUDGET | StepZeroLabel;
 
 export interface RateLimitCounter {
   /** Counts one refused request (429) under `label`. */

@@ -25,7 +25,8 @@ import { requestLogContext } from './platform/logging/correlation.js';
 import { requestLogger, routePrefix, type AccessLogFields } from './platform/logging/request-logger.js';
 import { createDocsRouter, DOCS_PATH, type DocsOptions } from './platform/openapi/serve.js';
 import { createRateLimitKit, denialOutageReporter, type RateLimitDependencies } from './platform/rate-limit/kit.js';
-import { createRouteRateLimit, ipLimiter, type RateLimitKit } from './platform/rate-limit/limits.js';
+import { withAuthnFailedBudget } from './platform/rate-limit/authn-failed.js';
+import { createRouteRateLimit, ipLimiter, type RateLimitKit, refreshCookieRoutePaths } from './platform/rate-limit/limits.js';
 import { createRateLimitCounter } from './platform/rate-limit/counter.js';
 import { securityEventSinkFrom } from './platform/logging/security-events.js';
 import type { RouteDescriptor } from './platform/routing/define-route.js';
@@ -106,7 +107,8 @@ export interface AppDependencies {
    * Test seam: replaces ONLY the authentication slot of the default pipeline (the rest, the audit capture included, is
    * still composed from these dependencies), so a test can drive the production composition to a 403 before the
    * session authenticator (TASK-052) exists. startApi never sets it; with `pipeline` it is ignored; createApp refuses
-   * it in `live` mode (AuthenticateSeamError). Retired with TASK-052 (the real authenticator replaces the stub).
+   * it in `live` mode (AuthenticateSeamError). Retired with TASK-052 (the real authenticator replaces the stub). With
+   * `rateLimit`, the seam is wrapped by the failed-authentication budget like the default slot (TASK-041 part 041-B).
    * @internal
    */
   readonly authenticate?: RouteSlot;
@@ -121,7 +123,9 @@ export interface AppDependencies {
    * (test compositions, the RBAC matrix app: the seam that keeps the generated matrix below the per-IP budget) the
    * step-0 limiter passes through and the step-5 slot is the TASK-020 stub. A `live` composition without it is refused
    * at boot (RateLimitMissingError, PR041-SEC-08). The denial budget (T-39) does not depend on
-   * it: the pipeline builds one whenever it builds the audit capture.
+   * it: the pipeline builds one whenever it builds the audit capture (sharing the kit's store breaker when it exists).
+   * With it, the authentication slot in effect is wrapped by the failed-authentication budget (rate-limit/authn-failed.ts;
+   * ADR-0016 am. 12 item 4), and step 0 learns the paths of the `refresh-cookie` routes (am. 13 item 1).
    */
   readonly rateLimit?: RateLimitDependencies;
 }
@@ -167,6 +171,7 @@ function defaultSlots(
     valkey: deps.rateLimit?.valkey,
     ...(deps.rateLimit === undefined ? {} : { authzDenialBudgetPerMin: deps.rateLimit.settings.AUTHZ_DENIAL_BUDGET_PER_MIN }),
     denialCounter: kit?.counter ?? createRateLimitCounter(),
+    storeBreaker: kit?.breaker,
     denialLog: { warn: (event, fields) => (logger.warn ?? logger.error).call(logger, event, fields) },
     onStoreUnavailable: denialOutageReporter(events),
     tenantTx: deps.tenantTx,
@@ -185,6 +190,9 @@ function defaultSlots(
 export function createApp(deps: AppDependencies): Express {
   const moduleRoutes = deps.modules.flatMap((module) => module.routes);
   assertBootable(deps, [...deps.health, ...moduleRoutes]);
+  // Step 0 selects the refresh cookie on exactly these paths; a cookie route with a non-literal path is refused here
+  // (RefreshCookiePathError; ADR-0016 am. 13 item 1).
+  const refreshCookiePaths = refreshCookieRoutePaths(moduleRoutes, API_PREFIX);
   const app = express();
   const logger = deps.logger ?? createRuntimeLog('api', process.stdout, { context: requestLogContext });
   const afterCommit = deps.afterCommit ?? createAfterCommitQueue(logger);
@@ -193,14 +201,17 @@ export function createApp(deps: AppDependencies): Express {
     error: (event, fields) => logger.error(event, fields),
   });
   const kit = deps.rateLimit === undefined ? undefined : createRateLimitKit(deps.rateLimit, events);
-  const slots = deps.pipeline ?? defaultSlots(deps, afterCommit, logger, kit, events);
+  const composed = deps.pipeline ?? defaultSlots(deps, afterCommit, logger, kit, events);
+  // Every refusal of the authentication slot in effect (default, seam or replaced pipeline) spends the IP's
+  // failed-authentication budget; no authenticator calls the limiter (ADR-0016 am. 12 item 4).
+  const slots = kit === undefined ? composed : { ...composed, authenticate: withAuthnFailedBudget(composed.authenticate, kit) };
 
   app.set('trust proxy', deps.trustProxyHops ?? 0);
 
   app.use(requestContextMiddleware(deps.apiMode === undefined ? {} : { apiMode: deps.apiMode }));
   app.use(requestLogger(logger));
   app.disable('x-powered-by');
-  app.use(ipLimiter(kit, API_PREFIX));
+  app.use(ipLimiter(kit, { apiPrefix: API_PREFIX, refreshCookiePaths }));
   app.use(corsPreflight());
   app.use(jsonBodyParser(deps.bodyLimit === undefined ? {} : { limit: deps.bodyLimit }));
 

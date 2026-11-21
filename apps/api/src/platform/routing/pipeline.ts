@@ -21,9 +21,10 @@ import { idempotency } from '../idempotency/idempotency.js';
 import { deprecationHeaderValues } from '../openapi/deprecation.js';
 import { mfaGate } from '../mfa/mfa-gate.js';
 import { RATE_LIMIT_DEFAULTS } from '@platform/config';
+import type { StoreBreaker } from '../rate-limit/breaker.js';
 import type { RateLimitCounter } from '../rate-limit/counter.js';
 import { createDenialBudget, type DenialBudget, type DenialBudgetLog } from '../rate-limit/denial-budget.js';
-import { routeRateLimit } from '../rate-limit/limits.js';
+import { RefreshCookiePathError, routeRateLimit } from '../rate-limit/limits.js';
 import type { ScriptClient } from '../rate-limit/store.js';
 import { type ExecuteOptions, executeSlot } from '../tx/execute.js';
 import { validate } from '../validate/slot.js';
@@ -80,6 +81,8 @@ export interface PipelineOptions extends Omit<ExecuteOptions, 'audit'> {
   readonly denialLog?: DenialBudgetLog;
   readonly denialCounter?: RateLimitCounter;
   readonly onStoreUnavailable?: (scope: string) => void;
+  /** The process breaker of the rate-limit store (createApp passes the kit's; ADR-0016 am. 12 item 7). */
+  readonly storeBreaker?: StoreBreaker | undefined;
 }
 
 /** The capture options that carry personal values: the writer's tokeniser and IP index, and the parser. */
@@ -101,6 +104,7 @@ export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
     denialLog,
     denialCounter,
     onStoreUnavailable,
+    storeBreaker,
     ...execute
   } = options;
   const capture =
@@ -123,6 +127,7 @@ export function defaultPipelineSlots(options: PipelineOptions): PipelineSlots {
           counter: denialCounter,
           log: denialLog,
           onStoreUnavailable,
+          breaker: storeBreaker,
         })
       : undefined);
   return {
@@ -251,5 +256,7 @@ export function bootFailureOf(error: unknown): BootFailure | undefined {
   }
   if (error instanceof UndefinedRouteError)
     return { event: 'api.route_not_defined', fields: { error: error.name, operation: error.operationId } };
+  if (error instanceof RefreshCookiePathError)
+    return { event: 'api.refresh_cookie_route_refused', fields: { error: error.name, operation: error.operationId, path: error.path } };
   return undefined;
 }

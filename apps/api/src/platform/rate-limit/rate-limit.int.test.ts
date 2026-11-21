@@ -2,7 +2,8 @@
  * The Lua scripts of the rate limiter and the denial budget against a real Valkey 8 (Testcontainers; lane B): the
  * fake client of the unit suites interprets the same scripts in JavaScript, this suite proves the real semantics
  * (atomic INCR + PEXPIRE, PTTL of the budget key, GETDEL of the carry, the concurrency slots, two clients sharing one
- * counter). US-040 AT-US-040-05; T-39, D-SECT39-01 item 3; TASK-041.
+ * counter, the hit-and-peek script of the failed-authentication budget). US-040 AT-US-040-05; T-39, D-SECT39-01 item 3;
+ * PR041-SEC-02 (b); TASK-041.
  */
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { Redis } from 'ioredis';
@@ -11,6 +12,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from 'testcontainer
 import { createValkeyClient } from '../valkey/client.js';
 import { createDenialBudget, denialKeys, RESTORE_SCRIPT, type DenialSubject } from './denial-budget.js';
 import { createRateLimiter } from './limiter.js';
+import { AUTHN_FAILED_RULE } from './policy.js';
 import { createValkeyStore } from './store.js';
 
 jest.setTimeout(120_000);
@@ -134,5 +136,60 @@ describe('[T-39] [D-SECT39-01 item 3] the denial budget over a real Valkey', () 
       ['individual', 'aggregated', 'suppressed'].map((kind) => [kind, verdicts.filter((v) => v.kind === kind).length]),
     );
     expect(counts).toEqual({ individual: 5, aggregated: 1, suppressed: 24 });
+  });
+});
+
+describe('[PR041-SEC-02] [B1] the failed-authentication budget over a real Valkey (TASK-041 part 041-B)', () => {
+  it('HIT_AND_PEEK_SCRIPT counts the first key and reads the second without counting it; a missing second key reads 0, 0', async () => {
+    const valkey = client('rl-peek');
+    const store = createValkeyStore(valkey, { timeoutMs: LOAD_TIMEOUT_MS });
+    expect(await store.hitAndPeek('rl:it:step', 60_000, 'rl:it:failed', 60_000)).toMatchObject({
+      hit: { count: 1 },
+      peek: { count: 0, resetMs: 0 },
+    });
+    expect(await valkey.exists('rl:it:failed')).toBe(0);
+    await store.hit('rl:it:failed', 60_000);
+    await store.hit('rl:it:failed', 60_000);
+    const { hit, peek } = await store.hitAndPeek('rl:it:step', 60_000, 'rl:it:failed', 60_000);
+    expect(hit.count).toBe(2);
+    expect(peek.count).toBe(2);
+    expect(peek.resetMs).toBeGreaterThanOrEqual(1);
+    expect(peek.resetMs).toBeLessThanOrEqual(60_000);
+    expect(await valkey.get('rl:it:failed')).toBe('2');
+    expect(await store.peek('rl:it:failed', 60_000)).toMatchObject({ count: 2 });
+    expect(await store.peek('rl:it:none', 60_000)).toEqual({ count: 0, resetMs: 0 });
+  });
+
+  it('a peeked key without a TTL (never expected) gets one, so no counter stays for good', async () => {
+    const valkey = client('rl-peek-ttl');
+    const store = createValkeyStore(valkey, { timeoutMs: LOAD_TIMEOUT_MS });
+    await valkey.set('rl:it:no-ttl', '5');
+    expect((await store.hitAndPeek('rl:it:step-2', 60_000, 'rl:it:no-ttl', 60_000)).peek.count).toBe(5);
+    const ttl = await valkey.pttl('rl:it:no-ttl');
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(60_000);
+    await valkey.set('rl:it:no-ttl-2', '1');
+    await store.peek('rl:it:no-ttl-2', 60_000);
+    expect(await valkey.pttl('rl:it:no-ttl-2')).toBeGreaterThan(0);
+  });
+
+  it('spends from two replicas reach the limit once; the gate then refuses with the rest of the window; key and TTL follow the ruling', async () => {
+    const limiters = [client('rl-authn-a'), client('rl-authn-b')].map((valkey) =>
+      createRateLimiter({ store: createValkeyStore(valkey, { timeoutMs: LOAD_TIMEOUT_MS }), onStoreUnavailable: () => undefined }),
+    );
+    const gate = { name: AUTHN_FAILED_RULE, key: '203.0.113.99', limit: 4, windowMs: 60_000 };
+    const step = { name: 'step0:credentialed', key: '203.0.113.99', limit: 6_000, windowMs: 60_000 };
+    const spends = await Promise.all(
+      Array.from({ length: 6 }, (_, index) => (limiters[index % 2] as (typeof limiters)[number]).spend(gate, 'it')),
+    );
+    expect(spends.filter((spend) => spend.reached)).toHaveLength(1);
+    const refused = await (limiters[0] as (typeof limiters)[number]).consumeGated(step, gate, { onStoreFailure: 'fail-open', scope: 'it' });
+    expect(refused).toMatchObject({ allowed: false, reading: { rule: AUTHN_FAILED_RULE, limit: 4, remaining: 0 } });
+    if (!refused.allowed) expect(refused.retryAfterSeconds).toBeLessThanOrEqual(60);
+    const probe = client('rl-authn-probe');
+    expect(await probe.get('rl:step0:authn-failed:203.0.113.99')).toBe('6');
+    const ttl = await probe.pttl('rl:step0:authn-failed:203.0.113.99');
+    expect(ttl).toBeGreaterThanOrEqual(1);
+    expect(ttl).toBeLessThanOrEqual(60_000);
   });
 });

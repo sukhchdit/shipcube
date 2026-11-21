@@ -9,15 +9,18 @@ import { RATE_LIMIT_DEFAULTS } from '@platform/config';
 import { BoundedMap, SWEEP_PER_INSERT } from './bounded-map.js';
 import { createRateLimitCounter } from './counter.js';
 import { createDenialBudget, denialKeys, memoryDenialStore, RESTORE_SCRIPT, windowEndsAt, type DenialSubject } from './denial-budget.js';
-import { createOutageReporter, createRateLimiter, type RateRule } from './limiter.js';
+import { counterKey, createOutageReporter, createRateLimiter, type RateRule } from './limiter.js';
 import {
   authAccountRule,
+  AUTHN_FAILED_RULE,
+  authnFailedRule,
   classPolicy,
   clientIpKey,
   emailSendRules,
   HOUR_MS,
   MINUTE_MS,
   quoteCreateRules,
+  stepZeroRule,
   streamSlotRule,
   type RateLimitSettings,
 } from './policy.js';
@@ -457,5 +460,150 @@ describe('[T-39] [D-SECT39-01] the denial budget', () => {
     expect((await store.take('b', 'c', 5)).count).toBe(1);
     now += 60_001;
     expect((await store.take('b', 'c', 5)).count).toBe(1);
+  });
+});
+
+describe('[B4] [PR041-SEC-03] the fallback set of ADR-0016 amendment 12 item 8', () => {
+  it.each([
+    ['auth', 'fallback'],
+    ['email-send', 'fallback'],
+    ['public-quote', 'fallback'],
+    ['public-tracking', 'fallback'],
+    ['public', 'fail-open'],
+    ['authenticated', 'fail-open'],
+    ['webhook', 'fail-open'],
+    ['csp-report', 'fail-open'],
+    ['none', 'fail-open'],
+  ] as const)('class %s: %s', (klass, mode) => {
+    expect(classPolicy(klass, { ip: '203.0.113.7', userId: 'u-1' }, settings).onStoreFailure).toBe(mode);
+  });
+
+  it.each([
+    ['public-quote', 21],
+    ['public-tracking', 31],
+  ] as const)(
+    'Valkey down: %s keeps its per-minute limit per instance (request %i refused) and reports the outage',
+    async (klass, refusedAt) => {
+      const valkey = new FakeValkey();
+      valkey.failure = new Error('connect ECONNREFUSED valkey.internal:6379');
+      const outages: string[] = [];
+      const limiter = createRateLimiter({ store: createValkeyStore(valkey), onStoreUnavailable: (scope) => outages.push(scope) });
+      const { rules, onStoreFailure } = classPolicy(klass, { ip: '203.0.113.7' }, settings);
+      expect(onStoreFailure).toBe('fallback');
+      expect(await firstRefused(limiter, rules, refusedAt + 3, FALLBACK)).toBe(refusedAt);
+      expect(outages.length).toBeGreaterThan(0);
+    },
+  );
+});
+
+describe('[B1] the store side of the failed-authentication budget: one call counts the hit and reads the budget', () => {
+  const IP = '203.0.113.7';
+  const step = stepZeroRule(IP, true, settings);
+  const gate = authnFailedRule(IP, { ...settings, RATE_LIMIT_PUBLIC_PER_MIN: 3 });
+
+  it('the rule is rl:step0:authn-failed:<ip>, 60 s, RATE_LIMIT_PUBLIC_PER_MIN', () => {
+    expect(authnFailedRule(IP, settings)).toEqual({ name: AUTHN_FAILED_RULE, key: IP, limit: 120, windowMs: MINUTE_MS });
+    expect(counterKey(AUTHN_FAILED_RULE, IP)).toBe(`rl:step0:authn-failed:${IP}`);
+  });
+
+  it('hitAndPeek counts the first key and reads the second without counting it, in one eval; a missing window reads 0, 0', async () => {
+    const valkey = new FakeValkey();
+    const store = createValkeyStore(valkey);
+    expect(await store.hitAndPeek('rl:a', 60_000, 'rl:b', 60_000)).toEqual({
+      hit: { count: 1, resetMs: 60_000 },
+      peek: { count: 0, resetMs: 0 },
+    });
+    await store.hit('rl:b', 60_000);
+    valkey.time += 10_000;
+    expect(await store.hitAndPeek('rl:a', 60_000, 'rl:b', 60_000)).toEqual({
+      hit: { count: 2, resetMs: 50_000 },
+      peek: { count: 1, resetMs: 50_000 },
+    });
+    expect(valkey.value('rl:b')).toBe(1);
+    expect(await store.peek('rl:b', 60_000)).toEqual({ count: 1, resetMs: 50_000 });
+    expect(await store.peek('rl:none', 60_000)).toEqual({ count: 0, resetMs: 0 });
+    expect(valkey.calls).toBe(5);
+  });
+
+  it('the memory store answers the same questions', async () => {
+    const clock = { now: 0 };
+    const store = createMemoryStore(() => clock.now);
+    expect(await store.hitAndPeek('rl:a', 60_000, 'rl:b', 60_000)).toEqual({
+      hit: { count: 1, resetMs: 60_000 },
+      peek: { count: 0, resetMs: 0 },
+    });
+    await store.hit('rl:b', 60_000);
+    expect(await store.peek('rl:b', 60_000)).toEqual({ count: 1, resetMs: 60_000 });
+    clock.now += 60_000;
+    expect(await store.peek('rl:b', 60_000)).toEqual({ count: 0, resetMs: 0 });
+  });
+
+  it.each([
+    ['not a list', 'OK'],
+    ['a hit count of 0', [0, 1000, 0, 0]],
+    ['a negative peeked count', [1, 1000, -1, 0]],
+    ['a non-finite peeked ttl', [1, 1000, 2, null]],
+  ])('refuses a malformed hitAndPeek reply (%s)', async (_label, reply) => {
+    const store = createValkeyStore({ eval: () => Promise.resolve(reply) });
+    await expect(store.hitAndPeek('rl:a', 60_000, 'rl:b', 60_000)).rejects.toMatchObject({ reason: 'malformed-reply' });
+  });
+
+  it('refuses a malformed peek reply and keeps a peeked reset inside the window', async () => {
+    await expect(createValkeyStore({ eval: () => Promise.resolve(['x', 1]) }).peek('rl:a', 60_000)).rejects.toMatchObject({
+      reason: 'malformed-reply',
+    });
+    expect(await createValkeyStore({ eval: () => Promise.resolve([4, 999_999]) }).peek('rl:a', 60_000)).toEqual({
+      count: 4,
+      resetMs: 60_000,
+    });
+  });
+
+  it('consumeGated: below the limit the step-0 rule decides; at the limit the gate refuses with its own reading and window', async () => {
+    const valkey = new FakeValkey();
+    const limiter = createRateLimiter({ store: createValkeyStore(valkey), onStoreUnavailable: () => undefined });
+    expect(await limiter.consumeGated(step, gate, OPEN)).toMatchObject({ allowed: true, reading: { rule: 'step0:credentialed' } });
+    expect(await limiter.spend(gate, 'rate-limit')).toEqual({ count: 1, reached: false });
+    expect(await limiter.spend(gate, 'rate-limit')).toEqual({ count: 2, reached: false });
+    valkey.time += 15_000;
+    expect(await limiter.spend(gate, 'rate-limit')).toEqual({ count: 3, reached: true });
+    const refused = await limiter.consumeGated(step, gate, OPEN);
+    expect(refused).toEqual({
+      allowed: false,
+      reading: { rule: AUTHN_FAILED_RULE, limit: 3, remaining: 0, resetSeconds: 45 },
+      retryAfterSeconds: 45,
+      first: false,
+    });
+    expect(await limiter.spend(gate, 'rate-limit')).toEqual({ count: 4, reached: false });
+    valkey.time += 45_000;
+    expect((await limiter.consumeGated(step, gate, OPEN)).allowed).toBe(true);
+  });
+
+  it('consumeGated: the step-0 ceiling still refuses on its own', async () => {
+    const limiter = createRateLimiter({ store: createMemoryStore(() => 0), onStoreUnavailable: () => undefined });
+    const tight = { ...step, limit: 1 };
+    expect((await limiter.consumeGated(tight, gate, OPEN)).allowed).toBe(true);
+    expect(await limiter.consumeGated(tight, gate, OPEN)).toMatchObject({
+      allowed: false,
+      first: true,
+      reading: { rule: 'step0:credentialed' },
+    });
+  });
+
+  it('[B1 (7)] during an outage the spends go to the per-instance fallback and the gate is read from it; the step-0 hit fails open', async () => {
+    const valkey = new FakeValkey();
+    valkey.failure = new Error('down');
+    const outages: string[] = [];
+    const limiter = createRateLimiter({ store: createValkeyStore(valkey), onStoreUnavailable: (scope) => outages.push(scope) });
+    expect(await limiter.consumeGated(step, gate, OPEN)).toEqual({ allowed: true, reading: undefined });
+    for (let spend = 1; spend <= 3; spend += 1) expect((await limiter.spend(gate, 'rate-limit')).count).toBe(spend);
+    expect(await limiter.consumeGated(step, gate, OPEN)).toMatchObject({
+      allowed: false,
+      reading: { rule: AUTHN_FAILED_RULE, remaining: 0 },
+    });
+    expect(outages).toHaveLength(5);
+    // A gated rule in fallback mode is counted per instance too.
+    const other = { ...step, key: 'other', limit: 1 };
+    expect((await limiter.consumeGated(other, { ...gate, key: 'other' }, FALLBACK)).allowed).toBe(true);
+    expect((await limiter.consumeGated(other, { ...gate, key: 'other' }, FALLBACK)).allowed).toBe(false);
   });
 });

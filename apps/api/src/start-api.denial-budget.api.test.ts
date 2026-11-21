@@ -155,7 +155,8 @@ interface Started {
   lines(): Record<string, unknown>[];
 }
 
-async function start(): Promise<Started> {
+/** `seam: false` keeps the production authentication slot (the TASK-020 stub, which refuses every declared credential). */
+async function start(options: { readonly seam?: boolean } = {}): Promise<Started> {
   const valkey = new FakeValkey();
   const services = {
     valkey,
@@ -194,7 +195,7 @@ async function start(): Promise<Started> {
     // The one test seam: the authentication slot. Every other dependency is what startApi composed.
     createApp: (deps) => {
       composed = deps;
-      app = createApp({ ...deps, authenticate: signedIn });
+      app = createApp(options.seam === false ? deps : { ...deps, authenticate: signedIn });
       return { listen: (_port, callback) => (callback(), server) };
     },
     modules: [{ name: 'addresses', routes: [gated] }],
@@ -271,5 +272,26 @@ describe('[T-39] [D-SECT39-01 item 6] [PR48-SEC-06] startApi composes the real l
       expect(JSON.stringify(line)).not.toContain('valkey.internal');
       expect(line['dropped_attributes']).toBeUndefined();
     }
+  });
+});
+
+describe('[PR041-SEC-02] [B1 (8)] startApi composes the failed-authentication budget around the production authentication slot', () => {
+  it('120 junk bearers from one IP answer 401 from the authentication slot, the 121st is 429 before it, with Retry-After', async () => {
+    const { app, valkey, lines } = await start({ seam: false });
+    const statuses: number[] = [];
+    for (let call = 0; call < 121; call += 1) {
+      statuses.push(
+        (await request(app).get('/api/v1/address-book').set('X-Forwarded-For', '203.0.113.50').set('Authorization', 'Bearer junk')).status,
+      );
+    }
+    expect(statuses.slice(0, 120).every((status) => status === 401)).toBe(true);
+    expect(statuses[120]).toBe(429);
+    expect(valkey.value('rl:step0:authn-failed:203.0.113.50')).toBe(120);
+    const events = lines().filter((line) => line['event'] === 'security.rate_limit_auth' || line['message'] === 'security.rate_limit_auth');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ class: 'authn-failed', key_type: 'ip' });
+    // A request that presents no credential is refused by the slot as well but spends nothing.
+    expect((await request(app).get('/api/v1/address-book').set('X-Forwarded-For', '203.0.113.51')).status).toBe(401);
+    expect(valkey.value('rl:step0:authn-failed:203.0.113.51')).toBeUndefined();
   });
 });

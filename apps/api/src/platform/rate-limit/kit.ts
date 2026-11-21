@@ -1,11 +1,13 @@
 /**
  * Composition of the rate limiter (TASK-041): the Valkey store over the runtime's client, the limiter with its
- * per-instance fallback, the outage report (once a minute per scope) and the counter. createApp calls it from the
+ * per-instance fallback, the process breaker of the store (ADR-0016 am. 12 item 7; shared with the denial budget, which
+ * createApp hands it to), the outage report (once a minute per scope) and the counter. createApp calls it from the
  * `rateLimit` dependency startApi passes; the denial budget is composed separately by the pipeline (it travels with the
  * audit capture, D-SECT39-01 item 6).
  */
 import type { SecurityEventSink } from '@platform/shared/logging';
 
+import { createStoreBreaker } from './breaker.js';
 import { createRateLimitCounter, type RateLimitCounter } from './counter.js';
 import { createOutageReporter, createRateLimiter } from './limiter.js';
 import type { RateLimitKit } from './limits.js';
@@ -27,14 +29,16 @@ export function createRateLimitKit(
   counter: RateLimitCounter = deps.counter ?? createRateLimitCounter(),
 ): RateLimitKit {
   const report = createOutageReporter((scope) => events.emit('rate_limit_store_unavailable', { store: 'valkey', scope }));
+  const breaker = createStoreBreaker();
   return {
     limiter: createRateLimiter({
-      store: deps.valkey === undefined ? createMemoryStore() : createValkeyStore(deps.valkey),
+      store: deps.valkey === undefined ? createMemoryStore() : createValkeyStore(deps.valkey, { breaker }),
       onStoreUnavailable: report,
     }),
     settings: deps.settings,
     counter,
     events,
+    breaker,
   };
 }
 

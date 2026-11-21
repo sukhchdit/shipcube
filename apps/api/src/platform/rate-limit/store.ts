@@ -1,12 +1,13 @@
 /**
  * Counter stores of the rate limiter (api/README §7, ADR-0016 §8, ADR-0013; TASK-041). Two implementations of one port:
- * the Valkey store (shared by every API replica, one atomic Lua script per call, every call bounded by a timeout) and
- * the in-memory store (the per-instance fallback of the security classes during a Valkey outage, README §7, and the
- * store of test compositions). Keys and values hold internal identifiers, counts and the IPv4 address or the IPv6 /64
+ * the Valkey store (shared by every API replica, one atomic Lua script per call, every call bounded by a timeout and
+ * guarded by the process breaker) and the in-memory store (the per-instance fallback of the fallback set during a Valkey
+ * outage, ADR-0016 am. 12 item 8, README §7, and the store of test compositions). Keys and values hold internal identifiers, counts and the IPv4 address or the IPv6 /64
  * of a client, kept for one window at most: no e-mail address, user agent, route or correlation id (D-SECT39-01 item 4).
  */
 
 import { BoundedMap } from './bounded-map.js';
+import type { StoreBreaker } from './breaker.js';
 
 /** One fixed-window hit: the count including this hit, and the milliseconds until the window closes. */
 export interface WindowHit {
@@ -14,9 +15,24 @@ export interface WindowHit {
   readonly resetMs: number;
 }
 
+/** A window read without a hit: count 0 and resetMs 0 when the key has no live window. */
+export type WindowPeek = WindowHit;
+
 export interface RateLimitStore {
   /** Counts one hit in the fixed window of `key` (the window opens at the first hit and is anchored by the key's TTL). */
   hit(key: string, windowMs: number): Promise<WindowHit>;
+  /**
+   * Counts one hit under `key` and reads the window of `peekKey` without counting, in ONE store call (step 0 of a
+   * credentialed request: the credentialed hit and the IP's failed-authentication count; ADR-0016 am. 12 item 4).
+   */
+  hitAndPeek(
+    key: string,
+    windowMs: number,
+    peekKey: string,
+    peekWindowMs: number,
+  ): Promise<{ readonly hit: WindowHit; readonly peek: WindowPeek }>;
+  /** Reads the window of `key` without counting (the per-instance fallback answers the step-0 gate during an outage). */
+  peek(key: string, windowMs: number): Promise<WindowPeek>;
   /** Takes one of `max` concurrent slots under `key` for `holder`; false when all are taken. A crashed holder's slot expires after `ttlMs`. */
   acquire(key: string, holder: string, max: number, ttlMs: number): Promise<boolean>;
   /** Frees `holder`'s slot (idempotent). */
@@ -81,28 +97,123 @@ return 1
 
 export const RELEASE_SCRIPT = `return redis.call('ZREM', KEYS[1], ARGV[1])`;
 
+/**
+ * HIT_SCRIPT on KEYS[1], then a read of KEYS[2] (GET + PTTL) that counts nothing. A live KEYS[2] without a TTL (never
+ * expected) gets one, as in HIT_SCRIPT. Returns {count, ttl, peeked count, peeked ttl}; 0, 0 for a missing KEYS[2].
+ */
+export const HIT_AND_PEEK_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+  ttl = tonumber(ARGV[1])
+end
+local peeked = tonumber(redis.call('GET', KEYS[2]) or '0') or 0
+local pttl = 0
+if peeked > 0 then
+  pttl = redis.call('PTTL', KEYS[2])
+  if pttl < 0 then
+    redis.call('PEXPIRE', KEYS[2], ARGV[2])
+    pttl = tonumber(ARGV[2])
+  end
+end
+return {count, ttl, peeked, pttl}
+`;
+
+/** The read half of HIT_AND_PEEK_SCRIPT alone. */
+export const PEEK_SCRIPT = `
+local peeked = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
+local pttl = 0
+if peeked > 0 then
+  pttl = redis.call('PTTL', KEYS[1])
+  if pttl < 0 then
+    redis.call('PEXPIRE', KEYS[1], ARGV[1])
+    pttl = tonumber(ARGV[1])
+  end
+end
+return {peeked, pttl}
+`;
+
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
-/** The Valkey-backed store; `timeoutMs` bounds every call (CLAUDE.md §9). */
-export function createValkeyStore(client: ScriptClient, options: { readonly timeoutMs?: number } = {}): RateLimitStore {
+const isTtl = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+/** A checked {count, ttl} pair of a reply: the reset stays inside the window; a peek of a missing window reads 0, 0. */
+function windowOf(count: unknown, ttl: unknown, windowMs: number): WindowHit {
+  if (!isCount(count) || !isTtl(ttl)) throw new RateLimitStoreError('malformed-reply');
+  if (count === 0) return { count: 0, resetMs: 0 };
+  return { count, resetMs: Math.min(Math.max(ttl, 1), windowMs) };
+}
+
+const replyItems = (reply: unknown): unknown[] => (Array.isArray(reply) ? (reply as unknown[]) : []);
+
+/** A pass-through guard: a store composed without the process breaker (unit compositions). */
+const UNGUARDED: Pick<StoreBreaker, 'run'> = { run: (call) => call() };
+
+export interface ValkeyStoreOptions {
+  /** Bound of one call (default {@link STORE_TIMEOUT_MS}). */
+  readonly timeoutMs?: number;
+  /** The process breaker (createRateLimitKit); absent, calls are not guarded. */
+  readonly breaker?: Pick<StoreBreaker, 'run'> | undefined;
+}
+
+/**
+ * The Valkey-backed store; `timeoutMs` bounds every call (CLAUDE.md §9). The breaker sees the bounded call together with
+ * its reply check, so a timeout, an unreachable store or a malformed reply opens it (ADR-0016 am. 12 item 7).
+ */
+export function createValkeyStore(client: ScriptClient, options: ValkeyStoreOptions = {}): RateLimitStore {
   const timeoutMs = options.timeoutMs ?? STORE_TIMEOUT_MS;
-  const run = (script: string, key: string, ...args: string[]): Promise<unknown> =>
-    withStoreTimeout(client.eval(script, 1, key, ...args), timeoutMs);
+  const breaker = options.breaker ?? UNGUARDED;
+  const run = <T>(parse: (reply: unknown) => T, script: string, keys: readonly string[], ...args: string[]): Promise<T> =>
+    breaker.run(async () => parse(await withStoreTimeout(client.eval(script, keys.length, ...keys, ...args), timeoutMs)));
   return {
-    async hit(key, windowMs) {
-      const reply = await run(HIT_SCRIPT, key, String(windowMs));
-      const [count, ttl] = Array.isArray(reply) ? (reply as unknown[]) : [];
-      if (!isCount(count) || typeof ttl !== 'number' || !Number.isFinite(ttl)) throw new RateLimitStoreError('malformed-reply');
-      return { count, resetMs: Math.min(Math.max(ttl, 1), windowMs) };
-    },
-    async acquire(key, holder, max, ttlMs) {
-      const reply = await run(ACQUIRE_SCRIPT, key, holder, String(max), String(ttlMs));
-      if (reply !== 0 && reply !== 1) throw new RateLimitStoreError('malformed-reply');
-      return reply === 1;
-    },
-    async release(key, holder) {
-      await run(RELEASE_SCRIPT, key, holder);
-    },
+    hit: (key, windowMs) =>
+      run(
+        (reply) => {
+          const [count, ttl] = replyItems(reply);
+          if (count === 0) throw new RateLimitStoreError('malformed-reply');
+          return windowOf(count, ttl, windowMs);
+        },
+        HIT_SCRIPT,
+        [key],
+        String(windowMs),
+      ),
+    hitAndPeek: (key, windowMs, peekKey, peekWindowMs) =>
+      run(
+        (reply) => {
+          const [count, ttl, peeked, peekTtl] = replyItems(reply);
+          if (count === 0) throw new RateLimitStoreError('malformed-reply');
+          return { hit: windowOf(count, ttl, windowMs), peek: windowOf(peeked, peekTtl, peekWindowMs) };
+        },
+        HIT_AND_PEEK_SCRIPT,
+        [key, peekKey],
+        String(windowMs),
+        String(peekWindowMs),
+      ),
+    peek: (key, windowMs) =>
+      run(
+        (reply) => {
+          const [peeked, ttl] = replyItems(reply);
+          return windowOf(peeked, ttl, windowMs);
+        },
+        PEEK_SCRIPT,
+        [key],
+        String(windowMs),
+      ),
+    acquire: (key, holder, max, ttlMs) =>
+      run(
+        (reply) => {
+          if (reply !== 0 && reply !== 1) throw new RateLimitStoreError('malformed-reply');
+          return reply === 1;
+        },
+        ACQUIRE_SCRIPT,
+        [key],
+        holder,
+        String(max),
+        String(ttlMs),
+      ),
+    release: (key, holder) => run(() => undefined, RELEASE_SCRIPT, [key], holder),
   };
 }
 
@@ -114,17 +225,28 @@ export function createMemoryStore(now: () => number = Date.now, maxEntries: numb
   const windows = new BoundedMap<string, { count: number; endsAt: number }>(maxEntries, (window) => window.endsAt <= now());
   const slots = new BoundedMap<string, Map<string, number>>(maxEntries, (held) => [...held.values()].every((at) => at <= now()));
 
+  const count = (key: string, windowMs: number): WindowHit => {
+    const t = now();
+    let window = windows.get(key);
+    if (window === undefined || window.endsAt <= t) {
+      window = { count: 0, endsAt: t + windowMs };
+      windows.set(key, window);
+    }
+    window.count += 1;
+    return { count: window.count, resetMs: Math.max(window.endsAt - t, 1) };
+  };
+  const read = (key: string): WindowPeek => {
+    const t = now();
+    const window = windows.get(key);
+    return window === undefined || window.endsAt <= t
+      ? { count: 0, resetMs: 0 }
+      : { count: window.count, resetMs: Math.max(window.endsAt - t, 1) };
+  };
+
   return {
-    hit(key, windowMs) {
-      const t = now();
-      let window = windows.get(key);
-      if (window === undefined || window.endsAt <= t) {
-        window = { count: 0, endsAt: t + windowMs };
-        windows.set(key, window);
-      }
-      window.count += 1;
-      return Promise.resolve({ count: window.count, resetMs: Math.max(window.endsAt - t, 1) });
-    },
+    hit: (key, windowMs) => Promise.resolve(count(key, windowMs)),
+    hitAndPeek: (key, windowMs, peekKey) => Promise.resolve({ hit: count(key, windowMs), peek: read(peekKey) }),
+    peek: (key) => Promise.resolve(read(key)),
     acquire(key, holder, max, ttlMs) {
       const t = now();
       const held = slots.get(key) ?? new Map<string, number>();

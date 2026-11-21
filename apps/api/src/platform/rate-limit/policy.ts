@@ -58,7 +58,7 @@ export interface RateSubject {
 
 export interface ClassPolicy {
   readonly rules: readonly RateRule[];
-  /** `fallback`: per-instance counters during a Valkey outage (security classes); `fail-open`: no limit (REQ-SEC-006). */
+  /** `fallback`: per-instance counters during a Valkey outage (ADR-0016 am. 12 item 8); `fail-open`: no limit (REQ-SEC-006). */
   readonly onStoreFailure: StoreFailureMode;
 }
 
@@ -84,7 +84,8 @@ export function classPolicy(klass: RateLimitClass, subject: RateSubject, s: Rate
           rule('public-quote:ip:min', ip, s.RATE_LIMIT_PUBLIC_QUOTE_PER_MIN, MINUTE_MS),
           rule('public-quote:ip:hour', ip, s.RATE_LIMIT_PUBLIC_QUOTE_PER_HOUR, HOUR_MS),
         ],
-        onStoreFailure: 'fail-open',
+        // Drives carrier calls (ADR-0016 am. 12 item 8, PR041-SEC-03): per-instance counters during an outage.
+        onStoreFailure: 'fallback',
       };
     case 'public-tracking':
       return {
@@ -92,7 +93,7 @@ export function classPolicy(klass: RateLimitClass, subject: RateSubject, s: Rate
           rule('public-tracking:ip:min', ip, s.RATE_LIMIT_PUBLIC_TRACKING_PER_MIN, MINUTE_MS),
           rule('public-tracking:ip:hour', ip, s.RATE_LIMIT_PUBLIC_TRACKING_PER_HOUR, HOUR_MS),
         ],
-        onStoreFailure: 'fail-open',
+        onStoreFailure: 'fallback',
       };
     case 'auth':
       return { rules: [rule('auth:ip', ip, s.RATE_LIMIT_AUTH_PER_IP_PER_MIN, MINUTE_MS)], onStoreFailure: 'fallback' };
@@ -115,12 +116,15 @@ export function classPolicy(klass: RateLimitClass, subject: RateSubject, s: Rate
   }
 }
 
-/** The 5/min per account identifier of the `auth` class (`accountKey` is the service's keyed hash of the identifier). */
+/**
+ * The 5/min per account identifier of the `auth` class (`accountKey` is the service's keyed hash of the identifier). A
+ * `fallback` rule: the consuming service passes `onStoreFailure: 'fallback'` (ADR-0016 am. 12 item 8).
+ */
 export function authAccountRule(accountKey: string, s: RateLimitSettings): RateRule {
   return rule('auth:account', accountKey, s.RATE_LIMIT_AUTH_PER_ACCOUNT_PER_MIN, MINUTE_MS);
 }
 
-/** The `email-send` class: 3/h per normalised address and 10/h per IP (AT-US-040-13); both fall back per instance. */
+/** The `email-send` class: 3/h per normalised address and 10/h per IP (AT-US-040-13); `fallback` rules, both per instance. */
 export function emailSendRules(addressKey: string, ip: string, s: RateLimitSettings): readonly RateRule[] {
   return [
     rule('email-send:address', addressKey, s.RATE_LIMIT_EMAIL_SEND_PER_ADDRESS_PER_HOUR, HOUR_MS),
@@ -131,7 +135,8 @@ export function emailSendRules(addressKey: string, ip: string, s: RateLimitSetti
 /**
  * `quote-create` (SEC-P3-29, D-053): authenticated VERIFIED `createQuote` callers, instead of the 600/min `authenticated`
  * class: per user 30/min and 300/h, per organisation 1,000/h. The route's service selects it (it reads the verified
- * state server-side); anonymous and unverified callers stay in `public-quote`.
+ * state server-side); anonymous and unverified callers stay in `public-quote`. `fallback` rules: the service passes
+ * `onStoreFailure: 'fallback'`, because they drive carrier calls (ADR-0016 am. 12 item 8, PR041-SEC-03).
  */
 export function quoteCreateRules(userId: string, orgId: string, s: RateLimitSettings): readonly RateRule[] {
   return [
@@ -153,6 +158,18 @@ export function stepZeroRule(ip: string, credentialed: boolean, s: RateLimitSett
   return credentialed
     ? rule('step0:credentialed', ip, s.RATE_LIMIT_AUTHENTICATED_PER_MIN * CREDENTIALED_IP_CEILING_FACTOR, MINUTE_MS)
     : rule('step0:anonymous', ip, s.RATE_LIMIT_PUBLIC_PER_MIN, MINUTE_MS);
+}
+
+/** The counter family of the failed-authentication budget: its key is `rl:step0:authn-failed:<ip key>`. */
+export const AUTHN_FAILED_RULE = 'step0:authn-failed';
+
+/**
+ * The per-IP failed-authentication budget of step 0 (PR041-SEC-02 (b); ADR-0016 am. 12 item 4, am. 13; D-ARCH-175,
+ * D-ARCH-182): a fixed 60 s window, anchored by the key's TTL at the first failure, of `RATE_LIMIT_PUBLIC_PER_MIN` units,
+ * because a refused credential is an unauthenticated request. A `fallback` rule: an outage counts per instance.
+ */
+export function authnFailedRule(ip: string, s: RateLimitSettings): RateRule {
+  return rule(AUTHN_FAILED_RULE, ip, s.RATE_LIMIT_PUBLIC_PER_MIN, MINUTE_MS);
 }
 
 /**
