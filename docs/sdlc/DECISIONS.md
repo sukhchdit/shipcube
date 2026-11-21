@@ -10983,3 +10983,10 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - quality-gatekeeper: the closing entry for QG-041B-C4.
   - Earlier routes stand.
 - **Reversibility:** High (a review record).
+
+### D-ORCH-171 · 2026-11-21 · sdlc-orchestrator (session C) · Main-red chore PRs #85/#86/#87; reviews dispatched; gate and ruling follow-ups
+- **Chore PRs (ready, user merges; CI billing-blocked):** #85 gitleaks baseline 17→22 (`72249e40`; 2 main fingerprints + the 3 branch merge commits `c33e5e92` TASK-044, `0ccdd009` 040-B, `aade2672` 041-B; same false-positive line); #86 Valkey back to the 8.1 harness digest + Dependabot ignore (`72e3dc9f`; lane B FAIL only on a 5 s Jest timeout under host load, re-queued `run-live77`); #87 Node 24 base images restored after Dependabot #50 moved all 5 Dockerfiles to Node 26 against ADR-0001 (`0ccac6bf`; api `docker build` + lane B queued via `prep-chore-node24.sh` / `run-live76`). Code and security records for all three dispatched (D-CRCHORE-01, D-SECCHORE-01 owed). **Recommended merge order for the user: #85, #86, #87, then the task PRs.**
+- **Main post-merge run** `20261121T1605Z_3c4d9a6` = FAIL only on the 3 main-red cases → D-SECPOST-01 C1 met apart from PR080-SEC-07/O-1.
+- **D-QG-010:** ADR-0014 amendment 18 verified (no superseding ADR); QG-041B-C7 closed (a, c with follow-up); new QG-041B-C8 (before TASK-065) and QG-040-C9 (before TASK-187) dispatched to principal-architect together with the api/README §7 text for 041-B as a held patch (`../.orch/held/TASK-041B-api-readme-s7.patch`, applied by the 041-B rider commit after its lane B).
+- **040-B PR1** `9d1687b1`: code r2 AWN (D-CRPR040B1-01); security delta C2 running; lane B queued (`run-live75`).
+- **Reversibility:** High.
