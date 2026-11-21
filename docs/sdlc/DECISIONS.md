@@ -11261,3 +11261,11 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - devops-engineer: PR85-SEC-01 and -02, PR86-SEC-01 and -02, PR87-SEC-01, with code review R1-n1 to R1-n3 (#85), R1-m1 and R1-n1 (#86), and R1-m1 and R1-n1 (#87).
   - orchestrator: #85 F1 and F2, the due dates, the D-SECPOST-01 O-1 closure on merge, and the D-ORCH-172 class (2) reading.
 - **Reversibility:** High (review records).
+
+### D-ORCH-173 · 2026-11-21 · sdlc-orchestrator (session C) · Chore security records; merge instruction for the user; D-ORCH-172 class (2) corrected
+- **Security:** #85, #86, #87 PASS_WITH_FOLLOW-UPS (D-SECCHORE-01, `0e62c404`): 0 Critical/High/Medium. #87 also removes exposure (Node 26.13.0 from #50 lacked the 2026-11-11 Node security release). #88 record running (D-SECCHORE-02).
+- **For the user:** squash-merge #85, #86, #87, #88 **as they are, without updating their branches** (they share `tools/ci/sec-static.test.ts` and `.github/dependabot.yml`; updating one after another lands voids its record and owes a merge-only round). Then the task PRs, each with a fresh push after #88 (lane A reads `.gitleaks.toml` from the event base).
+- **D-ORCH-172 class (2) withdrawn:** the ref-bound gitleaks runner is still `planned`, so lane B's gitleaks evidence is the int test reading HEAD's baseline and count; no "exit 2" signature appears today. Class (1) stands.
+- **Follow-ups (devops-engineer, tracked):** PR86-SEC-01 LOW Valkey 8.1.12+ for compose and the five harness pins together, before G3 (cooldown ends ~2026-11-25); PR86-SEC-02 pin `8.1.N-alpine@sha256`; PR85-SEC-01 retire the three branch-only baseline lines after the three task squashes; PR85-SEC-02 baseline comment fix; PR87-SEC-01 node-major rule + nightly security-release comparison before G3.
+- **Disclosure noted:** the security-analyst run showed hash fields (not raw secrets) of `infra/local/valkey/users.acl` once in its own session output; not copied anywhere; recorded in D-SECCHORE-01.
+- **Reversibility:** High.
