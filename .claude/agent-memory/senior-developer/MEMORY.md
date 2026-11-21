@@ -53,3 +53,18 @@
 - [TASK-043 resume triage](feedback_task043_resume_triage.md) — up-down-up runs twice per lane B run (cross-suite load proof), pg client.js:170 = connect timeout
 - [TASK-080 resume](feedback_task080_resume.md) — new table/model ripples (TenantDb pin, grants pins), prisma test import limits, parseDecimal exponents
 - [TASK-051 guest claim](feedback_task051_guest_claim.md) — shared probe modules in prisma/tests/harness, suite placement for pending SEC-TC, sibling self-match trap
+- [TASK-042 i18n](feedback_task042_i18n.md) — i18next usedLng-on-miss, JSON import attributes, isolateModules+React, lint-lock checker as lint step
+- [TASK-045 pagination](feedback_task045_pagination.md) — apps/api int tests can't import prisma harness; .binding lint, app.* literal lint, stray tsc emits, shared $ref
+- [TASK-080 fc1](feedback_task080_fc1.md) — lane B log in .orch/laneb-queue, background lock wait, C9 IN-list pin, canonical JSON oracle, escape mangling
+- [TASK-034 rehearsal](feedback_task034_rehearsal.md) — scratchpad Write refusal, require-await fakes, lintRepository-only rules, open-loop probe must yield
+- [TASK-051 fc1](feedback_task051_fc1.md) — shared scratchpad collisions, commitlint footer trap, gitleaks emulator, merge-tree supersede
+- [TASK-044 SSE](feedback_task044_sse.md) — slot 20 s deadline caps streams, Cache-Control overwrite, Express env=test hides console.error, origin_time_zone PII false positive
+- [TASK-051 R2-m1 tags](feedback_task051_tags.md) — unique commit-msg file names, never Write+commit in one parallel block; SEC-TC tag order
+- [TASK-045 fc1/fc2](feedback_task045_fc1.md) — RLS in bare-PG int tests, heredoc/sed traps, Joi helpers.original, explicit-undefined default arg 401
+- [TASK-041 part B stacked](feedback_task041b_stacked.md) — unset upstream on stacked branch, host api-run limit, heredoc parse fails, breaker/wrapper notes
+- [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
+- [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes
+- [TASK-044 fc1](feedback_task044_fc1.md) — unhandledRejection spy vacuous in Jest, equal-work ratio pins, id-less SSE frame helper ripple, scan the wire
+- [TASK-041B fc2](feedback_task041b_fc2.md) — entered-marker release rule + admission-to-slot gap, check-suppressions 0 every cycle, sed mutation proof
+- [TASK-041B fc1](feedback_task041b_fc1.md) — in-flight hold for read-then-spend gates (atomic admit, abort trap), wiring-pin api rows, heredoc parse kills whole cmd
+- [TASK-034 fc2](feedback_task034_fc2.md) — Prisma banner on stderr/status on stdout, never tail joined streams, Compose-prefix rewrite harness CLI proof

@@ -171,7 +171,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-213 **DC** (M1 Must) Webhook verification, deduplication and replay |
 | REQs | REQ-PAY-011, REQ-PAY-012 |
 | NFRs | NFR-SEC-013 |
-| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004 |
+| Spikes / security / decisions | D-ARCH-110, PR32-SEC-14, D-TASK020-41, D-SEC-PR38-02, D-ARCH-113, PR38-SEC-03, PR48-SEC-01, PR48-SEC-06, D-ARCH-134, D-ARCH-175, D-SD-004, D-SECPR041B-01, D-SECPR041B-02, PR041-SEC-16, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-167, TASK-040 |
@@ -189,6 +189,8 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - D-TASK020-41 / D-SEC-PR38-02 AUTHENTICATOR CONTRACT (ADR-0008 am. 6 item 2; D-ARCH-113): the Stripe and Mock-gateway signature authenticators read Stripe-Signature or X-Mock-Signature themselves (signature is not a presentable kind) and only on routes whose auth set is [signature]; they never read authorization, cookie or x-quote-token (presentedKinds(req.headers, route.auth) is empty on a [signature] route and the authenticator does not consult those headers); the provider principal permissions are built with readonlySet holding exactly the signature-only permission of the route; markCredentialsRead(res) is called together with the decision (valid, invalid, stale timestamp, missing header alike) and private, no-store on every 401 comes from the descriptor test ([signature] has no anonymous member); stripe-signature and x-mock-signature are in CREDENTIAL_HEADER_NAMES, so no webhook route can declare them in schema.headers (020-C PR38-SEC-03) and the handler reads the verified event from the body only; api tests: markCredentialsRead called once per request, a valid signature plus a bearer is 200 with the bearer never parsed (spy), the permissions view throws on mutation
 - RBAC MATRIX SEAM RETIREMENT, signature kind (PR48-SEC-01 remediation 2; PR48-SEC-06; PR #48 code review R1-m3; D-ARCH-134): this task replaces the synthetic signature seam for its [signature] rows with a real signed test body (test signing secret) through the real authenticate slot, keeps the signature-header:<name> foreign callers of TASK-289 (TASK-027-F; <name>: t=0,v1=0 on every route without signature in its auth set), regenerates the matrix and passes the still-stubbed-kinds tripwire of TASK-052
 - SIGNATURE REFUSALS (ADR-0016 amendment 12 item 4; D-ARCH-175): a failed signature is a 401 raised in the authentication slot and no database call precedes the verification; the wrapper of TASK-041 counts it; test: 121 bad signatures from one IP give 429 at the 121st
+- AUTHENTICATION SLOT OUTCOME (PR041-SEC-16 (a) LOW, CWE-772; D-SECPR041B-02; D-ORCH-159; code review n8 widened by D-SECPR041B-01): the authentication slot reports its outcome only by calling next once, throwing or rejecting, and never writes the response; one api row per refused shape: failed count +1, held count back to 0; every refused presented credential is a 4xx AppError (here: a failed or missing Stripe or Mock-gateway signature, 401)
+- BOUNDED SLOT LATENCY (D-SECPR041B-01 security addition (b) to ADR-0016 amendment 13 item 6; D-SD-012): if this authenticator does I/O (for example a session or key lookup after verification), the BOUNDED SLOT LATENCY line of TASK-055 applies: it settles within a bounded time when the store or database does not answer, with a test; an authenticator without I/O states so in its PR
 - AT-US-213-01 … AT-US-213-11: all 11 scenarios of US-213, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -235,7 +237,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-207 **DC** (M1 Must) Booking progress status and event stream |
 | REQs | REQ-BOOK-025 |
 | NFRs | NFR-PERF-004 |
-| Spikes / security / decisions | D-UX-007 |
+| Spikes / security / decisions | D-UX-007, D-ARCH-217, D-ARCH-219, D-ARCH-222, D-SECPR044-01, D-QG-007, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | S |
 | Depends on | TASK-092, TASK-044 |
@@ -248,6 +250,11 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-207 scenarios
+- PRECONDITION PART 044-B (ADR-0016 amendment 14 item 9; D-ARCH-217; R-ARCH-41): TASK-044 part 044-B is on main before this task is dispatched
+- STREAM DISCIPLINE (ADR-0016 amendment 14 items 4, 5 and 8; D-ARCH-219, D-ARCH-222): the producer passes its signal to its own subscription and timers only; the stream starts no saga work, and a disconnect leaves the saga untouched (test); while a saga is in progress the 30 s cap is the normal end of this stream, so the route logs max_duration and draining at info; after error with SERVICE_UNAVAILABLE, and after a stream that ends without a terminal event, the client reconnects or polls getBookingProgress
+- STREAM SLOT TTL (D-ARCH-219; D-SECPR044-01 PR044-SEC-05 and F2): as on TASK-141: at least two transactions, the 31 s stream deadline and 5 s; the slot is the counter shared by both stream operations and is released when the response closes
+- STREAM SLOT ACQUIRE AND RELEASE (D-SECPR044-01 F2, PR044-SEC-05; D-QG-007 QG-044-C1 (c)): as on TASK-141: the slot is taken in the pipeline step before execute from the counter shared with streamQuoteResults and released on res.once close however the stream ends; the TTL is the crash backstop; test: a user with streams open on both operations is refused at the shared cap, and a closed booking stream frees its slot at once
+- REPLAY CONDITIONS (D-SECPR044-01 F4, PR044-SEC-07 items 1, 2 and 4; TASK-044 code review R1-n3; D-QG-007 QG-044-C1 (c)): the first events of a stream are read for the authorised order under RLS, never by an id the client names alone; the stream has no resume (the CLIENT RECONNECT line of TASK-182), so a Last-Event-ID header is ignored and never ends the stream with INTERNAL_ERROR, and any id the stream sends is a per-stream sequence, never a table-wide one; api rows for the header case and for a foreign order
 - AT-US-207-01 … AT-US-207-05: all 5 scenarios of US-207, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -484,7 +491,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-195 **DC** (M1 Must) Step 7: confirmation page |
 | REQs | REQ-BOOK-017 |
 | NFRs | NFR-A11Y-001 |
-| Spikes / security / decisions | D-UX-007 |
+| Spikes / security / decisions | D-UX-007, D-ARCH-219, D-SD-012 |
 | Specialist · model | frontend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-164, TASK-173, TASK-165, TASK-178, TASK-181 |
@@ -497,6 +504,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-195 scenarios (S-B07)
+- CLIENT RECONNECT (ADR-0016 amendment 14 items 4 and 8; D-ARCH-219; flow F03): after error with SERVICE_UNAVAILABLE (while a saga runs the 30 s cap is the normal end of the stream) and after a stream that ends without a terminal event, the client reopens the stream after a random delay of up to 1 s, and polls getBookingProgress every 3 s when two reopenings in a row fail; the stream has no resume, and the first events after a reopening carry the current state
 - AT-US-195-01 … AT-US-195-08: all 8 scenarios of US-195, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -510,7 +518,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-254 **DC** (M1 Must) Shipments list with search, filters and cursor pagination |
 | REQs | REQ-ACCT-002 |
 | NFRs | NFR-PERF-002, NFR-PERF-006 |
-| Spikes / security / decisions | — |
+| Spikes / security / decisions | D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-149, TASK-054, TASK-045, TASK-118 |
@@ -524,6 +532,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-254 scenarios (S-C02)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listShipments sorted by updated_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-254-01 … AT-US-254-12: all 12 scenarios of US-254, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**

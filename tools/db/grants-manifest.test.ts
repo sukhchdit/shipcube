@@ -9,6 +9,8 @@ describe('grant manifest (data-model §4.4, C5)', () => {
   it('PR8-SEC-10, D-ARCH-075, C5: the committed manifest grants SELECT only on the authz catalogue and reference_dataset_versions, the §4.4 audit matrix, the TASK-037 organisation and user tables (no DELETE), the TASK-039 insert-only job_executions, SELECT only on the TASK-051 operator_staff_grants, and agrees with the table classes', () => {
     const grants = loadGrantsManifest();
     expect(grantTuples(grants)).toEqual([
+      // TASK-040: idempotency_keys, SYSTEM hard-delete allow-list (SELECT, INSERT, UPDATE, DELETE).
+      'platform_app DELETE public.idempotency_keys *',
       'platform_app INSERT public.audit_anchors *',
       'platform_app INSERT public.audit_chain_verifications *',
       'platform_app INSERT public.audit_checkpoint_heads *',
@@ -17,6 +19,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app INSERT public.audit_pii_vault *',
       'platform_app INSERT public.audit_stream_heads *',
       'platform_app INSERT public.data_subjects *',
+      'platform_app INSERT public.idempotency_keys *',
       'platform_app INSERT public.invitations *',
       'platform_app INSERT public.job_executions *',
       'platform_app INSERT public.membership_roles *',
@@ -31,6 +34,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app SELECT public.audit_pii_vault *',
       'platform_app SELECT public.audit_stream_heads *',
       'platform_app SELECT public.data_subjects *',
+      'platform_app SELECT public.idempotency_keys *',
       'platform_app SELECT public.invitations *',
       'platform_app SELECT public.job_executions *',
       'platform_app SELECT public.membership_roles *',
@@ -45,6 +49,7 @@ describe('grant manifest (data-model §4.4, C5)', () => {
       'platform_app UPDATE public.audit_chain_verifications *',
       'platform_app UPDATE public.audit_partitions *',
       'platform_app UPDATE public.audit_stream_heads *',
+      'platform_app UPDATE public.idempotency_keys *',
       'platform_app UPDATE public.invitations *',
       'platform_app UPDATE public.membership_roles *',
       'platform_app UPDATE public.memberships *',

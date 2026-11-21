@@ -24,13 +24,37 @@
  * `DbError` the runner throws; the problem handler answers it with the catalogue code, `Retry-After` when retryable and
  * the generic text, never its reason. `transaction: 'none'` routes (health) run `handler` and `afterCommit` without a
  * transaction and get no database handle. No external call may run inside a transaction callback (T-83 lint).
+ *
+ * Idempotency (TASK-040; ADR-0014, api/README §5, data-model §6.2): when the idempotency slot (7a) recorded a key, the
+ * key is claimed (ADR-0014 amendment 7: in the tx slot) in a transaction of its own BEFORE step 1, so a replay (stored status, headers, body and
+ * `Idempotent-Replayed: true`), a reused key (422) or a key still running (409 + `Retry-After: 1`) answers without any
+ * phase. The lease is sized to the longest phase and renewed before `call` and before the handler transaction
+ * ({@link idempotencyLeaseMs}). A 2xx completes the key inside the handler transaction (step 3), or, on a read-only
+ * (VIEW / DOWNLOAD) handler, after its fail-closed entry (step 3a); after a failure, a returned or thrown 4xx (not 429)
+ * is completed in its own short transaction after the FAILED entry, a thrown one as its problem document rendered
+ * once (ADR-0014 amendment 6, D-ARCH-195); a 5xx, a 429 or any other failure releases the key. A replay commits nothing
+ * new and schedules no `afterCommit`; a stored document is sent again byte for byte.
  */
 import { ANONYMOUS_ACTOR_ID, AppError, SYSTEM_ACTOR_ID } from '@platform/shared';
 import type { Request, Response } from 'express';
 
 import { type AuditCapture, type AuditHook, type MountedAudit, NOT_AUDITED, withoutCapture } from '../audit/capture.js';
 import { requestContextOf } from '../context/request-context.js';
-import type { TenantContext, TenantTxRunner } from '../db/index.js';
+import type { AppDb, TenantContext, TenantTxRunner, TransactionOptions } from '../db/index.js';
+import { IdempotencyReplayError } from '../idempotency/body-cipher.js';
+import { storedProblemOf } from '../idempotency/problem.js';
+import { isRenderedProblem } from '../errors/rendered-problem.js';
+import { IDEMPOTENT_REPLAYED_HEADER, idempotencyRequestOf, type IdempotencyRequest } from '../idempotency/request.js';
+import {
+  type BeginOutcome,
+  IDEMPOTENCY_LEASE_MS,
+  type IdempotencyClaim,
+  IdempotencyClaimLostError,
+  type IdempotencyStore,
+  IN_PROGRESS_RETRY_AFTER_SECONDS,
+  isStoredStatus,
+  type StoredOrigin,
+} from '../idempotency/store.js';
 import {
   type PhaseResults,
   type Principal,
@@ -64,6 +88,25 @@ export const FAILED_ENTRY_WAIT_MS = 1_000;
 /** `Retry-After` of the 503 a deadline or an early disconnect answers (the request may simply be repeated). */
 export const DEADLINE_RETRY_AFTER_SECONDS = 1;
 
+/**
+ * Margin of an idempotency lease for clock skew between API instances (the lease is written and read with each
+ * instance's application clock, data-model §7.6; NTP keeps the skew far below this) and for scheduling jitter.
+ */
+export const LEASE_SKEW_MARGIN_MS = 5_000;
+
+/**
+ * The idempotency lease of a request (TASK-040 fix cycle 1, code review m4): long enough that no phase between two
+ * renewals can outlive it, so a retry cannot take a running request's key over and repeat its `call`. The stretches
+ * are: claim -> `load` transaction -> renewal; renewal -> `call` (bounded by the enforced call deadline) -> renewal;
+ * renewal -> handler transaction -> FAILED entry wait -> completion transaction. A transaction is bounded by its
+ * admission and pool wait (`maxWait`) plus its `timeout`. Never below {@link IDEMPOTENCY_LEASE_MS}.
+ */
+export function idempotencyLeaseMs(transaction: TransactionOptions, callDeadlineMs: number): number {
+  const oneTransaction = transaction.maxWait + transaction.timeout;
+  const longest = Math.max(callDeadlineMs, 2 * oneTransaction + FAILED_ENTRY_WAIT_MS);
+  return Math.max(IDEMPOTENCY_LEASE_MS, longest + LEASE_SKEW_MARGIN_MS);
+}
+
 export interface ExecuteOptions {
   /**
    * `RuntimeServices.tenantTx` (always defined since TASK-020 part 020-B, D-ARCH-104). Optional only for test
@@ -85,6 +128,25 @@ export interface ExecuteOptions {
   readonly afterCommit?: AfterCommitQueue;
   /** Test seam: the `call` deadline (default `CALL_DEADLINE_MS`). */
   readonly callDeadlineMs?: number;
+  /**
+   * The idempotency key store (TASK-040; `idempotencyStoreFrom` over IDEMPOTENCY_BODY_KEY). Required by a route whose
+   * `idempotency` is `required` or `optional`: without it the slot refuses the route when it is mounted.
+   */
+  readonly idempotency?: IdempotencyStore;
+  /**
+   * The problem `type` base of the problem handler (`AppDependencies.problemTypeBase`), so that the 4xx document an
+   * idempotent request renders once and stores is the one the problem handler would render (D-ARCH-195). Default: the
+   * handler's default; part 040-B passes the same value to both when it wires the store.
+   */
+  readonly problemTypeBase?: string;
+}
+
+/** A route declares an idempotency mode but the composition supplied no key store (a wiring bug; PR32-SEC-03). */
+export class IdempotencyNotWiredError extends Error {
+  constructor(readonly operationId: string) {
+    super(`route ${operationId} declares an idempotency mode, but the tx slot has no idempotency store`);
+    this.name = 'IdempotencyNotWiredError';
+  }
 }
 
 /** Ids no request may act as: SYSTEM is for jobs and seeds, ANONYMOUS is stamped by the extension (PR26-SEC-04). */
@@ -235,6 +297,12 @@ interface Phases {
   readonly options: ExecuteOptions;
   readonly audit: MountedAudit;
   readonly lifetime: RequestLifetime;
+  /** The idempotent request the idempotency slot recorded (a key was sent on an idempotent route), if any. */
+  readonly idempotent: IdempotencyRequest | undefined;
+  /** The `call` deadline of this slot (the lease covers it). */
+  readonly deadlineMs: number;
+  /** `req.originalUrl`: the `instance` of a problem document rendered here. */
+  readonly url: string;
 }
 
 /**
@@ -247,7 +315,10 @@ interface RunOutcome {
 }
 
 /** Steps 1-3 for a tenant route; `transaction: 'none'` runs the handler (and its audit hook) without a transaction. */
-async function run({ route, request, options, audit, lifetime }: Phases): Promise<RunOutcome> {
+async function run({ route, request, options, audit, lifetime, idempotent, deadlineMs, url }: Phases): Promise<RunOutcome> {
+  // The key this request claimed (TASK-040); a stored 2xx completes it inside the handler transaction.
+  let claim: IdempotencyClaim | undefined;
+  let completedInTx = false;
   const write = async (db: unknown, phases: PhaseResults<unknown, unknown>): Promise<RouteResult> => {
     const ctx: RouteContext = Object.freeze({ ...request, db });
     // The descriptor erases the phase result types; this is the one place that hands them on (define-route.ts).
@@ -260,6 +331,14 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     // D-TASK029-16 (ADR-0007 §Capture, REQ-AUDIT-010): a returned status of 400 or more commits nothing; the result is
     // sent as returned, and a 409, 422 or 5xx gets its FAILED entry in a transaction of its own.
     if (result.status >= 400 && db !== undefined) throw new RouteReturnedError(result);
+    // ADR-0014: a 2xx completes the claimed key atomically with the business change, before the audit flush (the
+    // transaction's last database work). A stream has no body to store; a read-only handler transaction cannot write,
+    // so its key is completed after COMMIT instead (settleClaim).
+    if (claim !== undefined && db !== undefined && isStoredStatus(result.status) && !audit.readOnlyHandler) {
+      if (result.stream !== undefined) throw new RouteResultError(route.operationId, 'an idempotent route cannot return a stream');
+      await idempotencyStoreOf(options).complete(db as AppDb, claim, result);
+      completedInTx = true;
+    }
     await audit.inTransaction(ctx, result);
     return result;
   };
@@ -274,6 +353,30 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
   const runner = options.tenantTx;
   const tenant = tenantContextOf(request.principal, request.correlationId);
   const { load, call } = route;
+  const leaseMs = idempotencyLeaseMs(runner.transactionOptions, deadlineMs);
+  if (idempotent !== undefined) {
+    const begun = await beginIdempotent(runner, tenant, idempotencyStoreOf(options), idempotent, { request, audit, lifetime }, leaseMs);
+    if (begun.kind === 'replay') return { result: begun.result, committed: false };
+    if (begun.kind === 'execute') claim = begun.claim;
+  }
+  // Renews the lease before a phase that follows another one (m4). A claim lost meanwhile answers 409 IN_PROGRESS and
+  // logs WARN `api.idempotency_claim_lost` (phase and correlation id only). Audit: before `call` ran nothing external
+  // happened, so no entry (D-PM-081); after `call` ran, its effect happened, so exactly one FAILED entry (D-PM-084).
+  let unaudited: AppError | undefined;
+  const renew = async (phase: 'before-call' | 'before-handler', callRan: boolean): Promise<void> => {
+    const owned = claim;
+    if (owned === undefined) return;
+    try {
+      claim = await runner.withTenantTx(tenant, (db) => idempotencyStoreOf(options).renew(db as AppDb, owned, leaseMs));
+    } catch (error) {
+      if (!(error instanceof IdempotencyClaimLostError)) throw error;
+      claim = undefined;
+      idempotencyStoreOf(options).log.warn('api.idempotency_claim_lost', { phase, correlation_id: request.correlationId });
+      const lost = new AppError('IDEMPOTENCY_IN_PROGRESS', { cause: error, retryAfterSeconds: IN_PROGRESS_RETRY_AFTER_SECONDS });
+      if (!callRan) unaudited = lost;
+      throw lost;
+    }
+  };
   let result: RouteResult;
   try {
     const loaded =
@@ -282,6 +385,7 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
         : await runner.withTenantTx(tenant, async (db) => await load(Object.freeze({ ...request, db })), { readOnly: true });
     let called: unknown;
     if (call !== undefined) {
+      if (load !== undefined) await renew('before-call', false);
       const signal = lifetime.signal();
       // A client already gone (during load, authn or validation) gets no external effect and no write (PR #44 R1-m1).
       signal.throwIfAborted();
@@ -289,17 +393,146 @@ async function run({ route, request, options, audit, lifetime }: Phases): Promis
     }
     // R1-m6: a VIEW / DOWNLOAD handler records nothing in its transaction, so it may write nothing either.
     const handlerTx = audit.readOnlyHandler ? { readOnly: true } : undefined;
+    if (load !== undefined || call !== undefined) await renew('before-handler', call !== undefined);
     result = await runner.withTenantTx(tenant, (db) => write(db, Object.freeze({ loaded, called })), handlerTx);
   } catch (error) {
     // REQ-AUDIT-010: the request failed after authorisation (in load, call or the handler transaction, which rolled
     // back); its FAILED entry goes in a transaction of its own.
-    await recordFailure(audit, request, error, tenant, lifetime);
+    if (error !== unaudited) await recordFailure(audit, request, error, tenant, lifetime);
+    // ADR-0014 amendment 6, D-ARCH-195, D-ARCH-143: after the FAILED entry, a returned or thrown 4xx (not 429) is
+    // completed in its own short transaction, then sent (a replay answers it without running any phase again). A thrown
+    // one is rendered ONCE here, with this request's correlation id, and the same document is stored and sent. A 5xx, a
+    // 429 or any other failure releases the key.
+    if (claim !== undefined) {
+      if (error instanceof RouteReturnedError) {
+        await settleClaim(runner, tenant, idempotencyStoreOf(options), claim, error.result);
+      } else {
+        const context = { correlationId: request.correlationId, url, typeBase: options.problemTypeBase };
+        const stored = storedProblemOf(error, context);
+        await settleClaim(runner, tenant, idempotencyStoreOf(options), claim, stored?.result, 'slot-problem');
+        if (stored !== undefined) throw stored.error;
+      }
+    }
     if (error instanceof RouteReturnedError) return { result: error.result, committed: false };
     throw error;
   }
-  // The result set is fixed and nothing is sent yet: a VIEW / DOWNLOAD entry is written now (REQ-AUDIT-005).
-  await audit.afterCommit(request, result, tenant);
+  // The result set is fixed and nothing is sent yet: a VIEW / DOWNLOAD entry is written now (REQ-AUDIT-005). It fails
+  // closed, so a key not yet completed (a read-only handler) is completed only after it (code review M1): when the entry
+  // fails, the key is released and the retry runs again, writing the entry and scheduling `afterCommit`.
+  const pending = claim !== undefined && !completedInTx ? claim : undefined;
+  try {
+    await audit.afterCommit(request, result, tenant);
+  } catch (error) {
+    if (pending !== undefined) await settleClaim(runner, tenant, idempotencyStoreOf(options), pending, undefined);
+    throw error;
+  }
+  if (pending !== undefined) await settleClaim(runner, tenant, idempotencyStoreOf(options), pending, result);
   return { result, committed: true };
+}
+
+/** The store of an idempotent route; executeSlot refuses such a route at mount without one, so this never throws. */
+function idempotencyStoreOf(options: ExecuteOptions): IdempotencyStore {
+  if (options.idempotency === undefined) throw new IdempotencyNotWiredError('(unknown)');
+  return options.idempotency;
+}
+
+/**
+ * The claim of an idempotent request (TASK-040; data-model §6.2 step 1), in a transaction of its own committed before
+ * any phase runs (admitted under the request's tenant bulkhead like every other transaction of the request). A replay
+ * is returned for sending, a stored thrown 4xx is rethrown (problem.ts). Audit (REQ-AUDIT-010 as amended by D-PM-081):
+ *  - a reused key (422 `IDEMPOTENCY_KEY_REUSED`) and a key still running (409 `IDEMPOTENCY_IN_PROGRESS`,
+ *    `Retry-After: 1`) write NO audit entry: they are protocol answers, not business outcomes. Each logs
+ *    `api.idempotency_conflict` with the code and the correlation id, never the key;
+ *  - a replay writes none either (api/README §5 "Replay": no business action, no second audit entry or outbox event).
+ *    A stored response that cannot be read back answers 500, logged at ERROR by the store
+ *    (`api.idempotency_replay_unreadable`, class only, never the key or the body);
+ *  - a claim that fails on a NEW request (a 5xx: the claim transaction, or a `required` route without a scope) gets its
+ *    one FAILED entry, as any other 5xx of the route.
+ * An anonymous caller without a client network has no scope (code review n6): a `required` route answers 503, an
+ * `optional` one runs without idempotency, and both log `api.idempotency_scope_unavailable`.
+ */
+async function beginIdempotent(
+  runner: TenantTxRunner<unknown>,
+  tenant: TenantContext,
+  store: IdempotencyStore,
+  idempotent: IdempotencyRequest,
+  phases: Pick<Phases, 'request' | 'audit' | 'lifetime'>,
+  leaseMs: number,
+): Promise<
+  | { readonly kind: 'replay'; readonly result: RouteResult }
+  | { readonly kind: 'execute'; readonly claim: IdempotencyClaim }
+  | { readonly kind: 'unscoped' }
+> {
+  const { request, audit, lifetime } = phases;
+  const failed = async (error: unknown): Promise<never> => {
+    await recordFailure(audit, request, error, tenant, lifetime);
+    throw error;
+  };
+  let begun: BeginOutcome;
+  try {
+    begun = await runner.withTenantTx(tenant, (db) =>
+      store.begin(db as AppDb, { request: idempotent, principal: request.principal, clientIp: request.transport.ip, leaseMs }),
+    );
+  } catch (error) {
+    // An unreadable stored response belongs to a retry (no new business outcome); anything else failed a new request.
+    if (error instanceof IdempotencyReplayError) throw error;
+    return failed(error);
+  }
+  const conflict = (code: 'IDEMPOTENCY_KEY_REUSED' | 'IDEMPOTENCY_IN_PROGRESS'): AppError => {
+    store.log.info('api.idempotency_conflict', { code, correlation_id: request.correlationId });
+    return code === 'IDEMPOTENCY_IN_PROGRESS'
+      ? new AppError(code, { retryAfterSeconds: IN_PROGRESS_RETRY_AFTER_SECONDS })
+      : new AppError(code);
+  };
+  switch (begun.kind) {
+    case 'replay-problem':
+      throw begun.error;
+    case 'unscoped':
+      store.log.warn('api.idempotency_scope_unavailable', { mode: request.route.idempotency, correlation_id: request.correlationId });
+      if (request.route.idempotency === 'required') {
+        return failed(new AppError('SERVICE_UNAVAILABLE', { cause: new Error('no client network for an anonymous idempotency scope') }));
+      }
+      return begun;
+    case 'reused':
+      throw conflict('IDEMPOTENCY_KEY_REUSED');
+    case 'in-progress':
+      throw conflict('IDEMPOTENCY_IN_PROGRESS');
+    default:
+      return begun;
+  }
+}
+
+const errorClass = (error: unknown): string => (error instanceof Error ? error.name : 'non-error');
+
+/**
+ * Settles a claim whose result did not complete inside the handler transaction (TASK-040; D-TASK029-16/-17, PR #56
+ * R1-M1 / R2-m1, PR56-SEC-09, D-ARCH-143): a stored status (a 2xx, or a returned or thrown 4xx other than 429) is
+ * completed in a short transaction of its own; anything else (a 5xx, a 429, any other failure: `result` undefined)
+ * releases the key so the retry executes again (ADR-0014, EC-A30). A completion that fails releases the key instead,
+ * and the original status is still answered: the request changed nothing, so its retry may run again. A release that
+ * fails is logged; the lease then frees the key. Never throws.
+ */
+async function settleClaim(
+  runner: TenantTxRunner<unknown>,
+  tenant: TenantContext,
+  store: IdempotencyStore,
+  claim: IdempotencyClaim,
+  result: RouteResult | undefined,
+  origin: StoredOrigin = 'handler',
+): Promise<void> {
+  if (result !== undefined && isStoredStatus(result.status) && result.stream === undefined) {
+    try {
+      await runner.withTenantTx(tenant, (db) => store.complete(db as AppDb, claim, result, origin));
+      return;
+    } catch (error) {
+      store.log.warn('api.idempotency_completion_failed', { error: errorClass(error), status: result.status });
+    }
+  }
+  try {
+    await runner.withTenantTx(tenant, (db) => store.release(db as AppDb, claim));
+  } catch (error) {
+    store.log.warn('api.idempotency_release_failed', { error: errorClass(error) });
+  }
 }
 
 /**
@@ -341,6 +574,7 @@ export function executeSlot(options: ExecuteOptions): RouteSlot {
           : options.capture.mount(route);
     const queue = options.afterCommit;
     if (route.afterCommit !== undefined && queue === undefined) throw new AfterCommitNotWiredError(route.operationId);
+    if (route.idempotency !== 'not-applicable' && options.idempotency === undefined) throw new IdempotencyNotWiredError(route.operationId);
     const deadlineMs = options.callDeadlineMs ?? CALL_DEADLINE_MS;
     return async (req: Request, res: Response) => {
       const correlationId = requestContextOf(res)?.correlationId ?? '';
@@ -353,7 +587,20 @@ export function executeSlot(options: ExecuteOptions): RouteSlot {
       });
       const lifetime = requestLifetime(res, deadlineMs);
       try {
-        const { result, committed } = await run({ route, request, options, audit, lifetime });
+        const { result, committed } = await run({
+          route,
+          request,
+          options,
+          audit,
+          lifetime,
+          idempotent: idempotencyRequestOf(res),
+          deadlineMs,
+          url: req.originalUrl,
+        }).catch((error: unknown) => {
+          // A replayed stored 4xx is rendered by the problem handler like the original, marked as a replay.
+          if (isRenderedProblem(error) && error.replayed) res.setHeader(IDEMPOTENT_REPLAYED_HEADER, 'true');
+          throw error;
+        });
         // After a commit, afterCommit runs even when sending or the stream fails (PR #44 R1-n4); a returned failure
         // was rolled back, so nothing is scheduled for it (PR56-SEC-10).
         try {
