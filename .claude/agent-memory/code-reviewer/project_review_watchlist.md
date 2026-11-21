@@ -636,3 +636,9 @@ TASK-080 (pre-push, r1 CHANGES_REQUESTED at 4a0faee3, 2026-11-21; record `PR-pen
 - R1-M1: `ck_pricing_config_versions__source` must drop ADMIN (SEED/SAMPLE, or + OPERATOR per data-model §1.7); D-TASK080-05 text amended.
 - R1-m1 template-literal specifiers in pricing-purity `checkSource`; R1-m2 sample config hash over insertion-order JSON (re-pins 3 literals if fixed); R1-m3 WATCHED_GLOBALS only Date-pinned; R1-m4 `carrierDecimalToMoney` no carrier/operation.
 - Lane B (pricing-sample.int, C5/C10/C15, up-down-up) had not run; TASK-051 migration 20261120210000 sorts before 080's 20261121000000 (second merger re-times).
+
+TASK-051 (pre-push, r1 CHANGES_REQUESTED at 203d02eb, 2026-11-21; record `PR-pending-TASK-051-code-review.md`, commits fa98e4c5 + b1efe502 on main, not pushed). Re-check at the delta review:
+- R1-M1: C16 (b) `has_owner` must ignore an owner column that does not separate owners: `indnullsnotdistinct` on a nullable owner column, or an exclusion operator other than `=` (`conexclop`; btree_gist is in bootstrap 01). Expect planted probes on c16_gparent + fixture rows; architect confirms (or makes the exclusion half a stated limit).
+- R1-m1 T2-O exception map not kind-checked and its `ck_<child>__<x>_org_only` CHECK not verified; R1-m2 no pin migration 20261120200000 == renderGuestCapableGuardFunction(); R1-m3 AT-US-080-03 "only flagged tables" not asserted (audit_entries is nullable too); R1-m4 23001 missing from the D-ARCH-164 pin/tripwire.
+- Lane B 20261121T0336Z_203d02e FAIL: C2/C6 get 23001 on PG18 (ruling says 23503; architect amends §2.7, then expectations change) + gitleaks-full one extra fingerprint in ancestry (main docs 728599e0..e245e6e6 or the PR; security triage). Everything else green (rls-cross-tenant incl. SEC-TC-07 race, C16, O1-O6, up-down-up).
+- Operator-staff-grant half is clean (TASK-089 dependency); split allowed at the orchestrator's call.
