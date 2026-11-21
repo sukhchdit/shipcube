@@ -220,3 +220,95 @@ PR045-SEC-01 (code side): closed. Strings refuse U+0000. Integers are bounded to
 - R2-m1: integer filters on `smallint` columns can still reach SQLSTATE 22003 (500) under the default int4 range. This is the same class as PR045-SEC-01. Confirm in the delta round whether it stays under SEC-01 or gets its own row.
 - R2-n2: the keys-path timestamp text depends on the session `TimeZone` (not a pinned role setting). Add it to F1 / the TASK-073 conditions with PR045-SEC-04 and -06.
 - The binding now includes `credential` and `actorScope`, and it is never carried in the cursor, only used as MAC input, so its size does not matter. No new key handling.
+
+---
+
+# Round 3: delta review of fix cycle 2
+
+| Field | Value |
+|---|---|
+| Head | `c02dbf27` (code). The branch tip is `77326dc5`, which adds only the lane-B evidence (confirmed below). Branch `feat/TASK-045-cursor-pagination-filtering-sorting`, pushed (origin = `77326dc5`), no PR yet |
+| Delta | `3168c194..c02dbf27`: one commit, `test(api): task-045 anonymous reference-list caller, suppression task id` (D-TASK045-15 in its body). 2 files, +13 / -6, both tests: `pagination.api.test.ts` and `list-query.test.ts`. No production file, dependency, lockfile, configuration key, migration or contract change |
+| Was `3168c194` already reviewed? | Yes: round 2 above (APPROVED_WITH_NITS, commit `16819e33`). It is not re-reviewed here; only its open items are re-checked |
+| `c02dbf27..77326dc5` | 8 files, all under `docs/05-quality/tests/runs/20261121T1414Z_c02dbf2/`, nothing else. `summary.json`: `git_sha` `c02dbf27692e…`, `git_dirty` false, `build_clean` true, verdict PASS. The `sha256` of the 5 JUnit files and `coverage-summary.json` match the values in `summary.json` (recomputed) |
+| Main | Merge base still `530629f4`; main now carries #80 to #84. `git diff --name-only main...77326dc5` is the 18 round-1/2 files plus the evidence. `git merge-tree --write-tree main 77326dc5` is clean |
+| Inputs | Rounds 1 and 2 above; security round 3 (`PR-pending-TASK-045-security-review.md`, D-SECPR045-03, PASS_WITH_CONDITIONS at `c02dbf27`); `docs/04-plan/briefs/TASK-045.md`; D-ORCH-150; the TASK-045 and TASK-073 card lines in `docs/04-plan/tasks/WAVE-01.md` |
+| Reviewer | code-reviewer, 2026-11-21. Dispatch rules: no npm test/build/lint/typecheck, no Docker; git, grep and reads only |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: The fix is a test-helper repair, and the diagnosis is right: an explicit `undefined` argument takes the
+         default ORG_A, so the "anonymous" call was signed in. Production code, route auth and the credential gate are
+         unchanged. Lane B on c02dbf27 is green with every round-2 case. Cumulatively on 77326dc5 nothing blocks;
+         two new NITs, R2-n1 still open, and the R2-m1/m2/n2/n3 routings are confirmed on the cards.
+```
+
+## R3.1 What I verified
+
+| Check | How | Result |
+|---|---|---|
+| Diagnosis of the lane-B 401 | Read `get()` at `b380f429`, `3168c194` and `c02dbf27`; the fixture `signedIn` slot; `routing/tests/fixture-route.ts` (default `auth: 'anonymous'`) | Correct. `get(path, query, orgId = ORG_A)` with an explicit `undefined` sends `x-fixture-org: ORG_A`, `signedIn` makes a session principal, and the anonymous-only route refuses it with 401 at the credential gate. The defect has been in the helper since `b380f429`. It was never seen before because lane B first ran on `3168c194`. It is not a regression of fix cycle 1 (D-TASK045-15) |
+| The fix | `pagination.api.test.ts:135-147`, `:263`, `:269` | `ANONYMOUS_CALLER = null` and `orgId: string \| null = ORG_A`. `orgId === ANONYMOUS_CALLER` sends no headers; otherwise `orgId` narrows to `string`. The JSDoc records why `undefined` is not used. The only two anonymous calls use the sentinel, and no other call passes `undefined` (grep) |
+| Types of the narrowing | Not run by me (dispatch rule). Lane B's `npm run build` runs `tsc -b` on `apps/api`, whose `include: ["src"]` compiles the test files. `build_clean` true and the build did not fail | Type-checks |
+| No widening | The reference route still has no `auth` override (`fixtureRoute` default `anonymous`), `fixture-route.ts` and `list-fixture.ts` are unchanged | The 300 ceiling of D-TASK045-09 is still proved for an anonymous caller: 200 with every fixture country, `has_more` false, `next_cursor` null; 301 is 400 `VALIDATION_ERROR` |
+| Suppression description | `list-query.test.ts:193`; `tools/lint/check-suppressions.mjs:53` (`/\bTASK-\d{3}\b/u`) | Only the description changes, and it now matches the rule. The `@ts-expect-error` directive and the misspelt-column check it pins (R1-m6) are unchanged |
+| Format | Lines over `printWidth` 140 in the two files | Only `it('…')` title strings that Prettier cannot break, all from earlier rounds. The new lines are within 140 |
+| Lane B evidence | `20261121T1414Z_c02dbf2` | api 201, integration 425, unit 8349 (2 host-bound skips), rls-cross-tenant 157, catalog 113, 0 failures. `pagination.api.test.ts` has 22 cases including AT-US-037-07, and `list-keyset.int.test.ts` has 9 cases on PostgreSQL 18, all passing. Merged coverage of the changed sources: 100 % lines on every file; branches `cursor.ts` 97.43 %, `list-query.ts` 95.45 %, `list-spec.ts` 98.79 %, `page.ts` 100 %, `prisma-args.ts` 100 %, `validate.ts` 97.24 % |
+
+This closes round 2's merge condition 1 (lane B), which moved from `3168c194` to `c02dbf27`. Security round 3 closes condition 2 (C4 discharged).
+
+**Reviewer's note.** In round 2 I ran ESLint on the changed files but not `tools/lint/check-suppressions.mjs`, which is the third step of `npm run lint`. That is how the suppression without a task ID got past me. From now on a lint re-run covers all three steps.
+
+## R3.2 New findings
+
+| ID | Severity | File:line | Problem | Why it matters | Fix |
+|---|---|---|---|---|---|
+| R3-n1 | NIT | `pagination.api.test.ts:143` | The sentinel protects new calls only by convention. With `orgId: string \| null = ORG_A`, an explicit `undefined` still type-checks and still means `ORG_A`, so the next anonymous case written with `undefined` brings the defect back. It would fail loudly with 401, so there is no false pass. Security R3.3 notes the same | It is a trap in a helper that later list suites will copy | When the file is next touched (part 045-C): pass the caller as one required parameter, for example `as: { org: string; actor?: string } \| 'anonymous'`, or drop the default and give `orgId` the type `string \| null`, so that `undefined` does not compile |
+| R3-n2 | NIT | `pagination.api.test.ts:55-70` | The `signedIn` stub signs in a session principal whenever the org header is present, whatever kinds the route declares. Production `authenticate` reads only the kinds in `route.auth` (security R3.3) | That difference turned a helper bug into a gate refusal instead of a page check. A stub that matches production would have shown the bug directly | Optional, in part 045-C: have the stub honour `route.auth`, or record the difference in its JSDoc |
+
+## R3.3 Cumulative status on `77326dc5`
+
+| Item | Status |
+|---|---|
+| R1-M1, R1-m3..m5, R1-n1, n2, n4 | Closed (round 2). No production change since |
+| R1-m6 | Partly closed, accepted (round 2) |
+| R1-m1 (mutable sort keys) | Routed to principal-architect, with a dispatch gate on the first task whose list sorts on a mutable column (D-ORCH-150) |
+| R1-m2 | On the TASK-073 card (AUDIT LIST ON THE KEYS PATH) |
+| R1-n3 / PR045-SEC-07, module half | TASK-096 (D-ORCH-150) |
+| R2-m1 = PR045-SEC-08 | Routed to part 045-C by D-SECPR045-02. It is item (1) of the PART 045-C ALSO CARRIES line in `WAVE-01.md:464`: required integer range, `SMALLINT_RANGE`, a 32768-is-400 row. Accepted |
+| R2-m2 | TASK-073 CONTRACT RIDERS item (4) (`WAVE-01.md:1427`). The wording matches round 2 |
+| R2-n2 = PR045-SEC-09 | TASK-073 keys-path line (UTC `to_char`, or epoch microseconds through the `integer` kind) |
+| R2-n3 | TASK-073 keys-path line ("must, not opt-in") |
+| R2-n1 | **Open (NIT).** The header of `prisma-args.ts:22-23` still claims the move-back pin. Carry it to part 045-C with R3-n1 |
+| D-TASK045-15 | **Accepted.** The fix is in the fixture call, not in the route's auth kinds. Widening the kinds would have weakened a gate this suite does not own. Security's M2 shows the gate is pinned by `authorise.test.ts` |
+
+## R3.4 Exposure to main's rate limiter (#82, TASK-041 part 041-A)
+
+No TASK-045 test is affected.
+
+- Only one TASK-045 suite speaks HTTP: `pagination.api.test.ts` (22 cases, about 60 requests with the walks). It builds `createApp` without `rateLimit`. On main, the step-0 `ipLimiter(undefined, …)` is then a pass-through (`limits.ts:83-84`).
+- The suite also passes its own `pipeline` (`defaultPipelineSlots({ tenantTx: undefined })` plus the `signedIn` stub). So:
+  - step 5 is the TASK-020 stub `routeRateLimit`, which passes every class except the security classes;
+  - the T-39 denial budget is not built, because there is no `auditConfig` and the composition passes its own pipeline;
+  - every fixture route keeps `rateLimit: 'none'`, the `fixtureRoute` default.
+- No test expects a 403, so the denial budget would not count anything even if it were built. The foreign-org and binding refusals are 400 `INVALID_CURSOR`.
+- The other suites do not go through the limiter at all: `list-keyset.int.test.ts` (Prisma and PostgreSQL only, no HTTP), `cursor`/`keyset`/`list-query`/`paging` (unit), `validate.test.ts` (unit), and `tools/openapi/list-contract.test.ts` (unit).
+- TASK-045 adds no route to the module registry, so the generated RBAC matrix and the runtime-seams suites do not change.
+- The re-run on a merge with main still matters. It is the first time the pagination refusals render through #80's `classify.ts`, `problem-handler.ts` and `rendered-problem.ts`. Security's union replay (271 tests) is green, but lane B on the merge commit is the proof.
+
+## R3.5 Merge conditions (replace R2.6)
+
+1. **Merge with main and lane B on the merge commit** (the orchestrator, D-ORCH-167). If the merge is textually clean and changes none of the branch's 18 files, no new code-review round is needed. It needs only the partition check: `git diff <merge>^1 <merge>` is the branch's own files, and `git diff <merge>^2 <merge>` is main's. An overlap or a conflict resolution needs a merge-only round.
+2. **DECISIONS.md:** D-TASK045-10..15 accepted by reference, as D-ORCH-149 did for 01..09. This is still missing: line 8306 lists only 01..09.
+3. **Hosted CI on the PR head** (lane A and `security-integration`), or the user-accepted deviation of D-ORCH-162 recorded for this PR.
+4. Rename the record to `PR-<NNNN>-TASK-045-code-review.md` once the PR exists.
+5. Carried, not for this PR: C5 / part 045-C before the first list route is mounted, carrying R2-m1, R2-n1, R3-n1 and R3-n2.
+
+## R3.6 Good patterns worth keeping
+
+- The fix commit names the failing lane-B run, explains the root cause in the code at the point of the trap, and leaves the gate it does not own alone.
+- The evidence commit holds only the run directory, and its hashes reproduce.
+
+## R3.7 Security flags
+
+None new. The delta is test-only. I agree with security round 3: no production authentication change, and the credential gate is pinned by its own suite.
