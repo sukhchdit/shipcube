@@ -8,7 +8,8 @@
  *  - `list-without-pagination`: it declares no `limit` or no `cursor` query parameter (AT-US-037-09);
  *  - `list-without-page-fields`: its body lacks `next_cursor` or `has_more`;
  *  - `limit-out-of-policy`: `limit` is not an integer parameter with `minimum: 1`, a `maximum` and a `default` in
- *    1..maximum, or its maximum exceeds 100, 200 on an `audit`-tagged operation, or the operation's `x-max-limit`;
+ *    1..maximum, or its maximum exceeds 100, 200 on an audit list (tagged `audit` AND under `/audit/`: the tag alone
+ *    does not raise a business list's cap, PR045-SEC-07), or the operation's `x-max-limit`;
  *  - `max-limit-not-reference`: `x-max-limit` on an operation whose `x-tenancy` is not `public` (AT-US-037-08: tenant,
  *    user, guest and operator lists never raise the cap; ADR-0016 amendment 5 (d) allows bounded global reference lists
  *    only);
@@ -86,6 +87,9 @@ const tagsOf = (operation: ContractOperation): readonly unknown[] => {
   return Array.isArray(tags) ? tags : [];
 };
 
+/** An audit list: tagged `audit` and under the audit paths (the tag alone does not qualify; PR045-SEC-07). */
+const isAuditList = (operation: ContractOperation): boolean => tagsOf(operation).includes('audit') && operation.path.startsWith('/audit/');
+
 /** The findings of `x-max-limit` and of the `limit` parameter of one list operation. */
 function limitFindings(operation: ContractOperation, limit: Json): ListContractFinding[] {
   const route = routeOf(operation);
@@ -133,7 +137,7 @@ function limitFindings(operation: ContractOperation, limit: Json): ListContractF
       findings.push({ rule: 'max-limit-invalid', route, message: `limit maximum ${String(maximum)} differs from x-max-limit` });
     return findings;
   }
-  const cap = tagsOf(operation).includes('audit') ? AUDIT_MAX_LIMIT : STANDARD_MAX_LIMIT;
+  const cap = isAuditList(operation) ? AUDIT_MAX_LIMIT : STANDARD_MAX_LIMIT;
   if (maximum > cap)
     findings.push({ rule: 'limit-out-of-policy', route, message: `limit maximum ${String(maximum)} exceeds ${String(cap)}` });
   return findings;

@@ -13,7 +13,13 @@
  * is configured (dual verify during rotation); only an authentic payload is parsed, and then its expiry is checked.
  * Every failure is the same 400 `INVALID_CURSOR` with the catalogue detail, so a client cannot tell a forged cursor
  * from an expired or foreign one. Cursors live at most one hour (`MAX_CURSOR_TTL_MS`), the dual-verify window of the
- * register, so a key retired after that window never strands a live cursor (D-TASK045-02).
+ * register, so a key retired after that window never strands a live cursor (D-TASK045-02). The lifetime is also
+ * enforced at decode: an authentic cursor whose expiry lies further ahead than the codec's lifetime (plus
+ * `CURSOR_CLOCK_SKEW_MS` between instances) is refused, whoever signed it (PR045-SEC-05).
+ *
+ * Size: the sort-key values are bounded tokens (at most `MAX_CURSOR_KEYS` safe integers or strings of
+ * `MAX_CURSOR_KEY_LENGTH` characters of `[0-9A-Za-z :.+_-]`), so the largest cursor fits `MAX_CURSOR_LENGTH` whatever
+ * the row data (PR045-SEC-04); cursor.test.ts pins the largest case.
  *
  * Key bytes follow the audit privacy pattern (packages/audit privacy.ts): a deployed key is its decoded material
  * (the configuration guarantees at least 32 bytes); a `local-only-*` marker (APP_ENV local/test only; the placeholder
@@ -39,7 +45,7 @@ export interface CursorPosition {
 }
 
 export interface CursorCodec {
-  /** A cursor for `position` bound to `binding`; throws (a programming error) when it would exceed `MAX_CURSOR_LENGTH`. */
+  /** A cursor for `position` bound to `binding`; throws (a programming error) for an id or keys out of bounds. */
   encode(binding: string, position: CursorPosition): string;
   /** The position of an authentic, unexpired cursor issued for `binding`; anything else throws 400 INVALID_CURSOR. */
   decode(binding: string, cursor: string): CursorPosition;
@@ -60,9 +66,13 @@ export interface CursorCodecOptions {
 export const MAX_CURSOR_LENGTH = 512;
 /** One hour: the dual-verify window of `CURSOR_KEY` (ADR-0018 register). */
 export const MAX_CURSOR_TTL_MS = 60 * 60 * 1000;
-/** Bounds of the optional sort-key values. */
-export const MAX_CURSOR_KEYS = 8;
-const MAX_KEY_STRING = 256;
+/** Bounds of the optional sort-key values: one per sort term (`MAX_SORT_TERMS`), each a bounded token. */
+export const MAX_CURSOR_KEYS = 4;
+export const MAX_CURSOR_KEY_LENGTH = 48;
+/** Timestamp text (`2026-11-21 12:00:00.123456+00`), integers as text, UUIDs: no quotes, escapes or non-ASCII. */
+const KEY_TEXT = new RegExp(`^[0-9A-Za-z :.+_-]{1,${String(MAX_CURSOR_KEY_LENGTH)}}$`);
+/** Tolerated clock difference between the instance that issued a cursor and the one that decodes it. */
+export const CURSOR_CLOCK_SKEW_MS = 60_000;
 /** An id is a UUID or another opaque token of URL-safe characters. */
 const CURSOR_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -81,7 +91,7 @@ export function cursorKeyBytes(version: CursorKeyVersion): Uint8Array {
 const invalidCursor = (): AppError => new AppError('INVALID_CURSOR');
 
 function isKeyValue(value: unknown): value is string | number {
-  return (typeof value === 'string' && value.length <= MAX_KEY_STRING) || (typeof value === 'number' && Number.isFinite(value));
+  return (typeof value === 'string' && KEY_TEXT.test(value)) || (typeof value === 'number' && Number.isSafeInteger(value));
 }
 
 function validKeys(keys: readonly unknown[]): boolean {
@@ -156,7 +166,8 @@ export function createCursorCodec(options: CursorCodecOptions): CursorCodec {
       const authentic = keys.some((key) => timingSafeEqual(macOf(key, binding, encodedPayload), mac));
       if (!authentic) throw invalidCursor();
       const payload = readPayload(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
-      if (payload === undefined || payload.x * 1000 <= now()) throw invalidCursor();
+      const at = now();
+      if (payload === undefined || payload.x * 1000 <= at || payload.x * 1000 > at + ttlMs + CURSOR_CLOCK_SKEW_MS) throw invalidCursor();
       return payload.s === undefined ? { id: payload.i } : { id: payload.i, keys: payload.s };
     },
   });

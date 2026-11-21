@@ -8,9 +8,10 @@ import { AppError } from '@platform/shared';
 import Joi from 'joi';
 
 import type { Principal, RouteDescriptor, RouteInput, RouteRequestContext } from '../routing/define-route.js';
+import { fixtureRoute } from '../routing/tests/fixture-route.js';
 import { createCursorCodec } from './cursor.js';
 import { filterQueryKey, listQueryKeys, listQuerySchema, MAX_SORT_LENGTH, parseListQuery } from './list-query.js';
-import { defineListSpec, LIMIT_PRESETS, type ListSpecInput, ListSpecError, parseSortTerms } from './list-spec.js';
+import { defineListSpec, INT4_RANGE, LIMIT_PRESETS, type ListSpecInput, ListSpecError, parseSortTerms } from './list-spec.js';
 
 const SPEC_INPUT: ListSpecInput = {
   sort: { fields: { created_at: { column: 'createdAt' }, display_name: { column: 'displayName' } }, default: '-created_at' },
@@ -150,6 +151,50 @@ describe('defineListSpec', () => {
     );
     expect(() => defineListSpec({ ...SPEC_INPUT, filters: many })).toThrow('more than 16 filter fields');
   });
+
+  it('PR045-SEC-01: integer ranges are safe integers with min <= max, on integer filters only', () => {
+    const withFilter = (filter: NonNullable<ListSpecInput['filters']>[string]) => () =>
+      defineListSpec({ ...SPEC_INPUT, filters: { f: filter } });
+    expect(withFilter({ column: 'c', kind: 'string', max: 5 })).toThrow('filter "f" declares min or max but is not an integer');
+    expect(withFilter({ column: 'c', kind: 'integer', min: 5, max: 4 })).toThrow('min and max must be safe integers with min <= max');
+    expect(withFilter({ column: 'c', kind: 'integer', max: Number.MAX_SAFE_INTEGER + 1 })).toThrow('safe integers');
+    expect(withFilter({ column: 'c', kind: 'integer', min: 0.5 })).toThrow('safe integers');
+    expect(withFilter({ column: 'c', kind: 'integer', min: 3_000_000_000 })).toThrow('min <= max');
+    expect(withFilter({ column: 'c', kind: 'integer', min: 0, max: Number.MAX_SAFE_INTEGER })).not.toThrow();
+  });
+
+  it('PR045-SEC-04: a sort field may declare only a timestamp, integer or uuid cursor key', () => {
+    const sortWith = (key: string) => () =>
+      defineListSpec({
+        ...SPEC_INPUT,
+        sort: { fields: { created_at: { column: 'createdAt', key: key as never } }, default: 'created_at' },
+      });
+    expect(sortWith('text')).toThrow('sort field "created_at" has an unknown key kind');
+    for (const key of ['timestamp', 'integer', 'uuid']) expect(sortWith(key)).not.toThrow();
+    const keyed = defineListSpec({
+      ...SPEC_INPUT,
+      sort: { fields: { created_at: { column: 'createdAt', key: 'timestamp' } }, default: '-created_at' },
+    });
+    expect(parseSortTerms(keyed, '-created_at')).toEqual([
+      { field: 'created_at', column: 'createdAt', direction: 'desc', key: 'timestamp' },
+      { field: 'id', column: 'id', direction: 'desc' },
+    ]);
+  });
+
+  it('R1-m6: the type parameter binds columns to a model at compile time (a misspelt column does not compile)', () => {
+    type Column = 'id' | 'createdAt' | 'status';
+    const typed = defineListSpec<Column>({
+      sort: { fields: { created_at: { column: 'createdAt' } }, default: '-created_at' },
+      filters: { status: { column: 'status', kind: 'enum', values: ['ACTIVE'] } },
+    });
+    expect(typed.sortFields.get('created_at')?.column).toBe('createdAt');
+    const misspelt = (): unknown =>
+      defineListSpec<Column>({
+        // @ts-expect-error -- 'createdat' is not a column of the model (R1-m6).
+        sort: { fields: { created_at: { column: 'createdat' } }, default: '-created_at' },
+      });
+    expect(misspelt).not.toThrow();
+  });
 });
 
 describe('parseSortTerms', () => {
@@ -245,6 +290,69 @@ describe('listQueryKeys', () => {
     expect(joiTypes({ 'filter[status]': ['ACTIVE', 'REMOVED'] })).toEqual(['filter[status]:string.base']);
   });
 
+  it('PR045-SEC-01: a filter value the column would refuse is a validation error (NUL, outside int4, year 0000 or negative)', () => {
+    const nul = String.fromCharCode(0);
+    expect(joiTypes({ 'filter[reference]': `a${nul}b` })).toEqual(['filter[reference]:string.pattern.base']);
+    expect(joiTypes({ 'filter[reference]': nul })).toEqual(['filter[reference]:string.pattern.base']);
+    expect(joiTypes({ 'filter[weight_from]': '3000000000' })).toEqual(['filter[weight_from]:number.max']);
+    expect(joiTypes({ 'filter[weight_to]': String(INT4_RANGE.max + 1) })).toEqual(['filter[weight_to]:number.max']);
+    expect(joiTypes({ 'filter[weight_from]': '-2147483649' })).toEqual(['filter[weight_from]:number.min']);
+    expect(joiTypes({ 'filter[created_at_from]': '0000-01-01T00:00:00Z' })).toEqual(['filter[created_at_from]:date.min']);
+    expect(joiTypes({ 'filter[created_at_from]': '-000001-01-01T00:00:00Z' })).toEqual(
+      expect.arrayContaining(['filter[created_at_from]:date.min']),
+    );
+    expect(joiTypes({ 'filter[created_at_to]': '+275760-09-13T00:00:00Z' })).toEqual(
+      expect.arrayContaining(['filter[created_at_to]:date.max']),
+    );
+    expect(joiTypes({ 'filter[created_at_to]': '10000-01-01T00:00:00Z' })).toEqual(['filter[created_at_to]:date.format']);
+  });
+
+  it('PR045-SEC-01 controls: the bounds themselves, tabs and ordinary values are accepted', () => {
+    expect(joiTypes({ 'filter[reference]': 'a\tb' })).toEqual([]);
+    expect(joiTypes({ 'filter[weight_from]': String(INT4_RANGE.max), 'filter[weight_to]': String(INT4_RANGE.min) })).toEqual([]);
+    expect(joiTypes({ 'filter[created_at_from]': '0001-01-01T00:00:00Z', 'filter[created_at_to]': '9999-12-31T23:59:59.999Z' })).toEqual(
+      [],
+    );
+    expect(
+      joiTypes({ 'filter[created_at_from]': '2026-11-21T12:00:00.123+05:30', 'filter[created_at_to]': '2026-11-21T12:00:00Z' }),
+    ).toEqual([]);
+    const wide = defineListSpec({
+      ...SPEC_INPUT,
+      filters: { big: { column: 'big', kind: 'integer', min: 0, max: Number.MAX_SAFE_INTEGER } },
+    });
+    expect(joiTypes({ 'filter[big]': '3000000000' }, listQuerySchema(wide))).toEqual([]);
+    expect(joiTypes({ 'filter[big]': '-1' }, listQuerySchema(wide))).toEqual(['filter[big]:number.min']);
+  });
+
+  it('R1-n2: a timestamp bound is a date-time with at most millisecond precision (never silently rounded), not a date', () => {
+    for (const value of [
+      '2026-11-21',
+      '2026-11-21T12:00Z',
+      '2026-11-21T12:00:00',
+      '2026-11-21T12:00:00.1234Z',
+      '2026-11-21T12:00:00.123456Z',
+      '2026-11-21 12:00:00Z',
+      '1763726400000',
+    ]) {
+      expect(joiTypes({ 'filter[created_at_from]': value })).toEqual(['filter[created_at_from]:date.format']);
+    }
+    const request = parseListQuery(spec, ctxFor({ 'filter[created_at_from]': '2026-11-21T12:00:00.123Z' }), codec);
+    expect(request.filters).toEqual([
+      { field: 'created_at_from', column: 'createdAt', op: 'gte', value: new Date('2026-11-21T12:00:00.123Z') },
+    ]);
+  });
+
+  it('a list query schema mounts through defineRoute (closed, built-in Joi types only)', () => {
+    expect(() =>
+      fixtureRoute({
+        operationId: 'listThings',
+        path: '/things',
+        schema: { query: listQuerySchema(spec) },
+        handler: () => ({ status: 200, body: {} }),
+      }),
+    ).not.toThrow();
+  });
+
   it('bounds cursor and sort lengths; an empty cursor or sort passes to the parser', () => {
     expect(joiTypes({ cursor: 'x'.repeat(513) })).toEqual(['cursor:string.max']);
     expect(joiTypes({ sort: 'x'.repeat(MAX_SORT_LENGTH + 1) })).toEqual(['sort:string.max']);
@@ -316,6 +424,86 @@ describe('parseListQuery', () => {
       'INVALID_CURSOR',
     );
     expect(codeOf(() => parseListQuery(spec, ctxFor({ cursor }), codec))).toBe('INVALID_CURSOR');
+  });
+
+  describe('PR045-SEC-03 / R1-m3 / R1-m4: every binding member is pinned', () => {
+    const routeQuery = Joi.object({ ...listQueryKeys(spec), q: Joi.string().min(2).max(100), since: Joi.date().iso() });
+    const BASE: Principal = { ...principal('org-a'), actorId: 'actor-1', guestTokenHash: 'guest-hash-1' };
+
+    interface Variant {
+      readonly principal?: Partial<Principal>;
+      readonly operationId?: string;
+      readonly params?: Record<string, unknown>;
+      readonly query?: Record<string, unknown>;
+    }
+
+    /** The parse of `{ 'filter[status]': 'ACTIVE', q: 'acme', ...variant.query }` for the variant caller and route. */
+    const parse = (variant: Variant, cursor?: string) => {
+      const raw = { 'filter[status]': 'ACTIVE', q: 'acme', ...variant.query, ...(cursor === undefined ? {} : { cursor }) };
+      const validated = routeQuery.validate(Object.fromEntries(Object.entries(raw).filter(([, value]) => value !== undefined)), {
+        convert: true,
+      });
+      if (validated.error !== undefined) throw validated.error;
+      const ctx: Ctx = {
+        route: route('tenant', variant.operationId ?? 'listThings'),
+        principal: { ...BASE, ...variant.principal },
+        input: {
+          params: variant.params ?? { orgId: 'org-a' },
+          query: validated.value as Record<string, unknown>,
+          body: undefined,
+          headers: {},
+        },
+      };
+      return parseListQuery(spec, ctx, codec);
+    };
+    const cursor = codec.encode(parse({}).cursorBinding, { id: 'row-25' });
+
+    it('the same caller, route, sort, filters, path parameters and q continue; limit and include_total may change', () => {
+      expect(parse({}, cursor).after).toEqual({ id: 'row-25' });
+      expect(parse({ query: { limit: '50' } }, cursor).after).toEqual({ id: 'row-25' });
+      const totals = defineListSpec({ ...SPEC_INPUT, totals: true });
+      const withTotals = Joi.object({ ...listQueryKeys(totals), q: Joi.string() });
+      const ctx = (raw: Record<string, unknown>): Ctx => ({
+        route: route(),
+        principal: BASE,
+        input: {
+          params: {},
+          query: withTotals.validate(raw, { convert: true }).value as Record<string, unknown>,
+          body: undefined,
+          headers: {},
+        },
+      });
+      const first = codec.encode(parseListQuery(totals, ctx({ q: 'acme' }), codec).cursorBinding, { id: 'row-2' });
+      expect(parseListQuery(totals, ctx({ q: 'acme', include_total: 'true', cursor: first }), codec).after).toEqual({ id: 'row-2' });
+    });
+
+    it.each<[string, Variant]>([
+      ['another organisation', { principal: { orgId: 'org-b' } }],
+      ['another actor of the same organisation', { principal: { actorId: 'actor-2' } }],
+      ['another guest-token hash', { principal: { guestTokenHash: 'guest-hash-2' } }],
+      ['another actor scope', { principal: { actorScope: 'OPERATOR' } }],
+      ['another credential kind', { principal: { credential: 'quote-token' } }],
+      ['another operation', { operationId: 'listOtherThings' }],
+      ['another sort', { query: { sort: 'created_at' } }],
+      ['another filter value', { query: { 'filter[status]': 'REMOVED' } }],
+      ['another q', { query: { q: 'zeta' } }],
+      ['no q', { query: { q: undefined } }],
+      ['a route date key', { query: { since: '2026-11-21T00:00:00Z' } }],
+      ['another path parameter', { params: { orgId: 'org-c' } }],
+      ['an extra path parameter', { params: { orgId: 'org-a', memberId: 'm-1' } }],
+    ])('a cursor presented with %s is INVALID_CURSOR', (_name, variant) => {
+      expect(codeOf(() => parse(variant, cursor))).toBe('INVALID_CURSOR');
+    });
+
+    it('route keys and path parameters are bound in canonical order (key order of the input does not matter)', () => {
+      const a = parse({ params: { orgId: 'org-a', memberId: 'm-1' } });
+      const b = parse({ params: { memberId: 'm-1', orgId: 'org-a' } });
+      expect(a.cursorBinding).toBe(b.cursorBinding);
+      expect(parse({ query: { q: 'acme' } }).cursorBinding).toBe(parse({}).cursorBinding);
+      expect(parse({ query: { since: '2026-11-21T00:00:00Z' } }).cursorBinding).toBe(
+        parse({ query: { since: '2026-11-21T00:00:00.000Z' } }).cursorBinding,
+      );
+    });
   });
 
   it('binds equivalent filter spellings to the same cursor (any-of order and duplicates do not matter)', () => {

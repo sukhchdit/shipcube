@@ -4,8 +4,10 @@
  * with parseListQuery and answers with pageOf over the in-memory engine (memory-list.ts), so the HTTP convention is
  * exercised without a database. Never imported by production code.
  */
+import Joi from 'joi';
+
 import type { CursorCodec } from '../cursor.js';
-import { type ListRequest, listQuerySchema, parseListQuery } from '../list-query.js';
+import { type ListRequest, listQueryKeys, parseListQuery } from '../list-query.js';
 import { defineListSpec, type ListSpec } from '../list-spec.js';
 import { pageOf } from '../page.js';
 import type { RouteRequestContext } from '../../routing/define-route.js';
@@ -29,6 +31,7 @@ export function fixtureRecords(): ReadonlyMap<string, readonly MemoryRecord[]> {
     id: fixtureId('0193a5b2', n + 1),
     createdAt: new Date(T0 + n * 60_000),
     name: `Record ${String(n + 1).padStart(2, '0')}`,
+    rank: n + 1,
     status: STATUSES[n % STATUSES.length] ?? 'DRAFT',
     countryCode: COUNTRIES[Math.floor(n / 3) % COUNTRIES.length] ?? 'IN',
   }));
@@ -69,6 +72,8 @@ export const RECORD_LIST: ListSpec = defineListSpec({
     status: { column: 'status', kind: 'enum', values: [...STATUSES], anyOf: true },
     country: { column: 'countryCode', kind: 'enum', values: [...COUNTRIES] },
     created_at: { column: 'createdAt', kind: 'timestamp', range: true },
+    name: { column: 'name', kind: 'string' },
+    rank: { column: 'rank', kind: 'integer' },
   },
 });
 
@@ -101,9 +106,11 @@ const toItem = (record: MemoryRecord): RecordItem => ({
   ...(record['createdAt'] instanceof Date ? { created_at: record['createdAt'].toISOString() } : {}),
 });
 
-/** The handler body of a fixture list route: parse, query the caller's records, answer the page. */
-export function answerList(spec: ListSpec, ctx: ListContext, codec: CursorCodec, records: readonly MemoryRecord[]) {
+/** The handler body of a fixture list route: parse, query the caller's records (matching `q` when given), answer the page. */
+export function answerList(spec: ListSpec, ctx: ListContext, codec: CursorCodec, all: readonly MemoryRecord[]) {
   const request: ListRequest = parseListQuery(spec, ctx, codec);
+  const q = ctx.input.query['q'];
+  const records = typeof q === 'string' ? all.filter((record) => String(record['name']).toLowerCase().includes(q.toLowerCase())) : all;
   const rows = memoryListRows(records, request);
   return pageOf(request, rows, {
     codec,
@@ -113,5 +120,7 @@ export function answerList(spec: ListSpec, ctx: ListContext, codec: CursorCodec,
   });
 }
 
-/** The query schema of a fixture list route. */
-export const fixtureQuery = (spec: ListSpec) => ({ query: listQuerySchema(spec) });
+/** The query schema of a fixture list route, with route-specific keys (such as `q`) beside the list keys. */
+export const fixtureQuery = (spec: ListSpec, routeKeys: Record<string, Joi.Schema> = {}) => ({
+  query: Joi.object({ ...listQueryKeys(spec), ...routeKeys }),
+});

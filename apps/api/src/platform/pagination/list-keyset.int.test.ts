@@ -5,13 +5,18 @@
  * repository will.
  *
  * The database is a bare PostgreSQL 18 container (as tenant-admission.int.test.ts): `platform_app` with the bootstrap
- * role settings, and a `memberships` table with the columns of the Prisma model and its keyset index. The suite needs
- * only that table, so the migrated schema (foreign keys, lifecycle triggers, RLS) is not built; the organisation scope is
- * the repository's `base` condition here, which RLS backs in the real schema (tests/generated/rls). The planted `created_at` values share one millisecond and differ in
- * microseconds, and ten of them are equal, so a cursor that carried a JavaScript `Date` (milliseconds) would skip or
- * repeat rows; the ground truth is the database's own `ORDER BY created_at, id`.
+ * role settings, and a `memberships` table with the columns of the Prisma model, its keyset index and a tenant RLS
+ * policy of the real schema's shape over the released RLS helpers (`org_id = platform.app_org_id()`, the transaction's
+ * organisation; the table is owned by the superuser, so the policy binds `platform_app`). The suite needs only that table, so the migrated schema (foreign keys, lifecycle
+ * triggers) is not built; the repository's `base` condition adds the organisation scope as a real repository does. The
+ * planted `created_at` values share one millisecond and differ in microseconds, and ten of them are equal, so a cursor
+ * that carried a JavaScript `Date` (milliseconds) would skip or repeat rows; the ground truth is the database's own
+ * `ORDER BY created_at, id`. A boundary row that is deleted, or moved to another organisation (invisible under RLS),
+ * between pages is 400 INVALID_CURSOR (R1-M1, PR045-SEC-02); filter values at the column bounds answer 200
+ * (PR045-SEC-01 controls).
  */
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import type { Config } from '@platform/config';
@@ -55,16 +60,28 @@ const MEMBERSHIPS_DDL = [
   'CREATE INDEX ix_memberships__org_status_created ON public.memberships (org_id, status, created_at, id)',
   'GRANT USAGE ON SCHEMA public TO platform_app',
   'GRANT SELECT ON TABLE public.memberships TO platform_app',
+  // The real RLS helpers (platform.app_org_id() reads the transaction's organisation), applied from the released
+  // migration as written, then a tenant policy of the real schema's shape over them.
+  'CREATE SCHEMA platform',
+  'GRANT USAGE ON SCHEMA platform TO platform_app',
+  readFileSync(new URL('../../../../../prisma/migrations/20261112020000_platform_rls_helpers/migration.sql', import.meta.url), 'utf8'),
+  'ALTER TABLE public.memberships ENABLE ROW LEVEL SECURITY',
+  'CREATE POLICY p_memberships__tenant ON public.memberships FOR SELECT TO platform_app USING (org_id = platform.app_org_id())',
 ];
 
 const ORG_A = randomUUID();
 const ORG_B = randomUUID();
+/** Organisations whose boundary rows the R1-M1 cases delete or move. */
+const ORG_C = randomUUID();
+const ORG_D = randomUUID();
 const ACTOR = randomUUID();
-const MEMBER_LIST = defineListSpec({
+/** Typed against the generated model's field names (R1-m6): a misspelt column fails `tsc`. */
+const MEMBER_LIST = defineListSpec<Prisma.MembershipScalarFieldEnum>({
   sort: { fields: { created_at: { column: 'createdAt' } }, default: '-created_at' },
   filters: {
     status: { column: 'status', kind: 'enum', values: ['ACTIVE', 'SUSPENDED', 'REMOVED'], anyOf: true },
     created_at: { column: 'createdAt', kind: 'timestamp', range: true },
+    version: { column: 'version', kind: 'integer' },
   },
 });
 const keyBytes = new Uint8Array(32).map((_, index) => (index * 37 + 11) % 256);
@@ -207,6 +224,8 @@ beforeAll(async () => {
   await plant(ORG_A, 10, () => '2026-11-21 12:00:00.123500+00');
   await plant(ORG_A, 20, (n) => `2026-11-21 12:${String(n + 1).padStart(2, '0')}:00+00`);
   await plant(ORG_B, 3, (n) => `2026-11-21 13:00:0${String(n)}+00`);
+  await plant(ORG_C, 12, (n) => `2026-11-21 14:${String(n + 10)}:00.000001+00`);
+  await plant(ORG_D, 12, (n) => `2026-11-21 15:${String(n + 10)}:00.000002+00`);
   runtime = databaseRuntimeFromConfig(configFor(appUrl), 'api', createRuntimeLog('api', { write: () => true }));
   await runtime.startup();
 }, 300_000);
@@ -271,5 +290,50 @@ describe('keyset pagination on PostgreSQL 18 as platform_app (prismaListArgs + p
     if (first.next === null) throw new Error('no cursor');
     await expect(readPage(ORG_B, { limit: '2', cursor: first.next })).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
     expect(await walk(ORG_B, {})).toEqual(await truth(ORG_B, 'DESC'));
+  });
+
+  it('the tenant policy binds platform_app: without any condition it sees only the organisation of its transaction', async () => {
+    const visible = await runtime.tenantTx.withTenantTx(contextFor(ORG_D), async (tx) => (tx as AppDb).membership.count());
+    expect(visible).toBe(12);
+  });
+
+  it('R1-M1 / PR045-SEC-02: a boundary row deleted between pages is INVALID_CURSOR, never an empty last page', async () => {
+    const first = await readPage(ORG_C, { sort: 'created_at', limit: '3' });
+    const boundary = first.ids.at(-1);
+    if (boundary === undefined || first.next === null) throw new Error('no first page');
+    await asSuperuser('DELETE FROM public.memberships WHERE id = $1', [boundary]);
+    await expect(readPage(ORG_C, { sort: 'created_at', limit: '3', cursor: first.next })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
+    // A fresh walk sees the remaining rows.
+    expect(await walk(ORG_C, { sort: 'created_at', limit: '3' })).toEqual(await truth(ORG_C, 'ASC'));
+  });
+
+  it('PR045-SEC-02: a boundary row moved to another organisation (invisible under RLS) is INVALID_CURSOR; moved back, the walk continues', async () => {
+    const first = await readPage(ORG_D, { sort: 'created_at', limit: '3' });
+    const boundary = first.ids.at(-1);
+    if (boundary === undefined || first.next === null) throw new Error('no first page');
+    const expectedRest = (await truth(ORG_D, 'ASC')).slice(3);
+    await asSuperuser('UPDATE public.memberships SET org_id = $2 WHERE id = $1', [boundary, ORG_B]);
+    try {
+      await expect(readPage(ORG_D, { sort: 'created_at', limit: '3', cursor: first.next })).rejects.toMatchObject({
+        code: 'INVALID_CURSOR',
+      });
+    } finally {
+      await asSuperuser('UPDATE public.memberships SET org_id = $2 WHERE id = $1', [boundary, ORG_D]);
+    }
+    expect(await walk(ORG_D, { sort: 'created_at', limit: '3', cursor: first.next })).toEqual(expectedRest);
+  });
+
+  it('PR045-SEC-01 controls: the int4 maximum and the years 0001 and 9999 are accepted by PostgreSQL (200, never 500)', async () => {
+    expect((await readPage(ORG_A, { 'filter[version]': '2147483647' })).ids).toEqual([]);
+    expect((await readPage(ORG_A, { 'filter[version]': '-2147483648' })).ids).toEqual([]);
+    expect((await readPage(ORG_A, { 'filter[version]': '1', limit: '100' })).ids).toHaveLength(60);
+    const bounded = await readPage(ORG_A, {
+      'filter[created_at_from]': '0001-01-01T00:00:00Z',
+      'filter[created_at_to]': '9999-12-31T23:59:59.999Z',
+      limit: '100',
+    });
+    expect(bounded.ids).toEqual(await truth(ORG_A, 'DESC'));
   });
 });

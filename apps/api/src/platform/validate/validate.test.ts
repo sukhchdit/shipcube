@@ -232,6 +232,18 @@ describe('[AT-US-037-04-1] list routes: an unknown filter key is INVALID_FILTER 
     });
   });
 
+  it('R1-n4: more than MAX_VALIDATION_ISSUES earlier issues do not hide an unknown filter key (the full Joi error decides)', () => {
+    const query: Record<string, unknown> = Object.fromEntries(
+      Array.from({ length: MAX_VALIDATION_ISSUES + 5 }, (_, index) => [`x${String(index)}`, '1']),
+    );
+    query['filter[internal_notes]'] = 'x';
+    expect(issuesOf(() => validateRequest(list, raw({ query })))).toEqual({ code: 'INVALID_FILTER', errors: undefined });
+    delete query['filter[internal_notes]'];
+    const capped = issuesOf(() => validateRequest(list, raw({ query }))) as { code: string; errors: unknown[] };
+    expect(capped.code).toBe('VALIDATION_ERROR');
+    expect(capped.errors).toHaveLength(MAX_VALIDATION_ISSUES);
+  });
+
   it('isListQuerySchema recognises a list schema once and caches the answer per schema', () => {
     expect(isListQuerySchema(list.query)).toBe(true);
     expect(isListQuerySchema(list.query)).toBe(true);

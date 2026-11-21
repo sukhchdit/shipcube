@@ -7,7 +7,16 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { describe, expect, it } from '@jest/globals';
 import { AppError } from '@platform/shared';
 
-import { createCursorCodec, type CursorKeyVersion, cursorKeyBytes, MAX_CURSOR_LENGTH, MAX_CURSOR_TTL_MS } from './cursor.js';
+import {
+  createCursorCodec,
+  CURSOR_CLOCK_SKEW_MS,
+  type CursorKeyVersion,
+  cursorKeyBytes,
+  MAX_CURSOR_KEY_LENGTH,
+  MAX_CURSOR_KEYS,
+  MAX_CURSOR_LENGTH,
+  MAX_CURSOR_TTL_MS,
+} from './cursor.js';
 
 const keyOf = (keyId: string, bytes: Uint8Array = new Uint8Array(randomBytes(32)), localOnly = false): CursorKeyVersion => ({
   keyId,
@@ -112,7 +121,9 @@ describe('cursor codec', () => {
       { v: 1, x, i: 'x'.repeat(65) },
       { v: 1, x, i: ID, s: 'not-a-list' },
       { v: 1, x, i: ID, s: [true] },
-      { v: 1, x, i: ID, s: Array.from({ length: 9 }, () => 1) },
+      { v: 1, x, i: ID, s: Array.from({ length: MAX_CURSOR_KEYS + 1 }, () => 1) },
+      { v: 1, x, i: ID, s: ['x'.repeat(MAX_CURSOR_KEY_LENGTH + 1)] },
+      { v: 1, x, i: ID, s: [0.5] },
       { v: 1, x, i: ID, extra: 1 },
       [1, x, ID],
       null,
@@ -166,15 +177,61 @@ describe('cursor codec', () => {
     expect(local.decode(BINDING, local.encode(BINDING, { id: ID }))).toEqual({ id: ID });
   });
 
-  it('encode refuses an id or keys a cursor cannot carry, and a cursor longer than the contract allows', () => {
+  it('encode refuses an id or keys a cursor cannot carry (more than four, not a bounded token, not a safe integer)', () => {
     expect(() => codec.encode(BINDING, { id: '' })).toThrow('URL-safe token');
     expect(() => codec.encode(BINDING, { id: 'a/b' })).toThrow('URL-safe token');
-    expect(() => codec.encode(BINDING, { id: ID, keys: Array.from({ length: 9 }, () => 1) })).toThrow('out of bounds');
-    expect(() => codec.encode(BINDING, { id: ID, keys: [Number.NaN] })).toThrow('out of bounds');
-    expect(() => codec.encode(BINDING, { id: ID, keys: ['x'.repeat(257)] })).toThrow('out of bounds');
-    expect(() => codec.encode(BINDING, { id: ID, keys: ['x'.repeat(250), 'y'.repeat(250)] })).toThrow(
-      `exceeds ${String(MAX_CURSOR_LENGTH)}`,
-    );
+    expect(() => codec.encode(BINDING, { id: ID, keys: Array.from({ length: MAX_CURSOR_KEYS + 1 }, () => 1) })).toThrow('out of bounds');
+    const backslash = String.fromCharCode(92);
+    for (const key of [
+      Number.NaN,
+      1.5,
+      Number.MAX_SAFE_INTEGER + 1,
+      '',
+      'x'.repeat(MAX_CURSOR_KEY_LENGTH + 1),
+      'a"b',
+      `a${backslash}b`,
+      'é',
+    ]) {
+      expect(() => codec.encode(BINDING, { id: ID, keys: [key] })).toThrow('out of bounds');
+    }
+    // PR045-SEC-04 / R1-m5: CJK text is refused by the key bounds, not by a data-dependent length check (500).
+    expect(() => codec.encode(BINDING, { id: ID, keys: ['東'.repeat(40)] })).toThrow('out of bounds');
+    expect(codec.decode(BINDING, codec.encode(BINDING, { id: ID, keys: ['x'.repeat(MAX_CURSOR_KEY_LENGTH)] }))).toEqual({
+      id: ID,
+      keys: ['x'.repeat(MAX_CURSOR_KEY_LENGTH)],
+    });
+  });
+
+  it('PR045-SEC-04: the largest cursor the bounds allow fits the contract length, so encode never fails on row data', () => {
+    // An expiry of 11 digits (year 5138) and the widest id and keys.
+    const far = createCursorCodec({ current, now: () => 99_999_999_999_000 - MAX_CURSOR_TTL_MS });
+    for (const keys of [
+      Array.from({ length: MAX_CURSOR_KEYS }, () => 'x'.repeat(MAX_CURSOR_KEY_LENGTH)),
+      Array.from({ length: MAX_CURSOR_KEYS }, () => Number.MIN_SAFE_INTEGER),
+    ]) {
+      const cursor = far.encode(BINDING, { id: 'z'.repeat(64), keys });
+      expect(cursor.length).toBeLessThanOrEqual(MAX_CURSOR_LENGTH);
+      expect(far.decode(BINDING, cursor)).toEqual({ id: 'z'.repeat(64), keys });
+    }
+  });
+
+  it('PR045-SEC-05: an authentic cursor whose expiry lies beyond the lifetime (plus clock skew) is INVALID_CURSOR at decode', () => {
+    const sign = (x: number): string => {
+      const encoded = Buffer.from(JSON.stringify({ v: 1, x, i: ID }), 'utf8').toString('base64url');
+      const mac = createHmac('sha256', cursorKeyBytes(current)).update(`platform-cursor\0v1\0${BINDING}\0${encoded}`, 'utf8').digest();
+      return `${encoded}.${mac.toString('base64url')}`;
+    };
+    const skew = CURSOR_CLOCK_SKEW_MS / 1000;
+    const lifetimeEnd = (T0 + MAX_CURSOR_TTL_MS) / 1000;
+    expect(codec.decode(BINDING, sign(lifetimeEnd))).toEqual({ id: ID });
+    expect(codec.decode(BINDING, sign(lifetimeEnd + skew))).toEqual({ id: ID });
+    expect(codeOf(() => codec.decode(BINDING, sign(lifetimeEnd + skew + 1)))).toBe('INVALID_CURSOR');
+    expect(codeOf(() => codec.decode(BINDING, sign(lifetimeEnd + 120)))).toBe('INVALID_CURSOR');
+    expect(codeOf(() => codec.decode(BINDING, sign(lifetimeEnd + 10 * 365 * 24 * 3600)))).toBe('INVALID_CURSOR');
+    // The cap follows the codec's own lifetime.
+    const short = createCursorCodec({ current, ttlMs: 10_000, now: () => T0 });
+    expect(short.decode(BINDING, sign(T0 / 1000 + 10 + skew))).toEqual({ id: ID });
+    expect(codeOf(() => short.decode(BINDING, sign(T0 / 1000 + 10 + skew + 1)))).toBe('INVALID_CURSOR');
   });
 
   it('refuses a lifetime above the one-hour dual-verify window or below one second', () => {

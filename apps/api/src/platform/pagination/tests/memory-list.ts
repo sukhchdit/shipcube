@@ -2,8 +2,10 @@
  * Test helper (TASK-045): runs a list request over in-memory records with the semantics of `prismaListArgs` on
  * PostgreSQL: filters with AND, the order of the sort terms (the id tie-breaker last) and, after a cursor, every row at
  * or after the boundary row in that order, the boundary row's CURRENT values deciding (Prisma's native cursor compares
- * with the stored row), the boundary row itself included only when it still matches. No boundary row: no rows.
- * tests/api/list-keyset.int.test.ts proves the same semantics on the database. Never imported by production code.
+ * with the stored row), the boundary row itself included only when it still matches. No boundary row in the caller's
+ * visible set (deleted, moved to another organisation, invisible under RLS): no rows, as Prisma's boundary subqueries
+ * match nothing, which pageOf answers with INVALID_CURSOR (R1-M1). apps/api/src/platform/pagination/list-keyset.int.test.ts
+ * proves the same semantics on the database. Never imported by production code.
  */
 import type { FilterTerm, ListRequest } from '../list-query.js';
 

@@ -2,11 +2,12 @@
  * Paging through whole lists with the convention end to end, below HTTP (US-037): the fixture route body
  * (`answerList`: parseListQuery -> the in-memory engine with prismaListArgs semantics -> pageOf) driven page by page
  * with the returned cursors. pagination.api.test.ts repeats the scenarios over HTTP (lane B) and
- * tests/api/list-keyset.int.test.ts on PostgreSQL 18 (lane B).
+ * apps/api/src/platform/pagination/list-keyset.int.test.ts on PostgreSQL 18 (lane B).
  */
 import { randomBytes } from 'node:crypto';
 
 import { describe, expect, it } from '@jest/globals';
+import { AppError } from '@platform/shared';
 
 import type { Principal, RouteDescriptor, RouteRequestContext } from '../routing/define-route.js';
 // Through the module's entry point, as the list routes import it.
@@ -67,6 +68,17 @@ function walk(
   throw new Error('more than 100 pages');
 }
 
+/** The code of the AppError `run` throws. */
+function codeOf(run: () => unknown): string {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof AppError) return error.code;
+    throw error;
+  }
+  throw new Error('no error thrown');
+}
+
 const idsOf = (orgId: string, compare: (a: MemoryRecord, b: MemoryRecord) => number): string[] =>
   [...(records.get(orgId) ?? [])].sort(compare).map((record) => String(record['id']));
 
@@ -115,6 +127,30 @@ describe('paging through a list (US-037)', () => {
     expect(boundary).toBeDefined();
     expect(rest.ids).toHaveLength(8);
     expect(rest.ids.at(-1)).toBe(first.items[0]?.id);
+  });
+
+  it('R1-m1, the documented trade-off (D-TASK045-10): when the BOUNDARY row moves forward, the rows it passed are skipped', () => {
+    const data = [...(records.get(ORG_A) ?? [])].slice(0, 10).map((record) => ({ ...record }));
+    const idOfName = (name: string): string => String(data.find((record) => record['name'] === name)?.['id']);
+    const first = page(RECORD_LIST, ORG_A, { limit: '3', sort: 'name' }, data);
+    expect(first.items.map((item) => item.name)).toEqual(['Record 01', 'Record 02', 'Record 03']);
+    // The boundary row (Record 03) is renamed past Record 08: the walk resumes from its current position.
+    const moved = data.map((record) => (record['name'] === 'Record 03' ? { ...record, name: 'Record 08z' } : record));
+    const rest = walk(RECORD_LIST, ORG_A, { limit: '3', sort: 'name', cursor: first.next_cursor }, moved);
+    expect(rest.ids).toEqual([idOfName('Record 09'), idOfName('Record 10')]);
+  });
+
+  it("R1-M1 / PR045-SEC-02: a boundary row that left the caller's visible set is INVALID_CURSOR, never a silent end of the list", () => {
+    const data = [...(records.get(ORG_A) ?? [])];
+    const first = page(RECORD_LIST, ORG_A, { limit: '5' }, data);
+    const boundary = first.items.at(-1)?.id;
+    expect(boundary).toBeDefined();
+    // Deleted, or moved to another organisation (both: no longer among the caller's records).
+    const gone = data.filter((record) => record['id'] !== boundary);
+    expect(codeOf(() => page(RECORD_LIST, ORG_A, { limit: '5', cursor: first.next_cursor }, gone))).toBe('INVALID_CURSOR');
+    // Back again: the same cursor continues without overlap or gaps.
+    const rest = walk(RECORD_LIST, ORG_A, { limit: '5', cursor: first.next_cursor }, data);
+    expect([...first.items.map((item) => item.id), ...rest.ids]).toEqual(walk(RECORD_LIST, ORG_A, { limit: '5' }, data).ids);
   });
 
   it('[AT-US-037-07] a bounded reference list returns all 250 countries in one page of 300 with has_more false', () => {

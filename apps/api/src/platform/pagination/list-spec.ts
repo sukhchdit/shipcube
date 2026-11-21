@@ -6,8 +6,14 @@
  * apart. Every name in it comes from code; `defineListSpec` refuses a malformed one when the route module loads.
  *
  * Field names are the API's snake_case names (`created_at`); `column` is the Prisma field that backs it (`createdAt`).
+ * A repository binds the columns to its model at compile time with the type parameter, e.g.
+ * `defineListSpec<Prisma.MembershipScalarFieldEnum>({ ... })`, so a misspelt column fails `tsc`, not a request (R1-m6).
  * Sort fields must be NOT NULL columns with an index that leads with `org_id` for tenant lists (data-model §3 access
  * patterns; the query-plan registry, TASK-118, proves each plan).
+ *
+ * A sort field may declare `key`, the kind of value a consumer carries in the cursor for it (`keysOf`, the keys path
+ * for raw-SQL keysets on composite-key or partitioned tables): only exact timestamp text, integers and UUIDs, so a
+ * cursor never carries free text (personal data in URLs) and its size never depends on row data (PR045-SEC-04).
  */
 
 /** Page-size ceilings (DR-A21; ADR-0016 amendment 5 (d)). */
@@ -35,9 +41,9 @@ export const LIMIT_PRESETS = Object.freeze({
 
 export type FilterKind = 'enum' | 'string' | 'uuid' | 'boolean' | 'integer' | 'timestamp';
 
-export interface FilterFieldSpec {
+export interface FilterFieldSpec<TColumn extends string = string> {
   /** The Prisma field the filter applies to. */
-  readonly column: string;
+  readonly column: TColumn;
   readonly kind: FilterKind;
   /** `enum`: the allowed values. */
   readonly values?: readonly string[];
@@ -50,28 +56,39 @@ export interface FilterFieldSpec {
   readonly range?: boolean;
   /** `string`: the longest accepted value (default 200). */
   readonly maxLength?: number;
+  /**
+   * `integer`: the accepted range (default the PostgreSQL `integer` range, `INT4_RANGE`); a `bigint` column widens it
+   * explicitly, within the safe integers. A value outside it is 400 VALIDATION_ERROR, never a database error (500).
+   */
+  readonly min?: number;
+  readonly max?: number;
 }
 
-export interface SortFieldSpec {
+/** The kinds of sort-key value a cursor may carry (`keysOf`); see the header. */
+export type CursorKeyKind = 'timestamp' | 'integer' | 'uuid';
+
+export interface SortFieldSpec<TColumn extends string = string> {
   /** The Prisma field the sort applies to; a NOT NULL column. */
-  readonly column: string;
+  readonly column: TColumn;
+  /** The kind of value `keysOf` carries for this field; a field without one cannot be carried (keys path only). */
+  readonly key?: CursorKeyKind;
 }
 
-export interface ListSpecInput {
+export interface ListSpecInput<TColumn extends string = string> {
   /** Page size; default `LIMIT_PRESETS.standard`. */
   readonly limit?: LimitPolicy;
   /** The ceiling `limit.max` must respect; default `standard`. `reference` is for `public` reference lists only. */
   readonly ceiling?: LimitCeiling;
   readonly sort: {
-    readonly fields: Readonly<Record<string, SortFieldSpec>>;
+    readonly fields: Readonly<Record<string, SortFieldSpec<TColumn>>>;
     /** `sort` syntax, e.g. `-created_at`; used when the request has no `sort`. */
     readonly default: string;
   };
-  readonly filters?: Readonly<Record<string, FilterFieldSpec>>;
+  readonly filters?: Readonly<Record<string, FilterFieldSpec<TColumn>>>;
   /** The route documents `include_total` (AT-US-037-06); without it the parameter is an unknown field. */
   readonly totals?: boolean;
   /** The unique tie-breaker column (default `id`). */
-  readonly idColumn?: string;
+  readonly idColumn?: TColumn;
 }
 
 export interface ListSpec {
@@ -104,8 +121,11 @@ const MAX_ENUM_VALUES = 64;
 const ENUM_VALUE = /^[A-Za-z0-9_-]{1,64}$/;
 const DEFAULT_STRING_MAX = 200;
 const MAX_STRING_MAX = 500;
+/** PostgreSQL `integer`: the default range of an integer filter (PR045-SEC-01). */
+export const INT4_RANGE = Object.freeze({ min: -2_147_483_648, max: 2_147_483_647 });
 
 const FILTER_KINDS: readonly FilterKind[] = ['enum', 'string', 'uuid', 'boolean', 'integer', 'timestamp'];
+const CURSOR_KEY_KINDS: readonly CursorKeyKind[] = ['timestamp', 'integer', 'uuid'];
 
 function limitProblems(limit: LimitPolicy, ceiling: LimitCeiling): string[] {
   const problems: string[] = [];
@@ -140,6 +160,13 @@ function filterProblems(field: string, filter: FilterFieldSpec): string[] {
       problems.push(`${where} maxLength must be in 1..${String(MAX_STRING_MAX)}`);
     }
   }
+  if (filter.min !== undefined || filter.max !== undefined) {
+    const { min = INT4_RANGE.min, max = INT4_RANGE.max } = filter;
+    if (filter.kind !== 'integer') problems.push(`${where} declares min or max but is not an integer`);
+    if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min > max) {
+      problems.push(`${where} min and max must be safe integers with min <= max`);
+    }
+  }
   return problems;
 }
 
@@ -151,11 +178,17 @@ export function filterKeysOf(field: string, filter: FilterFieldSpec): readonly s
 /** The longest accepted value of a string filter. */
 export const stringFilterMax = (filter: FilterFieldSpec): number => filter.maxLength ?? DEFAULT_STRING_MAX;
 
+/** The accepted range of an integer filter. */
+export const integerFilterRange = (filter: FilterFieldSpec): { readonly min: number; readonly max: number } => ({
+  min: filter.min ?? INT4_RANGE.min,
+  max: filter.max ?? INT4_RANGE.max,
+});
+
 /**
  * Validates and freezes a list declaration. Throws `ListSpecError` listing every problem: a declaration is code, so a
  * mistake fails the module load (and its unit test), never a request.
  */
-export function defineListSpec(input: ListSpecInput): ListSpec {
+export function defineListSpec<TColumn extends string = string>(input: ListSpecInput<TColumn>): ListSpec {
   const problems: string[] = [];
   const limit = input.limit ?? LIMIT_PRESETS.standard;
   const ceiling = input.ceiling ?? 'standard';
@@ -169,8 +202,9 @@ export function defineListSpec(input: ListSpecInput): ListSpec {
   for (const [field, sort] of sortEntries) {
     if (!FIELD_NAME.test(field)) problems.push(`sort field "${field}" is not a snake_case name`);
     if (!COLUMN_NAME.test(sort.column)) problems.push(`sort field "${field}" has an invalid column`);
+    if (sort.key !== undefined && !CURSOR_KEY_KINDS.includes(sort.key)) problems.push(`sort field "${field}" has an unknown key kind`);
   }
-  const sortFields = new Map(sortEntries);
+  const sortFields = new Map<string, SortFieldSpec>(sortEntries);
 
   const filterEntries = Object.entries(input.filters ?? {});
   if (filterEntries.length > MAX_FILTER_FIELDS) problems.push(`more than ${String(MAX_FILTER_FIELDS)} filter fields`);
@@ -189,7 +223,7 @@ export function defineListSpec(input: ListSpecInput): ListSpec {
     ceiling,
     sortFields,
     defaultSort: input.sort.default,
-    filters: new Map(filterEntries),
+    filters: new Map<string, FilterFieldSpec>(filterEntries),
     totals: input.totals === true,
     idColumn,
   });
@@ -208,6 +242,8 @@ export interface SortTerm {
   readonly field: string;
   readonly column: string;
   readonly direction: SortDirection;
+  /** The declared cursor-key kind of the field (`SortFieldSpec.key`); absent on the tie-breaker and undeclared fields. */
+  readonly key?: CursorKeyKind;
 }
 
 /**
@@ -226,7 +262,10 @@ export function parseSortTerms(spec: ListSpec, value: string): readonly SortTerm
     const sort = field === undefined ? undefined : spec.sortFields.get(field);
     if (match === null || field === undefined || sort === undefined || seen.has(field)) return undefined;
     seen.add(field);
-    terms.push({ field, column: sort.column, direction: match[1] === '-' ? 'desc' : 'asc' });
+    const direction = match[1] === '-' ? 'desc' : 'asc';
+    terms.push(
+      sort.key === undefined ? { field, column: sort.column, direction } : { field, column: sort.column, direction, key: sort.key },
+    );
   }
   const last = terms.at(-1);
   if (last !== undefined && !terms.some((term) => term.column === spec.idColumn)) {

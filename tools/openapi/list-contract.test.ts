@@ -127,6 +127,19 @@ describe('list pagination contract rules (US-037)', () => {
     ]);
   });
 
+  it('PR045-SEC-07: an audit tag alone does not raise a list cap to 200; the list must also be under /audit/', () => {
+    const tagged = withOperation(doc, 'listMembers', (op) => {
+      op['tags'] = [...((op['tags'] as string[] | undefined) ?? []), 'audit'];
+      setLimitMaximum(op, 200);
+    });
+    expect(rulesFor(checkListContract(tagged), 'listMembers')).toEqual(['limit-out-of-policy']);
+    const untagged = withOperation(doc, 'listAuditEntries', (op) => {
+      op['tags'] = [];
+      setLimitMaximum(op, 200);
+    });
+    expect(rulesFor(checkListContract(untagged), 'listAuditEntries')).toEqual(['limit-out-of-policy']);
+  });
+
   it('a limit without minimum 1, an integer maximum or a default within range is out of policy', () => {
     for (const schema of [
       { type: 'integer', minimum: 0, maximum: 100, default: 25 },

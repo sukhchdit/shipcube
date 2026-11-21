@@ -2,7 +2,7 @@
  * US-037 acceptance tests over HTTP (AT-US-037-01..07 and -10; REQ-API-007/008; api/README.md §4) against the real
  * createApp and pipeline with defineRoute fixture list routes (tests/list-fixture.ts) over the in-memory engine with
  * prismaListArgs semantics; no database. The contract rules (AT-US-037-08/09) are tools/openapi/list-contract.test.ts;
- * the database behaviour of the keyset arguments is tests/api/list-keyset.int.test.ts.
+ * the database behaviour of the keyset arguments is apps/api/src/platform/pagination/list-keyset.int.test.ts.
  */
 import { randomBytes } from 'node:crypto';
 import type { Server } from 'node:http';
@@ -10,6 +10,7 @@ import type { AddressInfo } from 'node:net';
 
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import type { NextFunction, Request, Response } from 'express';
+import Joi from 'joi';
 
 import { createApp, type AppLogger } from '../../app.js';
 import type { Principal } from '../routing/define-route.js';
@@ -31,6 +32,7 @@ import {
   RECORD_LIST,
   RECORD_LIST_WITH_TOTALS,
 } from './tests/list-fixture.js';
+import type { MemoryRecord } from './tests/memory-list.js';
 
 jest.setTimeout(LOOPBACK_TEST_TIMEOUT_MS);
 
@@ -45,16 +47,20 @@ const codec = createCursorCodec({
 });
 
 const ORG_HEADER = 'x-fixture-org';
+const ACTOR_HEADER = 'x-fixture-actor';
+const ACTOR_A = '0193a5b2-7c1e-7d4a-9f3b-0000000000f1';
+const ACTOR_B = '0193a5b2-7c1e-7d4a-9f3b-0000000000f2';
 
-/** Signs the caller in for the organisation named by the fixture header (no header: anonymous). */
+/** Signs the caller in for the organisation (and actor) named by the fixture headers (no org header: anonymous). */
 const signedIn: RouteSlot = () => (req: Request, res: Response, next: NextFunction) => {
   const orgId = req.headers[ORG_HEADER];
+  const actorId = req.headers[ACTOR_HEADER];
   if (typeof orgId === 'string') {
     const principal: Principal = {
       ...ANONYMOUS,
       credential: 'session',
       authenticated: true,
-      actorId: '0193a5b2-7c1e-7d4a-9f3b-0000000000f1',
+      actorId: typeof actorId === 'string' ? actorId : ACTOR_A,
       orgId,
       permissions: readonlySet([]),
     };
@@ -63,13 +69,23 @@ const signedIn: RouteSlot = () => (req: Request, res: Response, next: NextFuncti
   next();
 };
 
+/** The records of the mutable fixture route (R1-M1: rows deleted between pages). */
+let mutable: MemoryRecord[] = [...(records.get(ORG_A) ?? [])];
+
 const routes = [
   fixtureRoute({
     operationId: 'listFixtureRecords',
     path: '/fixtures/records',
     auth: 'session',
-    schema: fixtureQuery(RECORD_LIST),
+    schema: fixtureQuery(RECORD_LIST, { q: Joi.string().min(2).max(100) }),
     handler: (ctx) => ({ status: 200, body: answerList(RECORD_LIST, ctx, codec, records.get(ctx.principal.orgId) ?? []) }),
+  }),
+  fixtureRoute({
+    operationId: 'listFixtureMutableRecords',
+    path: '/fixtures/mutable-records',
+    auth: 'session',
+    schema: fixtureQuery(RECORD_LIST),
+    handler: (ctx) => ({ status: 200, body: answerList(RECORD_LIST, ctx, codec, mutable) }),
   }),
   fixtureRoute({
     operationId: 'listFixtureRecordsWithTotals',
@@ -116,11 +132,11 @@ interface Answer {
   readonly body: Record<string, unknown>;
 }
 
-/** GET `path` with `query` (values encoded) as a member of `orgId` (undefined: anonymous). */
-async function get(path: string, query: Record<string, string>, orgId: string | undefined = ORG_A): Promise<Answer> {
+/** GET `path` with `query` (values encoded) as `actorId`, a member of `orgId` (undefined: anonymous). */
+async function get(path: string, query: Record<string, string>, orgId: string | undefined = ORG_A, actorId = ACTOR_A): Promise<Answer> {
   const search = new URLSearchParams(query).toString();
   const response = await fetchOnce(`${base}/api/v1${path}${search === '' ? '' : `?${search}`}`, {
-    headers: orgId === undefined ? {} : { [ORG_HEADER]: orgId },
+    headers: orgId === undefined ? {} : { [ORG_HEADER]: orgId, [ACTOR_HEADER]: actorId },
   });
   return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
@@ -255,5 +271,58 @@ describe('US-037 cursor pagination, filtering and sorting over HTTP', () => {
     const foreign = await get('/fixtures/records', { limit: '2', cursor }, ORG_B);
     expect(foreign.status).toBe(400);
     expect(foreign.body['code']).toBe('INVALID_CURSOR');
+  });
+
+  it('[AT-US-037-10] PR045-SEC-03: a cursor is bound to the actor and to q (another member or another q is INVALID_CURSOR)', async () => {
+    const first = await pageOf('/fixtures/records', { limit: '2', q: 'record' });
+    const cursor = first.next_cursor ?? '';
+    expect((await get('/fixtures/records', { limit: '2', q: 'record', cursor })).status).toBe(200);
+    for (const answer of [
+      await get('/fixtures/records', { limit: '2', q: 'record', cursor }, ORG_A, ACTOR_B),
+      await get('/fixtures/records', { limit: '2', q: 'record 1', cursor }),
+      await get('/fixtures/records', { limit: '2', cursor }),
+    ]) {
+      expect(answer.status).toBe(400);
+      expect(answer.body['code']).toBe('INVALID_CURSOR');
+    }
+  });
+
+  it('R1-M1 / PR045-SEC-02: a boundary record deleted between pages is 400 INVALID_CURSOR, not an empty last page', async () => {
+    const original = mutable;
+    try {
+      const first = await pageOf('/fixtures/mutable-records', { limit: '5' });
+      const boundary = first.items.at(-1)?.id;
+      expect(first.has_more).toBe(true);
+      mutable = original.filter((record) => record['id'] !== boundary);
+      const answer = await get('/fixtures/mutable-records', { limit: '5', cursor: first.next_cursor ?? '' });
+      expect(answer.status).toBe(400);
+      expect(answer.body).toMatchObject({ code: 'INVALID_CURSOR', detail: 'Invalid cursor.' });
+    } finally {
+      mutable = original;
+    }
+  });
+
+  it.each([
+    ['a string with U+0000', 'filter[name]', `Record${String.fromCharCode(0)}`, 'INVALID_FORMAT'],
+    ['an integer outside int4', 'filter[rank]', '3000000000', 'OUT_OF_RANGE'],
+    ['a negative integer outside int4', 'filter[rank]', '-2147483649', 'OUT_OF_RANGE'],
+    ['the year 0000', 'filter[created_at_from]', '0000-01-01T00:00:00Z', 'OUT_OF_RANGE'],
+    ['a date without a time', 'filter[created_at_from]', '2026-11-21', 'INVALID_FORMAT'],
+    ['a sub-millisecond bound', 'filter[created_at_to]', '2026-11-21T12:00:00.123456Z', 'INVALID_FORMAT'],
+  ])('PR045-SEC-01: %s is 400 VALIDATION_ERROR with the filter pointer, never 500', async (_name, key, value, subCode) => {
+    const answer = await get('/fixtures/records', { [key]: value });
+    expect(answer.status).toBe(400);
+    expect(answer.body['code']).toBe('VALIDATION_ERROR');
+    expect(answer.body['errors']).toEqual([expect.objectContaining({ pointer: `/query/${key}`, code: subCode })]);
+  });
+
+  it('PR045-SEC-01 controls: the int4 maximum and the year bounds are accepted', async () => {
+    expect((await get('/fixtures/records', { 'filter[rank]': '2147483647' })).status).toBe(200);
+    const all = await pageOf('/fixtures/records', {
+      'filter[created_at_from]': '0001-01-01T00:00:00Z',
+      'filter[created_at_to]': '9999-12-31T23:59:59.999Z',
+      limit: '100',
+    });
+    expect(all.items).toHaveLength(60);
   });
 });

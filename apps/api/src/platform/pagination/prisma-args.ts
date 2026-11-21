@@ -13,6 +13,19 @@
  *
  * With `orderBy` leading on the sort columns and ending on the id, and an index `(org_id, <sort columns>, id)` for
  * tenant lists (data-model §3 access patterns), the statement is an index range scan bounded by `take`.
+ *
+ * Limits of the native cursor (D-TASK045-10):
+ *  - A boundary row the caller can no longer see (deleted, purged, moved under RLS) makes the statement return no row;
+ *    `pageOf` answers that with 400 `INVALID_CURSOR`, never with a silent end of the list.
+ *  - The walk resumes from the boundary row's CURRENT sort values, so it is exact for immutable sort keys only. When
+ *    the boundary row's own sort value changes between pages, the unchanged rows between its old and new position are
+ *    skipped (it moved forward) or repeated (it moved back); a change of any other row moves only that row
+ *    (paging.test.ts pins both). Lists sorted on mutable columns (`updated_at`, `last_used_at`, `label`, `name`)
+ *    carry this trade-off until principal-architect rules on it (routed with D-TASK045-10).
+ *  - Composite-key or partitioned tables (`audit_entries`: primary key `(occurred_at, id)`, monthly partitions) have no
+ *    unique `id` to point at and could not prune partitions: they use the keys path instead (sort values carried in
+ *    the cursor through `keysOf`, exact timestamp text such as `occurred_at::text`, never a JavaScript `Date`, and the
+ *    comparison in the consumer's own scoped SQL, PR045-SEC-06). TASK-073 is the first such consumer.
  */
 import type { FilterTerm, ListRequest } from './list-query.js';
 

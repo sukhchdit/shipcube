@@ -6,13 +6,19 @@
  *    slot like every other parameter. `limit` out of range, non-numeric or repeated is 400 `VALIDATION_ERROR`, never
  *    clamped; a filter VALUE outside its type or enum is 400 `VALIDATION_ERROR` with the `/query/filter[...]` pointer;
  *    an unknown `filter[...]` KEY is 400 `INVALID_FILTER` (the validate slot maps it for list schemas, D-TASK045-04);
- *    `include_total` exists only when the route documents it (AT-US-037-06).
+ *    `include_total` exists only when the route documents it (AT-US-037-06). Every filter value the schema accepts is
+ *    one its column accepts (PR045-SEC-01): strings without U+0000, integers in the declared range (default the
+ *    PostgreSQL `integer` range), timestamps as RFC 3339 date-times (no date-only value, at most millisecond
+ *    precision, so a bound is never silently rounded; R1-n2) in the years 0001..9999. Anything else is 400
+ *    `VALIDATION_ERROR` with the pointer, never a database error (500).
  *  - `parseListQuery(spec, ctx, codec)`, in the handler: the sort against the allow-list (400 `INVALID_SORT`), the
  *    filters as typed terms, and the cursor, verified against the binding of this request (400 `INVALID_CURSOR`).
  *
- * The binding is everything a cursor must not cross: the operation, the caller (organisation, actor and guest token
- * hash, as the principal has them) and the canonical sort and filters. `limit` is not bound: a client may change the
- * page size between pages.
+ * The binding is everything a cursor must not cross (PR045-SEC-03, R1-m3): the operation, the caller (organisation,
+ * actor, actor scope, credential kind and guest token hash, as the principal has them), the canonical sort and filters,
+ * and every other validated input of the route: its path parameters and route-specific query keys such as `q`
+ * (canonical: sorted keys, JSON values, dates as ISO text). Only `limit` and `include_total` are not bound: a client may
+ * change the page size or ask for the total between pages.
  */
 import { AppError } from '@platform/shared';
 import Joi from 'joi';
@@ -22,6 +28,7 @@ import { type CursorCodec, type CursorPosition, MAX_CURSOR_LENGTH } from './curs
 import {
   type FilterFieldSpec,
   filterKeysOf,
+  integerFilterRange,
   type ListSpec,
   ListSpecError,
   MAX_SORT_TERMS,
@@ -35,6 +42,16 @@ export const MAX_SORT_LENGTH = MAX_SORT_TERMS * 65;
 /** At most this many values in one "any of" filter. */
 export const MAX_ANY_OF_VALUES = 20;
 const UUID = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}';
+/** PostgreSQL `text` refuses U+0000 (SQLSTATE 22021). */
+const NO_NUL = /^[^\0]*$/;
+/** RFC 3339 date-time with seconds and at most millisecond precision (a JavaScript `Date` holds no more). */
+const DATE_TIME_TEXT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+/** The years PostgreSQL `timestamptz` and the adapter both handle (0000 and negative years are SQLSTATE 22008/22007). */
+export const TIMESTAMP_FILTER_MIN = new Date('0001-01-01T00:00:00.000Z');
+export const TIMESTAMP_FILTER_MAX = new Date('9999-12-31T23:59:59.999Z');
+
+/** The list keys outside the route keys of the binding: the sort and filters are bound canonically, the rest not at all. */
+const LIST_KEYS = ['limit', 'cursor', 'sort', 'include_total'];
 
 /** The query key of a filter field: `filter[status]`. */
 export const filterQueryKey = (key: string): string => `filter[${key}]`;
@@ -52,13 +69,23 @@ function filterValueSchema(filter: FilterFieldSpec): Joi.Schema {
     case 'uuid':
       return Joi.string().pattern(filter.anyOf === true ? anyOfPattern(UUID) : new RegExp(`^${UUID}$`));
     case 'string':
-      return Joi.string().min(1).max(stringFilterMax(filter));
+      return Joi.string().min(1).max(stringFilterMax(filter)).pattern(NO_NUL);
     case 'boolean':
       return Joi.boolean();
-    case 'integer':
-      return Joi.number().integer();
+    case 'integer': {
+      const { min, max } = integerFilterRange(filter);
+      return Joi.number().integer().min(min).max(max);
+    }
     case 'timestamp':
-      return Joi.date().iso();
+      return Joi.date()
+        .iso()
+        .min(TIMESTAMP_FILTER_MIN)
+        .max(TIMESTAMP_FILTER_MAX)
+        .custom((value: Date, helpers) =>
+          typeof helpers.original !== 'string' || DATE_TIME_TEXT.test(helpers.original)
+            ? value
+            : helpers.error('date.format', { format: 'iso' }),
+        );
   }
 }
 
@@ -108,6 +135,16 @@ export interface ListRequest {
 
 const canonicalValue = (value: FilterValue): string => (value instanceof Date ? value.toISOString() : String(value));
 
+/** A validated input value in canonical text (dates as ISO text, everything else as JSON). */
+const canonicalInput = (value: unknown): string => (value instanceof Date ? value.toISOString() : JSON.stringify(value));
+
+/** The `[key, canonical value]` pairs of `values` in key order, without absent keys and without `skip`ped ones. */
+const canonicalEntries = (values: Readonly<Record<string, unknown>>, skip: (key: string) => boolean): [string, string][] =>
+  Object.keys(values)
+    .filter((key) => values[key] !== undefined && !skip(key))
+    .sort()
+    .map((key) => [key, canonicalInput(values[key])]);
+
 /** The typed terms of one filter field from the validated query (undefined values are absent keys). */
 function filterTerms(field: string, filter: FilterFieldSpec, query: Readonly<Record<string, unknown>>): FilterTerm[] {
   const column = filter.column;
@@ -155,14 +192,22 @@ export function parseListQuery(
 
   const filters = [...spec.filters].flatMap(([field, filter]) => filterTerms(field, filter, query));
   const { principal, route } = ctx;
+  const listKeys = new Set([
+    ...LIST_KEYS,
+    ...[...spec.filters].flatMap(([field, filter]) => filterKeysOf(field, filter).map(filterQueryKey)),
+  ]);
   const binding = JSON.stringify([
     'list',
     route.operationId,
     principal.orgId,
     principal.actorId,
+    principal.actorScope,
+    principal.credential,
     principal.guestTokenHash,
     sort.map((term) => `${term.direction === 'desc' ? '-' : ''}${term.field}`).join(','),
     filters.map((term) => [term.field, term.op, termValue(term)]),
+    canonicalEntries(ctx.input.params, () => false),
+    canonicalEntries(query, (key) => listKeys.has(key)),
   ]);
 
   const rawCursor = query['cursor'];

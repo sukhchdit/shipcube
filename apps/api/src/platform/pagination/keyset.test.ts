@@ -1,11 +1,12 @@
 /**
  * Prisma arguments and page assembly of a list request (US-037; NFR-PERF-006). The database behaviour of the native
- * cursor (microsecond timestamps, equal keys, a boundary row that no longer matches) is proven on PostgreSQL 18 by
- * tests/api/list-keyset.int.test.ts (lane B).
+ * cursor (microsecond timestamps, equal keys, a boundary row that no longer matches, a deleted or RLS-invisible boundary
+ * row) is proven on PostgreSQL 18 by apps/api/src/platform/pagination/list-keyset.int.test.ts (lane B).
  */
 import { randomBytes } from 'node:crypto';
 
 import { describe, expect, it } from '@jest/globals';
+import { AppError } from '@platform/shared';
 
 import { createCursorCodec } from './cursor.js';
 import type { ListRequest } from './list-query.js';
@@ -104,9 +105,52 @@ describe('pageOf', () => {
     expect(page.next_cursor).toBeNull();
   });
 
-  it('carries the sort-key values in the cursor when the consumer supplies them', () => {
-    const page = pageOf(REQUEST, rows('a', 'b', 'c'), { ...options, keysOf: (row: Row) => [row.name, 7] });
-    expect(codec.decode(REQUEST.cursorBinding, page.next_cursor ?? '')).toEqual({ id: 'b', keys: ['name-b', 7] });
+  it('R1-M1 / PR045-SEC-02: after a cursor, a query that returned no row at all is INVALID_CURSOR, never an empty last page', () => {
+    let error: unknown;
+    try {
+      pageOf({ ...REQUEST, after: { id: 'b' } }, [], options);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(AppError);
+    expect((error as AppError).toJSON()).toEqual({ code: 'INVALID_CURSOR', status: 400, detail: 'Invalid cursor.' });
+    // Only the boundary row came back: the list really ended after it.
+    expect(pageOf({ ...REQUEST, after: { id: 'b' } }, rows('b'), options)).toEqual({ items: [], next_cursor: null, has_more: false });
+  });
+
+  describe('sort-key values in the cursor (keys path; PR045-SEC-04)', () => {
+    const KEYED: ListRequest = {
+      ...REQUEST,
+      sort: [
+        { field: 'occurred_at', column: 'occurredAt', direction: 'desc', key: 'timestamp' },
+        { field: 'seq', column: 'seq', direction: 'desc', key: 'integer' },
+        { field: 'owner_id', column: 'ownerId', direction: 'desc', key: 'uuid' },
+        { field: 'id', column: 'id', direction: 'desc' },
+      ],
+    };
+    const OWNER = '0193a5b2-7c1e-7d4a-9f3b-000000000b02';
+    const keysOf = (row: Row): readonly (string | number)[] => [`2026-11-21 12:00:00.12345${row.id.length}+00`, 7, OWNER];
+
+    it('carries the declared kinds of the sort terms before the id tie-breaker', () => {
+      const page = pageOf(KEYED, rows('a', 'b', 'c'), { ...options, keysOf });
+      expect(codec.decode(REQUEST.cursorBinding, page.next_cursor ?? '')).toEqual({
+        id: 'b',
+        keys: ['2026-11-21 12:00:00.123451+00', 7, OWNER],
+      });
+      const iso = pageOf(KEYED, rows('a', 'b', 'c'), { ...options, keysOf: () => ['2026-11-21T12:00:00Z', -1, OWNER] });
+      expect(iso.next_cursor).not.toBeNull();
+    });
+
+    it('refuses keys of another count or kind, and a sort field that declares no key kind (programming errors)', () => {
+      const page = (request: ListRequest, keys: readonly (string | number)[]) => () =>
+        pageOf(request, rows('a', 'b', 'c'), { ...options, keysOf: () => keys });
+      expect(page(KEYED, ['2026-11-21 12:00:00+00', 7])).toThrow('keysOf returned 2 keys for 3 sort terms');
+      expect(page(KEYED, ['Alice Example', 7, OWNER])).toThrow('keysOf value for "occurred_at" is not of the timestamp kind');
+      expect(page(KEYED, ['2026-11-21 12:00:00+00', '7', OWNER])).toThrow('keysOf value for "seq" is not of the integer kind');
+      expect(page(KEYED, ['2026-11-21 12:00:00+00', 7.5, OWNER])).toThrow('keysOf value for "seq" is not of the integer kind');
+      expect(page(KEYED, ['2026-11-21 12:00:00+00', 7, 'not-a-uuid'])).toThrow('keysOf value for "owner_id" is not of the uuid kind');
+      expect(page(REQUEST, ['name-b'])).toThrow('sort field "created_at" declares no cursor key kind');
+    });
   });
 
   it('[AT-US-037-06] the total is part of the page only when the request asks for it', () => {

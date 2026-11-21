@@ -3,7 +3,9 @@
 // Re-exports only.
 export {
   createCursorCodec,
+  CURSOR_CLOCK_SKEW_MS,
   cursorKeyBytes,
+  MAX_CURSOR_KEY_LENGTH,
   MAX_CURSOR_KEYS,
   MAX_CURSOR_LENGTH,
   MAX_CURSOR_TTL_MS,
@@ -19,18 +21,22 @@ export {
   MAX_ANY_OF_VALUES,
   MAX_SORT_LENGTH,
   parseListQuery,
+  TIMESTAMP_FILTER_MAX,
+  TIMESTAMP_FILTER_MIN,
   type FilterTerm,
   type FilterValue,
   type ListRequest,
 } from './list-query.js';
 export {
   defineListSpec,
+  INT4_RANGE,
   LIMIT_CEILINGS,
   LIMIT_PRESETS,
   ListSpecError,
   MAX_FILTER_FIELDS,
   MAX_SORT_TERMS,
   parseSortTerms,
+  type CursorKeyKind,
   type FilterFieldSpec,
   type FilterKind,
   type LimitCeiling,
