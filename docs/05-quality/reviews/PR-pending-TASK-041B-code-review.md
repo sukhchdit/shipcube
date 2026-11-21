@@ -239,3 +239,117 @@ R2-m1 rides the (d) wording either way. R2-n1 goes to TASK-214. R2-n2 and R2-n3 
 - R2-M1: an abort after admission skips the in-flight hold (CWE-307 / CWE-770 class). It is reproducible with `zzcr2probe.api.test.ts` case P4b in my scratchpad (`review/TASK-041B-cr2/copy/apps/api/src/platform/rate-limit/`).
 - R2-m1: valid requests count toward the hold. Also: the `limit - k` squeeze of a shared address, and slow-body holds without a spend or an event.
 - Round 1's n7 and n8 stand.
+
+---
+
+# Round 3: delta `83a85739..12b8a10a` (fix cycle 2)
+
+| Field | Value |
+|---|---|
+| Head | `12b8a10a` on `feat/TASK-041-part-b-rate-limit-rulings-rev2` (parent `83a85739`), not pushed, no PR number yet. The worktree `HEAD` is `12b8a10a` and clean |
+| Delta reviewed | One commit, `12b8a10a` (`fix(api)`, D-TASK041-19..22 in the body): 12 files, 420+/73-. Only `apps/api/src/platform/rate-limit/**`, `apps/api/src/start-api.denial-budget.api.test.ts` and `docs/03-architecture/api/README.md` are touched |
+| Base | PR #82 is still **OPEN** at `be843ae1`. `origin/main` is `bf9f3454`, the merge base is still `530629f4`, no file is changed on both sides, and `git merge-tree --write-tree origin/main 12b8a10a` is clean |
+| Bindings read | Rounds 1 and 2 of this record; the commit body; ADR-0016 amendment 13 item 6 (`f8794de2`); rulings `wave-1-task-041-rulings.md` §9 (9.1 to 9.5); D-ARCH-225..227 and D-ORCH-158 (`docs/sdlc/DECISIONS.md`); security record round 1 (`e8067a31`: PR041-SEC-10..14) |
+| Reviewer | code-reviewer, 2026-11-21 |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: R2-M1 is closed: the entered unit is released only by its outcome. Probe P4b re-run gives 5 authenticator
+         entries (round 2: 60), also for a half-close and for the rulings' case B. 13 of 14 new mutants die; the
+         survivor is the breakerClock seam itself. R2-m1, R2-n1, R2-n2 and R2-n3 are closed. Three NITs, no MAJOR.
+```
+
+## R3.1 What I verified myself
+
+I ran every command in the foreground, one at a time, with no Docker. Nothing ran in the lane-B worktree. All runs used a `git archive 12b8a10a` extract in my scratchpad (`review/TASK-041B-cr3/copy`), with a junction to the worktree's `node_modules` and the git-ignored `prisma/generated` copied in. After the mutation batches I compared every mutated file byte for byte with `git show 12b8a10a:<file>`: all were equal.
+
+| Check | How | Result |
+|---|---|---|
+| Delta | `git log` / `git diff 83a85739..12b8a10a` | 1 commit, 12 files, all in the scope that rulings §9.3 names. No lockfile, config schema or file of another task |
+| Main drift | merge base, `comm -12` of both file lists, `git merge-tree --write-tree origin/main 12b8a10a` | No shared file; merge-tree clean. #82 is not merged yet, so C3 is still ahead |
+| Jest selection | unit + api projects, `--testPathPatterns "platform/rate-limit/\|platform/authn/\|start-api\|runtime-seams\|capture\.api"`, `--maxWorkers=2` | **411/411 pass** at the head (round 2: 398; the 13 new rows are H2 x 2, H3, H4/H5, the R2-n1 row, two wrapper units, two ledger units and the `held` assertions) |
+| Prettier, ESLint | `prettier --check` and `eslint --max-warnings 0` on the 12 changed files; `node tools/lint/check-suppressions.mjs` | Prettier clean; ESLint exit 0 with no output. `check-suppressions` needs a git work tree, so it cannot run in an archive copy: for it I rely on D-ORCH-158 (0 findings) |
+| **Probe P4b (round 2, re-run)** | `zzcr3probe.api.test.ts`, through `createApp`. 60 junk bearers from one IP, one every 3 ms; each client destroys its socket 15 ms after sending; seam slot 300 ms; limit 5 | **Authenticator entered 5 times, peak 5, failed count 5, ledger 0 at the end** (round 2 at `83a85739`: 60, 60, 60) |
+| Probe P4b, half-close | The same with `socket.end()` in place of the destroy | 5 entries, peak 5, failed 5, ledger 0 |
+| Probe P4d, rulings §9.2 case B | 12 waves of 5, 20 ms apart; slot 600 ms; each client destroys its socket 4 ms after sending | 5 entries, peak 5, failed 5, ledger 0 (the architect's probe at `83a85739`: 60) |
+| **Probe P8, D-TASK041-20 end to end** | 20 signature requests to the `signature` route, each with a complete gzip JSON body (inflates to about 200 KB); the client destroys the socket the moment the last byte is written | **20 of 20 reached the wrapper with `enter() === false`**: the close had released the unit while the body was inflated. Slot entered 0 times, nothing spent, ledger 0, and `server.close()` returned in 2 ms (no request or socket left open) |
+| Probe P9, an authenticator that never answers | 5 bearers for which the seam never calls `next`; each client leaves after 20 ms; then a valid bearer | The 5 units stay held and the valid bearer gets 429 with `Retry-After: 1`. This is the designed behaviour (no timer; rulings §9.4, am. 13 item 6 "Release"): an authenticator that never answers is a defect, which the TASK-214 gauge shows |
+| startApi wiring of the new seams | `start-api.ts:147`; `grep` for `inFlight:` and `breakerClock` outside tests | startApi passes `{ settings, valkey }` only. The only non-test readers are `kit.ts:28-47`, with the defaults of round 2 (`createInFlightLedger()`, `createStoreBreaker({})`) |
+| Mutants | `mutate-041b-r3.cjs`, one at a time over the selection above | **13/14 killed** (R3.4) |
+
+**Not re-run here:** `npm run typecheck`, the integration suite (H6 needs Docker), the generated project and the whole api project. For these I rely on the developer's report (D-ORCH-158: ESLint clean over the repo, check-suppressions 0, unit 956/956, the three api files 54/54) and on lane B at the merge head (C4).
+
+## R3.2 Closure of round-2 findings
+
+| ID | Status | Evidence |
+|---|---|---|
+| R2-M1 | **Closed** (option (a), as D-ARCH-226 requires) | `in-flight.ts:52-90`: a unit is `{ key, entered }`; `enter` marks it, `releaseUnentered` frees only an unmarked unit and leaves the holder `GONE`, `release` frees it either way. `authn-failed.ts:59` enters before `inner(...)`; `limits.ts:159-163` calls `releaseUnentered` at the close; `authn-failed.ts:69` and `:82` release at the outcome, the second after the spend. P4b, P4b half-close and P4d give 5 entries (round 2: 60). H2 (destroy and half-close) is the api row R2-M1 asked for, and it kills R1 (release at every close), R2 (no enter) and R14. The JSDoc of `in-flight.ts`, `ipLimiter` and `authn-failed.ts` states the rule; the old title "so an abort cannot skip the hold" is gone |
+| R2-m1 | **Closed** | ADR-0016 amendment 13 item 6, "When honest traffic meets it" and "When a client causes it", says what R2-m1 asked: every credentialed request counts, valid ones included, from step 0 to the outcome, body upload included; the `limit - k` room with no event below the limit; slow bodies that hold units without a spend or an event, up to the 300 s request timeout (30 s with TASK-108). security-analyst rated the cost LOW (PR041-SEC-11) and the bound INFO (PR041-SEC-12) |
+| R2-n1 | **Closed** (ruled into this cycle by D-ARCH-227, not TASK-214) | `counter.ts:17` adds `step0-authn-inflight`; `limiter.ts:151` marks a hold refusal `held: true`; `limits.ts:123` maps it; `limits.ts:171-173` counts nothing for a request whose client left before step 0 answered. H4/H5 and the H1 split kill R8 and R9; the R2-n1 row kills R10. The spent-gate refusal carries no `held` (`in-flight.test.ts` "[H5]") |
+| R2-n2 | **Closed** | `kit.ts:28` and `:37`: the `breakerClock` seam; the K1/K2 row freezes it at 0 (`start-api.denial-budget.api.test.ts:310`). R12 survives by design: with a fast host the row passes on the real clock too; the seam only removes the stall risk |
+| R2-n3 | **Closed** | `kit.ts:1-7` and `authn-failed.api.test.ts:1-8` are rewrapped |
+| n7, n8 (round 1) | Open, routed | Unchanged; they stay with C7 |
+
+## R3.3 Findings of this round
+
+| ID | Severity | file:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-n1 | NIT | `apps/api/src/platform/rate-limit/rate-limit.int.test.ts:197-243` (H6) | Two parts of H6 prove less than its title says. (1) `expect(landedWhenSecondIssued).toBeLessThan(gate.limit)` cannot fail: the second wave is issued in the same synchronous step that pushes the fifth spend, whose `.then` cannot have run, so `landed` is at most 4 there. (2) `limiter.spend` sends its script synchronously (`store.ts:174`, `breaker.ts:48-53`), so all five spends are queued on the connection before any second-wave script. Valkey runs them first, every second-wave peek reads 5, and `gated()` refuses on the spent gate without asking the ledger. The second wave therefore proves that a spend sent before a peek on one connection is seen by it. The ledger over real reply delivery is proved by the first wave only (60 peeks that all read 0, 5 admitted). Both facts are worth having, and the row is correct | When the file is next touched: drop or replace the vacuous assertion (for example, count the second wave's refusals that carry `held: true` and expect 0, which states the order fact directly), and say in the title which wave proves what. No change needed for merge |
+| R3-n2 | NIT | `apps/api/src/platform/rate-limit/authn-failed.test.ts:236-255` | D-TASK041-20 is pinned by the wrapper and ledger units only (mutants R3, R4, R6 and R7 die there; no api row fails for R3). The path is real: probe P8 reaches it 20 times out of 20 with a complete gzip body and an immediate disconnect. Without the `return`, each such request would run the authenticator outside the hold, which is the remaining way around it | Optional: an api row in the P8 shape (complete body, disconnect, slot entered 0 times, ledger 0) |
+| R3-n3 | NIT | `apps/api/src/platform/rate-limit/kit.ts:25-28`; `apps/api/src/start-api.denial-budget.api.test.ts:222-226` | The two new dependencies are test seams, but unlike `authenticate` (`AuthenticateSeamError`, `app.ts:155`) they are accepted in live mode, and the startApi row checks `valkey`, `settings` and the absent `authenticate` but not that `rateLimit` carries nothing else. Today startApi passes `{ settings, valkey }` (`start-api.ts:147`), so nothing is exposed | Optional: in the startApi row, `expect(Object.keys(composed.rateLimit ?? {}).sort()).toEqual(['settings', 'valkey'])`; and "Test seam:" at the start of both JSDoc lines |
+
+## R3.4 Mutants
+
+`mutate-041b-r3.cjs`, one at a time, over the 411-row selection:
+
+| Mutant | Result | Killed by |
+|---|---|---|
+| R1 the close releases at every close (round 2's code) | Killed | H2 destroy and half-close |
+| R2 the wrapper never calls `enter` | Killed | H2, the wrapper unit "[R2-M1]" |
+| R3 the wrapper ignores the result of `enter` | Killed | the wrapper unit "[D-TASK041-20]" (unit only; R3-n2) |
+| R4 `enter` lets a `GONE` holder in | Killed | both D-TASK041-20 units |
+| R5 `releaseUnentered` ignores `entered` | Killed | H2, both R2-M1 units |
+| R6 `releaseUnentered` forgets the holder instead of marking it `GONE` | Killed | both D-TASK041-20 units |
+| R7 `admit` admits a `GONE` holder | Killed | the ledger unit (step 0 never asks for a closed response, so this is a unit-level contract) |
+| R8 no `step0-authn-inflight` label | Killed | H1 split, H4/H5 |
+| R9 `gated()` drops `held` | Killed | H1, H4/H5, the consumeGated units |
+| R10 a closed request is counted | Killed | the R2-n1 row |
+| R11 the kit ignores `deps.inFlight` | Killed | H2, H3, H4 (they read the harness ledger) |
+| R12 the kit ignores `breakerClock` | **Survived, by design** | (the seam removes a stall risk; the row passes on the real clock on a fast host) |
+| R13 the close releases nothing | Killed | 6 rows, first the H3 404 row |
+| R14 `release` leaves an entered unit held | Killed | 41 rows, from B1 (1) on: every admitted request keeps its unit |
+
+## R3.5 Rulings
+
+| Item | Ruling |
+|---|---|
+| D-TASK041-19 (C-1, the release rule) | **Accepted.** It is the shape of R2-M1 option (a) and of rulings §9.3 C-1, with no timer. Every admitted holder is released exactly once in effect: by `releaseUnentered` at the close when the slot was never entered, else by `release` at the outcome. The `GONE` mark keeps a released holder from entering or being admitted again. Memory stays as in round 2: the per-key count map is deleted at the last release, and the `WeakMap` entry (`Unit` or `GONE`) dies with the response |
+| D-TASK041-20 (a holder released before the slot cannot enter; neither the slot nor `next()` runs) | **Accepted. The request is left unanswered, and that is safe.** (1) A `ServerResponse` emits `close` only once the response has finished or its socket has gone. Nothing between step 0 and the slot finishes a response and then continues: the CORS preflight and the OPTIONS responder answer requests step 0 never gates, and a body-parser error goes to the problem handler, not the route. So `enter() === false` means the socket is gone, and there is nobody to answer. (2) Nothing registered before the slot waits for `next()`: the request context is an `AsyncLocalStorage` scope; the access line is written at the close with `aborted: true` (`request-logger.ts:88`); the call deadline and the transaction start at step 8 (`execute.ts:204-209`). (3) Calling `next()` instead would run the authenticator outside the hold, which is the bypass P8 shows: 20 of 20 requests reached this branch. Probe P8 also shows nothing left open (`server.close()` in 2 ms, ledger 0). One wording point: the comment at `authn-failed.ts:56-58` says "the response is closed", which is exact; a future reader may want "the socket has gone" next to it |
+| D-TASK041-21 (C-2, the label and `held`) | **Accepted.** `held?: true` sits on the refusal variant only, and `gateRefusal`'s return type is narrowed so the spread type-checks. Using the decision, not `Retry-After`, is right (a spent window can end in 1 s). Not counting a request whose client left before step 0 answered covers the three step-0 labels of a credentialed request, which matches the `StepZeroLabel` JSDoc and is a superset of what am. 13 item 6 requires. The comment at `limits.ts:169-170` is correct: `answer` runs in the `.then` of the decision, and no macrotask (and so no `close`) can run between the admission and it |
+| D-TASK041-22 (test seams `inFlight` and `breakerClock`; NITs) | **Accepted with R3-n3.** The defaults are unchanged, startApi never passes either, and both are inert in production. The three suppression texts now name TASK-041 |
+| README §7 sentence (C-3) | **Accepted.** The three sentences are verbatim from rulings §9.3 C-3, after "whether its own credential is valid or not." |
+| H1 to H6 | **Accepted.** H1's label split derives the hold refusals from `Retry-After: 1`, which is sound in the fake (a 60 s window opened within the row). H2 is deterministic in the count: once five refusals have landed the gate is spent, so `entered` cannot pass 5 however slowly the arrivals run; under heavy load some clients leave only after their answer, which weakens the row's power but cannot make it flaky. H3 and H4 use raw sockets with a short body, so the unit is held in the body parser for as long as the row needs. H6 is correct, with R3-n1 |
+
+## R3.6 Merge conditions (these replace round 2's R2.6)
+
+- **C1.** Closed (R2-M1 by fix; D-ARCH-226).
+- **C2.** Closed (ADR-0016 am. 13 item 6, `f8794de2`). quality-gatekeeper verifies item 6 before merge, as D-ARCH-225 and rulings §9.5 require.
+- **C3. After PR #82 merges** (still open at `be843ae1`), unchanged from round 2 and refined by D-ORCH-158: merge `origin/main` into the branch (no rebase); prove that the squash of #82 equals `be843ae1` on the part-A files; prove that `git diff origin/main <merge>` equals `git diff be843ae1 12b8a10a` file by file (or the head then current); show any hand resolution with `git show --cc`. A pure merge needs no further code-review round; a hand-resolved code file needs a delta round.
+- **C4. Lane B on that merge head:** `rate-limit.int.test.ts` with the three real-Valkey rows of round 1 **and H6**; the api project, including `authn-failed.api.test.ts` (H1 to H5 and the R2-n1 row), `start-api.denial-budget.api.test.ts`, `limits.api.test.ts` and `runtime-seams.api.test.ts`; `in-flight.test.ts` and `authn-failed.test.ts`; the generated project; coverage of the changed files. Lane A: the `security-integration` job. The loopback rows (H2 to H4) must pass without retries; a retry hides a real failure here.
+- **C5. Security delta round** on the final head: PR041-SEC-10 verified closed (it is R2-M1), and the D-TASK041-20 confirmation that D-ORCH-158 asks for. My ruling above is the code-review half.
+- **C6.** QG-041-C2 second half (product-manager) before merge, unchanged; it now includes the one PRD §9 R-16 / A-112 sentence of rulings §9.5.
+- **C7.** The orchestrator routes round 1's n7 (cluster hash slots) and n8 (TASK-052 401-only row). R3-n1 to R3-n3 are optional; they may ride a later commit of this branch or the next TASK-041 change.
+
+## R3.7 Good
+
+- The fix is the smallest one that closes the hole: one boolean per unit, one sentinel and three ledger operations, with no timer and no extra store call.
+- `enter()` sits at the only point that cannot race, the first statement of the wrapper. A close after it releases nothing, and a close before it releases the unit and also stops the request.
+- H2 reproduces the attack shape of R2-M1 through `createApp` with real sockets, both ways a client can leave, and fails at `83a85739`.
+- Hold refusals are told apart by a flag on the decision, not by a header value. That keeps trigger (iv) of the residual readable.
+- The `breakerClock` seam fixes the cause of R2-n2 instead of widening a bound.
+
+## R3.8 Security flags (for security-analyst)
+
+- R2-M1 / PR041-SEC-10: closed here by fix; P4b, the half-close and case B each give 5 entries. Probe file: `review/TASK-041B-cr3/copy/apps/api/src/platform/rate-limit/zzcr3probe.api.test.ts` in my scratchpad.
+- D-TASK041-20: P8 shows that the branch is reachable (a complete compressed body, then a disconnect) and that it ends the request with nothing open. Without the branch, such a request would be the remaining way around the hold.
+- P9: an authenticator that never answers keeps its unit, so the address's hold on that instance stays full (429 `Retry-After: 1` for valid credentials) until the process restarts. This is by design (am. 13 item 6, rulings §9.4) and depends on every authenticator card having its own timeout (TASK-052/055/091/171/261).
