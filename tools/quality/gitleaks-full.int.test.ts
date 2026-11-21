@@ -1,7 +1,8 @@
 /**
  * gitleaks-full runner against the real history with the pinned image (PR33-SEC-08 integration cases; PR25-SEC-01;
- * D-SEC-PR45-01; TASK-015 part 015-B). Docker required (lane B). The ancestry of HEAD carries the 19 recorded
- * baseline fingerprints: the full baseline gives 0 findings, dropping one line gives exactly that one finding back, and
+ * D-SEC-PR45-01; TASK-015 part 015-B). Docker required (lane B). The ancestry of HEAD carries the 19 main baseline
+ * fingerprints (the other 3 of the 22 are branch-only merge commits, D-DEVOPS-002; the first line is a main one): the
+ * full baseline gives 0 findings, dropping the first line gives exactly that one finding back, and
  * the config is the committed `.gitleaks.toml` read from git (the file lane A reads from the base ref).
  */
 import { spawnSync } from 'node:child_process';
@@ -34,14 +35,14 @@ function report(): string {
 }
 
 describe('gitleaks-full: full-history scan with the pinned image', () => {
-  it('[PR33-SEC-08] the 19-line baseline gives 0 findings over the ancestry of HEAD', () => {
+  it('[PR33-SEC-08] the 22-line baseline gives 0 findings over the ancestry of HEAD', () => {
     const file = report();
     const result = scan({ root: repoRoot, sha: head, configText, baselineLines: baseline, report: file });
     expect(result).toEqual({ status: 'clean', findings: 0 });
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual([]);
   }, 900_000);
 
-  it('[PR33-SEC-08] an 18-line baseline gives back exactly the dropped fingerprint (redacted)', () => {
+  it('[PR33-SEC-08] a 21-line baseline gives back exactly the dropped fingerprint (redacted)', () => {
     const [dropped, ...rest] = baseline;
     const file = report();
     const result = scan({ root: repoRoot, sha: head, configText, baselineLines: rest, report: file });
