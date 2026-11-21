@@ -187,4 +187,59 @@ describe('DbError and helpers', () => {
     expect(isDatabaseError(null)).toBe(false);
     expect(isDatabaseError('P2028')).toBe(false);
   });
+
+  it('[D-ARCH-164] [D-ARCH-212] [PR293-SEC-03 b] one answer for a refused reference: two violations that differ only in constraint, message and detail map deep-equal, for 23503 (foreign_key_violation) and 23001 (restrict_violation, PostgreSQL 18), each raw under P2010 and as Prisma P2003', () => {
+    const refused = (
+      prismaCode: string,
+      sqlState: string,
+      constraint: string,
+      message: string,
+      detail: string,
+    ): Error & Record<string, unknown> => {
+      const error = prismaError(
+        prismaCode,
+        sqlState,
+        { kind: 'postgres', code: sqlState, constraint, originalMessage: message, detail },
+        message,
+      );
+      error['meta'] = { ...(error['meta'] as Record<string, unknown>), constraint, field_name: constraint, modelName: 'QuotePackage' };
+      return error;
+    };
+    const answers = new Map<string, Record<string, unknown>>();
+    for (const sqlState of ['23503', '23001']) {
+      for (const prismaCode of ['P2010', 'P2003']) {
+        // The guest key and the organisation key of the owner-bound pair: another owner's row, an absent row, or (23001)
+        // a referenced key that changed while a row still names it.
+        const foreign = mapDbError(
+          refused(
+            prismaCode,
+            sqlState,
+            'fk_quote_packages__guest_token_hash_quote_id',
+            'insert or update violates foreign key',
+            'Key (guest_token_hash, quote_id) is not present',
+          ),
+        );
+        const unknown = mapDbError(
+          refused(
+            prismaCode,
+            sqlState,
+            'fk_quote_packages__org_id_quote_id',
+            'update or delete on table "quotes" violates RESTRICT setting of foreign key constraint "fk_quote_packages__org_id_quote_id"',
+            'Key (org_id, quote_id)=(a, b) is still referenced from table "quote_packages"',
+          ),
+        );
+        expect(foreign).toEqual(unknown);
+        expect(foreign).toEqual({ status: 500, code: 'INTERNAL_ERROR', reason: 'DB_ERROR', retryable: false, sqlState, prismaCode });
+        expect(JSON.stringify(foreign)).not.toMatch(/fk_|quote|Key|RESTRICT/);
+        answers.set(`${sqlState} ${prismaCode}`, { ...foreign });
+      }
+    }
+    // Under one Prisma code the two SQLSTATEs map to answers that differ in sqlState only.
+    for (const prismaCode of ['P2010', 'P2003']) {
+      const { sqlState: fkState, ...fkRest } = answers.get(`23503 ${prismaCode}`) ?? {};
+      const { sqlState: restrictState, ...restrictRest } = answers.get(`23001 ${prismaCode}`) ?? {};
+      expect([fkState, restrictState]).toEqual(['23503', '23001']);
+      expect(restrictRest).toEqual(fkRest);
+    }
+  });
 });

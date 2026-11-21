@@ -9,8 +9,13 @@
  */
 import type { BillableWeight, CanonicalPackage, Money } from '@platform/shared';
 
-/** Semantic version of the engine's arithmetic and step order; recorded in every result. */
-export const ENGINE_VERSION = '1.0.0';
+import type { Rate } from './rounding.js';
+
+/**
+ * Semantic version of the engine's arithmetic and step order; recorded in every result. 1.1.0 (TASK-080) adds the
+ * margin step after the base freight line.
+ */
+export const ENGINE_VERSION = '1.1.0';
 
 export interface PricingRequest {
   /** ISO 4217 currency of every charge line and total. */
@@ -33,9 +38,27 @@ export interface CarrierCostQuote {
   readonly cost: Money;
 }
 
-/** The materialised configuration version (ADR-0015 §4); rule sets join it in later tasks. */
+/**
+ * One margin rule (data-model `margin_rules`, DR-B08; US-140, TASK-080). A null dimension matches any value. The M0
+ * dimensions are carrier and service; US-141 adds carrier account, lane, customer segment, content type, weight band
+ * and date range, and US-152 adds fixed-amount margins.
+ */
+export interface MarginRule {
+  readonly ruleKey: string;
+  /** Higher wins (DR-B08); the default rule has -1000. */
+  readonly priority: number;
+  readonly carrierCode: string | null;
+  readonly serviceCode: string | null;
+  /** Percentage over the base freight: `{ bps: 1500 }` is 15 %. Never negative. */
+  readonly rate: Rate;
+  /** Exactly one rule per configuration is the default: priority -1000 and every dimension null (REQ-PRICE-003). */
+  readonly isDefault: boolean;
+}
+
+/** The materialised configuration version (ADR-0015 §4); further rule sets join it in later tasks. */
 export interface PricingConfigSnapshot {
   readonly version: string;
+  readonly marginRules: readonly MarginRule[];
 }
 
 export interface PricingInput {

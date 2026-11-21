@@ -177,9 +177,22 @@ const SHARED_ROOT_LOGGING: readonly Violation[] = SHARED_ROOT_CASES.map(([title,
   BOUNDARIES,
   SHARED_ROOT_MESSAGE,
 ]);
+/**
+ * packages/pricing has a second control on the specifier arm (PR076-SEC-07, TASK-080): platform/pricing-purity refuses
+ * every `@platform/shared/<subpath>` import, so that fixture reports both rules; both messages name the specifier.
+ */
+const sharedLoggingSpecifierCase = (importer: string, dir: string): Violation => {
+  const [title, file] = sharedLoggingCase(
+    `${importer} imports @platform/shared/logging (package specifier)`,
+    `${dir}/bad-logging-specifier.ts`,
+  );
+  return dir === 'packages/pricing/src'
+    ? [title, file, [BOUNDARIES, PRICING_PURITY], '@platform/shared/logging']
+    : [title, file, BOUNDARIES, SHARED_LOGGING_MESSAGE];
+};
 const SHARED_LOGGING: readonly Violation[] = [
   ...SHARED_LOGGING_IMPORTERS.flatMap(([importer, dir]) => [
-    sharedLoggingCase(`${importer} imports @platform/shared/logging (package specifier)`, `${dir}/bad-logging-specifier.ts`),
+    sharedLoggingSpecifierCase(importer, dir),
     sharedLoggingCase(`${importer} imports packages/shared/src/logging (resolved file)`, `${dir}/bad-logging-resolved.ts`),
   ]),
   sharedLoggingCase('apps/web build configuration (vite.config.ts) imports @platform/shared/logging', 'apps/web/vite.config.ts'),
@@ -337,6 +350,22 @@ const RULES: readonly Violation[] = [
       ['[R2-n2] a string-named import specifier { "uuidv7" as id }', 'bad-shared-string-name-import', '@platform/shared uuidv7'],
       ['[R2-n2] a string-named re-export { "uuidv7" as id } from', 'bad-shared-string-name-export', '@platform/shared uuidv7'],
       ['[R2-n1] navigator (locale and environment)', 'bad-navigator', 'navigator.language'],
+      [
+        '[PR076-SEC-07] a @platform/shared subpath (queues: retryDelayMs defaults to Math.random)',
+        'bad-shared-subpath',
+        '@platform/shared/queues (a subpath; pricing imports the @platform/shared root only)',
+      ],
+      ['[PR076-SEC-07] declare const Date shadowing the global', 'bad-declare-date', 'declare Date'],
+      ['[PR076-SEC-07] a declare global block', 'bad-declare-global', 'declare global'],
+      ['[R1-m3] declare const process shadowing the global', 'bad-declare-process', 'declare process'],
+      ['[R1-m3] declare const Math shadowing the global', 'bad-declare-math', 'declare Math'],
+      ['[PR080-SEC-02] a destructured declare const { Date }', 'bad-declare-destructured', 'shadowed Date'],
+      ['[PR080-SEC-02] a type-only import aliased as Date', 'bad-shadow-import-type', 'shadowed Date'],
+      [
+        '[PR080-SEC-03] a template-literal import() of a @platform/shared subpath',
+        'bad-template-import-subpath',
+        '@platform/shared/queues (a subpath; pricing imports the @platform/shared root only)',
+      ],
     ] as const
   ).map(([title, name, what]): Violation => [
     `[AT-US-138-02] ${PRICING_PURITY}: ${title}`,
@@ -344,6 +373,12 @@ const RULES: readonly Violation[] = [
     PRICING_PURITY,
     `'${what}' is not allowed in packages/pricing`,
   ]),
+  [
+    '[AT-US-138-02] [PR080-SEC-02] platform/pricing-purity and @typescript-eslint/no-namespace: a type-only namespace Date',
+    'rules/pricing-purity/packages/pricing/src/bad-shadow-namespace.ts',
+    [PRICING_PURITY, '@typescript-eslint/no-namespace'],
+    '',
+  ],
   [
     '[AT-US-138-02] [PR076-SEC-01] platform/pricing-purity: production code imports a module of its tests/ folder',
     'rules/pricing-purity/packages/pricing/src/bad-tests-import.ts',

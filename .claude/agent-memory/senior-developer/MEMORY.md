@@ -44,4 +44,27 @@
 - [TASK-027 RBAC matrix](feedback_task027_rbac_matrix.md) — classifier refuses tools/quality edits, npm ci during live run, loopback timeouts under load, contract fixtures, resume/flake budget
 - [TASK-020D resume](feedback_task020d_resume.md) — leftover mutant after outage, guard breaks existing int test, main.ts comments vs diff gate, host-overload probe
 - [TASK-285 audit actions](feedback_task285_audit_actions.md) — bootstrap name must sort last, shadow-init KEEP ripple, lane-test pins, saturation-only evidence FAILs
+- [TASK-029 resume](feedback_task029_resume.md) — audit inherited branch vs sheet (load/call FAILED gap), testcontainer wait, 180 s bg move, TASK-028 tokeniser gap
+- [PR #54 fc1/fc2](feedback_pr54_fc1.md) — flake triage, 0xC0000142, MSYS-mangled gitleaks config, prerender 10 s INVALID, setTimeout seam pin
 - [PR #54 evidence push](feedback_pr54_evidence_push.md) — union-needed checklist, remerge-diff proof, hostscan positive control, nested node_modules link cleanup
+- [Batch 1.1 lessons](feedback_batch_11.md) — type-only files fail diff gate, BullMQ name/id rules, tenant-key std-columns models, lock handover
+- [Plan fold D-SD-001](feedback_plan_fold_dsd001.md) — idAt moves tasks w/o renumbering, waveExceptions, no-dod cards, briefs dir, D-SD series, fetch not pull --rebase
+- [Dispatch plan 11-19](feedback_dispatch_plan_1119.md) — push freeze during PR CI start-up, hold slots for gated critical path, Wave 2 fillers, stale-card grep, f-level overlap check
+- [TASK-043 resume triage](feedback_task043_resume_triage.md) — up-down-up runs twice per lane B run (cross-suite load proof), pg client.js:170 = connect timeout
+- [TASK-080 resume](feedback_task080_resume.md) — new table/model ripples (TenantDb pin, grants pins), prisma test import limits, parseDecimal exponents
+- [TASK-051 guest claim](feedback_task051_guest_claim.md) — shared probe modules in prisma/tests/harness, suite placement for pending SEC-TC, sibling self-match trap
+- [TASK-042 i18n](feedback_task042_i18n.md) — i18next usedLng-on-miss, JSON import attributes, isolateModules+React, lint-lock checker as lint step
+- [TASK-045 pagination](feedback_task045_pagination.md) — apps/api int tests can't import prisma harness; .binding lint, app.* literal lint, stray tsc emits, shared $ref
+- [TASK-080 fc1](feedback_task080_fc1.md) — lane B log in .orch/laneb-queue, background lock wait, C9 IN-list pin, canonical JSON oracle, escape mangling
+- [TASK-034 rehearsal](feedback_task034_rehearsal.md) — scratchpad Write refusal, require-await fakes, lintRepository-only rules, open-loop probe must yield
+- [TASK-051 fc1](feedback_task051_fc1.md) — shared scratchpad collisions, commitlint footer trap, gitleaks emulator, merge-tree supersede
+- [TASK-044 SSE](feedback_task044_sse.md) — slot 20 s deadline caps streams, Cache-Control overwrite, Express env=test hides console.error, origin_time_zone PII false positive
+- [TASK-051 R2-m1 tags](feedback_task051_tags.md) — unique commit-msg file names, never Write+commit in one parallel block; SEC-TC tag order
+- [TASK-045 fc1/fc2](feedback_task045_fc1.md) — RLS in bare-PG int tests, heredoc/sed traps, Joi helpers.original, explicit-undefined default arg 401
+- [TASK-041 part B stacked](feedback_task041b_stacked.md) — unset upstream on stacked branch, host api-run limit, heredoc parse fails, breaker/wrapper notes
+- [TASK-034 fc1](feedback_task034_fc1.md) — draft worktree during lane B, PGlite SQL probes, COALESCE is syntax, loop-circular any, wait loops
+- [TASK-040B1 envelope/keys](feedback_task040b1.md) — wrapper drops optional args, gitleaks-safe KATs, runner hides admission wait, bg output vanishes
+- [TASK-044 fc1](feedback_task044_fc1.md) — unhandledRejection spy vacuous in Jest, equal-work ratio pins, id-less SSE frame helper ripple, scan the wire
+- [TASK-041B fc2](feedback_task041b_fc2.md) — entered-marker release rule + admission-to-slot gap, check-suppressions 0 every cycle, sed mutation proof
+- [TASK-041B fc1](feedback_task041b_fc1.md) — in-flight hold for read-then-spend gates (atomic admit, abort trap), wiring-pin api rows, heredoc parse kills whole cmd
+- [TASK-034 fc2](feedback_task034_fc2.md) — Prisma banner on stderr/status on stdout, never tail joined streams, Compose-prefix rewrite harness CLI proof

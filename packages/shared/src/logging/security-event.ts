@@ -47,6 +47,9 @@ export const RUNTIME_SECURITY_EVENTS = [
   'db_privilege_denied',
   'audit_mutation_rejected',
   'audit_partition_squatted',
+  // TASK-041 (D-SECT39-01 item 5): the rate-limit / denial-budget store (Valkey) is unavailable and the instance fell back
+  // to its per-instance counters. In the README §13 runtime table (api-designer to acknowledge).
+  'rate_limit_store_unavailable',
 ] as const;
 export type RuntimeSecurityEventName = (typeof RUNTIME_SECURITY_EVENTS)[number];
 
@@ -86,6 +89,7 @@ export const SECURITY_EVENT_LEVEL: Readonly<Record<SecurityEventName | RuntimeSe
   db_privilege_denied: 'error',
   audit_mutation_rejected: 'error',
   audit_partition_squatted: 'error',
+  rate_limit_store_unavailable: 'error',
 };
 
 /**
@@ -127,6 +131,7 @@ export const SECURITY_EVENT_FIELDS: Readonly<Record<SecurityEventName | RuntimeS
   db_privilege_denied: ['sql_state'],
   audit_mutation_rejected: ['sql_state'],
   audit_partition_squatted: ['partition_name', 'kind', 'reason', 'sql_state'],
+  rate_limit_store_unavailable: ['store', 'scope'],
 };
 
 /** Emitted instead of an event whose name is not a valid event identifier. */

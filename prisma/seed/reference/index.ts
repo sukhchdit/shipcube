@@ -3,6 +3,7 @@
  * run after them, all inside one transaction (see `runReferenceSeed`).
  *
  * Later tasks append here, each with its own `Dataset` file next to this one:
+ * - TASK-080 `pricing_config_versions` (the sample pricing configuration version, insert-only and audited), the first.
  * - TASK-026 `countries` (and its `currencies` dependency), TASK-066 `currencies`/`fx_rates`, and the other
  *   data-model §9.2 datasets as their tables arrive. A dataset needs a stable `name`, a `version`, the natural key
  *   and `source` on every row; configuration datasets set `audited`, published ones `insertOnly`.
@@ -14,9 +15,11 @@
  */
 import type { Dataset, SeedStep } from '../framework/contracts.js';
 import { authzParityStep } from './authz-parity-step.js';
+import { pricingSampleDataset } from './pricing-sample.js';
 
-export const REFERENCE_DATASETS: readonly Dataset[] = [];
+export const REFERENCE_DATASETS: readonly Dataset[] = [pricingSampleDataset];
 
 export const REFERENCE_STEPS: readonly SeedStep[] = [authzParityStep];
 
 export { authzParityStep, catalogueSnapshot, diffAuthz, type AuthzSnapshot } from './authz-parity-step.js';
+export { PRICING_SAMPLE_CONTENT_SHA256, PRICING_SAMPLE_VERSION_KEY, pricingSampleDataset } from './pricing-sample.js';

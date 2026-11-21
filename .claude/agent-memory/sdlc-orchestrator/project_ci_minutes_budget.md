@@ -17,3 +17,6 @@ Hosted CI runs on the free 2,000 Actions minutes/month with a $0 spend limit (CL
 - P4: run `ci:minutes --forecast` every Monday and at wave exits; record in STATUS.
 - Lane C `wave-end` at most once a month while forecast > 60 %; nightly only with it.
 - Related: [[project-host-resource-limits]], [[project-run-scope-and-publishing]].
+
+**2026-11-21: exhausted.** From about 03:12Z GitHub stopped starting jobs: "recent account payments have failed or your spending limit needs to be increased" (D-ORCH-146). A job that fails with no steps means billing; check `gh api repos/<o>/<r>/check-runs/<job>/annotations`. Merges wait for the monthly reset or a user account change. Do not try to work around it. Keep building and preparing PRs up to "ready".
+- Merge-ref check: fetch with `+refs/pull/<n>/merge:…`. GitHub force-updates the ref, so a fetch without `+` is rejected silently and leaves a stale copy.

@@ -260,3 +260,69 @@ The round-2 NITs (n2, R2-n2, R2-n3, R2-n4) are unchanged and remain NITs.
 2. **R3-C2:** a security record on the final head that rules R3-m1 and R3-m2 (fix now, or due before the first catalogued event type).
 3. **R3-C3:** R2-C5 still stands: the lint twin of the tripwire goes on the next lint-lock holder's card.
 4. **R3-C4:** if main moves again, merge it and take main's DECISIONS.md. A merge with the current main (`5451a677`) is clean.
+
+---
+
+# Round 4 (delta review, verdict bound to head `3ba1eb53`)
+
+| Field | Value |
+|---|---|
+| Head | `3ba1eb53`. Path from the round-3 head `93f9faa0`: `fe266fd1` (merge of main `eb0aab52`), `16c686ee` (test-layer tripwire), `02d7130b` (merge of main `b9c0ddeb`), `35bfb1b4` (AT-US-011-04 retitle), `65dff945` (merge of main `0bfc0620`), `3ba1eb53` (fix cycle 3). The branch is unpushed, so no CI has run on it |
+| Reviewer | code-reviewer, 2026-11-21 |
+| Bindings added | Security round 2, R2.5 rulings (scope of PR043-SEC-08 and the reopened PR043-SEC-02 tripwire arm). D-TASK043-13 to -15 are in the body of `3ba1eb53` |
+
+```
+VERDICT: APPROVED_WITH_NITS at 3ba1eb53 (merge conditions R4-C1 to R4-C4)
+SUMMARY: All three merges are clean automatic merges, and the PR delta is conserved. R3-m1 (a)(b)(c) is closed as
+         security R2.5 scoped it, and R3-m2 is closed by the general tests/-folder rule. Every new guard is pinned
+         (11 of 11 mutants killed). One new MINOR is security-owned and due before TASK-049: the probe set does
+         not catch a pattern that lacks a `$` anchor.
+```
+
+## R4.1 What I verified myself
+
+Same host rule: commands ran in the foreground, one at a time, with no Docker. I worked in a `git archive 3ba1eb53` extract under the session scratchpad, with `node_modules` junctioned to the evidence worktree (HEAD `3ba1eb53`) and `prisma/generated` copied in. The extract was removed afterwards. The worktree is unchanged: `git status` clean, 748 entries in `node_modules`. There is one side effect. `tools/tsconfig.json` keeps its build info under the root `node_modules/.cache`, so `tsc -b tools` rewrote the git-ignored `node_modules/.cache/tools.tsbuildinfo` of the evidence worktree through the junction. That file is a cache only: the next `tsc -b` there rebuilds `tools`.
+
+| Check | Result |
+|---|---|
+| Merges `fe266fd1`, `02d7130b`, `65dff945` | For each one, `git merge-tree --write-tree <p1> <p2>` gives no conflict, and `git diff <tree> <merge>` is empty. All three are clean automatic merges and pure unions |
+| Delta conservation | The R3 PR delta (`af4a1b48..93f9faa0`) has 54 files. The R4 delta (`0bfc0620..3ba1eb53`) has 56: the same 54 plus `system-tx.test.ts` and `open-queue.test.ts`. For the 50 files the fix commits do not touch, the `^[+-]` lines of both diffs have equal md5. The PR diff has no `package-lock.json`, `DECISIONS.md` or `.env*` change |
+| Merge with the current main `6a21b63a` | `git merge-tree --write-tree origin/main 3ba1eb53`: clean |
+| Prettier and ESLint (`--max-warnings 0`) on the six changed files | Clean |
+| `tsc -b packages/shared apps/worker tools` | Clean |
+| Unit tests: events, `tools/repo/test-seams`, system-tx, relay, purge, writer (`--maxWorkers=2`) | 6 suites, 88 tests pass |
+| `open-queue.test.ts` (`--maxWorkers=1`) | 4 of 4 pass |
+| Mutants, each run against its pinning suite | 11 of 11 killed. Walk mutants: drop `whens`, drop `ordered`, drop `failover`, drop `custom`, drop `invert`, drop the 257-letter probe, drop the `*_enc` key check, array items lose their key. Tripwire mutants: no directory `require`, no back quotes, `testing` subpath for `api` only |
+| Probe A: the walk at the head, using the repository's Joi | Closed, and each stores free text: `/^ORD-/` stores `ORD-p@example.com free text`; `/^[0-9]{4}/` stores `1234 p@example.com`; `/[0-9]/` stores `call 5 p@example.com`; `/^[A-Z]{3}/` stores `ABC p@example.com` (R4-m1). Also closed: a `Joi.extend` that keeps the type name `string` or `number` and adds a value-returning rule (`zzrule`) or a type-level `validate`; each stores `p@example.com` (R4-n1). Harmless or refused: `.allow(<constant>)`, `.replace` (the walk runs with `convert: false`), `.prefs({convert:true}).replace` + `guid` (refused at validation), `.rename`, `.empty(schema)`, `valid(Joi.ref('$x'))` (no context is passed), an escaped `/` in a regex, base64 inside an object under a `*_enc` key (refused) |
+| Probe B: the tripwire, with production files planted in the extract | Caught: a relative import of `routing/tests/timing.js`, the same import as a back-quoted `import()`, and a `packages/audit` file importing `../../tests/fixture.js`. Not caught (R4-n2): `import(/* c */ '…/routing/tests/timing.js')`, and a `packages/config/src/web` file re-exporting `../testing/index.js` (the folder behind `@platform/config/testing`) |
+| Not re-run | All `*.int.test.ts`. The D-TASK043-15 triage rests on run `20261120T1407Z_320933c`; I did not read its artefacts. I did re-read `down.sql`: it reverts every prefix, as the decision states (`REVOKE DELETE` on `job_executions`, which only this migration grants, then `DROP TABLE IF EXISTS` twice) |
+
+## R4.2 The delta
+
+| Item | Ruling |
+|---|---|
+| R3-m1 (a) / PR043-SEC-08: `opensValues` | **Closed.** It refuses `whens`, `ordered`, `externals`, `flags.default`, `flags.failover` (an extension of R2.5, D-TASK043-13), a `custom` rule and an inverted `pattern`, at every node. Each refusal row validates its own payload first, so no row is vacuous. A key-level `when` on a `guid`, which round 3 found harmless, is now refused as well. That is conservative and accepted |
+| R3-m1 (b): pattern probe set | **Closed as scoped by R2.5.** The probes are an address, a space, the empty string and 257 letters, with a fresh `RegExp` for each probe. The four mutant rows admit exactly one probe each, so dropping any probe turns a row red (confirmed by mutant). A regex that does not parse throws at load (D-TASK043-13): accepted. Residual: R4-m1 |
+| R3-m1 (c): `base64` only under `*_enc` | **Closed.** Array items inherit the array's key. A nested object under `token_enc` does not pass the key down (probe). The controls `token_enc` and `tokens_enc[]` are accepted |
+| R3-m2 / PR043-SEC-02 tripwire arm (`16c686ee`, `3ba1eb53`) | **Closed.** This is the general rule R2.5 asked for. It flags any relative specifier that resolves into a `test`, `tests` or `__tests__` folder (the CommonJS directory form included) and any `@platform/<pkg>/testing`, under `apps/*/src` and `packages/*/src`. It reads back-quoted specifiers and has positive rows for `routing/tests/timing.js` and a `packages/` form. The near misses (`./tests.js`, a template with a substitution, `testingx`, `tests/../`) stay clean. A non-vacuity check asserts that `packages/` is scanned. The image preflight remains the backstop for `tests/` |
+| `35bfb1b4` retitle | Accepted. The relay half of AT-US-011-04 under the D-PM-079 split. The title changes only, and the body already asserts a single job per event id |
+| D-TASK043-14: `open-queue.test.ts` timeouts | Accepted. Hook 15 s and test 30 s, against a stated budget of 7 s and 11.2 s, and the comments give the budget. The change is test-only and widens no product bound |
+| `system-tx.test.ts` | Accepted. It covers `systemContext` and both `errorClassOf` arms, and it asserts that the error message never comes back |
+| D-TASK043-15: up-down-up triage | Accepted, provisionally. The reasoning matches `down.sql`, and lane B on the final head (R4-C1) is the evidence |
+
+## R4.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R4-m1 | MINOR (security-owned, for security-analyst) | `packages/shared/src/events/event-definition.ts` `refusesEveryProbe` / `PATTERN_PROBES` | Joi does not anchor `pattern`. A regex without a `$` anchor passes the probe set whenever its leading class excludes the probes, and it then admits any suffix: `/^ORD-/`, `/^[0-9]{4}/`, `/^[A-Z]{3}/` and `/[0-9]/` are all "closed" and store an e-mail address (probe A). A missing `$` is a common slip, unlike the deliberate shapes in PR043-SEC-08, and a mechanical check can decide it. R2.5's "review duty" covers pattern quality, such as `^ORD-.*$` or a name class, but this case can be checked by code. | In `closedString`, also require each `pattern` source to start with `^` and end with an unescaped `$`, with no top-level `\|` (or require the form `^(?:…)$`). Add refusal rows for `/^ORD-/` and `/[0-9]/` and a control for `/^[A-Z]{3}$/`. Due: the same as PR043-SEC-08, a merge prerequisite of TASK-049, unless security-analyst rules otherwise. The catalogue is empty, so this is not a TASK-043 merge blocker |
+| R4-n1 | NIT (security-owned) | same file, `closedNode` | The walk refuses a rule only when it is named `custom`; any other rule name is accepted, and number nodes are never checked for rules. A `Joi.extend` that keeps the built-in type name (`string`, `number`) and adds a value-returning rule passes the walk and stores an e-mail address. A type-level `validate` in such an extension leaves no trace in `describe()` at all. This is deliberate code in an owned path, the same class as PR043-SEC-08, and it contradicts the "structural allow-list" wording | Replace the `custom` deny-list with an allow-list of rule names per type. Also refuse `Joi.extend` under `packages/shared/src/events/**`, either by a tripwire grep or by checking that each schema's `$_root` is the canonical `joi` export, because `describe()` cannot see a type-level `validate`. Same due date as R4-m1 |
+| R4-n2 | NIT (lint twin card) | `tools/repo/test-seams.test.ts` `SPECIFIERS`, `TEST_FOLDER` | (a) A comment inside `import(…)` before the string hides the specifier. (b) A relative import into `packages/config/src/testing/` is not flagged, while its `@platform/config/testing` specifier is (that folder ships in `dist/`, so the preflight does not catch it either). (c) The export pattern `@platform/api/modules/*` can match `modules/<m>/tests/<x>`, which resolves to a `tests/<x>/index.ts`; no such file exists today | Name (a) to (c) on the R3-C3 card line for the resolved-file boundaries twin, which sees all three. No change is needed in this PR |
+
+The NITs from round 2 (n2, R2-n2, R2-n3, R2-n4) are unchanged and remain NITs.
+
+## R4.4 Merge conditions at `3ba1eb53` (replacing R3.4)
+
+1. **R4-C1:** lane B PASS on the final head. Scope: everything R3-C1 named (the api `writer.int.test.ts`, every outbox lane B row, C5 against the column-level manifest line), plus `open-queue.test.ts` and the up-down-up copy in the parallel integration suite, which together confirm D-TASK043-14 and -15. The known `env-example-parity` failure from the two user-only `OUTBOX_RELAY_*` lines clears only when the user commits those lines, and it must be green on the head that merges.
+2. **R4-C2:** a security record that covers `3ba1eb53` and rules on R4-m1 and R4-n1 (fix now, or due with PR043-SEC-08 before TASK-049). Under R2.4 of that record, this delta touches only unowned paths, so the round-2 binding may carry over; security-analyst confirms that.
+3. **R4-C3:** R3-C3 still stands: the lint twin goes on the next lint-lock holder's card. That card now also names R4-n2 (a) to (c) and the back-quoted `import()` spelling.
+4. **R4-C4:** if main moves again, merge it and take main's DECISIONS.md. The merge with the current main `6a21b63a` is clean.

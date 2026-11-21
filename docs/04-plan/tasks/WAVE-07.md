@@ -40,7 +40,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (partial; completed by TASK-193) | US-027 (M1 Must) Sessions list and remote sign-out (API and My sessions page) |
 | REQs | REQ-AUTH-021, REQ-AUTH-022, REQ-ADMIN-007 |
 | NFRs | NFR-SEC-004 |
-| Spikes / security / decisions | D-047, D-ARCH-191 |
+| Spikes / security / decisions | D-047, D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-095, TASK-067 |
@@ -54,6 +54,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - API scenarios of US-027
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: revokeOtherSessions, revokeMySession (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listMySessions sorted by last_used_at, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - Covers the scenarios of AT-US-027-01 … AT-US-027-07 that belong to its layer; US-027 closes in TASK-193
 
 **DoD notes**
@@ -235,6 +236,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 
 **Acceptance tests to write**
 - All US-141 and US-146 scenarios
+- MERGE PREREQUISITE PR080-SEC-06 (INFO, CWE-693; D-SECPR080-02; TASK-080 security record PR-0081 round 2, section R2.3), unless an earlier task that changes tools/eslint-rules/pricing-purity.mjs took it (the next change to that file carries it): platform/pricing-purity reports import x = require(...) (a TSImportEqualsDeclaration visitor) and a computed import() specifier inside packages/pricing, so neither form rests only on the unprotected rules @typescript-eslint/no-require-imports and platform/static-module-specifier; the validated 8-line patch and two fixtures of the record, every other fixture and source unchanged; tools/eslint-rules is an owned path, so the PR carries a security record
 - AT-US-141-01 … AT-US-141-07: all 7 scenarios of US-141, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-146-01 … AT-US-146-06: all 6 scenarios of US-146, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
@@ -832,7 +834,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-013 (M0 Should) Telemetry seam and graceful shutdown |
 | REQs | REQ-PLAT-019, REQ-PLAT-022 |
 | NFRs | NFR-AVAIL-002, NFR-OBS-002, NFR-OBS-003 |
-| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004, D-ARCH-182, PR041-SEC-09, D-SD-005, D-ARCH-183, D-QG-002, D-SD-006, D-ARCH-188, D-ARCH-196, PR043-SEC-04, D-SD-007, D-PM-084, D-SD-009 |
+| Spikes / security / decisions | ADR-0017, D-ARCH-043, PR6-SEC-03, PR6-SEC-12, PR20-SEC-17, D-ORCH-025, D-ARCH-084, D-ARCH-118, D-ARCH-125, PR64-SEC-04, D-ARCH-160, PR041-SEC-04, D-ARCH-177, D-SD-004, D-ARCH-182, PR041-SEC-09, D-SD-005, D-ARCH-183, D-QG-002, D-SD-006, D-ARCH-188, D-ARCH-196, PR043-SEC-04, D-SD-007, D-PM-084, D-SD-009, D-SECPR040-04, D-ARCH-200, D-ARCH-202, D-SD-010, D-ARCH-221, D-ARCH-224, D-ARCH-227, D-SECPR041B-01, PR041-SEC-13, D-SD-012 |
 | Specialist · model | backend-developer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-010, TASK-092, TASK-047, TASK-039 |
@@ -857,9 +859,13 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR #11 code review R3-m1 (ii) (first metrics task; D-ARCH-079): the leak counter sessionContextLeaks() exported by apps/api/src/platform/db/runtime.ts is published as the metric db_session_context_leak_total (api and worker) with an alert rule; the latched not-ready state stays visible in /health/ready
 - PR #20 code review n8 / api/README §13 header (D-ORCH-025 (2); D-ARCH-084): the counter `security_events_total{event}` is published by the security sink for every catalogue and runtime event (label = event name only; no attribute label); PR20-SEC-17 — one per-line size budget charges `err` (cause chain) and the merged child bindings together with the fields (or err is capped at MAX_LINE_CHARS in total and child bindings at 2 KiB) so a line never exceeds the 16 KiB Docker json-file split, and the shipper partial-line handling is documented in the observability runbook
 - IMAGE SIZE (D-ARCH-118 (e); ADR-0017 amendment 2026-11-14; rulings/wave-0-task-014-rulings.md section 4.3 (e); R-ARCH-31): no @opentelemetry/sdk-node — the SDK is assembled explicitly from sdk-trace-node, exporter-trace-otlp-http, resources, semantic-conventions and the five named instrumentations (registerInstrumentations); metrics stay on @prometheus-io/client; the CI exporter is InMemorySpanExporter of sdk-trace-base; the PR body shows @grpc/grpc-js, protobufjs and exporter-trace-otlp-grpc absent from the api and worker images and quotes the layer-sum delta against the TASK-283 baseline (expected about 8 MiB per image)
-- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160; an alert on the security event rate_limit_auth with class authn-failed and on the counter step0-authn-failed (ADR-0016 amendment 13 item 4; PR041-SEC-09; PRD R-16; D-ARCH-182): the runbook entry says that every credentialed request of that address is refused for up to 60 s and names the two narrower designs
+- RATE-LIMIT METRICS (D-ARCH-177; PR041-SEC-04; rulings/wave-1-task-041-rulings.md section 6 line 8): the rate-limit counters (labels: the classes, authz-denial, unauthenticated, step0-credentialed, step0-authn-failed) and the store-breaker state are exported; PR041-SEC-04: a key-count gauge for the rl: prefix next to the Valkey memory alarms of D-ARCH-160; an alert on the security event rate_limit_auth with class authn-failed and on the counter step0-authn-failed (ADR-0016 amendment 13 item 4; PR041-SEC-09; PRD R-16; D-ARCH-182): the runbook entry says that every credentialed request of that address is refused for up to 60 s and names the two narrower designs; the label step0-authn-inflight is exported with the others; a gauge of the in-flight units held on the instance, summed over addresses (a floor that never returns to 0 is a unit that was never released); an alert on refusals under step0-authn-inflight; the runbook entry of line 12 gains: a refusal by the hold lasts a second at a time, needs no refused credential, logs no security event and is told from the lock by its label (ADR-0016 amendment 13 item 6; D-ARCH-227)
 - OUTBOX ALARMS (ADR-0013 amendment 5 item 25; D-ARCH-183): the alert rules OutboxRelayLag and OutboxRelayStalled with the expressions, durations, severity and runbook of that table; the lane A test of the alarm rules pins both; the worker readiness reports the relay as degraded when platform_outbox_relay_oldest_pending_age_seconds is above 60 s; OutboxRelayStalled has the absent() arm of ADR-0013 amendment 5 item 26; QueueDeadLetterNew pages for booking, payments and outbox-relay; the relay-lag readiness component exists on the worker only (D-ARCH-188); OutboxRelayStalled reads the last tick that held the relay lock (ADR-0004 amendment 4 item 24), so a foreign holder of the key fires it (D-ARCH-196; PR043-SEC-04, C4-2 of D-SECPR043-01)
-- IDEMPOTENCY CLAIM LOST ALERT (D-PM-084, recommended; PR040-SEC-05): an alert (ticket) on any api.idempotency_claim_lost event with the phase after call; the runbook line says to compare the provider record (carrier shipment or gateway authorisation) with the shipment or payment of the correlation id, because the retry that took the key over ran call again; expected count 0
+- IDEMPOTENCY SIGNALS (D-ARCH-200, D-ARCH-202; D-PM-084; PR040-SEC-05): counters for api.idempotency_claim_lost and api.call_without_commit; an alert (ticket) on any api.idempotency_claim_lost event with the phase after call; the runbook line of D-PM-084 says to compare the provider record (carrier shipment or gateway authorisation) with the shipment or payment of the correlation id, because the retry that took the key over ran call again; expected count 0
+- PAYMENT METHOD DETACH DEAD LETTERS (D-SECPR040-04 C-5): the dead-letter queue of the detach step of TASK-249 is visible to operations through the dead-letter alert of this task; if TASK-249 merges after this task, TASK-249 adds its queue to that alert
+- STREAM SIGNALS (ADR-0003 amendment 2026-11-21 rule (p); D-ARCH-221, D-ARCH-223): api.stream_cut is counted by reason; deadline and end_grace alert (a stream that does not end by its cap or at the drain is a defect of the stream), buffer_limit is a dashboard series; a client disconnect is not an error and is not counted in the 5xx rate behind ROLLBACK_TRIGGERS (the access line carries aborted true)
+- DRAIN, KEEP-ALIVE AND THE COMPOSE STOP GRACE (D-ARCH-224; probe P4 of rulings/wave-1-task-044-rulings.md): on Node 24.22.3 a connection that was busy when server.close() ran stays keep-alive and serves a new request afterwards, so new requests are not refused on it (US-013); after the drain starts a connection is closed when its response ends (Connection: close on responses sent while draining, or closeIdleConnections() repeated until the drain ends); test: a second request on a kept-alive connection after SIGTERM is not served; compose.yaml sets stop_grace_period 35s on api and worker (Docker stops a container 10 s after SIGTERM by default; platform.md 5.2 gives 35 s)
+- EVENT-LOOP DELAY GAUGE (PR041-SEC-13 INFO; D-SECPR041B-01; D-ORCH-158): the api exports an event-loop delay gauge (perf_hooks monitorEventLoopDelay, p99 and max per scrape) next to the store-breaker state, because an event-loop stall above 250 ms opens the rate-limit store breaker although the store answered; the runbook entry of the breaker names the gauge as the first check
 - AT-US-013-01 … AT-US-013-06: all 6 scenarios of US-013, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 
 **DoD notes**
@@ -876,7 +882,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | — |
 | REQs | — (enabler; see refs) |
 | NFRs | NFR-OPS-004, NFR-SCALE-003 |
-| Spikes / security / decisions | R-ARCH-13, D-002, D-ARCH-179, PR041-SEC-05, D-SD-004 |
+| Spikes / security / decisions | R-ARCH-13, D-002, D-ARCH-179, PR041-SEC-05, D-SD-004, D-ORCH-151, D-SD-012 |
 | Specialist · model | devops-engineer · sonnet (escalate to opus from fix cycle 2) |
 | Complexity | M |
 | Depends on | TASK-015 |
@@ -891,6 +897,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 **Acceptance tests to write**
 - terraform fmt/validate and Checkov clean in lane A iac job; no apply step in ci.yml (policy test)
 - TRUST PROXY PIN (ADR-0016 amendment 12 item 9; D-ARCH-179; PR041-SEC-05): the api task definition sets TRUST_PROXY_HOPS=2; a Terraform test (or Checkov custom policy) fails unless that value, the CloudFront origin-facing prefix list on sg-alb and the ALB rule that refuses a request without X-Origin-Verify are all present; the post-deploy smoke step of PR041-SEC-05 (audit IP and access-log ip are never an ALB or CloudFront address) belongs to the first pipeline that deploys to a real target, a G4 precondition for a production release
+- VALKEY CLUSTER MODE AND THE TWO-KEY SCRIPTS (TASK-041 part 041-B code review n7; D-ORCH-151; devops-engineer with data-architect; D-SD-012): the Valkey module keeps cluster mode disabled, and a Terraform test or Checkov custom policy fails when it is enabled; the rate-limit scripts TAKE_SCRIPT and HIT_AND_PEEK_SCRIPT take two keys (rl:step0:credentialed and rl:step0:authn-failed of one IP) that land in different hash slots under cluster mode (CROSSSLOT); principal-architect adds them, with the hash-tag change of the key grammar that cluster mode needs, to the 100x line of platform.md at the next architecture fold
 
 **DoD notes**
 - No secrets or real credentials; `--ignore-scripts` installs; digest-pinned images; hadolint/actionlint clean.
@@ -1156,7 +1163,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 | Stories (completes) | US-085 (M1 Should) Manage members, last-Owner and individual-organisation safeguards<br>US-062 **DC** (M0 Must) Personal organisation and memberships with type-checked roles |
 | REQs | REQ-ORG-012, REQ-ORG-013, REQ-ORG-014, REQ-ORG-002, REQ-ORG-003, REQ-ORG-004 |
 | NFRs | NFR-SEC-011 |
-| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-04, D-SEC-PR65-01, D-ARCH-154, D-ORCH-137, D-SD-002, D-ARCH-191 |
+| Spikes / security / decisions | SEC-COND-01, D-042, PR8-SEC-06, D-ARCH-069, D-ARCH-123, D-067, D-ORCH-131, D-PM-068, D-SD-001, PR65-SEC-04, D-SEC-PR65-01, D-ARCH-154, D-ORCH-137, D-SD-002, D-ARCH-191, D-ORCH-150, D-SD-012 |
 | Specialist · model | backend-developer · opus |
 | Complexity | M |
 | Depends on | TASK-227, TASK-187 |
@@ -1179,6 +1186,7 @@ Shared hot files (D-ORCH-118, D-ARCH-147): `api-tenant-db` = `apps/api/src/platf
 - PR65-SEC-04 (d) ATTRIBUTION FROM THE ACTOR (INFO; D-SEC-PR65-01; PR #65 code review R2-n2, D-TASK037-27): membership_roles.granted_by and revoked_by, memberships.removed_by and accepted_by_user_id are derived from the transaction actor, never taken from the caller (today assignRole passes a caller-supplied grantedBy and the database binds only created_by and updated_by); one unit case per column with a mismatching caller value
 - RULINGS wave-1-pr65-r1 SECTION 7 (D-ARCH-154): LAST_OWNER and owner-cap counts may rely on membership_roles.org_id (composite key); a removed member is re-added as a new row and REMOVED is never reversed
 - PRECONDITION PART 040-B (ADR-0014 amendment 9; D-ARCH-191): this task mounts an operation whose x-idempotency is required or optional, so part 040-B of TASK-040 is on main before this task is dispatched; without it the composition refuses the route at mount (IdempotencyNotWiredError); operations of this task in openapi.yaml: updateMember, removeMember (optional) (D-SD-007)
+- DISPATCH GATE, MUTABLE SORT KEYS (TASK-045 code review R1-m1; D-ORCH-150; D-SD-012): this task lists listMembers sorted by display_name, a mutable column; the principal-architect ruling of R1-m1 (the gate line on TASK-070) exists before this task is dispatched, and the list follows it
 - AT-US-085-01 … AT-US-085-10: all 10 scenarios of US-085, with the IDs in the test titles (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 - AT-US-062-01 … AT-US-062-06: US-062 completes here under the delivery split of D-PM-068: this task proves the scenarios that the card lines above assign to it and TASK-037, TASK-049 the rest, with the IDs in the test titles; the story is accepted when all 6 pass in `ac-trace.json` (TEST-STRATEGY §6; map `docs/05-quality/tests/gherkin-test-map.md`)
 

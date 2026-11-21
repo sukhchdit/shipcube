@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-P5 code reviews go to the MAIN repo at `docs/05-quality/reviews/PR-<nnnn>-TASK-<xxx>-code-review.md`, using the name the orchestrator dispatches. It is not the agent default `REVIEW-TASK-xxx-r<round>.md`. The file is not committed by the reviewer.
+P5 code reviews go to the MAIN repo at `docs/05-quality/reviews/PR-<nnnn>-TASK-<xxx>-code-review.md`, using the name the orchestrator dispatches. It is not the agent default `REVIEW-TASK-xxx-r<round>.md`. Default: the file is not committed by the reviewer. Exception (PR #55, 2026-11-16): when the dispatch says "commit it on the PR branch as a docs(review) commit and push", write it in the PR worktree, commit ONLY the review file (never `.claude/agent-memory`, which stales lane B evidence) and push; memory edits stay uncommitted in the main checkout.
 
 Contents:
 - verdict block
@@ -46,3 +46,10 @@ Exception: during parallel batches the orchestrator may forbid installs, builds,
 - Overlap file: `git merge-file -p main base old` and diff against NEW to isolate the hand resolution; extract case tables with awk and `cmp` them.
 - Ancestry: loop `git merge-base --is-ancestor` over `git rev-list MB..OLD`; `git rev-list --merges origin/main..NEW` empty.
 - CI: `gh run view <id> --log | grep "No-weakening run:\|rule new to the base"` gives the base-ref extras count.
+
+**Host rule (D-ORCH-125 amendment, 2026-11-17):** while the orchestrator's serial lane-B queue runs, reviewers run only targeted test files with `--maxWorkers=2`. No full `test:unit`, no Testcontainers suites, no quality:heavy. Rely on the lane-B evidence. Jest positional path args do NOT narrow a `--selectProjects` run; use `--testPathPatterns`.
+
+**Commit on main (PR #63/#64 r1, 2026-11-18):** the dispatch may say "commit+push only your record on main". The main checkout always has uncommitted `.claude/agent-memory` edits, so plain `git pull --rebase` refuses; commit with an explicit pathspec, then `git pull --rebase --autostash`. Parallel reviewers share the checkout, so another agent's push may carry your commit: check `git log origin/main` before re-pushing.
+**Round-2 records when r1 lives only on the PR branch (PR #61, 2026-11-18):** write `PR-<nnnn>-TASK-<xxx>-code-review-r2.md` on MAIN (PR #60 precedent); appending to the r1 path on main would add/add-conflict the squash. Main checkout has other agents' memory edits: commit the record first, then `git pull --rebase --autostash`, then push. Under the no-Jest host rule, run tsx probes on a `git archive` extract with junctions for node_modules AND the copy's own `@platform/*` packages (probe files outside the copy must import via relative paths).
+- Pre-PR reviews (287-B, 2026-11-18): no PR number yet -> `PR-pending-TASK-xxx-code-review.md` on main; the orchestrator renames it once the PR exists.
+- **Shared hooks (2026-11-20):** core.hooksPath=tools/hooks is set in the shared repo config (TASK-043 dev ran hooks:install). Every commit runs npm exec prettier/eslint/commitlint on staged files, so commit with the Node 24 PATH prefix and prettier-check a review .md first. Coordinator mid-review head bumps: re-verify the delta and bind the verdict to the newest head.

@@ -51,7 +51,6 @@ import {
   DEFAULT_MAX_CALL_RECORDS,
   MAX_TRACKING_NUMBERS,
   MOCK_CARRIER_CODE,
-  MOCK_CURRENCY,
   MOCK_SERVICE_CODES,
   MOCK_SERVICES,
   type MockZone,
@@ -134,9 +133,9 @@ const quoteOf = (service: (typeof MOCK_SERVICE_CODES)[number], zone: MockZone, b
   return {
     serviceCode: canonicalServiceCode(MOCK_CARRIER_CODE, service),
     tier: spec.tier,
-    baseCharge: { amountMinor: price.base.amount, currency: MOCK_CURRENCY },
-    surcharges: [{ code: 'FUEL', amount: { amountMinor: price.fuel.amount, currency: MOCK_CURRENCY } }],
-    totalCharge: { amountMinor: price.total.amount, currency: MOCK_CURRENCY },
+    baseCharge: price.base,
+    surcharges: [{ code: 'FUEL', amount: price.fuel }],
+    totalCharge: price.total,
     transitDaysMin: spec.transitDaysMin,
     transitDaysMax: spec.transitDaysMax,
     ...(delivery === undefined ? {} : { estimatedDelivery: delivery }),
@@ -186,7 +185,7 @@ function shipmentOf(req: ShipmentRequest): ShipmentConfirmation {
     serviceCode: req.serviceCode,
     labels: labelFormatsOf(req.labelFormats).map((format) => mockLabel(format, trackingNumber)),
     packages: packageResults(req.clientReference, req.packages),
-    charge: { amountMinor: price.total.amount, currency: MOCK_CURRENCY },
+    charge: price.total,
   };
 }
 
