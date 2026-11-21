@@ -9068,3 +9068,13 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Next session:** fix cycle 2 on TASK-045 for the two defects, then lane B, then a delta security round. Test-only changes in owned paths still void the binding.
 - The run was moved to `../.orch/laneb-queue/aside/`.
 - **Reversibility:** High.
+
+### D-ORCH-156 · 2026-11-21 · sdlc-orchestrator (session B, after handback) · TASK-040 part 040-B PR 1: lane B PASS on the stacked head `a4aadd2e`
+- **Run:** `20261121T0754Z_a4aadd2` = PASS on PostgreSQL 18. unit 8,355, integration 432 (including the sealed-envelope and CHECK cases and gitleaks-full), api 212, catalog 113, migrations 30 (the new `idempotency_keys_completed_body` migration up/down/up), rls 157.
+- **Diagnostic, not merge evidence:** the head is stacked on `0f0d92a0`. After PR #80 merges, main is merged in and lane B runs again on that head. The run dir was kept in `../.orch/laneb-queue/aside/`.
+- **Owed:**
+  - code review round 1 and security round 1 on `a4aadd2e`, then a merge-only round after the main merge;
+  - the architect's answer to the lease-gap question;
+  - an owner for the stale `IDEMPOTENCY_BODY_KEY` description in `schema.ts` and `keys.ts`;
+  - the migration timestamp `20261121000000` collides with TASK-080's (`20261121000000_pricing_config_versions`), so the second to merge re-times.
+- **Reversibility:** High.
