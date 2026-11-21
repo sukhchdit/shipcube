@@ -11269,3 +11269,33 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Follow-ups (devops-engineer, tracked):** PR86-SEC-01 LOW Valkey 8.1.12+ for compose and the five harness pins together, before G3 (cooldown ends ~2026-11-25); PR86-SEC-02 pin `8.1.N-alpine@sha256`; PR85-SEC-01 retire the three branch-only baseline lines after the three task squashes; PR85-SEC-02 baseline comment fix; PR87-SEC-01 node-major rule + nightly security-release comparison before G3.
 - **Disclosure noted:** the security-analyst run showed hash fields (not raw secrets) of `infra/local/valkey/users.acl` once in its own session output; not copied anywhere; recorded in D-SECCHORE-01.
 - **Reversibility:** High.
+
+### D-CRPR034-02 · 2026-11-21 · code-reviewer · TASK-034 code review round 3 (fix cycle 3, D-ARCH-238 F1 to F15) = APPROVED_WITH_NITS at head `1bac00b1` (appended as round 3 to `docs/05-quality/reviews/PR-pending-TASK-034-code-review.md` on main)
+
+- **Decision:** APPROVED_WITH_NITS. No BLOCKER or MAJOR finding is open. There is 1 MINOR (R3-m1) and 5 NITs.
+- **Merges pure:**
+  - `1a0cdeaf` (origin/main `88fd7360`) and `e17f1d6d` (docs-only local main `3b807c24`) each equal the tree that `git merge-tree --write-tree` prints for their parents.
+  - `package.json` is the only path changed on both sides, in separate hunks.
+  - Raw-diff equality holds on both sides of each merge.
+- **F1 to F15 implemented as specified.** For each item, a mutant that reverts it fails a named test (record §R3.2).
+  - R2-m1 is closed: the record binds the `_prisma_migrations.checksum` read after the deploy, and the record is written before the PASS line.
+  - R2-n1 and R2-n2 are closed.
+- **Earlier fixture outcomes unchanged:**
+  - No fixture changed, and no expectation line was removed.
+  - A static scan finds no rule-21 hit on any pre-existing fixture, inline test SQL or repository migration. The `platform.app_*_id()` hits are policy `WITH CHECK` clauses.
+- **New findings:**
+  - **R3-m1 MINOR:** the rule-14 range regex `[^;]*` misses a quoted type name that holds `;`. C17 (b) and the gate still catch it.
+  - **R3-n1:** the identity check binds the admin URL's cluster, not the Compose service that runs `pg_restore`. It fails closed in practice; routed to TASK-119.
+  - **R3-n2:** pin the VIRTUAL outcome after lane B.
+  - **R3-n3:** the two delimiting cases assert the rule only.
+  - **R3-n4:** state dynamic-SQL DDL as a rule-21 limit.
+  - **R3-n5:** principal-architect decides whether list (c) grows (`table_to_xml` family).
+- **Rulings:** D-TASK034-15 to -23 are accepted. -17 is accepted for this head only, until the outcome is pinned.
+- **Merge conditions:**
+  - lane B run-live78 green on `1bac00b1` (unit, integration, `catalog-c1-c14` with the C17 file, `migrations`), with the evidence committed;
+  - the security delta round closes C1 and C2 of D-SECPR034-01;
+  - D-TASK034-01..23 accepted by reference;
+  - hosted CI green;
+  - squash.
+- **Verification:** git, grep and reads only, per the dispatch. No npm, Jest or Docker.
+- **Reversibility:** High.

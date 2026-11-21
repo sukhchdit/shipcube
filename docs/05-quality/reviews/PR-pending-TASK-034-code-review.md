@@ -375,3 +375,121 @@ Not a merge blocker: no `data-changing: yes` migration exists yet, so the first 
 - The `tolerantRead` differential test against the token reading over the shared case corpora.
 - The C4 proof asserts the exact Compose prefix and the in-container argv, then swaps only the transport.
 - `verified before deploy` is asserted in both the unit test (step order) and the int test (`differences = []` after the deploy).
+
+# Round 3 (pre-push, fix cycle 3, D-ARCH-238 F1 to F15)
+
+| Field | Value |
+|---|---|
+| Head reviewed | `1bac00b1` on `feat/TASK-034-backup-restore-rehearsal-zero-downtime` (pushed; local and origin equal) |
+| Chain since round 2 | `447e23fd` lane-B evidence of `3ee36f01`; `1a0cdeaf` merge of origin/main `88fd7360` (#80 to #84); `e17f1d6d` merge of local main `3b807c24` (docs only, D-TASK034-15); `1bac00b1` fix cycle 3 |
+| Fix delta | `git diff e17f1d6d..1bac00b1`: 45 files, +2064 / -178 (20 new fixture files, no fixture changed, no lockfile change) |
+| Lane-B evidence | run-live78 on `1bac00b1` (the orchestrator's; not committed yet, not read by me) |
+| Round | 3 |
+| Date | 2026-11-21 |
+| Verdict | **APPROVED_WITH_NITS** (0 BLOCKER, 0 MAJOR, 1 MINOR, 5 NIT) |
+
+```
+VERDICT: APPROVED_WITH_NITS
+SUMMARY: Both merges are byte-identical to git's own clean merge, and package.json is the only path changed on both
+  sides. F1 to F15 of D-ARCH-238 are implemented as specified, each with a test that a reverting mutant fails. R2-m1,
+  R2-n1 and R2-n2 are closed, and no earlier lint fixture or expectation changed. One new MINOR: the rule-14 range regex
+  misses a quoted name that holds ";" (C17 (b) and the gate still catch it).
+```
+
+## R3.1 What I verified myself
+
+Under the dispatch constraints I ran no npm, Node, Jest or Docker command. I used git, grep and file reads only. Test outcomes rest on lane B run-live78.
+
+- **Merge purity.**
+  - `1a0cdeaf` has parents `447e23fd` and `88fd7360`, merge base `530629f4`. `e17f1d6d` has parents `1a0cdeaf` and `3b807c24`, merge base `88fd7360`. For each parent pair, `git merge-tree --write-tree` prints exactly the commit's tree (`ae7b792b`, `473c956f`), so neither merge holds a hand resolution.
+  - Files changed on both sides:
+    - `1a0cdeaf`: `package.json` only. The branch side adds three `db:*` scripts and the main side bumps devDependencies, in separate hunks. `git diff 88fd7360 1a0cdeaf -- package.json` is exactly the branch's three script lines.
+    - `e17f1d6d`: none.
+  - Raw-diff equality, with `package.json` excluded:
+    - `diff --raw 88fd7360 1a0cdeaf` equals `diff --raw 530629f4 447e23fd`.
+    - `diff --raw 447e23fd 1a0cdeaf` equals `diff --raw 530629f4 88fd7360`.
+    - For the docs merge, `diff --raw 3b807c24 e17f1d6d` equals `diff --raw 88fd7360 1a0cdeaf`, so the branch delta is carried unchanged.
+    - `88fd7360..3b807c24` touches `docs/**` and `.claude/agent-memory/**` only.
+- **The fix.** I read in full:
+  - every changed production file: the new `load-time-code.ts` and `private-files.ts`; rules 10, 14 and 21 and the down.sql pass of `lint-migrations.ts`; `verify-restore.ts`, `backup.ts`, `rehearsal-manifest.ts`, `pg-archive.ts`, `prisma-outcome.ts`, `rehearsal-cli.ts` and `zero-downtime-probe.ts`;
+  - every new or changed test, the 10 new fixtures and the runbook diff;
+  - `tokenize` and `sqlText` in `sql-text.ts`. Token texts concatenate back to the statement, which the offset-preserving `blankedCode` relies on.
+- **Spec.** D-ARCH-235 to D-ARCH-238 on main. In data-model (in the worktree through `e17f1d6d`): §4.6 C17, the §8.3 rule-14 amendment and rule 21, the §8.6 second amendment and the C17 fence.
+- **The 81 earlier fixture outcomes.**
+  - No fixture file was modified. `diff --name-status` over `tools/db/fixtures` shows 20 `A` and nothing else.
+  - `lint-migrations.test.ts` has no removed line. The one addition to an existing expectation table is the row for the new `create_range_type` fixture.
+  - A static scan of every pre-existing fixture and every pre-existing inline test SQL finds a load-time clause in 6 fixtures. The four `CHECK (…platform.app_org_id())` hits are policy `WITH CHECK` clauses, which `LOAD_TIME_STATEMENT` excludes. The rest call no routine.
+  - In `prisma/migrations/**` the load-time clauses call only `char_length`, `octet_length`, `lower` and `IN` lists. The 5 `platform.app_*_id()` hits are policies.
+  - So rule 21 adds no finding to an existing outcome or to `lintRepository`. Lane B confirms this by execution.
+
+## R3.2 F1 to F15
+
+Each row names the mutant I checked by reading (the change reverted, or the stated wrong variant) and the assertion that fails on it.
+
+| Item | Status | Evidence and killing test |
+|---|---|---|
+| F1 (R2-m1) | **Closed** | **Change.** After a successful deploy, `verifyRestoredDatabase` reads `_prisma_migrations.checksum` (base table, `APPLIED_CHECKSUM_SQL`) into `report.rehearsed`. `writeRehearsalRecord` refuses a missing, null or other-migration checksum, and refuses when the SHA-256 of the `migration.sql` bytes differs from it (`verify-restore.ts:363-370`). `main` writes the record before the PASS line, and a refusal becomes one FAIL line and exit 1.<br>**Mutants.** No checksum comparison: the unit case that edits `migration.sql` after the deploy fake gets through the write, and `toThrow(/changed during the rehearsal/)` fails. PASS printed first: `sink.lines` is not `[]` in the CLI case. Checksum read after a failed deploy: `rehearsed` is not null.<br>**Int.** The R1-M1 case runs real Prisma, asserts that `report.rehearsed.checksum` is the SHA-256 of the file bytes, and the record binds that value. |
+| F2 (SEC-02) | Done | **Change.** `private-files.ts` creates folders with recursive `mkdir` `0o700` (plus `chmod` on POSIX), writes new files `wx` `0o600`, replaces the report with `w` plus `chmod`, and opens the sink `wx` `0o600`. `backup.ts`, `pg-archive.ts` (sink) and `verify-restore.ts` (report) use it.<br>**Mutants.** Drop the chmod or change a mode: the recording-fs `toEqual` call lists fail on every platform. The POSIX real-mode cases are skipped on the Windows host. |
+| F3 (SEC-03) | Done | **Change.**<br>- `maskValues` masks escaped quotes and nested groups, innermost first. It cuts at 2 000 characters, and an open quote or parenthesis ends the line.<br>- `allowedFacts` keeps the Prisma codes, the SQLSTATE and the first `ERROR:` line, masked (none for class P0).<br>- `errorSummary` drops the server message after `ERROR:`, `FATAL:` or `PANIC:`.<br>- `failureOf` masks, and withholds P0 messages.<br>**Mutants.** The old free-text tail: every sentinel case (a `randomBytes` value) fails `not.toContain(value)`. P0 not withheld: the exact P0001 detail fails. The old `errorSummary`: `'refusing row s3cr3t'` survives and the `toBe` fails. |
+| F4 (SEC-04) | Done | **Change.** `(t.*)::pg_catalog.text`.<br>**Mutant** `t::text`: the unit `toContain` fails, and so does the int case (a column named `t`; changing `secret` must change the checksum). |
+| F5 (SEC-06) | Done | **Change.** For rule 10 (DO blocks and the routine call-site half), `bodyText` replaces `ESCAPE_STRING_MARK` with a space. Rule 16 still reads the marked text.<br>**Mutant** without the replacement: X4 through `lintTexts` gives rule 16 only, and `toEqual([[…'10'], […'16']])` fails. The control without the escape keeps rule 16 only. D-TASK034-16 wording accepted. |
+| F6 (SEC-08) | Done | **Change.** The `prismaChildEnvironment` allow-list, used by `db:verify-restore` and the probe.<br>**Mutant** `{ ...env }`: the exact `toEqual` of the child environment fails. The bootstrap URL, the passwords, `NODE_OPTIONS` and `PRISMA_*` are excluded. |
+| F7 (D-ARCH-237) | Done, with R3-m1 | **Change.** `REFUSED_OBJECTS` gains the range regex. The message, the header and the stated limits name it. Fixture `20261114000900_create_range_type` fails rule 14.<br>**Mutant** without the regex: the `refused-objects` table and the new message case fail.<br>**Gap:** R3-m1. |
+| F8 (rule 21) | Done, with R3-n3 | **Change.**<br>- A statement gate, then a keyword scan on code with literals, quoted identifiers and comments blanked.<br>- Each clause is delimited by parenthesis depth, and the scan resumes after it (linear).<br>- (a) `RoutineRegistry.definedRoutine`, writing routines or not. (b) A qualified non-`pg_catalog` call, or `OPERATOR(schema.…)`. (c) The five query-string built-ins, quoted or not. (d) Fail closed.<br>- It runs on migration.sql and down.sql; down.sql counts the migrations' routines and its own.<br>- The 7 failing and 2 clean fixtures of §8.3, and a linearity case with nested parentheses.<br>**Mutants.**<br>- (a) through `calledWriter` (writing routines only): the fixture messages expect "a routine of this or an earlier migration" for the non-writing `fixture_check`, so they fail.<br>- (a) removed: fixture `0100` (unqualified call) gives no rule 21.<br>- (b) removed: `0600` fails.<br>- Operator arm removed: the `OPERATOR(public.===)` case fails.<br>- (c) removed: `0500` fails, because `pg_catalog.` passes (b).<br>- Literals not blanked: the control `DEFAULT 'check (public.fixture_check(1))'` reports.<br>- No lowercasing: no keyword matches.<br>**Weak spot:** R3-n3. |
+| F9 | Done | **Change.** `LOAD_TIME_CODE_SQL`, the empty `ReadonlyMap`, `loadTimeCodeFindings` (fail closed on an unknown reason) and `unusedReviewedBuiltins`.<br>**Mutants.** SQL drift: the comparison with the data-model §8.6 fence fails. Excusing any reason: the `'something new'` and `'not built in'` rows fail. |
+| F10 (C17) | Done, with R3-n2 | Committed schema: 0 findings, 0 unused entries, more than 50 sites. Planted as the migrator and rolled back: all 10 shapes of (ii), each with kind, object, reference and reason. The controls of (iii), plus a row comparison. (iv) VIRTUAL. |
+| F11 (gate) | Done | **Change.**<br>- `captureManifest` runs C17 and the cluster query on the snapshot session.<br>- `parseManifest` requires both fields.<br>- `compareManifests` reports restored load-time code and ignores the cluster.<br>- `db:backup` prints one line and returns 1, with the three files written.<br>- `runVerifyRestore` throws before the admin session.<br>**Mutants.** Gate removed, or moved after `withSession(admin)`: `run.admin` is not `[]`. Backup returning 0: the `toBe(1)` case fails. |
+| F12 (cluster) | Done, with R3-n1 | **Change.** The identifier is read on the admin session before `CREATE DATABASE`. Both refusals say what to do. `--same-cluster` and `target.sameCluster` exist.<br>**Mutants.** Read after `CREATE DATABASE`: the admin statement list `toEqual([CLUSTER_IDENTIFIER_SQL, …])` fails. Either refusal removed: its case fails. |
+| F13 (tests) | Done | **Unit:** every case D-ARCH-238 lists.<br>**Int:**<br>- The existing cases pass `sameCluster`.<br>- One refused case creates no database.<br>- The gate case: the migrator adds the CHECK `NOT VALID`, then validates it. The backup exits 1 with exactly that constraint. Verify exits 1 in both forms. No scratch database exists, the side table holds only the migrator's row, and `rolsuper` is false.<br>- The optional second-cluster CLI case (D-TASK034-18). |
+| F14 (docs) | Done | **Runbook:** §1 the gate line and what to do; §2 the two forms, the residuals and the privileged sessions; steps 0 and 1; the record before PASS; the R2-n1 owners; the R2-n2 residual.<br>**Header:** step 1 of `verify-restore.ts` is restated. |
+| F15 | Done | D-TASK034-15..23 are in the `1bac00b1` body. Rulings in R3.4. |
+| R2-n1 / R2-n2 | **Closed** | **R2-n1:** the owners (TASK-119, TASK-147, TASK-116) are named in the runbook, `verify-restore.ts`, `zero-downtime-probe.ts` and the int test.<br>**R2-n2:** the stale-CI residual and its detector are in the runbook.<br>**R2-n3** stays as written: re-pin on the next Prisma bump. |
+
+## R3.3 New findings
+
+| ID | Severity | File:line | Issue | Required fix |
+|---|---|---|---|---|
+| R3-m1 | MINOR | `tools/db/lint-migrations.ts:584` | `/^create type\b[^;]*\bas range\b/` runs on `masked` text, which keeps quoted identifiers. `CREATE TYPE public."a;b" AS RANGE (subtype = integer)` lexes as one statement, but `[^;]*` cannot cross the `;` inside the name, so rule 14 stays silent. This is the regex D-ARCH-237 adopted "as proposed". C17 (b) and the load-time gate still report the type, so only the early warning is affected. | Use `/^create type\b.*\bas range\b/` (a split statement holds no code `;`), or anchor the name with `CALL_IDENT`. Add a `lintTexts` case with a quoted name that holds `;`. Due with the next rule-14 or rule-21 change, at the latest at the post-merge §8.3 refresh of D-ARCH-238. |
+| R3-n1 | NIT | `tools/db/verify-restore.ts:255`, `:273` | The identity check reads the cluster of `DATABASE_BOOTSTRAP_URL`, but `pg_restore` runs in the Compose service that `--project`/`--service` select, and nothing ties the two. If they differ, the restore fails closed in practice, because the scratch database exists only on the checked cluster. The exception is another cluster that already holds a database of that exact name. The int second-cluster case cannot see this, because its runner pins the container to the URL's cluster. | Route to the TASK-119 job, or to a follow-up on `db-tools-backup`. Read `system_identifier` through the archive tool's own `exec` (for example `psql -Atc` in the same service) and require it to equal the admin session's. Or state the residual in the runbook next to "with `--project <its compose project>`". |
+| R3-n2 | NIT | `prisma/tests/catalog/c17-load-time-code.int.test.ts:189` | F10 (iv) asks to pin the outcome lane B shows, but the case accepts either `0A000` or a report. | After run-live78, keep only the observed outcome (expected: `0A000`) and turn the other into a comment. |
+| R3-n3 | NIT | `tools/db/lint-migrations.test.ts:1532-1539` | The two delimiting cases (parentheses inside literals; a comment and a quoted identifier) assert only the rule number. Suppose a mutant stops blanking quoted identifiers or comments. `closingParenthesis` then finds no close, (d) still yields rule 21, and the mutant survives. The effect is over-reporting only (fail closed). | Assert the message of those two cases (`… calls public.fixture_w, a routine outside pg_catalog`). |
+| R3-n4 | NIT | `tools/db/lint-migrations.ts:81-91` | Rule 21 reads top-level `CREATE`/`ALTER TABLE` and `CREATE`/`ALTER DOMAIN` statements only. It does not read DDL inside a `DO` block or an `EXECUTE` string, and the header's limits do not say so. C17 and the gate are the boundary. | Add "a load-time clause in dynamic SQL (`DO`, `EXECUTE`)" to the rule-21 limits. The architect mirrors it in §8.3 at the post-merge refresh. |
+| R3-n5 | NIT (spec, principal-architect) | `tools/db/lint-migrations.ts:1063`; data-model §8.3 rule 21 (c) | List (c) names the query-string built-ins. `table_to_xml`, `cursor_to_xml`, `schema_to_xml` and `database_to_xml`, with their `xmlschema` variants, read a named relation. That relation can be a view whose query calls a routine as the caller. These built-ins are not IMMUTABLE, so C17 and the gate already report them. | Principal-architect decides whether (c) grows at the §8.3 refresh. No code change in this PR. |
+
+## R3.4 Rulings on D-TASK034-15..23
+
+| ID | Ruling |
+|---|---|
+| D-TASK034-15 (two merges) | **Accepted.** R3.1 proves it by tree equality with `git merge-tree` and by raw-diff equality. |
+| D-TASK034-16 (rule 16 controls every escape string; rule 10 decodes line breaks only) | **Accepted.** `\x3b`, `\x27` and `\x2a\x2f` stay rule-16 refusals. The X4 control shows that only the line-break escape opens a rule-10 hit. |
+| D-TASK034-17 (VIRTUAL: two accepted outcomes) | **Accepted for this head.** Narrow it to the observed outcome (R3-n2). |
+| D-TASK034-18 (second cluster without a harness change) | **Accepted.** It is the preferred form of F13 and the shape of the TASK-119 job. Compose's own lookup stays unproven (D-ORCH-160). R3-n1 is the binding it does not cover. |
+| D-TASK034-19 (`errorSummary` drops the server message) | **Accepted.** It goes further than F3 asks, and the non-P0 `RAISE` residual is stated. |
+| D-TASK034-20 (injectable file system) | **Accepted.** On Windows the files inherit the profile ACL. The POSIX real-mode cases run where the modes mean something. |
+| D-TASK034-21 (child environment) | **Accepted.** `NODE_OPTIONS`, `NODE_AUTH_TOKEN` and `PRISMA_*` are out, as F6 requires. |
+| D-TASK034-22 (rule 21 limits) | **Accepted.**<br>- One finding per clause; the scan stops at the first undelimited clause.<br>- An operator of another schema is seen only as `OPERATOR(schema.op)`.<br>- Quoted schemas are lowercased. A migration cannot create a schema (rule 14), so the lowercasing cannot hide one.<br>Add R3-n4 to the limits. |
+| D-TASK034-23 (restored load-time code; cluster not compared; 5 shown) | **Accepted.** |
+
+## R3.5 Merge conditions
+
+- **C1 (code review).** Met: no BLOCKER or MAJOR is open, and no new finding blocks the merge. MAX_FIX_CYCLES is reached, so the open items are routed:
+  - R3-m1, R3-n3 and R3-n4: a follow-up card, or the next holder of `tools/db`.
+  - R3-n1: the TASK-119 card.
+  - R3-n2: the lane-B follow-up.
+  - R3-n5: principal-architect.
+- **C2 (lane B).** run-live78 on `1bac00b1`: unit, integration, `catalog-c1-c14` and `migrations`, each with 0 failures and 0 errors, and the evidence committed on the branch.
+  - `catalog-c1-c14` must include the C17 file: 1 committed case, 10 planted, 1 control and 1 VIRTUAL case.
+  - The run proves what I could only read: the fence against PostgreSQL 18 field names, the gate case, the second-cluster case, the equality of the real Prisma checksum, and the unchanged fixture outcomes.
+- **C3 (security).** The delta round of D-SECPR034-01 on `1bac00b1`. It closes C1 through the five checks of D-ARCH-238, and C2 (R2-m1, closed here).
+- **C4 (records).**
+  - D-TASK034-01..23 accepted by reference in DECISIONS.md.
+  - The record renamed once the PR exists.
+  - Hosted CI green.
+  - Squash merge.
+
+## R3.6 Good
+
+- One query and one finding rule serve the catalog case, `db:backup` and `db:verify-restore`, and a text test pins the query to the data-model fence.
+- Both refusals sit in `runVerifyRestore` before the admin session, so the harness callers are covered too. The unit tests assert the exact list of admin statements.
+- The allow-list detail tests plant a random sentinel in every channel that can carry row data: `DETAIL`, `RAISE`, escaped quotes, nested groups and `Key (…)=(…)`.
+- The gate int case proves the threat end to end: the routine ran once, as the migrator at `VALIDATE`, and never as the bootstrap role.
