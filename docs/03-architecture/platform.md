@@ -1228,6 +1228,11 @@ Requirements: NFR-REC-001..003, NFR-AVAIL-001/002, NFR-DATA-004, REQ-PLAT-013..0
    - the SHA-256 of every stored document matches its recorded hash.
 5. Report JSON and Markdown as an artifact, with restore time measured (≤ 15 min sanity target, NFR-REC-002). The script exits non-zero on any mismatch.
 
+*Amended 2026-11-21 (TASK-034 security round 1, PR034-SEC-01; D-ARCH-235; data-model §8.6 governs where the two texts differ):*
+- *Step 2: the dump runs as the bootstrap superuser, not as `platform_migrator`. FORCE row security binds the owner, so the migrator cannot dump every row (data-model OI-16).*
+- *Step 3: `db:verify-restore` checks that the target is not the cluster that was backed up (`system_identifier`), and the job requires `target.sameCluster` false in the report. Before the restore, the load-time gate refuses an archive whose CHECK, generated-column or partition-key expressions call anything but IMMUTABLE built-in routines, because `pg_restore` would run them as the superuser.*
+- *In AWS: a snapshot restore evaluates nothing. A logical restore (`pg_restore`) needs an instance that holds nothing else, and the gate. It is never run with the master credential into an instance that holds other data (COND-G4-PROD).*
+
 **In AWS (M5):** before a data-changing migration, `cd.yml` takes an AWS Backup on-demand snapshot, restores it to a temporary instance, runs the same verification script through a one-off ECS task, and then migrates (§7.5). Backfills run as throttled, resumable worker jobs (CLAUDE.md §5).
 
 ### 10.4 Graceful shutdown, statelessness and Redis loss
