@@ -11639,3 +11639,154 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   7. After the first `release.yml` publish: Profile > Packages > each `shipcube-*` > Package settings > `Change visibility` per the release plan, and `Manage Actions access` = repository `shipcube` with role `Write` only.
 - **Alternatives:** classic branch protection (equivalent, but rulesets show bypasses in the rule insights); requiring PRs for docs commits too (no bypass; strongest, but every orchestrator docs commit would need a PR and a hosted run); a workflow PR tightening permissions (rejected: nothing to tighten).
 - **Reversibility:** High (all items are repository settings; this entry changes no file other than DECISIONS.md).
+
+### D-ARCH-242 · 2026-11-22 · principal-architect · D-TASK298-01 (D-SD-016, D-ORCH-178): the one foreign key of the bootstrap lane, `fk_audit_pii_vault__subject`, is corrected to `RESTRICT` on both actions by a new audit bootstrap file; item 37 of ADR-0005 amendment 15 and arm (d) of C16 are not narrowed; TASK-298 merges with its pin, renamed; the correction is a new late task due before G3
+- **Trigger:** the dispatch of session D. TASK-298 (`300c644f`, `prisma/tests/**` only) found that arm (d) reports `fk_audit_pii_vault__subject` of `prisma/bootstrap/10-audit.sql`, which states no action. D-SD-016 offered (a) a new bootstrap file or (b) arm (d) for writing actions only.
+- **Read:** D-SD-016, D-ORCH-178, D-ARCH-215, D-ARCH-216, D-QG-005, D-QG-006, PR051-SEC-06; rulings file §8.5, §8.9 and §8.12; ADR-0005 amendment 15 item 37; data-model §4.6 C16 and §5.7; on main `prisma/bootstrap/10-audit.sql`, `90-audit-ddl-guard.sql`, `91-audit-actions-v2.sql`, `tools/db/shadow-init.ts`, `tools/db/audit-ddl-reviewers.json`; at `300c644f`, through the object store of the main checkout, `prisma/tests/catalog/tenant-keys.ts` and `c16-tenant-keys.int.test.ts`. Nothing ran in a worktree.
+- **Decision: option (a).** The rule stands for every key, and the key is corrected.
+  1. **The file.** `prisma/bootstrap/92-audit-vault-subject-restrict.sql`, with its own rule-12 marker, under `SET ROLE platform_audit_owner`, one statement: `ALTER TABLE public.audit_pii_vault DROP CONSTRAINT IF EXISTS fk_audit_pii_vault__subject, ADD CONSTRAINT fk_audit_pii_vault__subject FOREIGN KEY (subject_id) REFERENCES public.data_subjects (id) ON DELETE RESTRICT ON UPDATE RESTRICT`. No `NOT VALID`, no `NOT ENFORCED`, no `DEFERRABLE`. `10-audit.sql` is not edited.
+  2. **Owner and card.** A new late task, key `vaultfkrestrict` (the next free id, TASK-300, which senior-developer assigns at the next plan fold), database-engineer, with its own security record. Its card line is the last line of rulings §8.9. It also adds one KEEP form to `tools/db/shadow-init.ts`, because that renderer refuses a statement form it does not know, and the catalog case P9-FK.
+  3. **Order and date.** Dispatched after the TASK-034 fix head has a green lane B: a new bootstrap file changes the schema dump that its restore cases compare. Merged before G3.
+- **The test change of TASK-298 (exact).** In `prisma/tests/catalog/c16-tenant-keys.int.test.ts`:
+  - the constant `BOOTSTRAP_NO_ACTION_PENDING_RULING` is renamed `BOOTSTRAP_KEY_PENDING_CORRECTION`;
+  - its comment and the title of the committed case of arm (d) name D-ARCH-242 and bootstrap file `92-audit-vault-subject-restrict.sql` instead of "pending its ruling (D-TASK298-01)";
+  - no assertion changes. The committed case keeps expecting exactly the one finding text, and the planted case keeps its three reported keys, the key that states no action among them.
+- **Merge condition of TASK-298: this rename, and nothing of the bootstrap lane.** TASK-087 needs arms (c) and (d) on main before its PR. It does not need the audit lane to change first.
+- **Why the pin is acceptable until then:** it is one exact finding text with the table and both actions. Any other key, and any other action on this key, still fails the case. The correction fails the case too, so the pin is deleted in the PR that corrects the key.
+- **Why (a) and not (b):**
+  - `NO ACTION` writes nothing, so the reason of D-ARCH-215 does not apply to this key. The rule is still worth more than its reason: "every key states `RESTRICT`" asks no judgment of an author or of the arm, and five cards carry it.
+  - `NO ACTION` is what a key gets when nobody stated an action in SQL. An arm that passes it no longer tells a decision from an omission.
+  - `NO ACTION` can be deferred on a `DEFERRABLE` key and accepts a referenced key that another row supplies in the same statement. An arm that allowed it would have to read `condeferrable` too.
+  - On PostgreSQL 18 the two answer a refused change differently (`23001`, `23503`), and three cards pin `23001`.
+  - The gatekeeper verified the sentence twice as a rule. Narrowing it costs an amendment, a code change on TASK-298 and a plan fold, to save one statement.
+  - The statement is free now and not later: no database of this run holds a vault row outside a test. At M5 it scans the vault under a lock that holds back every audited write.
+- **Alternatives rejected:** option (b); an exception entry for this key by amendment (item 37 offers one to a key that needs another action, and this key needs none); the bootstrap file inside TASK-298 (it would take `prisma/bootstrap/**`, the shadow renderer and a rule-12 approval into the branch that TASK-087 waits for); `NOT VALID` with a later `VALIDATE` (arm (c) reports it).
+- **What quality-gatekeeper decides for QG-051-C6:**
+  - whether the build half closes on the lane B evidence of TASK-298 (the six plants of arm (c) and the three of arm (d)) while the pin is open. I recommend that it closes: QG-051-C6 is the rule of arm (c), which has no finding, and the pin belongs to arm (d);
+  - a new tracked condition for the pin, due before G3: the late task is merged, the committed case of arm (d) expects no finding, and the constant is gone. It joins the G3 list of D-QG-006;
+  - that the three dated notes (ADR-0005 item 37, data-model §4.6 C16 (d) and §5.7) change no rule. No Accepted sentence is narrowed by this entry.
+- **Routed:**
+  - security-analyst: concurrence with the pin until the correction; the rule-12 approval of file 92 in the record of the late task; whether the plants of TASK-298 join SEC-TC-76 (open since D-ARCH-216).
+  - senior-developer: the fold of the two card lines of rulings §8.9 and of the late task; the rename on the TASK-298 branch before its reviews.
+  - orchestrator: the code review and the security record of TASK-298 can start once the rename is in.
+- **Method:** one Node probe on PGlite 0.4.3 (PostgreSQL 17.5) in the session scratchpad, rulings §8.13 rows A1 to A7: the key as file 10 declares it is `a`/`a`, validated, not deferrable; the one-statement replacement gives `r`/`r`, validated, one constraint of that name; a refused delete, a refused key change and an orphan insert are refused before and after.
+- **Not verified:** PostgreSQL 18; the real bootstrap lane with its roles; that the audit DDL guard admits the statement (read from file 90: it returns for `current_user = platform_audit_owner`, and file 91 is the precedent); the shadow rendering of the new form.
+- **My omission:** D-ARCH-215 counted the migrations and searched the data model for referential actions. A key that states none holds no word to find, and I did not read the bootstrap lane.
+- **Applied in:** ADR-0005 (note at item 37); data-model §4.6 C16 (d), §5.7, A44; rulings file §8.9 (23 lines) and §8.13.
+- **Reversibility:** High. One constraint is re-created with a stricter-or-equal action, and no row changes.
+
+### D-ARCH-243 · 2026-11-22 · principal-architect · PR034-SEC-09 (D-SECPR034-02, D-ORCH-176): an operator of a load-time expression is itself an operator of `pg_catalog`, and its routine is not VOLATILE; C17 (b) also refuses a cast outside an extension, because the SQL/JSON constructors run a cast function that the expression never names; the sentence "IMMUTABLE built-in routines only" is corrected (data-model §4.6 C17 and §8.6, third amendment)
+- **Trigger:** condition C1 of D-SECPR034-02 as narrowed, and the architect touch of D-ORCH-176.
+- **Decision:**
+  1. **Operators.** C17 (a) read "every operator it uses is implemented by a `pg_catalog` routine". It now reads: the operator is itself in `pg_catalog`, and its routine is a `pg_catalog` routine that is not VOLATILE. Two new reasons, `operator outside pg_catalog` and `volatile operator routine`. The reviewed list excuses neither. An operator of an extension is a finding, as a routine of an extension already was.
+  2. **Casts.** C17 (b) gains: no cast outside `pg_catalog` and outside an extension, where a cast is outside `pg_catalog` when its source type, its target type or its function is. Reason `cast outside an extension`. This is the catalog half of rule 14, which refuses `CREATE CAST` since D-ARCH-172.
+  3. **The sentence.** "A privileged load therefore runs IMMUTABLE built-in routines only" is corrected in place and restated as item 3 of the third amendment: built-in code only, where an operator may be STABLE.
+  4. **The query.** The fence of data-model §8.6 is replaced. `LOAD_TIME_CODE_SQL` follows it, and the fence test stays the proof.
+- **The cast route is a finding of this run, not of the security record.** `JSON_OBJECT`, `JSON_ARRAY` and `JSON_SCALAR` convert a value whose type is not built in through its cast to `json`, looked up at run time. With an enum, a function from it to `json` and `CREATE CAST … WITH FUNCTION`, the CHECK `JSON_OBJECT('k': c) IS NOT NULL` ran the function as the superuser that wrote the row. The tree of that CHECK holds no `:funcid`. The query at the head and the form that the record proposes for PR034-SEC-09 both return no row for it. It is the class of PR034-SEC-09: a routine reached through syntax that names none. security-analyst gives it an id and a severity.
+- **Why the operator may stay STABLE:** D-ARCH-236 allowed `timestamptz + interval`, and that holds. On PostgreSQL 17.5, 768 built-in operators have an IMMUTABLE routine and 31 a STABLE one. None has a VOLATILE one, so the new refusal costs a correct schema nothing.
+- **Why a cast arm and not a refusal of the constructors:** with no such cast in the database, every run-time lookup finds built-in casts, whichever built-in does the lookup. A list of the nodes that look a cast up would age as the deny-list of D-ARCH-236 would.
+- **Alternatives rejected:** operators IMMUTABLE only (it would report a correct `timestamptz + interval` CHECK, a control that the C17 case pins); the record's form as written (it leaves the cast route open and names the operator by its routine).
+- **Method:** Node probes on PGlite 0.4.3 (PostgreSQL 17.5), in the session scratchpad, not kept. A role without superuser created each shape, and the superuser wrote a row.
+  - The amended query reports all 21 planted shapes: the 11 of D-ARCH-236 and 10 new ones (the operator over `ts_rewrite` in a table CHECK, a domain CHECK and a CHECK validated later; an operator over the IMMUTABLE `texteq`; `public.=(text, text)` reached by `NULLIF` with no `OPERATOR()`; a planted operator in a generated column and in a partition key; the cast shape; a cast `WITH INOUT`; an operator of `pg_trgm`). The query at the head reports 12 of the 21.
+  - The superuser's write ran the planted routine as the superuser for the three `ts_rewrite` shapes and for the cast through `JSON_OBJECT`, `JSON_ARRAY` and `JSON_SCALAR`.
+  - 0 rows for 16 clauses of built-in shapes (`timestamptz + interval`, a row comparison, `NULLIF`, `IN`, `= ANY`, `JSON_OBJECT` over text among them), for a fresh database, and for a database with only `pg_trgm`, `btree_gin` and `btree_gist`.
+  - The fence was extracted from data-model §8.6 after the edit and run as written there.
+- **Not verified:** PostgreSQL 18 (field names, the SQL/JSON constructors, the volatility counts); the real schema. A composite type takes another path in the constructors and its cast is not called; the arm reports that cast all the same. A row equality cannot use a planted `=` (`0A000`: it needs a btree operator family).
+- **Consequences for expectations at the head:** the planted operator of F10 (ii) now gives two rows. The planted range type gives two as well, because PostgreSQL creates a cast to its multirange with it.
+- **Gatekeeper:** verifies the amended text of data-model §4.6 C17 and §8.6 (third amendment, items 1 to 3, the corrected sentence, the fence). No ADR names C17, so no ADR is superseded (D-ARCH-235).
+- **Routed:** security-analyst: the id of the cast route; threat model §10.4 I items 3 (a) and 8 and the wording of RR-19 residual (b), which still say "IMMUTABLE built-in routines only"; SEC-TC-85 covers the new probes.
+- **Applied in:** data-model §4.6 C17, §8.6, A44; platform.md §10.3 (one clause).
+- **Reversibility:** High. A query, its reasons and planted probes; no release holds a manifest.
+
+### D-ARCH-244 · 2026-11-22 · principal-architect · PR034-SEC-10 (D-SECPR034-02, D-ORCH-176): every privileged session of the rehearsal sets `restrict_nonsystem_relation_kind = 'view, foreign-table'`, so the server refuses a read through a view; every read of `public._prisma_migrations` is preceded by a `relkind` check that refuses, and never reads as absent, anything but an ordinary table; no lock is required (data-model §8.6, third amendment, items 4 to 7)
+- **Trigger:** condition C1 of D-SECPR034-02, and D-ORCH-176: correct the wording "`relkind = 'r'`, `FROM ONLY`".
+- **Decision:**
+  1. **The boundary is a session setting.** `SET restrict_nonsystem_relation_kind = 'view, foreign-table'` before the first statement that names an application relation, read back, and a `RehearsalError` when it is not in effect. It joins the session settings that `db:backup` and `db:verify-restore` already apply.
+  2. **The readable refusal is a `relkind` check** before each read of `public._prisma_migrations`: absent when the name does not resolve; read with `FROM ONLY` when it is `r`; refused otherwise, also when the OID has no `pg_class` row in the session's snapshot.
+  3. **The wording** "`relkind = 'r'`, `FROM ONLY`" is corrected in place. `FROM ONLY` does not keep a view out.
+  4. **The fingerprints and the orphan checks** need no code change beyond item 1.
+- **Why the setting and not the lock that the record proposes:**
+  - The lock closes the race for the relations that the tool remembers to lock. The setting closes it for every statement of the session, the orphan checks included, which the record did not list.
+  - The server applies it to the relation that a name resolves to when the statement is prepared. A swap between a check and a read is then refused, not read.
+  - It is PostgreSQL's own control for this attack: CVE-2024-7348, a relation swapped for a view or a foreign table under `pg_dump`. The fix added this parameter and made `pg_dump` set it.
+  - In a `REPEATABLE READ` transaction a `pg_class` query sees the snapshot while a name resolves against the current catalog. A check built on a lock has to reason about both. The setting does not.
+- **What the lock would still add:** a table renamed during a backup is read under its new binding. The comparison of the two manifests then fails, which is the right outcome. So the lock is not required. If security-analyst wants it as well, it says so in its delta round; the default is no lock.
+- **Method:** a Node probe on PGlite 0.4.3 (PostgreSQL 17.5).
+  - With the setting off, the superuser's head read of a view named `_prisma_migrations` ran the planted routine as the superuser (the finding, reproduced).
+  - With it on, the read is refused with `55000` "access to non-system view … is restricted", also inside `REPEATABLE READ READ ONLY`, and the routine did not run.
+  - A table swapped for a view after it was listed is refused the same way. A table, `pg_sequences`, `pg_roles` and `information_schema` are still read. An unknown kind in the list is `22023`.
+  - `FROM ONLY` on a view is accepted by PostgreSQL. `LOCK TABLE ONLY … IN ACCESS SHARE MODE` is allowed in a read-only transaction and runs nothing of a view (probed, not adopted).
+  - The parameter is documented for PostgreSQL 18 (the client configuration page), and the advisory of CVE-2024-7348 describes the attack and the fix.
+- **Not verified:** PostgreSQL 18 itself; a foreign table (PGlite has no foreign-data wrapper, so that half rests on the documentation); `pg_dump` setting the parameter in the Compose image (read from the release announcement).
+- **Gatekeeper:** verifies items 4 to 7 of the third amendment and the corrected sentence of the second.
+- **Routed:** security-analyst: concurrence that the setting replaces the lock of its remediation items 1 and 2; threat model §10.4 I item 8.
+- **Applied in:** data-model §8.6, A44.
+- **Reversibility:** High. One session setting and one check.
+
+### D-ARCH-245 · 2026-11-22 · principal-architect · Rule 14 reads `DO` bodies and routine bodies for the objects it refuses outright (PR034-SEC-09 item 3); the range pattern matches the whole statement (R3-m1); the limits of rule 21 are completed (PR034-SEC-09 item 4, R3-n4); list (c) of rule 21 does not grow (R3-n5) (data-model §8.3, amendment of 2026-11-22)
+- **Trigger:** D-ORCH-176 ("say whether rule 14 reads DO bodies"), and the items that D-SECPR034-02 and D-CRPR034-02 route to me.
+- **Decision:**
+  1. **Yes, rule 14 reads bodies**, for `CREATE OPERATOR`, `CREATE RULE`, `CREATE CAST`, `CREATE AGGREGATE` and `CREATE TYPE … AS RANGE`: at a statement start inside a `DO` block or a routine body, and at the start of a string literal there. The reader is the one of rule 10. A routine body counts where the routine is defined, with no registry.
+  2. **No, for the first list of rule 14** (schemas, extensions, roles, database settings, default privileges, schema grants): the migrator lacks the privilege, and C5, C11 and C13 read the outcome.
+  3. **Stated limit:** a statement built at run time. The catalog is the boundary: the operator case of `c01-c12`, and C17 (a) and (b).
+  4. **R3-m1:** `/^create type\b.*\bas range\b/`.
+  5. **Rule 21 limits:** an operator not written `OPERATOR(schema.op)`; attribute notation; a load-time clause in a `DO` block or an `EXECUTE` string; a cast looked up at run time.
+  6. **R3-n5:** the `*_to_xml` family is not added to list (c). The list is the one that rule 16 shares with rule 20, a deny-list ages, and C17 reports every function that is not IMMUTABLE.
+- **Why bodies:** a `DO` block runs at deploy time. "Refused outright" had a one-line way around it, and with rule 21 blind to an unqualified operator, the whole chain of PR034-SEC-09 linted clean as one migration.
+- **Why at the definition for a routine:** no routine of this model creates one of these objects, so a registry and a call site would be machinery for a case that should not exist.
+- **Not verified:** no linter code ran. The rule is specified from reading `tools/db/lint-migrations.ts` at `1bac00b1`. No committed migration or bootstrap file holds one of the five forms outside a comment (text search on main).
+- **Gatekeeper:** verifies the §8.3 amendment of 2026-11-22.
+- **Applied in:** data-model §8.3, A44.
+- **Reversibility:** High.
+
+### D-ARCH-246 · 2026-11-22 · principal-architect · TASK-034, escalation ladder rung 1 (D-ORCH-175, D-ORCH-176): the change list F16 to F26 for the re-dispatch, the split rule, how security-analyst checks C1, and the owners outside the fix
+- **Trigger:** the deliverable of the dispatch. The head is `1bac00b1`. F1 to F15 of D-ARCH-238 are built and reviewed (D-CRPR034-02, D-SECPR034-02). The list below is closed: nothing outside it is asked of this fix.
+- **F16, the lane-B failure (D-ORCH-175; condition C4 of D-SECPR034-02).** Seven cases of `prisma/tests/migrations/backup-restore.int.test.ts` fail with "schema: the normalised schema dump differs from the source".
+  - First step: print the `schemaDiff` lines (`onlyBefore`, `onlyAfter`) of one failing case and name the object. The JUnit of run `20261121T1743Z_1bac00b` holds the message only.
+  - Fix the cause, not the comparison. A line that is a grant, a policy, an owner, an RLS flag, a trigger or an event trigger goes to security-analyst before `normaliseSchemaDump` changes.
+  - A change of the normalisation is a `D-TASK034-nn` decision that quotes the lines it hides and says why source and restore must differ on them.
+  - If the cause is the comparison rule of data-model §8.6 step 5 itself, the task comes back to me (rung 2).
+- **F17, the C17 query (D-ARCH-243).** `LOAD_TIME_CODE_SQL` equals the fence of data-model §8.6 as amended 2026-11-22. The fence test of F9 is the proof and is not loosened. The JSDoc of `LoadTimeCodeRow` names the kind `cast`, the via `cast` and the seven reasons. `loadTimeCodeFindings` keeps its rule: only `not immutable` can be excused. Unit rows: `operator outside pg_catalog`, `volatile operator routine` and `cast outside an extension` are findings although the reviewed list names their reference.
+- **F18, the C17 probes** (`prisma/tests/catalog/c17-load-time-code.int.test.ts`; created as the migrator, rolled back; each with kind, object, reference and reason):
+  - (a) a table CHECK through `public.@@@` over `pg_catalog.ts_rewrite(tsquery, text)`: two rows, `operator outside pg_catalog` with the operator and `volatile operator routine` with the routine;
+  - (b) a domain CHECK through it: two rows;
+  - (c) the CHECK added `NOT VALID` and then validated: two rows;
+  - (d) a table CHECK through `public.===` over `pg_catalog.texteq`: one row, `operator outside pg_catalog`;
+  - (e) `public.=(text, text)` over `pg_catalog.texteq`, a table created under `search_path = public, pg_catalog` with `CHECK (NULLIF(a, b) IS NOT NULL)`: one row;
+  - (f) an enum, a function from it to `json`, `CREATE CAST … WITH FUNCTION`, and a table CHECK `JSON_OBJECT('k': c) IS NOT NULL`: one row of kind `cast`, and no row of kind `table check` for that constraint;
+  - (g) a table CHECK with `a % 'abc'` (`pg_trgm`): two rows.
+  - Changed expectations: the planted operator of F10 (ii) gives two rows, and the planted range type gives two (its cast to the multirange).
+  - Control not reported: `JSON_OBJECT('k': a)` over a text column. The committed case stays at 0 findings and 0 unused entries.
+  - R3-n2 rides: the VIRTUAL case keeps the one outcome that lane B showed.
+- **F19, rule 14 (D-ARCH-245).** `REFUSED_OBJECTS` at the statement starts of rule 10 inside `DO` bodies and routine bodies, string literals included, through the reader of rule 10 and no second one. The range pattern of R3-m1. The message and the header say so, with the stated limit.
+  - Failing fixtures under `refused-objects/`: `DO $$ BEGIN CREATE OPERATOR … END $$`; the chain of the record's shape S9; a `CREATE FUNCTION` whose body holds `CREATE CAST`; `EXECUTE 'CREATE TYPE … AS RANGE …'` in a `DO` body; `CREATE TYPE public."a;b" AS RANGE (subtype = integer)`.
+  - Clean fixtures: a `DO` block that names the forms in a comment only; a routine whose body creates a table.
+  - The existing fixture outcomes stay identical, and `lintRepository(repoRoot)` stays without a finding. A new finding on an existing fixture is a `D-TASK034-nn` decision, never a silent change.
+  - The linearity tests gain one long body.
+- **F20, rule 21 text.** The header lists the four limits of data-model §8.3 (2026-11-22). R3-n3: the two delimiting cases assert their message.
+- **F21, the session setting (D-ARCH-244).** `MANIFEST_SESSION_SETTINGS` gains `SET restrict_nonsystem_relation_kind = 'view, foreign-table'`. `applySessionSettings` reads the value back and throws a `RehearsalError` when it differs. `runBackup` and `verifyRestoredDatabase` call it before any statement that names an application relation, as they do today.
+- **F22, the `_prisma_migrations` check (D-ARCH-244).** `MIGRATION_TABLE_SQL` returns whether the name resolves and its `relkind`. `captureManifest`: not resolved, a null head and no read; `r`, `MIGRATION_HEAD_SQL` with `FROM ONLY`; anything else, `RehearsalError` "public._prisma_migrations is not a table (relkind …): refused (data-model 8.6)". The same check before `APPLIED_CHECKSUM_SQL`, which also reads `FROM ONLY`.
+- **F23, tests of F21 and F22 (SEC-TC-85).**
+  - Integration, PostgreSQL 18, on a clone: the migrator renames `_prisma_migrations` and creates a view of that name whose query calls a routine that records `current_user`. `db:backup` returns 1 with the refusal. The side table holds no row of the bootstrap role, and `rolsuper` is false for the migrator.
+  - The same for the restored side: `verifyRestoredDatabase` on such a database refuses before the head read.
+  - A session case: after `applySessionSettings`, `SELECT … FROM ONLY <that view>` is `55000` and the routine did not run. This pins the setting apart from the check.
+  - Unit, with fakes: `relkind` `v`, `m`, `f` and `p`, and a name that resolves with no `pg_class` row, are refused and not treated as absent; an absent name gives a null head and no head read in the statement list; a session that reads back another value of the setting is refused before `BEGIN`; the statement lists of both tools show the `SET` before the first application read.
+- **F24, the runbook and the headers.** `docs/07-ops/runbooks/backup-restore.md` section 2 gets the new refusal lines and what to do about each: the two operator reasons and the cast reason of the gate, "is not a table", and `55000`. The sentence on what the privileged sessions do follows data-model §8.6 as amended. The headers of `load-time-code.ts`, `rehearsal-manifest.ts`, `backup.ts` and `verify-restore.ts` are restated.
+- **F25, PR034-SEC-11 (INFO),** as its record specifies: Prisma codes from Prisma's own lines only; the server part cut at the first severity word whatever its case or language.
+- **F26.** Every choice and deviation is `D-TASK034-24` and following in the commit body.
+- **If the fix must be smaller:** C4 needs F16. C1 needs F17, F18, F19, F21, F22 and F23. F20, F25 and the header half of F24 may move to the late task of D-ARCH-242, which opens `tools/db` next. The runbook half of F24 may not: a refusal line is documented with the code that prints it. The orchestrator decides and records it. I recommend one fix.
+- **How security-analyst checks C1** in its delta round on the fix head:
+  1. Its probe P11 (B1 to B3) is reported by C17, and its shape S9 is a rule-14 finding.
+  2. Its probes P13, P13b and P13c: `db:backup` refuses the view. With the `relkind` check removed by a mutant, the read fails with `55000` and the routine did not run.
+  3. The cast shape of F18 (f) is reported.
+  4. Lane B on PostgreSQL 18 is green: the seven cases of F16, the C17 file and the cases of F23.
+  5. The statement lists of both tools match items 4 and 5 of the third amendment.
+- **Owners outside the fix:**
+  - **quality-gatekeeper:** the amended Accepted text of D-ARCH-243 to D-ARCH-245 (data-model §4.6 C17, §8.3 amendment of 2026-11-22, §8.6 third amendment with the two sentences corrected in place and the fence), and the decisions of D-ARCH-242.
+  - **security-analyst:** the two concurrences (D-ARCH-244, D-ARCH-242); the id of the cast route; its threat model text.
+  - **senior-developer:** the root cause of F16, which D-ORCH-176 runs in parallel; the brief of the re-dispatch quotes F16 to F26.
+  - **qa-lead:** unchanged. SEC-TC-85 joins `catalog-c1-c14.required_cases` after the merge, and `restore-rehearsal` waits for C1.
+  - **orchestrator:** R3-n1 stays on the TASK-119 card. The late task of D-ARCH-242 starts after this fix has a green lane B.
+  - **principal-architect:** data-model §8.3 as shipped after the merge, and RR-19 in `risks.md`, both still owed from D-ARCH-238.
+- **Not verified:** the list was not built or run. F19, F21 and F22 are specified from reading `1bac00b1`.
+- **Reversibility:** High.

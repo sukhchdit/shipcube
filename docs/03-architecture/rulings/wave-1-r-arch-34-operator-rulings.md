@@ -639,6 +639,8 @@ Written without apostrophes, for `plan-data.mjs`.
 
 *2026-11-21, after D-QG-005 (D-ARCH-215, D-ARCH-216; section 8.12):* the TASK-087 line on unique keys is reworded, and five lines are added at the end of the table. The table now has 21 lines: TASK-051 (7), TASK-087 (2), TASK-091 (3), TASK-146 (3), TASK-234 (1), TASK-237 (2), TASK-154 (1) and the C16 follow-up (2).
 
+*2026-11-22, after TASK-298 was built (D-TASK298-01, D-SD-016; D-ARCH-242; section 8.13):* two lines are added at the end, one for TASK-298 and one for a new late task. The table now has 23 lines.
+
 | Task | Line |
 |---|---|
 | TASK-051 `guestclaim` (fix cycle) | "C16 (a) BOTH OWNER COLUMNS (D-TASK051-03; D-ARCH-207; rulings/wave-1-r-arch-34-operator-rulings.md section 8.1; data-model 4.6 C16 as amended 2026-11-21): a foreign key of a table with guest_token_hash that holds both owner columns is reported and is the sibling of no key; the planted probe c16_g_both (org_id, guest_token_hash, parent_id) -> c16_gparent (org_id, guest_token_hash, id) joins PLANTED_GUEST_REFERENCE_FINDINGS" |
@@ -662,6 +664,8 @@ Written without apostrophes, for `plan-data.mjs`.
 | TASK-154 `customsapi` *(added 2026-11-21, D-ARCH-215)* | Add: "CUSTOMS CURRENCY KEY (D-QG-005 condition QG-051-C1 (a); D-ARCH-215; ADR-0005 amendment 15 item 37 as clarified 2026-11-21; data-model 3.11 note of 2026-11-21): fk_customs_items__declaration_currency is FOREIGN KEY (org_id, declaration_id, currency) REFERENCES customs_declarations (org_id, id, currency) ON DELETE RESTRICT ON UPDATE RESTRICT on the target index ux_customs_declarations__org_id_id_currency (org_id, id, currency), which replaces UNIQUE (id, currency); there is no ON UPDATE CASCADE, and every relation of customs.prisma states onDelete: Restrict and onUpdate: Restrict; every unique index of customs_declarations and customs_items leads with org_id; a change of the declaration currency is ONE statement that updates the declaration and every line of it, soft-deleted lines included, one update as a data-modifying CTE of the other, each row with its version step and actor; integration cases on PostgreSQL 18: the declaration first is refused with 23001 and a line first with 23503, both on fk_customs_items__declaration_currency, the one statement succeeds, and a line of another organisation that names the declaration is refused with 23503 on the same constraint; C16 is the gate" |
 | The C16 follow-up *(added 2026-11-21, D-ARCH-216)*: the fix cycle of TASK-051 if senior-developer folds it there, otherwise a late task on `prisma/tests/catalog/tenant-keys.ts` and `c16-tenant-keys.int.test.ts`; merged before TASK-087 opens its PR | "C16 (c) CONSTRAINT STATE (D-QG-005 condition QG-051-C6; D-ARCH-216; data-model 4.6 C16 as amended 2026-11-21; rulings section 8.12): TENANT_REFERENCES_SQL returns per foreign key the fact enforced = conenforced AND convalidated; the pure function reports a key that is not enforced whatever its columns, never counts it as org-bound, guest-bound or a sibling, and reports an exception entry that names it; a second assertion of the suite finds no constraint of a non-system schema (the scope of P9-CK) with conenforced or convalidated false, with no exception map; planted and reported, each rolled back: an org-bound key declared NOT ENFORCED, an org-bound key altered to NOT ENFORCED with ALTER CONSTRAINT, an org-bound key left NOT VALID, a guest-bound key declared NOT ENFORCED whose org-bound sibling is then reported as alone, an owner CHECK declared NOT ENFORCED and a CHECK left NOT VALID; fixtures in tenant-keys.test.ts drive the function; pg_constraint.conenforced exists from PostgreSQL 18 on, so the query fails on a PGlite 17 replay and is not adapted for it" |
 | The C16 follow-up *(added 2026-11-21, D-ARCH-215)* | "C16 (d) REFERENTIAL ACTIONS (D-QG-005 condition QG-051-C1 (a); D-ARCH-215; ADR-0005 amendment 15 item 37 as clarified 2026-11-21; data-model 4.6 C16): no foreign key of a non-system schema has confdeltype or confupdtype other than r (RESTRICT), with no exception map; planted and reported, each rolled back: a key with ON UPDATE CASCADE, a key with ON DELETE SET NULL and a key that states no action (NO ACTION on both); not reported: the 13 keys of the merged migrations" |
+| TASK-298 `c16state` *(added 2026-11-22, D-ARCH-242)* | Add: "BOOTSTRAP KEY PIN (D-TASK298-01; D-SD-016; D-ARCH-242; rulings section 8.13; data-model 5.7 as amended 2026-11-22): arm (d) keeps its rule and gets no exception map; the committed case of c16-tenant-keys.int.test.ts keeps expecting exactly one finding, fk_audit_pii_vault__subject on public.audit_pii_vault with NO ACTION on both actions, until the bootstrap task of section 8.13 is on main; the constant BOOTSTRAP_NO_ACTION_PENDING_RULING is renamed BOOTSTRAP_KEY_PENDING_CORRECTION, and its comment and the title of the committed case name D-ARCH-242 and bootstrap file 92-audit-vault-subject-restrict.sql instead of a pending ruling; no assertion changes, and the planted case keeps its three reported keys, the key that states no action among them" |
+| New late task `vaultfkrestrict` *(added 2026-11-22, D-ARCH-242)*: database-engineer; `prisma/bootstrap/**`, `tools/db/shadow-init.ts` and their tests; depends on TASK-298; dispatched after the TASK-034 fix head has a green lane B; merged before G3 | "AUDIT VAULT KEY RESTRICT (D-TASK298-01; D-ARCH-242; ADR-0005 amendment 15 item 37; data-model 4.6 C16 (d) and 5.7 as amended 2026-11-22; rulings section 8.13): new file prisma/bootstrap/92-audit-vault-subject-restrict.sql with the rule-12 header -- @audit-ddl security-approved: security-analyst and the date of the approval, SET search_path = pg_catalog, pg_temp as its first statement, SET ROLE platform_audit_owner, then ONE statement ALTER TABLE public.audit_pii_vault DROP CONSTRAINT IF EXISTS fk_audit_pii_vault__subject, ADD CONSTRAINT fk_audit_pii_vault__subject FOREIGN KEY (subject_id) REFERENCES public.data_subjects (id) ON DELETE RESTRICT ON UPDATE RESTRICT, then RESET ROLE; no NOT VALID, no NOT ENFORCED, no DEFERRABLE; 10-audit.sql is not edited; tools/db/shadow-init.ts gains one KEEP form for exactly this statement shape: the same fk_ name dropped and added, one column list on each side, ON DELETE RESTRICT ON UPDATE RESTRICT as the last words, the whole statement anchored; unit cases refuse a different name, a trailing NOT VALID, NOT ENFORCED or DEFERRABLE, a third action, another referential action and a name that does not start with fk_; the shadow database then holds the key with RESTRICT on both actions; the bootstrap suite, the ledger tests and the bootstrap-lane lint case list the fourth audit file; in prisma/tests/catalog/c16-tenant-keys.int.test.ts the pin BOOTSTRAP_KEY_PENDING_CORRECTION is deleted, the committed case of arm (d) expects no finding and names fk_audit_pii_vault__subject among the keys it read, and the planted case compares without a filter; one more catalog case P9-FK: every constraint named fk_ in a non-system schema is a foreign key, with a planted control, because the KEEP form trusts the name as the CHECK form does (P9-CK); integration on PostgreSQL 18: after the bootstrap the key has confdeltype r and confupdtype r, is validated and enforced, and exactly one constraint of that name exists; lane B with the catalog, bootstrap, shadow and audit suites; its own security record with the rule-12 approval" |
 
 ### 8.10 Verification and open items
 
@@ -797,3 +801,61 @@ SELECT n.nspname::text AS schema, c.conrelid::regclass::text AS "table", c.conna
 | N5 | The arm (c) sketch over the probe schema: 58 constraints (7 foreign keys, 3 CHECK, 37 NOT NULL, 10 primary keys, 1 unique) | the five planted constraints of N1 to N3 and nothing else. PostgreSQL 18 lists NOT NULL constraints in `pg_constraint`; all of them pass |
 | N6 | The arm (d) sketch over the 7 foreign keys; then a key that states no action | the two keys with `ON UPDATE CASCADE` (`a`/`c` as drawn, `r`/`c`); `a`/`a` |
 | N7 | `pg_get_constraintdef` of the T2-O CHECK | `CHECK (((requote_of_quote_id IS NULL) OR (org_id IS NOT NULL)))`, validated and enforced. It is the 17.5 text of section 8.3, so the pinned text holds on 18.6 |
+
+### 8.13 The one key of the bootstrap lane (D-TASK298-01; D-SD-016; D-ARCH-242)
+
+Added 2026-11-22, after TASK-298 was built (`300c644f`, `prisma/tests/**` only).
+
+**Edited (docs only).** ADR-0005 (a dated note at item 37). data-model §4.6 (a dated note at C16 (d)), §5.7 and amendment row A44. This file: section 8.9 (two lines) and this section. DECISIONS.md. Not edited: `plan-data.mjs`, the cards, any code, any branch.
+
+**Run here.** One single-process Node probe on in-memory PGlite 0.4.3 (PostgreSQL 17.5), in the session scratchpad: the two tables with the key as file 10 declares it, the replacement statement, and the catalog rows before and after. Nothing ran in a worktree.
+
+**Not run here.** PostgreSQL 18, the real bootstrap lane with its roles and the audit DDL guard, the shadow rendering. Lane B of the implementing task is the evidence.
+
+**Finding of TASK-298.** Arm (d) as ruled reports one committed key: `fk_audit_pii_vault__subject`, `audit_pii_vault (subject_id) → data_subjects (id)`, created by `prisma/bootstrap/10-audit.sql` (TASK-021). It states no action and is `NO ACTION` on both (A1). Section 8.12, D-ARCH-215 and D-QG-006 counted the 13 keys of `prisma/migrations` and did not read the bootstrap lane. The omission is mine: I searched the migrations and the data model for referential actions, and a key that states none holds no word to find. Data-model §5.7 draws it without an action as well.
+
+**Ruling: the key is corrected, and the rule is not narrowed.** Item 37 of ADR-0005 amendment 15 and arm (d) stand as they are: every foreign key has `RESTRICT` on both actions, and there is no exception map.
+
+- **Why the rule keeps its form.**
+  - The reason of D-ARCH-215 is the writing action, which runs as the table owner past the guard. `NO ACTION` writes nothing, so that reason does not apply to this key. The rule is still worth more than its reason: "every key states `RESTRICT` on both actions" asks no judgment of the author of a relation and none of the catalog arm, and five cards carry it already (TASK-087, TASK-092, TASK-154, TASK-237, TASK-298).
+  - `NO ACTION` is what a key gets when nobody stated an action in SQL. An arm that passes it no longer tells a decision from an omission.
+  - `NO ACTION` differs from `RESTRICT` in two ways that a later key could come to rely on. Its check on the referenced side is deferred when the key is `DEFERRABLE`, and it accepts the change of a referenced key when another row supplies that key in the same statement. An arm that allowed it would have to read `condeferrable` as well.
+  - The answer of a refused change differs on PostgreSQL 18: `23001` for `RESTRICT`, `23503` for `NO ACTION` (section 8.5). The cards of TASK-146, TASK-154 and TASK-237 pin `23001`.
+  - The gatekeeper verified the sentence twice as a rule (D-QG-005, D-QG-006). Narrowing it for one key that one statement corrects would be the wrong trade.
+- **Why now.** No database of this run holds a vault row outside a test, so the statement validates nothing. At M5 the same statement scans the vault under a lock that holds back every audited write.
+- **What changes for a session.** Nothing but the SQLSTATE of a refused change of a referenced subject (A2, A3, A6). The key is not deferrable before or after (A1, A5). No runtime role can delete a subject or change its `id`: `platform_app` holds `INSERT` and `SELECT` on `data_subjects`, and `platform_erasure` may update `erased_at` and the standard columns.
+
+**The correction.** A new late task, the last line of section 8.9. In short:
+
+- `prisma/bootstrap/92-audit-vault-subject-restrict.sql`, with its own rule-12 marker, under `SET ROLE platform_audit_owner`, one statement (A4): `ALTER TABLE public.audit_pii_vault DROP CONSTRAINT IF EXISTS fk_audit_pii_vault__subject, ADD CONSTRAINT fk_audit_pii_vault__subject FOREIGN KEY (subject_id) REFERENCES public.data_subjects (id) ON DELETE RESTRICT ON UPDATE RESTRICT`. The name sorts after file 91, which the runner requires. File 91 is the precedent for a `DROP` and an `ADD` in one `ALTER TABLE` under that role, and the audit DDL guard returns at once for it.
+- `tools/db/shadow-init.ts` refuses a statement form that it does not know, so it gains one KEEP form for exactly this shape, anchored at both ends. Without it `prisma migrate dev` fails closed on the new file.
+- The pin of TASK-298 is deleted in the same PR. The test forces that: the committed case expects exactly the `NO ACTION` finding and fails as soon as the key is `RESTRICT`.
+- **Order.** After the TASK-034 fix head has a green lane B. A new bootstrap file changes the schema dump that its restore cases compare, and that comparison is the open failure of D-ORCH-175.
+- **Due.** Before G3.
+
+**TASK-298.** The branch keeps `prisma/tests/**` as its scope and merges with the pin.
+
+- The committed case of arm (d) keeps its three assertions. The constant `BOOTSTRAP_NO_ACTION_PENDING_RULING` becomes `BOOTSTRAP_KEY_PENDING_CORRECTION`. Its comment and the title of the case name D-ARCH-242 and file 92 instead of "pending its ruling (D-TASK298-01)".
+- The planted case does not change. A key that states no action stays one of the three reported plants.
+- The pin is not an exception map. It is one exact finding text with the table and both actions, so any other key, and any other action on this key, still fails the case. It ends with the correction and cannot outlive it unnoticed.
+- This change is the merge condition that D-ORCH-178 names. The bootstrap file is not a merge condition of TASK-298: TASK-087 needs arms (c) and (d) on main before its PR, and it does not need the audit lane to change first.
+
+**Alternatives rejected.**
+
+- **Arm (d) reports writing actions only** (option (b) of D-SD-016). It costs no DDL. It narrows a verified rule, lets `NoAction` pass for every later relation, and leaves "every relation states `Restrict`" on five cards with nothing that checks it. That is the state D-QG-005 found on 2026-11-21.
+- **An exception entry for this key, by amendment.** Item 37 provides an amendment for "a key that needs another action". This key needs none: nothing depends on `NO ACTION` here.
+- **The bootstrap file inside TASK-298.** The branch would take `prisma/bootstrap/**` and `tools/db/shadow-init.ts`, a rule-12 approval and a schema-dump change, and TASK-087 waits for that branch.
+- **Editing `10-audit.sql`.** Applied bootstrap files are immutable (`bootstrap_migrations.sha256`, rule 12).
+- **`NOT VALID` and a later `VALIDATE`.** Arm (c) reports a constraint that is left `NOT VALID`, and the table holds no rows to make the scan matter.
+
+**Probe results (PGlite 0.4.3 = PostgreSQL 17.5; the refused changes answer `23503` there, section 8.5).**
+
+| Row | Case | Result |
+|---|---|---|
+| A1 | The key as file 10 declares it | `confdeltype` `a`, `confupdtype` `a`, validated, not deferrable |
+| A2 | Delete of a subject that a vault row names, `NO ACTION` | refused on the key |
+| A3 | Change of that subject's `id`, `NO ACTION` | refused on the key |
+| A4 | The one-statement replacement | ok |
+| A5 | The key after it | `r` and `r`, validated, not deferrable; one constraint of that name |
+| A6 | Delete of the subject, `RESTRICT` | refused on the key |
+| A7 | A vault row that names a missing subject, `RESTRICT` | refused on the key |
