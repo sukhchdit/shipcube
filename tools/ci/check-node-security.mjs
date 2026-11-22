@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Node security-release comparison (PR87-SEC-01 (b); D-SECCHORE-01; D-DEVOPS-004). Local and zero hosted minutes:
+ * Node security-release comparison (PR87-SEC-01 (b); D-SECCHORE-01; D-DEVOPS-005). Local and zero hosted minutes:
  * the operator runs it at session start, before each lane B wave run and before G3/G4 (docs/07-ops/CI-CD.md section 6).
  *
  * It reads the version of the `node:` base of every repository Dockerfile (they are byte-identical, check-dockerfiles

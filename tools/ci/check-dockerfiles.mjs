@@ -30,7 +30,7 @@
  *                          /usr/local/bin/node` and nothing else, and mounts nothing from it (`RUN --mount=...from=`).
  *   entrypoint         an api/worker final stage has `ENTRYPOINT ["/app/entrypoint.sh"]` as its last ENTRYPOINT and
  *                      `COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh` (PR #39 fix cycle 1).
- *   node-major         (repository mode; PR87-SEC-01 (a), PR-0087 R1-m1, D-DEVOPS-004) every `node:<version>-...` FROM
+ *   node-major         (repository mode; PR87-SEC-01 (a), PR-0087 R1-m1, D-DEVOPS-005) every `node:<version>-...` FROM
  *                      has the major of `.node-version` and a version that satisfies `engines.node` of the root
  *                      package.json (ADR-0001: Node 24 LTS). Fails closed: an unreadable `.node-version`, a missing or
  *                      unparsable `engines.node`, or a node tag without a numeric version is a finding. Dependabot #50

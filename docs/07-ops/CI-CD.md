@@ -229,7 +229,7 @@ Prisma download redirects.
 
 ## 6. Node base image: major, security releases and hand bumps
 
-*Added 2026-11-22 by devops-engineer (PR87-SEC-01 (a) to (c), D-SECCHORE-01; D-DEVOPS-004).*
+*Added 2026-11-22 by devops-engineer (PR87-SEC-01 (a) to (c), D-SECCHORE-01; D-DEVOPS-005).*
 
 The five image Dockerfiles (api, worker, web, admin, prisma) share one `node:<version>-trixie-slim@sha256:…` base,
 which must be byte-identical everywhere (check-dockerfiles `runtime-codename` (b)). ADR-0001 fixes Node 24 LTS.

@@ -1,5 +1,5 @@
 /**
- * Node security-release comparison (PR87-SEC-01 (b), D-DEVOPS-004): the pure status function, the pin reader, the
+ * Node security-release comparison (PR87-SEC-01 (b), D-DEVOPS-005): the pure status function, the pin reader, the
  * bounded fetch and the CLI exit codes (0 current, 1 behind, 2 cannot run). No test touches the network.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

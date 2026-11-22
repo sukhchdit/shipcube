@@ -9,10 +9,10 @@
 #   toolchain peers allow it. Moving to 7 is a reviewed task PR with its own superseding ADR, not an automated bump. Minor and
 #   patch updates still flow through the npm-minor-and-patch group. Other majors stay visible for review on purpose,
 #   except the ADR-0001 pins that a major has broken: stylelint (npm, #92), node (docker, #50 and #90) and valkey/valkey
-#   (docker-compose, #49); see the comment at each ignore (PR-0086 and PR-0087 R1-n1, D-DEVOPS-004).
+#   (docker-compose, #49); see the comment at each ignore (PR-0086 and PR-0087 R1-n1, D-DEVOPS-005).
 # - A Dependabot job carries the configuration of the commit that triggered it but clones the default branch when it
 #   starts. Two merges that change this file within a minute can therefore run a job with the older ignore list against
-#   the newer tree (#90, D-DEVOPS-004). No rule here prevents that; the repository-side gates do (check-dockerfiles
+#   the newer tree (#90, D-DEVOPS-005). No rule here prevents that; the repository-side gates do (check-dockerfiles
 #   node-major for the node pin, `npm ci` peer resolution for stylelint, compose-stack for valkey).
 # - docker (every image Dockerfile) and docker-compose (compose*.yaml) since TASK-014 (PR #39 R2, PR39-SEC-06); the
 #   terraform ecosystem is added with the first infra code (TASK-017).
@@ -29,7 +29,7 @@ updates:
       - dependency-name: '@platform/*'
       - dependency-name: typescript
         update-types: ['version-update:semver-major']
-      # stylelint semver-major is ignored (D-DEVOPS-004): ADR-0001 fixes Stylelint 17, and stylelint-use-logical 2.1.3
+      # stylelint semver-major is ignored (D-DEVOPS-005): ADR-0001 fixes Stylelint 17, and stylelint-use-logical 2.1.3
       # (csstools/use-logical, NFR-I18N-003) declares the peer range ">= 11 < 18". #92 moved stylelint to 18.0.0 and
       # `npm ci` failed with ERESOLVE on main. Stylelint 18 is a reviewed PR with an ADR-0001 amendment once a
       # stylelint-use-logical release admits it, not an automated bump.
@@ -66,9 +66,9 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 2
-    # node 25 and later are ignored (D-DEVOPS-002, D-DEVOPS-004): ADR-0001 and D-ARCH-001 fix Node 24 LTS, and
+    # node 25 and later are ignored (D-DEVOPS-002, D-DEVOPS-005): ADR-0001 and D-ARCH-001 fix Node 24 LTS, and
     # package.json engines (">=24.2 <25") with engine-strict reject any other major in the image npm ci stages. #50 and
-    # #90 moved all five Dockerfiles to node:26 and were reverted (#87, D-DEVOPS-004). Node 26 is a reviewed task PR with
+    # #90 moved all five Dockerfiles to node:26 and were reverted (#87, D-DEVOPS-005). Node 26 is a reviewed task PR with
     # a superseding ADR (engines, .node-version, CI and images together), not an automated bump. The range is absolute,
     # not `update-types: semver-major`, which is relative to the version in the file: once a hand edit or a stale job put
     # node:26 in the tree, a relative rule would keep offering 26.x. `.a` also excludes 25 pre-release tags (the bound
