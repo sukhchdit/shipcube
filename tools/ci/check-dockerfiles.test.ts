@@ -19,8 +19,13 @@ import {
   copySources,
   crossFileBaseFindings,
   instructions,
+  nodeMajorFindings,
+  nodeTagVersion,
+  readNodePolicy,
   runtimeCodenameFindings,
+  satisfiesEngines,
   stages,
+  versionParts,
 } from './check-dockerfiles.mjs';
 
 const repoRoot = findRepoRoot();
@@ -51,6 +56,16 @@ const rulesOf = (text: string, options = service) => checkDockerfileText(text, o
 const edit = (from: string, to: string) => {
   if (!good.includes(from)) throw new Error(`fixture line not found: ${from}`);
   return good.replace(from, to);
+};
+/** The reference with a debian runtime stage that takes only the Node binary from the node stage, as apps/api does. */
+const slim = good.replace(
+  'FROM base AS runtime',
+  [`FROM ${DEBIAN} AS runtime`, 'ENV NODE_ENV=production', 'COPY --from=base /usr/local/bin/node /usr/local/bin/node'].join('\n'),
+);
+/** The Node policy of the repository root (ADR-0001), written into a scratch root for the repository-mode tests. */
+const writeNodePolicy = (root: string) => {
+  writeFileSync(join(root, '.node-version'), '24\n');
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ engines: { node: '>=24.2 <25', npm: '>=11.10' } }));
 };
 
 describe('check-dockerfiles parsing helpers', () => {
@@ -171,11 +186,6 @@ describe('check-dockerfiles rules', () => {
 });
 
 describe('runtime-codename (D-ARCH-116, PR #39 R3)', () => {
-  /** The reference with a debian runtime stage that takes only the Node binary from the node stage, as apps/api does. */
-  const slim = good.replace(
-    'FROM base AS runtime',
-    [`FROM ${DEBIAN} AS runtime`, 'ENV NODE_ENV=production', 'COPY --from=base /usr/local/bin/node /usr/local/bin/node'].join('\n'),
-  );
   const slimEdit = (from: string, to: string) => {
     if (!slim.includes(from)) throw new Error(`fixture line not found: ${from}`);
     return slim.replace(from, to);
@@ -300,6 +310,7 @@ describe('runtime-codename (D-ARCH-116, PR #39 R3)', () => {
     it('repository mode (--root) reports the cross-file finding and exits 1', () => {
       const root = mkdtempSync(join(tmpdir(), 'check-dockerfiles-'));
       try {
+        writeNodePolicy(root);
         for (const [dir, text] of [
           ['apps/api', api],
           ['apps/worker', slim.replace(DEBIAN, DEBIAN.replace(/@sha256:.*$/u, OTHER_DIGEST))],
@@ -322,6 +333,144 @@ describe('runtime-codename (D-ARCH-116, PR #39 R3)', () => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe('node-major (PR87-SEC-01 (a), PR-0087 R1-m1)', () => {
+  const policy = { nodeVersion: '24', enginesNode: '>=24.2 <25' };
+  const NODE26 = 'node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc';
+  const messagesOf = (text: string, p: { nodeVersion: string | undefined; enginesNode: string | undefined } = policy) =>
+    nodeMajorFindings([{ file: 'apps/api/Dockerfile', text }], p).map(({ file, finding }) => {
+      expect(file).toBe('apps/api/Dockerfile');
+      expect(finding.rule).toBe('node-major');
+      return finding.message;
+    });
+
+  it.each([
+    [NODE, '24.22.3'],
+    [`docker.io/library/${NODE}`, '24.22.3'],
+    ['node:24-trixie-slim@sha256:' + 'a'.repeat(64), '24'],
+    ['node:24.22@sha256:' + 'a'.repeat(64), '24.22'],
+    ['node:lts-trixie-slim@sha256:' + 'a'.repeat(64), undefined],
+    [DEBIAN, undefined],
+  ])('nodeTagVersion(%s) = %s', (from, expected) => {
+    expect(nodeTagVersion(from)).toBe(expected);
+  });
+
+  it.each([
+    ['24', [24]],
+    ['v24.22.3', [24, 22, 3]],
+    [' 24.2\n', [24, 2]],
+    ['24.x', undefined],
+    ['lts/*', undefined],
+    ['24.0.0-rc.1', undefined],
+  ])('versionParts(%j)', (text, expected) => {
+    expect(versionParts(text)).toEqual(expected);
+  });
+
+  it.each([
+    ['24.22.3', '>=24.2 <25', true],
+    ['24.2.0', '>=24.2 <25', true],
+    ['24.1.9', '>=24.2 <25', false],
+    ['25.0.0', '>=24.2 <25', false],
+    ['26.13.1', '>=24.2 <25', false],
+    ['24.22.3', '>= 24.2 < 25', true],
+    ['26.13.1', '>=24.2 <25 || >=26', true],
+    ['24.0.0', '>24', false],
+    ['25.0.0', '>24', true],
+    ['24.9.9', '<=24', true],
+    ['25.0.0', '<=24', false],
+    ['24.22.3', '24', true],
+    ['25.0.0', '24', false],
+    ['24.22.3', '=24.22.3', true],
+    ['24.22.4', '24.22.3', false],
+    ['24.22.3', '>24.22.3', false],
+    ['24.22.3', '<=24.22.3', true],
+    ['24.22.3', '^24.2.0', undefined],
+    ['24.22.3', '~24.2', undefined],
+    ['24.22.3', '24.x', undefined],
+    ['24.22.3', '24.0.0 - 24.99.0', undefined],
+    ['24.22.3', '', undefined],
+    ['24.22.3', '>=24 ||', undefined],
+    ['24', '>=24', undefined],
+  ])('satisfiesEngines(%s, %j) = %s', (version, range, expected) => {
+    expect(satisfiesEngines(version, range)).toBe(expected);
+  });
+
+  it('passes the ADR-0001 pin (Node 24.22.3, .node-version 24, engines ">=24.2 <25") in every stage', () => {
+    expect(messagesOf(slim)).toEqual([]);
+    expect(messagesOf(good)).toEqual([]);
+  });
+
+  it('a node:26 base (Dependabot #50 and #90) fails both the major and the engines check', () => {
+    expect(messagesOf(slim.replace(NODE, NODE26))).toEqual([
+      expect.stringContaining('is Node 26 but .node-version is 24'),
+      expect.stringContaining('does not satisfy engines.node ">=24.2 <25"'),
+    ]);
+  });
+
+  it('a 24.x below the engines floor fails only the engines check; a floating major tag fails it too', () => {
+    expect(messagesOf(slim.replace('24.22.3', '24.1.0'))).toEqual([expect.stringContaining('node:24.1.0 does not satisfy')]);
+    expect(messagesOf(slim.replace('24.22.3', '24'))).toEqual([expect.stringContaining('node:24 does not satisfy')]);
+  });
+
+  it('a node tag without a numeric version is a finding', () => {
+    expect(messagesOf(slim.replace('24.22.3-trixie-slim', 'lts-trixie-slim'))).toEqual([
+      expect.stringContaining('has no numeric node version'),
+    ]);
+  });
+
+  it('fails closed on a missing .node-version, a missing engines.node or an unreadable range', () => {
+    expect(messagesOf(slim, { nodeVersion: undefined, enginesNode: policy.enginesNode })).toEqual([
+      expect.stringContaining('.node-version is missing'),
+    ]);
+    expect(messagesOf(slim, { nodeVersion: 'lts/*', enginesNode: policy.enginesNode })).toEqual([
+      expect.stringContaining('.node-version is missing'),
+    ]);
+    expect(messagesOf(slim, { nodeVersion: '24', enginesNode: undefined })).toEqual([expect.stringContaining('no string engines.node')]);
+    expect(messagesOf(slim, { nodeVersion: '24', enginesNode: '^24.2.0' })).toEqual([
+      expect.stringContaining('range syntax this check does not read'),
+    ]);
+  });
+
+  it('ignores Dockerfiles without a node base', () => {
+    const nginx = `FROM ${NGINX}\nUSER nginx`;
+    expect(messagesOf(nginx, { nodeVersion: undefined, enginesNode: undefined })).toEqual([]);
+  });
+
+  it('readNodePolicy reads .node-version and engines.node; absent files give undefined', () => {
+    const root = mkdtempSync(join(tmpdir(), 'check-dockerfiles-policy-'));
+    try {
+      expect(readNodePolicy(root)).toEqual({ nodeVersion: undefined, enginesNode: undefined });
+      writeNodePolicy(root);
+      expect(readNodePolicy(root)).toEqual(policy);
+      expect(readNodePolicy(repoRoot)).toEqual(policy);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('repository mode (--root) reports a node:26 Dockerfile and exits 1; without a policy every node FROM is reported', () => {
+    const root = mkdtempSync(join(tmpdir(), 'check-dockerfiles-'));
+    try {
+      for (const dir of ['apps/api', 'apps/worker']) {
+        mkdirSync(join(root, dir), { recursive: true });
+        writeFileSync(join(root, dir, 'Dockerfile'), slim.replace(NODE, NODE26));
+      }
+      const unpoliced = checkRepository(root).map((r) => [r.file, r.findings.map((f) => f.rule)]);
+      expect(unpoliced).toEqual([
+        ['apps/api/Dockerfile', ['node-major', 'node-major']],
+        ['apps/worker/Dockerfile', ['node-major', 'node-major']],
+      ]);
+      writeNodePolicy(root);
+      expect(checkRepository(root).map((r) => [r.file, r.findings.map((f) => f.rule)])).toEqual(unpoliced);
+      const cli = runNode([join(repoRoot, 'tools', 'ci', 'check-dockerfiles.mjs'), '--root', root], { cwd: repoRoot });
+      expect(cli.status).toBe(1);
+      expect(cli.stderr).toContain('apps/worker/Dockerfile:');
+      expect(cli.stderr).toContain('[node-major] FROM node:26.13.1 is Node 26 but .node-version is 24');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

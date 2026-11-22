@@ -410,7 +410,12 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       cooldown: { 'default-days': '7' },
       // D-ORCH-078 P3 (TASK-286): one open npm group PR at a time.
       'open-pull-requests-limit': '1',
-      ignore: [{ 'dependency-name': '@platform/*' }, { 'dependency-name': 'typescript', 'update-types': ['version-update:semver-major'] }],
+      // D-DEVOPS-005: stylelint stays on the ADR-0001 major (17) while stylelint-use-logical's peer range ends below 18.
+      ignore: [
+        { 'dependency-name': '@platform/*' },
+        { 'dependency-name': 'typescript', 'update-types': ['version-update:semver-major'] },
+        { 'dependency-name': 'stylelint', 'update-types': ['version-update:semver-major'] },
+      ],
       groups: { 'npm-minor-and-patch': { 'update-types': ['minor', 'patch'] } },
       'commit-message': { prefix: 'chore(deps)' },
     });
@@ -431,8 +436,9 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       schedule: { interval: 'monthly' },
       cooldown: { 'default-days': '7' },
       'open-pull-requests-limit': '2',
-      // D-DEVOPS-002: the node base stays on the ADR-0001 major (24; engines ">=24.2 <25"); 26 needs an ADR.
-      ignore: [{ 'dependency-name': 'node', 'update-types': ['version-update:semver-major'] }],
+      // D-DEVOPS-002, D-DEVOPS-005: the node base stays on the ADR-0001 major (24; engines ">=24.2 <25"); 26 needs an
+      // ADR. An absolute range, not the semver-major update type that is relative to the version in the file.
+      ignore: [{ 'dependency-name': 'node', versions: ['>= 25.a'] }],
       groups: { 'docker-images': { patterns: ['*'] } },
       'commit-message': { prefix: 'build(deps)' },
     });

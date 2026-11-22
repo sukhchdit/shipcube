@@ -30,6 +30,12 @@
  *                          /usr/local/bin/node` and nothing else, and mounts nothing from it (`RUN --mount=...from=`).
  *   entrypoint         an api/worker final stage has `ENTRYPOINT ["/app/entrypoint.sh"]` as its last ENTRYPOINT and
  *                      `COPY --chmod=0555 tools/docker/entrypoint.sh /app/entrypoint.sh` (PR #39 fix cycle 1).
+ *   node-major         (repository mode; PR87-SEC-01 (a), PR-0087 R1-m1, D-DEVOPS-005) every `node:<version>-...` FROM
+ *                      has the major of `.node-version` and a version that satisfies `engines.node` of the root
+ *                      package.json (ADR-0001: Node 24 LTS). Fails closed: an unreadable `.node-version`, a missing or
+ *                      unparsable `engines.node`, or a node tag without a numeric version is a finding. Dependabot #50
+ *                      and #90 moved all five FROM lines to Node 26; lane B --profile pr builds no image, so before this
+ *                      rule only an image `npm ci` (engine-strict) noticed.
  *
  *   node tools/ci/check-dockerfiles.mjs [--root <dir>]   scans every Dockerfile of the repository; exit 1 on findings
  */
@@ -302,6 +308,153 @@ export function crossFileBaseFindings(files) {
   return out;
 }
 
+/** The numeric version of a `node:` tag (`node:24.22.3-trixie-slim@…` gives `24.22.3`); undefined for `node:lts-…`. */
+const NODE_TAG_VERSION = new RegExp(`${IMAGE_PREFIX}node:(\\d+(?:\\.\\d+){0,2})(?=[-@]|$)`);
+
+/** @param {string} from @returns {string | undefined} */
+export function nodeTagVersion(from) {
+  return NODE_TAG_VERSION.exec(from)?.[1];
+}
+
+/**
+ * `MAJOR[.MINOR[.PATCH]]` (an optional leading `v`) as numbers; undefined for anything else (no pre-release, no `x`).
+ * @param {string} text @returns {number[] | undefined}
+ */
+export function versionParts(text) {
+  const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(text.trim());
+  if (!match) return undefined;
+  return match
+    .slice(1)
+    .filter((part) => part !== undefined)
+    .map(Number);
+}
+
+/** @param {readonly number[]} a @param {readonly number[]} b @returns {number} */
+function compareParts(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * One comparator of an engines range against a full version; undefined for a syntax this check does not read.
+ * @param {readonly number[]} v @param {string} comparator @returns {boolean | undefined}
+ */
+function comparatorHolds(v, comparator) {
+  const match = /^(>=|<=|>|<|=)?(.+)$/.exec(comparator);
+  const operator = match?.[1] ?? '=';
+  const parts = versionParts(match?.[2] ?? '');
+  if (parts === undefined) return undefined;
+  const full = parts.length === 3;
+  // The first version above a partial one: 24 -> 25, 24.2 -> 24.3 (npm semver x-range semantics).
+  const next = [...parts.slice(0, -1), (parts.at(-1) ?? 0) + 1];
+  switch (operator) {
+    case '>=':
+      return compareParts(v, parts) >= 0;
+    case '<':
+      return compareParts(v, parts) < 0;
+    case '>':
+      return full ? compareParts(v, parts) > 0 : compareParts(v, next) >= 0;
+    case '<=':
+      return full ? compareParts(v, parts) <= 0 : compareParts(v, next) < 0;
+    default:
+      return full ? compareParts(v, parts) === 0 : compareParts(v, parts) >= 0 && compareParts(v, next) < 0;
+  }
+}
+
+/**
+ * Whether a release version satisfies an npm `engines` range, for the subset this repository writes: alternatives
+ * joined by `||`, each a space-separated AND of comparators `>=`, `>`, `<=`, `<`, `=` or a bare (possibly partial)
+ * version. Partial versions follow npm's semver (`<25` = `<25.0.0`, `>24` = `>=25.0.0`, `<=24` = `<25.0.0`,
+ * `24` = `>=24.0.0 <25.0.0`). Returns undefined for any other syntax (`^`, `~`, `x`, `*`, hyphen ranges, pre-releases):
+ * the caller fails closed instead of guessing.
+ * @param {string} version full `x.y.z` @param {string} range @returns {boolean | undefined}
+ */
+export function satisfiesEngines(version, range) {
+  const v = versionParts(version);
+  if (v?.length !== 3 || range.trim() === '') return undefined;
+  let any = false;
+  for (const alternative of range.split('||')) {
+    const comparators = alternative
+      .trim()
+      .replace(/([<>]=?|=)\s+/g, '$1')
+      .split(/\s+/)
+      .filter(Boolean);
+    if (comparators.length === 0) return undefined;
+    let all = true;
+    for (const comparator of comparators) {
+      const holds = comparatorHolds(v, comparator);
+      if (holds === undefined) return undefined;
+      all &&= holds;
+    }
+    any ||= all;
+  }
+  return any;
+}
+
+/**
+ * The Node policy of the repository root: `.node-version` and `engines.node` of package.json (undefined if unreadable).
+ * @param {string} root @returns {{ nodeVersion: string | undefined, enginesNode: string | undefined }}
+ */
+export function readNodePolicy(root) {
+  /** @type {string | undefined} */
+  let nodeVersion;
+  /** @type {string | undefined} */
+  let enginesNode;
+  try {
+    nodeVersion = readFileSync(join(root, '.node-version'), 'utf8').trim();
+  } catch {
+    nodeVersion = undefined; // reported by nodeMajorFindings (fail closed)
+  }
+  try {
+    const manifest = /** @type {{ engines?: { node?: unknown } }} */ (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')));
+    enginesNode = typeof manifest.engines?.node === 'string' ? manifest.engines.node : undefined;
+  } catch {
+    enginesNode = undefined; // reported by nodeMajorFindings (fail closed)
+  }
+  return { nodeVersion, enginesNode };
+}
+
+/**
+ * node-major: every `node:` FROM of the given Dockerfiles has the major of `.node-version` and satisfies `engines.node`.
+ * @param {readonly { file: string, text: string }[]} files
+ * @param {{ nodeVersion: string | undefined, enginesNode: string | undefined }} policy
+ * @returns {{ file: string, finding: Finding }[]}
+ */
+export function nodeMajorFindings(files, policy) {
+  /** @type {{ file: string, finding: Finding }[]} */
+  const out = [];
+  const major = versionParts(policy.nodeVersion ?? '')?.[0];
+  for (const { file, text } of files) {
+    for (const stage of stages(instructions(text))) {
+      if (baseImageKind(stage.from) !== 'node') continue;
+      const add = (/** @type {string} */ message) => out.push({ file, finding: { rule: 'node-major', line: stage.line, message } });
+      if (major === undefined) add('.node-version is missing or not MAJOR[.MINOR[.PATCH]]: the node base major cannot be checked');
+      if (policy.enginesNode === undefined) add('package.json has no string engines.node: the node base version cannot be checked');
+      const version = nodeTagVersion(stage.from);
+      const parts = versionParts(version ?? '');
+      if (version === undefined || parts === undefined) {
+        add(`FROM ${stage.from} has no numeric node version in its tag`);
+        continue;
+      }
+      if (major !== undefined && parts[0] !== major) {
+        add(
+          `FROM node:${version} is Node ${String(parts[0])} but .node-version is ${String(major)} (ADR-0001; a new major is a reviewed PR with a superseding ADR)`,
+        );
+      }
+      if (policy.enginesNode !== undefined) {
+        const holds = satisfiesEngines([0, 1, 2].map((i) => parts[i] ?? 0).join('.'), policy.enginesNode);
+        if (holds === undefined) add(`engines.node "${policy.enginesNode}" uses a range syntax this check does not read`);
+        else if (!holds)
+          add(`FROM node:${version} does not satisfy engines.node "${policy.enginesNode}" (engine-strict rejects it in npm ci)`);
+      }
+    }
+  }
+  return out;
+}
+
 const ENTRYPOINT_COPY = /^--chmod=0555\s+tools\/docker\/entrypoint\.sh\s+\/app\/entrypoint\.sh$/;
 
 /**
@@ -434,7 +587,7 @@ export function findDockerfiles(root) {
 }
 
 /**
- * Per-file rules plus the cross-file runtime-codename (b) check over every scanned Dockerfile.
+ * Per-file rules plus the cross-file runtime-codename (b) and node-major checks over every scanned Dockerfile.
  * @param {string} root @returns {{ file: string, findings: Finding[] }[]}
  */
 export function checkRepository(root) {
@@ -446,7 +599,8 @@ export function checkRepository(root) {
       nodeService: NODE_SERVICE_DOCKERFILES.includes(file),
     }),
   }));
-  for (const { file, finding } of crossFileBaseFindings(files)) results.find((result) => result.file === file)?.findings.push(finding);
+  for (const { file, finding } of [...crossFileBaseFindings(files), ...nodeMajorFindings(files, readNodePolicy(root))])
+    results.find((result) => result.file === file)?.findings.push(finding);
   return results;
 }
 

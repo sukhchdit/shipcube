@@ -13,7 +13,7 @@
 # ---- base: pinned Node 24 LTS (ADR-0001). Used by the build stage; the final stage takes only its node binary.
 # The node tag's Debian codename (trixie) equals the runtime's debian tag (D-ARCH-116 rule 1, check-dockerfiles
 # runtime-codename); Dependabot bumps both pins in one grouped PR.
-FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS base
+FROM node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0 AS base
 ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1 \
     SCARF_ANALYTICS=false \

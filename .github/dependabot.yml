@@ -7,7 +7,13 @@
 #   to registry.invalid, so Dependabot must never look them up (check the first run for private_source_not_reachable).
 # - typescript semver-major is ignored: ADR-0001 pins TypeScript ~6.0.3 and defers TypeScript 7 (tsgo) until the Jest/ESLint
 #   toolchain peers allow it. Moving to 7 is a reviewed task PR with its own superseding ADR, not an automated bump. Minor and
-#   patch updates still flow through the npm-minor-and-patch group. Other majors stay visible for review on purpose.
+#   patch updates still flow through the npm-minor-and-patch group. Other majors stay visible for review on purpose,
+#   except the ADR-0001 pins that a major has broken: stylelint (npm, #92), node (docker, #50 and #90) and valkey/valkey
+#   (docker-compose, #49); see the comment at each ignore (PR-0086 and PR-0087 R1-n1, D-DEVOPS-005).
+# - A Dependabot job carries the configuration of the commit that triggered it but clones the default branch when it
+#   starts. Two merges that change this file within a minute can therefore run a job with the older ignore list against
+#   the newer tree (#90, D-DEVOPS-005). No rule here prevents that; the repository-side gates do (check-dockerfiles
+#   node-major for the node pin, `npm ci` peer resolution for stylelint, compose-stack for valkey).
 # - docker (every image Dockerfile) and docker-compose (compose*.yaml) since TASK-014 (PR #39 R2, PR39-SEC-06); the
 #   terraform ecosystem is added with the first infra code (TASK-017).
 version: 2
@@ -22,6 +28,12 @@ updates:
     ignore:
       - dependency-name: '@platform/*'
       - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # stylelint semver-major is ignored (D-DEVOPS-005): ADR-0001 fixes Stylelint 17, and stylelint-use-logical 2.1.3
+      # (csstools/use-logical, NFR-I18N-003) declares the peer range ">= 11 < 18". #92 moved stylelint to 18.0.0 and
+      # `npm ci` failed with ERESOLVE on main. Stylelint 18 is a reviewed PR with an ADR-0001 amendment once a
+      # stylelint-use-logical release admits it, not an automated bump.
+      - dependency-name: stylelint
         update-types: ['version-update:semver-major']
     groups:
       npm-minor-and-patch:
@@ -54,14 +66,18 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 2
-    # node semver-major is ignored (D-DEVOPS-002): ADR-0001 and D-ARCH-001 fix Node 24 LTS, and package.json engines
-    # (">=24.2 <25") with engine-strict reject any other major in the image npm ci stages. #50 moved all five Dockerfiles
-    # to node:26 and was reverted. Node 26 is a reviewed task PR with a superseding ADR (engines, .node-version, CI and
-    # images together), not an automated bump. 24.x minor and patch bumps still come, in the same docker-images group
-    # as the debian:trixie-slim runtime base, so node and debian still move together (D-ARCH-116 rule 3).
+    # node 25 and later are ignored (D-DEVOPS-002, D-DEVOPS-005): ADR-0001 and D-ARCH-001 fix Node 24 LTS, and
+    # package.json engines (">=24.2 <25") with engine-strict reject any other major in the image npm ci stages. #50 and
+    # #90 moved all five Dockerfiles to node:26 and were reverted (#87, D-DEVOPS-005). Node 26 is a reviewed task PR with
+    # a superseding ADR (engines, .node-version, CI and images together), not an automated bump. The range is absolute,
+    # not `update-types: semver-major`, which is relative to the version in the file: once a hand edit or a stale job put
+    # node:26 in the tree, a relative rule would keep offering 26.x. `.a` also excludes 25 pre-release tags (the bound
+    # Dependabot itself derives for a semver-major ignore). 24.x minor and patch bumps still come, in the same
+    # docker-images group as the debian:trixie-slim runtime base, so node and debian move together (D-ARCH-116 rule 3).
+    # Node security releases reach 24.x only after the 7-day cooldown: docs/07-ops/CI-CD.md section 6 (hand bump).
     ignore:
       - dependency-name: node
-        update-types: ['version-update:semver-major']
+        versions: ['>= 25.a']
     groups:
       docker-images:
         patterns: ['*']
