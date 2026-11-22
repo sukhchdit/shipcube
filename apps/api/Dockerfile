@@ -5,7 +5,7 @@
 # fixtures, spikes, docs (except the API contract), env files and host build output.
 
 # ---- base: pinned Node 24 LTS (ADR-0001: node:24-trixie-slim by digest). No apt packages.
-FROM node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0 AS base
+FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS base
 ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1 \
     SCARF_ANALYTICS=false \
