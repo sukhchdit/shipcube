@@ -226,3 +226,37 @@ holds `${{ }}` (PR42-SEC-18; other spellings of the lint script are not matched,
 lane-c.yml and nightly.yml never publish, push, apply or assume a cloud role; Playwright browsers (and apt through
 `--with-deps`) are installed only in lane-c.yml, and only through `npm run deps:rebuild`, which refuses Playwright and
 Prisma download redirects.
+
+## 6. Node base image: major, security releases and hand bumps
+
+*Added 2026-11-22 by devops-engineer (PR87-SEC-01 (a) to (c), D-SECCHORE-01; D-DEVOPS-004).*
+
+The five image Dockerfiles (api, worker, web, admin, prisma) share one `node:<version>-trixie-slim@sha256:…` base,
+which must be byte-identical everywhere (check-dockerfiles `runtime-codename` (b)). ADR-0001 fixes Node 24 LTS.
+Three controls keep it there:
+
+1. **Major (static, lane A and lane B unit).** check-dockerfiles rule `node-major` fails when a `node:` FROM has a major
+   other than `.node-version`'s or a version outside `engines.node` of the root `package.json`. It fails closed when
+   either file is unreadable. The repository test `tools/ci/check-dockerfiles.test.ts` (repository Dockerfiles) runs it
+   in every unit run, so a Node 26 base fails before an image build.
+2. **Dependabot.** The `docker` ecosystem ignores `node` versions `>= 25.a`, an absolute range rather than the
+   semver-major update type, which is relative to the version in the file. Note a race: a Dependabot job carries the
+   configuration of the commit that triggered it but clones the default branch when it starts. #90 came from the job
+   triggered by #86's push, which still had no node ignore, and it ran against the tree after #87. The job triggered
+   by #87 applied the ignore and proposed nothing. No configuration can close that race, so control 1 does.
+3. **Security releases (local, zero hosted minutes).**
+   `node tools/ci/check-node-security.mjs` compares the pin with the newest release of the same major that
+   <https://nodejs.org/dist/index.json> marks `security: true`. It exits 0 if the pin is current, 1 if it is behind and 2
+   if the check could not run (no network, ambiguous pins). `--index <file>` reads a saved copy instead of the network.
+   The orchestrator runs it at each session start and before G3 and G4, and the devops engineer runs it after every
+   Node security announcement.
+
+**Hand-bump rule for Node security releases.** Dependabot's 7-day cooldown delays a security release by a week. When
+`check-node-security` exits 1, or nodejs.org announces a security release that covers the pinned major, a
+devops-engineer chore PR bumps all five FROM lines in one commit within 2 working days. The bump goes to the security
+release's `node:<x.y.z>-trixie-slim` tag at its current index digest, read from Docker Hub. It does not wait for the
+cooldown, because that week of delay is the exposure this rule removes (#50 offered 26.13.0 five days after the 26.13.1
+security release). The same PR moves the
+`debian:trixie-slim` runtime pin if that image was rebuilt (D-ARCH-116 rule 3). Lane B runs on the head, and the PR
+records the advisory, the old and new versions and the digest source. A new **major** is never a hand bump: it needs a
+superseding ADR that moves `.node-version`, `engines`, CI and images together.

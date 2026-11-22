@@ -5,7 +5,7 @@
 
 # ---- build: same pinned Node base as the Node images (ADR-0001). Root lockfile, .npmrc and every workspace manifest
 # (am. J item 1 (c)); lifecycle scripts never run, and no deps:rebuild is needed for the static apps (platform.md §3.3).
-FROM node:26.13.1-trixie-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS build
+FROM node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0 AS build
 ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1 \
     SCARF_ANALYTICS=false \
