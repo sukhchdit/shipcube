@@ -12231,3 +12231,30 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Not verified:** anything on PostgreSQL 18, finding 1 included (I expect the same behaviour there and did not run it; lane B has to show it); the change list, of which nothing is built; that the lane B image ships `file_fdw`; a VIRTUAL generated column at a read; the sessions of `pg_dump` and `pg_restore` themselves on the route of finding 1; threat model text.
 - **No evidence note:** as for D-QG-001 to D-QG-012, this entry is the record. The next entry of this series is D-QG-014.
 - **Reversibility:** High (a verification record).
+
+### D-CRCHORE-03 · 2026-11-22 · code-reviewer · Code review round 1 of PR #93 (Dependabot regression repair #90 to #92, PR87-SEC-01) at `1b8db071` = APPROVED_WITH_NITS (record `docs/05-quality/reviews/PR-0093-code-review.md`)
+- **Trigger:** D-ORCH-179/180 (session D): an independent code verdict on the repair chore.
+- **Method:** reads by SHA, without editing the worktree. Run with Node 24.22.3 and no Docker: targeted Jest on the four `tools/ci` suites (207 passed, `--maxWorkers=2`), Prettier, ESLint and `tsc -p tools/tsconfig.json` on the changed files, `check-dockerfiles` on the head (0 findings) and on an archive of main's #90 tree (10 `node-major` findings), and a live `check-node-security` run (exit 0, 24.22.3 is the newest 24.x security release). `check-evidence` passes at `860d6651` and fails at `1b8db071`. For the full suites I relied on lane B `20261122T0507Z_36b072c`.
+- **Reverts proven byte-exact:**
+  - The five FROM lines equal #87 `7cc7d2e4`.
+  - `package*.json` equals `95cb411d`; #92 is the only commit after it to touch them.
+  - compose rustfs equals the pre-#91 line and the harness `RUSTFS_IMAGE`.
+  - The delta from `36b072cc` to `1b8db071` is 11 lines of comment and doc text only.
+- **Findings:**
+  - **R1-m1 (MINOR):** `1b8db071` makes the lane-B run stale, and hosted `fast-lane` fails at "Lane B evidence" (run 44989509938). The PR body's check-evidence PASS was true only at `860d6651`.
+  - **R1-m2 (MINOR):** On a Dependabot PR, lane A stops at the evidence step before the unit tests, so node-major gives no signal before merge. CI-CD.md section 6 control 1 and the dependabot.yml note overclaim. Fix: a fast-lane `check-dockerfiles` step before the evidence step, or reworded text.
+  - **R1-m3 (MINOR):** D-DEVOPS-005 is cited in six files but does not exist.
+  - **R1-m4 (MINOR):** PR87-SEC-01 (b) asked for a lane C or nightly run. The PR delivers a local tool with an orchestrator duty that nothing enforces. security-analyst rules on it.
+  - **R1-n1 to R1-n6 (NIT):**
+    - n1: the stylelint ignore should be absolute (`>= 18.a`).
+    - n2: the script and the doc give different cadences.
+    - n3: retry responses are not drained, and 429 is untested.
+    - n4: a flag without a value is not refused.
+    - n5: "ADR-0001 fixes Stylelint 17" should cite ADR-0025 line 60.
+    - n6: aws-cli 2.40.3 is unexercised by the lane-B pr profile.
+- **Merge conditions:**
+  1. Lane B on the final head with its record committed, and hosted `fast-lane` and `ci-gate` green.
+  2. The D-DEVOPS-005 entry exists.
+  3. A security record on the final head for the owned paths, ruling on R1-m4 and PR87-SEC-01 closure.
+  4. A later head that changes more than comments or evidence needs a delta round.
+- **Reversibility:** High (review record).
