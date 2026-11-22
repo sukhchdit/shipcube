@@ -11952,3 +11952,100 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Bookkeeping:** D-PM-093 landed inside commit `dde82c09` (the D-ORCH-180 commit staged the shared file after product-manager wrote it; content intact). Two entries carry the id D-DEVOPS-004: the public-posture check on main (`de1901d7`) keeps it; the repair-chore branch entry is renumbered D-DEVOPS-005 when it lands.
 - **User-only (owner settings, not worked around):** D-DEVOPS-004 checklist items 1 to 7 (ruleset requiring `ci-gate`, secret scanning + push protection, Dependabot alerts/security updates, fork approval for all outside contributors, SHA-pinning setting, private vulnerability reporting); SECPUB-02 noreply e-mail (set `git config user.email` to the noreply address first, then "Keep my email private"); SECPUB-03 confidentiality call.
 - **Reversibility:** High.
+
+### D-SECARCH-01 · 2026-11-22 · security-analyst · Position on D-ARCH-242 to D-ARCH-246 (TASK-034 C1; D-TASK298-01). I concur that the session setting replaces the lock (D-ARCH-244), with two additions. The cast route is PR034-SEC-12 MEDIUM, and the amended C17 (a)/(b) closes -09 and -12. New PR034-SEC-13 MEDIUM (casts in the tools' own reads) joins C1 as F27 plus an extension of F22. The TASK-298 pin is acceptable until G3. The arm (c)/(d) plants and P9-FK join SEC-TC-76. Threat-model wording corrected
+- **Trigger:** D-ARCH-242, -243, -244 and -246 route these to me and ask for my concurrence before the rung-1 fix of TASK-034 is built (dispatch of session D).
+- **Read:** `51e1bdb4` (data-model §4.6 C17, §8.3 amendment, §8.6 third amendment and fence, ADR-0005 item 37 note, rulings §8.9/§8.13, platform.md §10.3); D-ARCH-215, -216, -242 to -246; D-SECPR034-02, D-SECPR051-02, D-SD-016, D-ORCH-176, D-ORCH-178. By SHA through the main object store: `1bac00b1` (`tools/db/rehearsal-manifest.ts`, `backup.ts`, `verify-restore.ts`, `bootstrap.ts`, the C17 case) and `300c644f` (`c16-tenant-keys.int.test.ts`). Nothing ran in a worktree.
+- **Decision:** 0 Critical, 0 High.
+  1. **PR034-SEC-10, D-ARCH-244: I concur, with no lock.**
+     - The setting is PostgreSQL's own control for this attack (CVE-2024-7348). The server applies it when it prepares a statement, to the relation that the name resolves to. So it covers every read of the session, the fingerprints and orphan checks included, and a swap after the check. My lock covered only the relations that the tool remembered to lock.
+     - Probe S1: a view named `_prisma_migrations` is refused with `55000` inside `REPEATABLE READ READ ONLY`, and its routine does not run. `SHOW` returns exactly `view, foreign-table`.
+     - **Addition (a), for C1.** The parameter is user-level (`pg_settings.context = user`): a NOSUPERUSER role cleared it with `set_config(…, '', false)` (probe P4). A read-back only at session start misses a clear by code that runs later in the session, and PR034-SEC-13 is such code. So the check row of F22 also returns `current_setting('restrict_nonsystem_relation_kind')`, and the tool refuses unless the setting is in effect. The check runs before the head read and before the checksum read.
+     - **Addition (b).** The `SET` is session-level and outside a transaction block, never `SET LOCAL`: a `SET` inside a transaction that rolls back is reverted (probe S2). Both tools apply it that way at `1bac00b1`. The unit statement lists pin it.
+     - The residual of item 7 is accepted. A table swapped for another table is read, and the manifest comparison fails. That is an integrity effect, and no code runs.
+  2. **PR034-SEC-12 MEDIUM (CWE-250, CWE-184; OWASP A04:2021): the cast route of D-ARCH-243.** `JSON_OBJECT`, `JSON_ARRAY` and `JSON_SCALAR` look up a cast to `json` at run time, so a planted enum cast runs as the loading superuser. principal-architect found it. Actors, impact and preconditions are those of -09.
+     - **The amended C17 (a)/(b) closes -09 and -12.** I ran the fence as committed in data-model §8.6 on PGlite 17.5 (probe P5): a fresh database per case, objects created by a NOSUPERUSER role.
+       - An operator over `ts_rewrite` in a table CHECK, a domain CHECK and a `NOT VALID` + `VALIDATE` CHECK: 2 rows each, `operator outside pg_catalog` and `volatile operator routine`.
+       - `public.===` over `texteq`: 1 row. `public.=` reached through `NULLIF` under `search_path = public, pg_catalog`: 1 row.
+       - The enum cast used by `JSON_OBJECT`: 1 row of kind `cast`.
+       - The control clause (`JSON_OBJECT` over text, `timestamptz + interval`, `IN`, `= ANY`, `NULLIF`): 0 rows.
+     - Both close in code when F17 and F18 (a) to (g) are green in lane B on PostgreSQL 18.
+     - Row comparisons (`RowCompareExpr :opnos`) are still not read. That is the stated limit of D-SECPR034-01 (a btree family needs a superuser), and it is not reopened.
+     - **Threat model** (my document; committed with this entry):
+       - §10.4 I items 3 (a) and 4 and RR-19 (c) now describe built-in code as data-model §8.6 item 3 lists it, in place of "IMMUTABLE built-in routines only".
+       - Item 8 records -12 and -13.
+       - SEC-TC-76 names C16 (c) and (d), and SEC-TC-85 gains (e) to (g).
+  3. **New PR034-SEC-13 MEDIUM (CWE-250, CWE-706; OWASP A04:2021): the tools' own reads apply casts to application types.** Found while checking D-ARCH-244 against `1bac00b1`.
+     - **(a) The fingerprint, on the source.**
+       - `tools/db/rehearsal-manifest.ts:140` reads each row as `(t.*)::pg_catalog.text`. The migrator owns every table's row type, so it may create `CREATE CAST (public.t AS text) WITH FUNCTION public.f(public.t)`. A cast to the pseudo-type `record` is refused (`42809`).
+       - The explicit cast looks in `pg_cast` before it falls back to the I/O conversion.
+       - `captureManifest` fingerprints (line 246) before the gate query (line 252), and `db:backup` fingerprints whatever the gate finds.
+       - Probe P1 used the code's session: search path pinned, the seven settings, the new setting, `REPEATABLE READ READ ONLY`. The function ran as `postgres`, a superuser, on the source cluster.
+       - The impact is that of -10: `COPY … TO PROGRAM` is allowed in that transaction, and the function can also clear the setting (1 (a)).
+     - **(b) The checksum read after the rehearsed deploy.**
+       - `tools/db/verify-restore.ts:113/163` compares `migration_name = $1`. The deploy before it runs migrator code that no gate saw.
+       - A migration can retype `migration_name` to the migrator's enum or composite and add an IMPLICIT cast to `text`. The comparison then runs that cast as the superuser (probes S3 and S4). `relkind` is `r` and the setting is on, so the F22 check as specified passes. Writing `$1::pg_catalog.text` does not help (same probes).
+       - The head read fails closed: `42804`, because `COLLATE` refuses a non-collatable type.
+     - **(c) Bounded, no new code.**
+       - `findOrphans` with `OPERATOR(pg_catalog.=)` applies an implicit cast on a foreign-key column, because PostgreSQL accepts a key through an implicit cast. Probe P3 ran that cast as `postgres`.
+       - That read runs only on the restored database, before the deploy and after the gate passed. The cast arm of C17 (b) reports every such cast, so the restore is refused before a database exists. The cast arm is load-bearing for this read too.
+     - **Remediation.**
+       - **F27.** `tableFingerprintSql` reads the row through the row type's output function: `pg_catalog.convert_to(pg_catalog.textin(pg_catalog.record_out((t.*))), 'UTF8')`.
+         - No cast, and no `row_to_json`, `to_json`, `format` or JSON constructor: those look up casts of the column types. Probe E ran an enum-to-`json` cast through `row_to_json`.
+         - On a table without a planted cast, PGlite gives the same checksum as today (`1081228596326983594` both ways). No manifest and no format change.
+         - With the planted cast, the function did not run (probes B and F).
+       - **F22, extended.** The check row returns the OID and `relkind`, the type schemas of the columns that each read names, and the value of the setting. The columns are `migration_name`, `finished_at` and `rolled_back_at`, plus `checksum` for the checksum read.
+         - The tool refuses, never reads and never treats as absent, unless `relkind` is `r`, every one of those columns has a `pg_catalog` type and the setting is in effect.
+         - The check runs before the head read on both sides and before the checksum read.
+     - **Verification.**
+       - Integration on PostgreSQL 18 (`backup-restore.int`, SEC-TC-85 (g)):
+         - The migrator plants a row-type cast to `text` on a fingerprinted table, whose function raises an exception with a marker. `db:backup` exits 1 with the gate line naming the cast, and no output holds the marker.
+         - A post-deploy step, run as the migrator, retypes `migration_name` with a marker-raising implicit cast. `verifyRestoredDatabase` refuses before the checksum read, and no output holds the marker.
+       - Unit:
+         - The fingerprint SQL is pinned, and a mutant back to `::pg_catalog.text` fails.
+         - With fakes, a column type outside `pg_catalog` and an empty read-back of the setting are each refused before every `_prisma_migrations` read.
+  4. **What C1 needs beyond F16 to F26 (D-ARCH-246).**
+     - F27 and the F22 extension above. F21 stays as written, with 1 (b) pinned. F23 gains the cases of item 3. The runbook half of F24 names the two new refusals.
+     - Three checks join D-ARCH-246's "How security-analyst checks C1":
+       - 6. P1 shows the marker with the F27 mutant reverted, and no marker without it.
+       - 7. S3/S4 are refused before the checksum read.
+       - 8. A cleared setting is refused.
+     - F27 and the F22 extension may not move to the late task.
+     - principal-architect adds one sentence to §8.6 (item 8 of the third amendment, or a dated note under item 6): "A privileged session applies no cast, operator or function to a value of an application type except the type's output function. A row is read through `record_out`, and `_prisma_migrations` is read only when the columns that the read names have `pg_catalog` types." The re-dispatch brief may quote this entry before that text lands (documents only).
+     - C1 now covers PR034-SEC-09, -10, -12 and -13. Its due dates are unchanged: before `restore-rehearsal` is activated, before any non-synthetic rehearsal, and at the latest G3. The fix head touches owned paths, so it needs a delta round.
+     - I concur with D-ARCH-243 (STABLE operators allowed; a cast arm, not a list of constructors) and with D-ARCH-245 (rule 14 reads bodies and fails closed on prose; the stated limits).
+  5. **D-ARCH-242: the TASK-298 pin is acceptable until the late task, and no later than G3.**
+     - **Why.**
+       - `toEqual` checks one exact finding text: key, table and both actions. Any other key or action fails, and the correction fails the case too.
+       - `NO ACTION` on a key that is not deferrable still refuses at the end of the statement.
+       - No runtime role deletes or updates `data_subjects.id`, so the window has no exploitable path. I rate the deviation INFO.
+     - **Conditions.**
+       - The constant is deleted in the PR that adds file 92 (QG-051-C9), and arm (d) changes in nothing else meanwhile.
+       - The rename commit of TASK-298 also tags the four arm (c)/(d) cases `[SEC-TC-76]` (titles only, before its reviews). At `300c644f` they carry only `[D-ARCH-215]` or `[D-ARCH-216]`, although D-SECPR051-02 recorded the tag.
+     - **Stated now for the late task's security record (file 92):**
+       - a rule-12 marker with a listed reviewer, and `SET ROLE platform_audit_owner`;
+       - one statement, with no `NOT VALID`, no `NOT ENFORCED` and no `DEFERRABLE`;
+       - the audit DDL guard admits the statement as the owner, shown by a test, not by reading;
+       - the shadow-init KEEP form matches exactly this statement, not a pattern;
+       - P9-FK asserts `r`/`r`, validated, enforced, not deferrable, and one constraint of that name;
+       - a refused change of a parent row answers `23001`;
+       - lane B runs after TASK-034's lane B is green.
+     - **SEC-TC-76: yes.** The six arm (c) plants, the three arm (d) plants, the committed (d) case and P9-FK join it. The row is updated in the threat model.
+  6. **The D-QG-012 conditions on me.**
+     - **QG-034-C1:** (a) is item 1, (b) is item 2, and (c) is the threat-model edit in this commit. In item 8, "relkind under a lock" carries a dated note that D-ARCH-244 supersedes it. Delta round on the fix head, as the condition says.
+     - **QG-034-C2:** I recommend the second option. `SET row_security = off` joins the session settings, with a read-back and a test: a reader that does not bypass row security gets `42501` and no policy routine runs. `pg_dump` makes the same choice. The setting fails closed, while a limit sentence only describes the risk. For the bootstrap superuser it changes nothing. It goes into F21 if principal-architect agrees.
+     - **QG-034-C3:** the `relkind` refusal before the checksum read belongs to C1 (it is in the F22 verification above). The `WITH INOUT` / `WITHOUT FUNCTION` cast row and the foreign-table row should be in the fix. The late task is acceptable for those two, because neither opens a path.
+     - **QG-051-C10, last point:** the TASK-298 security record restates item 5.
+- **Method:**
+  - PGlite 0.4.3 (PostgreSQL 17.5) from the main checkout's `node_modules`.
+  - Five scripts in the session scratch: P1 fingerprint cast, S1 to S5 setting and checksum read, P3 orphan cast, P4 parameter context, P5 C17 fence.
+  - A fresh in-memory database per case, and the C17 fence extracted from data-model.md on main.
+  - No Docker, no npm suites, no worktree command.
+- **Not verified:** PostgreSQL 18 (the cast lookup and the parameter are the same code paths since 17; lane B proves them); foreign tables; the real migrated schema.
+- **Routed:**
+  - orchestrator and senior-developer: the re-dispatch brief quotes F16 to F26, F27 and the F22 extension; the TASK-298 rename adds the four tags.
+  - principal-architect: the §8.6 sentence of item 4.
+  - quality-gatekeeper: QG-034-C1 is answered here and closes in the delta round; QG-051-C9 carries the pin. I concur with the D-ARCH-243 to -245 text that D-QG-012 verified.
+  - principal-architect: QG-034-C2 (item 6).
+  - qa-lead: SEC-TC-85 (e) to (g) join the required cases after the merge.
+- **Reversibility:** High. Records, threat-model text and conditions only. No code changed.
