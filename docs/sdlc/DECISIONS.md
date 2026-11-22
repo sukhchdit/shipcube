@@ -11790,3 +11790,72 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - **principal-architect:** data-model §8.3 as shipped after the merge, and RR-19 in `risks.md`, both still owed from D-ARCH-238.
 - **Not verified:** the list was not built or run. F19, F21 and F22 are specified from reading `1bac00b1`.
 - **Reversibility:** High.
+
+### D-SECPUB-01 · 2026-11-22 · security-analyst · Exposure check after the repository became public (D-ORCH-180): 0 secrets and 0 restricted (legacy) data in any pushed ref, PR body or comment; 4 LOW and 2 INFO on personal and business information already in history; verdict PASS (no Critical or High)
+- **Trigger:** D-ORCH-180 (repository `sukhchdit/shipcube` made public). Read before writing: D-DEVOPS-004 (CI/CD posture and owner checklist), PR080-SEC-07, PR13-SEC-11, D-SECCHORE-02, `tools/quality/gitleaks-baseline.txt` (22 lines).
+- **Scope:** everything a visitor can fetch. A fresh `git clone --mirror` of the public remote at main `de1901d7` holds 177 refs: 83 `refs/heads/*`, 92 `refs/pull/*/head` and 2 Dependabot heads that a force push had orphaned. I found those two through the push-event feed and fetched them by SHA, because GitHub still serves them. There are 0 tags, 0 open PRs (so no `refs/pull/*/merge`) and 1,678 commits (781 on main). The mirror also holds 92 PR bodies, 92 PR conversation comments, 0 review comments and 0 issues. The later main commits `51e1bdb4` and `437cd57a` are architecture docs; a needle check of their added lines found 0 hits.
+- **Secrets (check 1): 0 real secrets.** Method: the pinned image `ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0…` with main's `.gitleaks.toml`, `--redact`, `--ignore-gitleaks-allow`, `--network none` and no baseline. All five runs were made in one `docker.lock` hold (04:42:05Z to 04:49:16Z). I read back only the rule, commit, path and line of each finding.
+  - Control, the gitleaks-full range (main, first-parent): 19 findings, equal to the 19 main lines of the baseline. The other 3 baseline lines are the commit-bound branch merges of PR080-SEC-07.
+  - `--all`, 1,467 non-merge commits (1,448 have added lines): 20 findings = the 19 baseline findings + 1.
+  - `--all --merges --diff-merges=first-parent`, 211 merge commits: 5 findings.
+  - Directory scan of the PR bodies and comments: 1 finding.
+  - Positive control (a token built at run time): 1 finding, as expected.
+  - Every fingerprint outside the baseline belongs to an already-triaged false-positive class (SECPUB-06).
+- **Restricted data (check 2): 0. No backup and no legacy record in any ref.**
+  - Coverage: 3,878 paths that ever existed and all 8,412 blobs.
+  - No backup, archive, database or binary file of any kind: 0 `.bak`/`.bacpac`/`.mdf`/`.ldf`/`.dump`/`.zip`/`.gz`/`.7z`/`.tar` and 0 binary blobs. The 577 `.sql` blob versions are migrations, bootstrap scripts, tool fixtures and test fixtures. The 1 `.csv` is the task map. The blobs over 1 MB are `DECISIONS.md` versions and lane-B JUnit reports.
+  - 0 `pg_dump` markers, except in two tests that assert on them. 0 `INSERT`/`COPY` into any Appendix A legacy table. 0 Stripe or PayPal identifiers. 0 free-mail addresses in any blob.
+  - Every e-mail domain is reserved or synthetic, except one (SECPUB-03).
+  - Phone-shaped values are GitHub comment IDs, fictional examples, HS codes and tracking-number examples. The Luhn-valid numbers are k6 metrics and fragments of SHAs. The only AWS account IDs are the documented placeholders. The private IPs and `*.internal` hosts are test and RFC examples.
+  - The secret-like keys in `compose.env` and `infra/local/env/*.env` hold `local-only-*` markers (which the config refuses outside local) or references.
+- **GitHub side:** 0 Actions secrets, 0 variables, 0 self-hosted runners and 0 artifacts. This agrees with D-DEVOPS-004.
+- **Restricted-file handling:** I opened no `.env*` file. My content scans excluded the 7 blob versions that ever sat at a dot-env path, by blob id. Only the real image scanned them, with redaction, as lane B does.
+- **Limits:**
+  - Heads that were deleted or force-pushed before the event feed starts (2026-11-17) cannot be listed.
+  - I did not scan Actions run logs. No secret exists to leak into them, and there are no artifacts.
+  - I did not fetch PR review summaries. The sole collaborator cannot review their own PRs.
+- **Findings** (none can be removed from history, because history rewrites are not allowed; for each one, the history part is a user decision, see below):
+  1. **SECPUB-01 LOW (CWE-359, A01:2021). The workstation account holder's full name appears in Windows user-profile paths.** The name is the Windows account name, not the git author name.
+     - Main tip: `docs/04-plan/briefs/TASK-298.md:4` and `:52`, and `docs/sdlc/DECISIONS.md:11173`. Its 8.3 short form (the first six letters) is at `.claude/agent-memory/principal-architect/project_wave0_prisma_client_rulings.md:19`.
+     - History: 4 commits add or remove the full name, and it is in 21 of 177 ref tips. 7 commits carry the short form, which is in 124 ref tips (two scrubbed lane-B JUnit reports under `docs/05-quality/tests/runs/`, and one version of a security-analyst memory file).
+     - Impact: no credential. It names a person and shows the host's folder layout, which helps OSINT and phishing.
+     - Fix:
+       - (a) orchestrator: rewrite the three main-tip paths in workspace-relative form (`../Shipqube-TASK-298`, `../.orch/held/…`). This redacts a path and changes no decision.
+       - (b) principal-architect: replace the short form in memory line 19 with `<8.3 short form>`.
+       - (c) devops-engineer: add a lane-A text check, as an extension of the PR-0031 scrub tool. It refuses an added line in tracked text that holds a Windows user-profile path, in drive-letter or Git Bash form, whose account segment is not a placeholder (`<…>`, `%USERNAME%`, `$env:…`). The existing scrub-test fixtures are allow-listed by path.
+     - Verification: a fixture line with a real-looking profile path turns the check red, and a placeholder line stays green.
+  2. **SECPUB-02 LOW (CWE-359, A01:2021). The owner's personal free-mail address is the git author and committer e-mail.** It fills 3,234 of the 3,356 identity fields in the 1,678 commits; the others are GitHub web-flow (99) and Dependabot noreply (23). Every new agent commit from this checkout adds it again.
+     - Fix (user, in this order):
+       1. Set `git config user.email <id>+sukhchdit@users.noreply.github.com` in the main checkout and in each worktree.
+       2. Then, in GitHub Settings > Emails, turn on "Keep my email addresses private" and "Block command line pushes that expose my email". With the order reversed, every agent push is refused.
+  3. **SECPUB-03 LOW (CWE-200, A01:2021). Another organisation's identifiers are in `Tech-stack.md:127`.** The line holds a mailbox at an unrelated organisation's domain and a study-style project code, from notes of another engagement. It has been there since the initial commit `762b0061`, so it is in every ref, and the product does not use it.
+     - Fix: the user decides whether that organisation's information is confidential. The orchestrator removes the line in the next docs commit. If it is confidential, the only remedy for the history is to make the repository private again and treat the line as disclosed.
+  4. **SECPUB-04 INFO (CWE-200). Business information is now public.** No personal data, records or credentials are involved. The public content is:
+     - the legacy profile of brief Appendix A (43 legacy table names, aggregate volumes, the lane mix, payment providers, carrier accounts and the volumetric factor), in `docs/sdlc/BRIEF.md` and `shipping-platform-brief.md`;
+     - the competitor benchmark;
+     - the PRD targets;
+     - the threat model and every security record, including the open LOW and INFO findings and the descriptions of gate bypasses.
+
+     No deployment exists (budget 0, production blank), so the impact is low today. Re-assess before any staging or production target is configured. Fix: user decision.
+  5. **SECPUB-05 LOW (CWE-829, A08:2021). Agent tooling on the host could run code from a contributor's PR.** A public repository accepts fork PRs. Lane B and agent sessions run repository code on the host: test code, the `PostToolUse` hook in the tracked `.claude/settings.json`, and Docker. Today the queue runs only the agents' own `feat/*` branches and there are 0 forks, so nothing has been exposed. D-DEVOPS-004 item 4 covers hosted CI only.
+     - Fix:
+       - Orchestrator rule: never queue, check out or open in an agent session a ref whose PR head repository is not `sukhchdit/shipcube`, or that carries commits not made by the owner or the agents.
+       - devops-engineer: make the lane-B queue refuse any branch that is not a `refs/heads/*` of this repository.
+  6. **SECPUB-06 INFO (no action for gitleaks-full, which scans main only).** The all-refs scan found 7 fingerprints outside the baseline. All 7 belong to two triaged false-positive classes, and each one is byte-equal (by hash) to an existing baseline value:
+     - the PR13-SEC-11 synthetic test literal, 4 fingerprints: `e6ccf607` (the PR #13 test file), the merge `d68898a8` (PR #11, which re-adds main's two baseline lines), and line 89 of the PR #13 body;
+     - the PR080-SEC-07 doc phrase, 3 fingerprints from union merges: `05e1e9da` (#83), `22f69a82` (#82) and `2805c809` (#81).
+
+     When D-DEVOPS-004 item 2 turns on secret scanning, GitHub scans the history of every branch. With non-provider patterns on, it may raise alerts on these synthetic literals and on the `local-only-*` markers. Close such alerts as false positives (used in tests), citing this entry.
+- **D-DEVOPS-004 cross-check:** its MEDIUM rating (secret scanning and push protection off) stands. It is the main control gap for future leaks, because gitleaks only sees a secret after it has been published. That makes owner checklist item 2 the first setting to turn on.
+- **User decisions** (flagged to the orchestrator for its batch):
+  - (1) for the history behind SECPUB-01 to -04: accept that it is public, or make the repository private again (the only remedy, since rewrites are not allowed);
+  - (2) SECPUB-02: switch to the noreply e-mail;
+  - (3) SECPUB-03: decide whether the third-party note is confidential;
+  - (4) the D-DEVOPS-004 settings, which only the owner can change.
+- **Verdict:** PASS. 0 Critical, 0 High and 0 new Medium; 4 LOW (SECPUB-01, -02, -03, -05) and 2 INFO (SECPUB-04, -06).
+- **Routed:**
+  - orchestrator: SECPUB-01 (a), the SECPUB-03 removal, the SECPUB-05 rule, and the user batch;
+  - principal-architect: SECPUB-01 (b);
+  - devops-engineer: SECPUB-01 (c) and the SECPUB-05 queue guard;
+  - user: SECPUB-02, -03 and -04, and the D-DEVOPS-004 checklist.
+- **Reversibility:** High. This entry changes no file other than `DECISIONS.md`. The scans were read-only, and the scratch mirror was deleted afterwards.
