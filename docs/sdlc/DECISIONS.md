@@ -12049,3 +12049,79 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - principal-architect: QG-034-C2 (item 6).
   - qa-lead: SEC-TC-85 (e) to (g) join the required cases after the merge.
 - **Reversibility:** High. Records, threat-model text and conditions only. No code changed.
+
+### D-ARCH-247 · 2026-11-22 · principal-architect · Three spec items before the TASK-034 rung-1 fix and the late task of D-ARCH-242: `row_security = off` joins the security settings of a privileged session (QG-034-C2); a privileged read applies nothing but an output function to a value of an application type (PR034-SEC-13: row text through `record_out`, `pg_catalog` column types for `_prisma_migrations`); the paragraph on erasure of data-model §5.7 is restored (QG-051-C11); the final change list F16 to F27 (data-model §8.6, fourth amendment)
+- **Trigger:** the dispatch of session D. D-QG-012 sets QG-034-C2 and QG-051-C11 on me. D-SECARCH-01 routes the §8.6 sentence of PR034-SEC-13 to me and recommends the second option for QG-034-C2. The orchestrator puts the three test rows of QG-034-C3 into the brief of the fix.
+- **Read:** D-ARCH-242 to D-ARCH-246, D-QG-012, D-SECARCH-01, D-SECPR034-02; data-model §5.7 and §8.6 at `1adf896e`, and §5.7 at the parent of `51e1bdb4`; the threat-model text of `1adf896e`; by SHA at `1bac00b1`, through the object store of the main checkout, `tools/db/rehearsal-manifest.ts`, `backup.ts`, `verify-restore.ts`, `bootstrap.ts`, `load-time-code.test.ts` and the C17 case. Nothing ran in a worktree, no `.env` file was opened, and Docker was not used.
+- **Decision 1 (QG-034-C2): yes, `SET row_security = off`.** This is the second option of the condition, as security-analyst recommends.
+  - It joins `restrict_nonsystem_relation_kind`. Data-model §8.6 held no fence for the session settings. Item 8 of the fourth amendment now holds one, with the read-back.
+  - Both constraints of D-SECARCH-01 are in the text: a plain `SET` for the whole session and never `SET LOCAL`, and a second read-back in the check before each read of `_prisma_migrations`.
+  - **Two points go beyond that record.**
+    - `row_security` is read back in the same two places. It has the context `user` too, and a role without privileges set it back to `on` through `set_config`. One rule for both parameters is simpler than one rule each.
+    - The tool judges the settings before anything else of the check. An absent table then cannot hide a cleared setting from the reads that follow.
+  - **A third point, from the probe:** a `SET` sent in one query string with `BEGIN` is undone by the `ROLLBACK`. So "outside a transaction block" also means a statement of its own. Both tools send one statement per query at `1bac00b1`.
+  - **Why the setting and not a limit sentence:** the setting fails closed, and a sentence only describes. For the bootstrap superuser nothing changes, so the fix pays one array entry, one read-back and one test.
+- **Decision 2 (PR034-SEC-13): item 9 of the fourth amendment.** It holds the rule, the three reads that the rule governs, and the reasons.
+  - Row text comes from `pg_catalog.textin(pg_catalog.record_out((t.*)))`, never from a cast of the row (F27).
+  - `_prisma_migrations` is read only when the columns that the read names have `pg_catalog` types (the extension of F22). An absent column counts as outside.
+  - **The sentence differs from the one that D-SECARCH-01 proposes, in one case.** "No cast, operator or function … except the type's output function" is not true of the orphan checks. They apply the equality operator of the constraint to the key columns, and PostgreSQL adds an implicit cast where the types differ. Item 9 states that case and what bounds it: the cast arm of C17 (b), as item 3 (c) of the record itself says. security-analyst confirms the wording in its delta round.
+  - **One detail of the record was not reproduced.** `format('%s', …)` and `concat` looked up no cast in my probe; they print through the output function. `row_to_json`, `to_json`, `to_jsonb`, `JSON_OBJECT` and `JSON_ARRAY` did run the planted cast. The rule does not depend on this: a row is read through `record_out` and through nothing else.
+  - **Item 10 states three limits.**
+    - A check and its read are two statements. The setting closes that window for a view. Nothing closes it for a retyped column or a new cast, which takes a second session of the owner on the restored database. I keep "no lock" of D-ARCH-244 and state the limit. security-analyst rates it.
+    - A reader that does not bypass row security gets `42501` from a table with a policy, and the tool stops.
+    - On PostgreSQL 18 a VIRTUAL generated column is computed at the read. Its documentation allows built-in functions and types only there, and the C17 case shows what the server does with a migration routine.
+- **Decision 3 (QG-051-C11): data-model §5.7 is repaired.**
+  - The paragraph on erasure ends with its two sentences again, and the amendment of 2026-11-17 stands directly under it. Both equal the parent of `51e1bdb4` byte for byte.
+  - The note of D-ARCH-242 stands after that amendment. Its last bullet lost the two sentences, and one dated bullet says what was repaired. No other word of the note changed.
+  - I moved the note and did not reword "the statement above": the Accepted amendment keeps every word, and the notes are in date order again.
+  - **My error:** I inserted the note by line position, between a paragraph and the sentences that belonged to it, and did not read the result as prose.
+- **The final change list of the TASK-034 fix: F16 to F27.** The brief quotes D-ARCH-246 for the items marked "as D-ARCH-246" and this entry for the others. The list is closed.
+  - **F16** (lane B, the seven schema-diff cases; condition C4): as D-ARCH-246.
+  - **F17** (`LOAD_TIME_CODE_SQL` equals the fence; the unit rows): as D-ARCH-246. This entry does not change the fence of the C17 query.
+  - **F18** (the C17 probes): rows (a) to (g), the changed expectations and the control as D-ARCH-246, and one more row.
+    - **(h), QG-034-C3 row 2.** An enum and `CREATE CAST (public.<enum> AS pg_catalog.text) WITH INOUT AS IMPLICIT`, created as the migrator, with no load-time expression. Exactly one row: kind `cast`, object `public.<enum> AS text`, via `cast`, reference `WITH INOUT`, reason `cast outside an extension`. Probed on 17.5 with the fence as the document holds it.
+    - The third reference form, `WITHOUT FUNCTION`, gets no row. The migrator cannot create such a cast (`42501`).
+  - **F19** (rule 14 in bodies) and **F20** (rule 21 text): as D-ARCH-246.
+  - **F21, the session settings (replaces the text of D-ARCH-246).** `MANIFEST_SESSION_SETTINGS` gains the two `SET` statements of the fence of data-model §8.6 item 8, in that order. `applySessionSettings` sends every setting as a statement of its own, then runs the read-back of the fence, and throws a `RehearsalError` that names the parameter unless the answers are `view, foreign-table` and `off`. `runBackup` calls it before `BEGIN` and `verifyRestoredDatabase` before its first statement, as today. Neither tool sends `SET LOCAL`.
+  - **F22, the `_prisma_migrations` check (replaces the text of D-ARCH-246).** `MIGRATION_TABLE_SQL` reads the system catalogs only and returns one row: whether `public._prisma_migrations` resolves, its `relkind`, the schema of the type of each column that the read names (nothing for a column that the table does not have), and the two settings. The columns are `migration_name`, `finished_at` and `rolled_back_at` for the head read, and those three with `checksum` for the checksum read. The tool judges in this order and stops at the first point that applies:
+    1. `restrict_nonsystem_relation_kind` does not read `view, foreign-table`, or `row_security` does not read `off`: `RehearsalError` "the session setting … is not in effect: refused (data-model 8.6)". This holds also when the name does not resolve.
+    2. The name does not resolve: the table is absent. The head or the checksum is null, and no read follows.
+    3. The `relkind` is not `r`, or the OID has no `pg_class` row: `RehearsalError` "public._prisma_migrations is not a table (relkind …): refused (data-model 8.6)".
+    4. A named column is absent, or its type is outside `pg_catalog`: `RehearsalError` "public._prisma_migrations.… is not of a pg_catalog type: refused (data-model 8.6)".
+    5. Otherwise the read follows, with `FROM ONLY`.
+    - The check runs before `MIGRATION_HEAD_SQL` in `captureManifest`, so in both tools, and before `APPLIED_CHECKSUM_SQL`.
+  - **F23, the tests (SEC-TC-85):** every row of D-ARCH-246, and the rows below.
+    - Integration, PostgreSQL 18:
+      - **(i1), QG-034-C3 row 1.** The checksum read. The injected deploy step, as the migrator after a successful deploy, renames `_prisma_migrations` and creates a view of that name whose query calls the recording routine. `verifyRestoredDatabase` stops with the "is not a table (relkind v)" refusal, and the side table holds no row of the bootstrap role.
+      - **(i2), PR034-SEC-13 (a).** A cast from the row type of a fingerprinted table to `text`, whose function raises an exception with a marker. `db:backup` exits 1 with the gate line that names the cast, and no output holds the marker.
+      - **(i3), PR034-SEC-13 (b).** The injected deploy step retypes `migration_name` to an enum of the migrator, with an implicit cast to `text` whose function raises the marker. `verifyRestoredDatabase` refuses before the checksum read, and no output holds the marker.
+      - **(i4), QG-034-C3 row 3.** A foreign table: `CREATE EXTENSION file_fdw`, a server and a foreign table, created as the bootstrap superuser in a transaction that is rolled back or on a scratch database. After `applySessionSettings`, a read of it is `55000`, with and without `ONLY`. If the lane B image does not ship `file_fdw`, the case fails and does not skip, and a `D-TASK034-nn` decision then moves the row to the late task.
+      - **(i5), QG-034-C2.** A table with a policy whose expression calls the recording routine. After `applySessionSettings`, under a role that is no superuser, has no `BYPASSRLS` and does not own the table (`SET ROLE` is enough), a read of it is `42501`, and the side table holds no row. Control: without `SET row_security = off` the same read records that role. The bootstrap superuser reads the rows and records nothing.
+    - Unit:
+      - **(u1)** The fingerprint SQL holds `pg_catalog.textin(pg_catalog.record_out((t.*)))`, and a mutant back to the cast fails.
+      - **(u2)** With fakes, a column type schema other than `pg_catalog` and an absent column are each refused before the head read and before the checksum read. The statement list holds no read of the table.
+      - **(u3)** With fakes, a read-back other than `view, foreign-table` and `off` is refused at the start, before `BEGIN`. In the check it is refused before the read, also when the name does not resolve.
+      - **(u4)** The statement lists of both tools hold the two `SET` statements, each alone, before `BEGIN` and before the first read of an application relation. No statement starts with `SET LOCAL`.
+      - **(u5), QG-034-C3 row 1.** A `relkind` of `v` in the check before the checksum read is refused, and `APPLIED_CHECKSUM_SQL` is not in the statement list.
+  - **F24** (the runbook and the headers): as D-ARCH-246. The runbook also names the settings refusal, the column-type refusal and the server's `42501` "query would be affected by row-level security policy" (the reader does not bypass row security). The headers follow items 8 to 10.
+  - **F25** (PR034-SEC-11) and **F26** (`D-TASK034-24` and following): as D-ARCH-246.
+  - **F27, row text (PR034-SEC-13 (a); D-SECARCH-01).** `tableFingerprintSql` reads the row as `pg_catalog.convert_to(pg_catalog.textin(pg_catalog.record_out((t.*))), 'UTF8')`. It holds no cast of the row and no `row_to_json`, `to_json`, `to_jsonb` or JSON constructor. `MANIFEST_FORMAT` and every checksum stay as they are, and the JSDoc says why the form is not a cast.
+- **If the fix must be smaller (replaces the rule of D-ARCH-246):** C4 needs F16. C1 needs F17, F18 (a) to (g), F19, F21, F22, F27 and F23 without (i4). F18 (h) and F23 (i4) may move to the late task of D-ARCH-242, as D-SECARCH-01 item 6 allows, by a recorded decision of the orchestrator. F20, F25 and the header half of F24 may move as before. The runbook half of F24 may not.
+- **How security-analyst checks C1:** points 1 to 5 of D-ARCH-246, points 6 to 8 of D-SECARCH-01, and a point 9: a mutant of `MANIFEST_SESSION_SETTINGS` without `SET row_security = off` fails (u3) or (u4), and (i5) is green in lane B.
+- **What quality-gatekeeper verifies:**
+  1. The fourth amendment of data-model §8.6 (items 8 to 10 and the fence) adds rules and replaces no word of items 1 to 7. The three dated pointers under items 4, 5 and 7, and the dated parenthesis on the limits of the second amendment (observation 2 of D-QG-012), add text only.
+  2. QG-034-C2 is answered by its second option. Its tests are F23 (i5), (u3) and (u4).
+  3. QG-051-C11: the paragraph on erasure and the amendment of 2026-11-17 equal the parent of `51e1bdb4` byte for byte, and the note changed in its last bullet only. By its own wording the condition needs no further D-QG entry.
+  4. QG-034-C3: the three rows are F23 (i1) with (u5), F18 (h) and F23 (i4).
+  5. No ADR names the session settings or the read rule (D-ARCH-235, D-QG-012), so no ADR is superseded.
+  6. The two additions beyond D-SECARCH-01 (the read-back of `row_security`, the order of judging), the wording of item 9 against that record, and the three limits of item 10, which are new statements.
+- **Method:** five Node probes on PGlite 0.4.3 (PostgreSQL 17.5) in the session scratchpad, not kept. A role without superuser created every object, and the superuser read. The last paragraph of the fourth amendment lists the results. The C17 block was extracted from the document with the expression of the branch's fence test, before and after the edit: one block, the same bytes. So the fence test of the branch stays green when main is merged into it. The documentation of PostgreSQL 18 was read for `row_security`, `restrict_nonsystem_relation_kind` and virtual generated columns.
+- **Not verified:** PostgreSQL 18 and lane B; the list, of which nothing is built; that the lane B image ships `file_fdw`; the VIRTUAL lane at the read (documentation only); the `WITHOUT FUNCTION` form of the cast reference in the fence.
+- **Routed:**
+  - orchestrator and senior-developer: the brief of the fix quotes F16 to F27 as this entry lists them.
+  - security-analyst: the wording of item 9 against its proposed sentence; the two-statement window of item 10, to rate and to place in RR-19 or not; threat model §10.4 I item 8 and SEC-TC-85 name `row_security = off` and row (i5). This entry changes nothing in the threat model.
+  - quality-gatekeeper: the six points above.
+  - qa-lead: unchanged. SEC-TC-85 joins the required cases after the merge.
+- **Owed by me, unchanged:** data-model §8.3 as shipped after TASK-034 merges; RR-19 in `risks.md`; QG-051-C5.
+- **Applied in:** data-model §5.7, §8.6 (the fourth amendment; the pointers under items 4, 5 and 7; the date on the limits of the second amendment), A45.
+- **Reversibility:** High. Document text and a change list. No code changed, and no release holds a manifest.
