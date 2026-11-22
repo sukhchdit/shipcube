@@ -12125,3 +12125,109 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Owed by me, unchanged:** data-model §8.3 as shipped after TASK-034 merges; RR-19 in `risks.md`; QG-051-C5.
 - **Applied in:** data-model §5.7, §8.6 (the fourth amendment; the pointers under items 4, 5 and 7; the date on the limits of the second amendment), A45.
 - **Reversibility:** High. Document text and a change list. No code changed, and no release holds a manifest.
+
+### D-QG-013 · 2026-11-22 · quality-gatekeeper · Verification of the Accepted text touched by `82c85c12` (CLAUDE.md §5; D-ARCH-247) = PASS_WITH_CONDITIONS. The fourth amendment of data-model §8.6 and the dated pointers add text and replace none; QG-034-C2 = CLOSED as text (second option); QG-051-C11 = CLOSED (§5.7 is byte-equal); the three rows of QG-034-C3 are placed; no superseding ADR; the two additions and the wording of item 9 are VERIFIED. Item 10 does not complete the limits: a read of an ordinary table runs code of its owner as the reading superuser when the statement is planned, with every control of items 4 to 9 in effect (reproduced on 17.5). New condition QG-034-C4, which holds the TASK-034 merge with QG-034-C1
+- **Trigger:** the dispatch of orchestrator session D. D-ARCH-247 routes six points to this series. This is not a phase gate.
+- **Judged at:** main `3079e2f7`. `docs/03-architecture/data-model.md` at HEAD is byte-equal to `82c85c12`. TASK-034 is read by SHA at `1bac00b1`, which is still the head of the branch, local and on origin. The fix is not started, and `docs/04-plan/briefs/TASK-034.md` (last changed in `ed156913`) holds none of F21 to F27. No worktree was written.
+- **Method.**
+  - **Read in full:** the commit; D-ARCH-244, D-ARCH-246, D-ARCH-247, D-QG-012, D-SECARCH-01; data-model §8.6 from its heading to §8.7, §5.7, §8.3 rule 21 ("Not load-time clauses"), row A45; at `1bac00b1` `tools/db/rehearsal-manifest.ts`, `backup.ts` and `verify-restore.ts`.
+  - **Searched:** `docs/03-architecture/adr` and the other architecture documents for `row_security`, `restrict_nonsystem_relation_kind`, `record_out`, `BYPASSRLS`, "privileged session" and "session setting"; `docs` for any record of an index predicate, `indpred`, `indexprs` or `stxexprs` as a read-side route (none).
+  - **Run (Node 24, PGlite 0.4.3 = PostgreSQL 17.5, five scripts in the session scratch directory, not kept).** Every object was created by a role that is not a superuser, and the superuser `postgres` read. Each read of probe 1 ran in a fresh instance loaded from a copy of the data directory, so with an empty relation cache, as in a new connection of the tool. The byte comparisons read the files from `git show`.
+  - **Not run:** Docker, PostgreSQL 18, lane B, Jest, npm, the linter. No `.env` file was opened.
+
+**Point 1. The commit adds text and replaces none: HOLDS**
+
+| Claim | Result |
+|---|---|
+| The commit touches two files | **Holds.** `data-model.md` (+49, −8) and this file (+76). "Applied in" of D-ARCH-247 equals the commit |
+| The 8 removed lines | 5 moved unchanged (a blank line and the four lines of the amendment of 2026-11-17). 3 changed: the paragraph on erasure has its two sentences again, the last bullet of the §5.7 note lost exactly those two, and "Limits" of the second amendment gained one dated parenthesis at its end |
+| Items 1 to 7 of the third amendment and the C17 fence | **Equal to the parent** once the three dated bullets under items 4, 5 and 7 are taken out. The fence is byte-equal, so the fence test of the branch is not touched |
+| The first and second amendments of §8.6 | One line differs, "Limits", and the new line starts with the old one |
+| The rest of the file | **Equal**, row A45 aside |
+| The fourth amendment | A new block between the fence and §8.7. Its items are numbered 8 to 10 |
+
+**Point 2. QG-034-C2: answered by its second option. CLOSED as text**
+
+- `SET row_security = off` joins the session settings in item 8, with a fence and a read-back, and "Limits" of the second amendment has its date (observation 2 of D-QG-012).
+- **Reproduced:** a reader without `BYPASSRLS` ran the policy routine as itself. With `row_security = off` the same read is `42501` and the side table stays empty. The superuser reads the rows and records nothing.
+- The tests are named: F23 (i5), (u3), (u4), and check 9 of D-ARCH-247 (a mutant without the statement). None is built. Row (i5) on PostgreSQL 18 is read with QG-034-C1.
+
+**Point 3. QG-051-C11: CLOSED**
+
+- §5.7 from its heading to the note of 2026-11-22 is byte-equal to the whole of §5.7 at the parent of `51e1bdb4`. That covers the paragraph on erasure and the amendment of 2026-11-17 (1,349 bytes together).
+- The order is the paragraph, the amendment of 2026-11-17, the note of 2026-11-22. "The statement above" stands under the erasure statement again.
+- The note: its first five lines are unchanged, the last bullet is the old one without the two sentences, and one dated bullet is added.
+
+**Point 4. The three rows of QG-034-C3: PLACED. The condition stays open until they are green**
+
+| Row of QG-034-C3 | Where | Read |
+|---|---|---|
+| The `relkind` refusal before the checksum read | F23 (i1), integration, and (u5), unit | The deploy step swaps the table for a view as the migrator; the refusal is "is not a table (relkind v)"; `APPLIED_CHECKSUM_SQL` is not in the statement list |
+| A cast `WITH INOUT` or `WITHOUT FUNCTION` reported by C17 | F18 (h) | **Reproduced on 17.5** with the fence of the document: the migrator created the cast, and the result is exactly the one row that (h) states. A cast `WITHOUT FUNCTION` is `42501` for the migrator. Created by the superuser on a base type, it is reported with the reference `WITHOUT FUNCTION`, which D-ARCH-247 lists as not verified |
+| A foreign table refused with `55000` on PostgreSQL 18 | F23 (i4) | The case fails and does not skip when the image lacks `file_fdw` |
+
+- The orchestrator keeps F18 (h) and F23 (i4) inside the TASK-034 fix. So all three rows are in the fix, and the late-task branch of the condition is not used.
+
+**Point 5. Superseding ADR: not needed**
+
+- No ADR names the session settings, the read rule or the output function. `BYPASSRLS` in ADR-0005 concerns the runtime roles.
+- `packages/config` refuses `options=` in the `DATABASE_URL` of a service (PR3-SEC-12). The tools send a `SET` statement on a session of the bootstrap role. The two do not meet.
+- Every rule of items 8 and 9 is stricter than the text before it.
+
+**Point 6. The two additions, the wording of item 9, the limits of item 10**
+
+- **The read-back of `row_security`: VERIFIED.** Both parameters have the context `user`. A role without privileges, inside `REPEATABLE READ READ ONLY`, set one to the empty string and the other to `on` through `set_config`, and the read-back showed it.
+- **The order of judging: VERIFIED as text.** The settings are judged first, also when the name does not resolve (item 8, F22 step 1). It fails closed.
+- **"A statement of its own": reproduced.** A `SET` in a rolled-back transaction, a `SET LOCAL`, and a `SET` in one string with `BEGIN` were gone afterwards. A plain `SET` survived a later rolled-back transaction. The list written as `foreign-table, view` reads back as written, so the comparison of item 8 refuses it.
+- **The wording of item 9 against the sentence of D-SECARCH-01: the architect's wording is the correct one.** The proposed sentence is false of the orphan checks: `rehearsal-manifest.ts:174` applies `OPERATOR(schema.op)` to the key columns. Item 9 states that case and its bound.
+  - The statements that a privileged session sends to an application database at `1bac00b1` are the listing, the fingerprints, the sequences, the server version, the cluster identifier, the gate query, the head read, the orphan checks and the checksum read, and `pg_export_snapshot` in `db:backup`. So the orphan checks are the one case in which a statement applies a cast or an operator to a value of an application type.
+  - The columns that item 9 names are those of the two statements: three for the head read, four for the checksum read.
+  - **Reproduced:** the cast form ran a planted row-type cast as `postgres`, and the `record_out` form ran none. Both forms gave the same checksum on a table without a cast. The checksum read ran the implicit cast of a retyped `migration_name` as `postgres`. The head read failed with `42804`. The type schema of that column reads `public`. The four refusals: a cast to `record` (`42809`), a cast between two built-in types, a cast `WITHOUT FUNCTION` and a base type (`42501` each).
+  - security-analyst has not yet confirmed the wording. That joins QG-034-C1.
+- **The three limits of item 10: each holds as far as it can be read here.** The second is reproduced (`42501`). The third rests on the documentation of PostgreSQL 18, as the text says. The first is a statement of exposure that security-analyst rates.
+- **Finding 1 (QG-034-C4): the limits are not complete. A read of an ordinary table runs code of its owner as the reader, at planning time.**
+  - My reading of the mechanism, which the probe supports: when PostgreSQL plans a read of a table, it loads the predicate and the expressions of every index of that table, and the expressions of its statistics objects, and it folds their constant parts. A call with no column argument to a function that its owner declared `IMMUTABLE` is such a part. The function runs as the role that plans the statement. It can call a `VOLATILE` function.
+  - **Probe 1.** The migrator created the functions, the tables and the indexes. The reader was `postgres` with `search_path` pinned, both settings of item 8 in effect and read back, `FROM ONLY`, and the fingerprint in the `record_out` form of F27.
+
+    | Read | Planted by the migrator | Result |
+    |---|---|---|
+    | Fingerprint of a plain table | nothing | Nothing ran (control) |
+    | Fingerprint | a partial index `WHERE public.f()` | The function ran as `postgres`, wrote a row to a side table, and set `restrict_nonsystem_relation_kind` to the empty string and `row_security` to `on` |
+    | Fingerprint | an index on `((public.f()))` | The same |
+    | Fingerprint | `CREATE STATISTICS … ON (a + public.f()), b` | The same |
+    | Fingerprint inside `REPEATABLE READ READ ONLY`, as `db:backup` reads | the partial index | The function ran and cleared both settings. Its insert left no row, because the transaction is read only |
+    | The check of items 5, 8 and 9, then the checksum read | a partial index on `_prisma_migrations` | The check passed: `relkind` `r`, four `pg_catalog` types, both settings in effect. The read then ran the function as `postgres` |
+    | The same check, then the head read | the same | The same |
+    | The C17 fence of the document on that database | all of the above | **0 rows** |
+
+  - **Where it applies.** `db:backup` fingerprints every table of the source cluster before the gate query and whatever the gate finds (`captureManifest`, lines 246 to 252). `db:verify-restore` fingerprints the restored database, runs the orphan checks, and reads the checksum after a rehearsed deploy whose code no gate saw. `pg_restore` builds an index as the table owner, so the restore itself is not this route.
+  - **What the text says.** C17 has no arm for an index or a statistics object. §8.3 rule 21 lists "an index expression or predicate" under "Not load-time clauses". That is right for a load and says nothing of a read.
+  - **Sentences that do not hold as written:**
+    - item 8, first bullet: "items 4 to 6 describe a read of an ordinary table that runs no code of its owner, and that was true only of a reader that bypasses row security". It was not true of that reader either;
+    - the pointer under item 7: "item 10 completes these limits";
+    - the second amendment, an older sentence: the privileged sessions "never … call a routine of a non-system schema".
+  - The heading of item 9 holds only as it is worded, for what a statement applies to a value.
+  - **The read-back of item 8 does not see it in time.** The settings are read again only before a read of `_prisma_migrations`. In the probe the function cleared both during one fingerprint, and the fingerprints after it would run without them.
+  - **Not reproduced, on a `FROM ONLY` read as the superuser:** a table CHECK, a column default and a STORED generated column that hold such a call, also with `constraint_exclusion = on`; an index expression and an index predicate over a column.
+  - **Class.** It is the class of PR034-SEC-10 and -13: code of the migrator, or of whoever holds its credential, as the bootstrap superuser, in `db:backup` on the source cluster. Nothing of TASK-034 is merged, and `restore-rehearsal` waits for C1. The id and the severity are security-analyst's.
+  - **My omission as well.** D-QG-012 verified items 4 to 6 with reads of tables that had no such index. From now on a claim that a read runs no code of the owner is probed in a fresh session against every catalog object that holds an expression of that table.
+- **Why PASS_WITH_CONDITIONS and not FAIL.** The route is older than this commit: it is open at `1bac00b1` and under the third amendment as D-QG-012 verified it. The fourth amendment makes nothing worse, and each control that it adds is verified. Taking it back would remove three of them. What is wrong is two sentences that claim more than the controls give, and one missing limit or control. Nothing is merged, and QG-034-C4 holds the merge.
+- **Observations (no condition):**
+  1. Item 9 says that every output function is built in. A type of an extension has an output function of that extension. The migrator creates no extension (§8.3 rule 14, C5), so nothing follows from it.
+  2. Row (u3) proves the refusal of a cleared setting with fakes. No row clears a setting in a real session on PostgreSQL 18 and shows the refusal. Check 8 of D-SECARCH-01 is security-analyst's to read.
+  3. D-ARCH-247 says that `format` and `concat` looked up no cast in its probe. I did not probe them. The rule does not depend on it.
+
+- **Conditions:**
+  - **QG-034-C4 · principal-architect, with security-analyst for the id, the severity and its concurrence · before the delta round closes QG-034-C1, at the latest G3; it holds the TASK-034 merge together with C1.** The planning-time route of finding 1.
+    - Either the text closes it, with a row in F23 that plants the three shapes on PostgreSQL 18 and shows that no routine of the migrator runs as the bootstrap role in `db:backup` and in `db:verify-restore`;
+    - or the text states it as a limit, with what bounds it on the source cluster and after the rehearsed deploy. Today nothing does.
+    - The two sentences of item 8 and of the pointer under item 7 get a dated correction.
+    - The answer is new Accepted text and gets an entry of this series.
+    - If the answer changes code, the change list is no longer closed at F27. The orchestrator decides whether the brief of the fix waits for it. I recommend that it does: the fix has not started, and a second round costs a fix cycle on a task that is on rung 1 of the ladder.
+  - **QG-034-C1 gains three points (security-analyst, same date):** (d) the wording of item 9 is confirmed against its own sentence; (e) the first limit of item 10 is rated and placed in RR-19 or not; (f) threat model §10.4 I item 8 and SEC-TC-85 name `row_security = off` and row (i5), and (i5) is green in lane B.
+  - **QG-034-C2 = CLOSED** (text). **QG-051-C11 = CLOSED.**
+  - **QG-034-C3 stays open** until lane B of the fix shows F18 (h), F23 (i1) and (i4), and the unit run shows (u5); before G3.
+- **Conditions open after this entry:** QG-034-C1, -C3, -C4; QG-051-C5, -C6 (the TASK-087 half and the run on the merge head), -C7 (at the merge), -C8, -C9, -C10; QG-041B-C5, -C6, -C10, -C11 and the threat-model half of -C4; the QG-040, QG-041, QG-043 and QG-044 conditions as their entries left them.
+- **Not verified:** anything on PostgreSQL 18, finding 1 included (I expect the same behaviour there and did not run it; lane B has to show it); the change list, of which nothing is built; that the lane B image ships `file_fdw`; a VIRTUAL generated column at a read; the sessions of `pg_dump` and `pg_restore` themselves on the route of finding 1; threat model text.
+- **No evidence note:** as for D-QG-001 to D-QG-012, this entry is the record. The next entry of this series is D-QG-014.
+- **Reversibility:** High (a verification record).
