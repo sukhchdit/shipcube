@@ -5,7 +5,7 @@
 # fixtures, spikes, docs, env files and host build output. Same stage plan as apps/api/Dockerfile.
 
 # ---- base: pinned Node 24 LTS (ADR-0001: node:24-trixie-slim by digest). No apt packages.
-FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS base
+FROM node:24.22.3-trixie-slim@sha256:af02d57b57719b9657a45199a79264a9437940cd55b3c7b3fc99615654f124a0 AS base
 ENV NODE_ENV=production \
     CHECKPOINT_DISABLE=1 \
     SCARF_ANALYTICS=false \
