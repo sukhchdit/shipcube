@@ -12281,3 +12281,34 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
   - orchestrator: C1, C3, PR93-SEC-03 (start checklist), rustfs Dependabot triage, the corrections in items 2 and 3.
   - principal-architect: the ADR-0023 note, if a scheduled job is chosen.
 - **Reversibility:** High (review record).
+
+### D-DEVOPS-005 · 2026-11-22 · devops-engineer · Dependabot repair chore (D-ORCH-179): PR #93 restores the Node 24 base images, closes PR87-SEC-01 (a) to (c), reverts stylelint 18 and the compose rustfs bump; #90 came from a Dependabot config race, not a broken ignore
+- **Trigger:** D-ORCH-179. The regressions came from #90 (node:26 in five Dockerfiles), #92 (stylelint 18.0.0) and #91 (rustfs 1.0.5, aws-cli 2.40.3). The task also took PR87-SEC-01 (D-SECCHORE-01) and PR-0087 R1-m1 and R1-n1 (D-CRCHORE-01). The run resumed the partial work of the earlier run, which had hit an API limit.
+- **PR #93** (`chore/dependabot-regressions-90-92`, head `981731ce`, from `origin/main` `dde82c09`; commits `36b072cc` change, `860d6651` evidence, `1b8db071` renumbering, `981731ce` evidence):
+  - **(a) Node.** The five FROM lines are byte-equal to #87 (`node:24.22.3-trixie-slim@sha256:af02d57b…`). nodejs.org `index.json` shows `v24.22.3` (2026-11-10, `security: true`) as the newest 24.x and the newest 24.x security release, and Docker Hub `24-trixie-slim` still carries the #87 index digest. No newer 24.x security release exists, so there is no bump.
+  - **(b) Why #87's ignore did not stop #90: it did, and this was a race.** The Dependabot-on-Actions logs prove it. Job 1721094313 (run 44980363263), triggered by #86's push `25dfd72f`, has `"ignore-conditions":[]` but cloned the default branch after #87 merged (`Base commit SHA: 7cc7d2e4`, clone at 03:23:27Z, #87 at 03:23:03Z). That job opened #90. Job 1721094357, triggered by #87, logged the semver-major ignore and `No update needed`. In short, a job carries the config of the commit that triggered it and clones the tree when it starts. No config can close this race. Two changes follow:
+    - the docker `node` ignore becomes the absolute `versions: ['>= 25.a']`. The relative `update-types` would keep offering 26.x once node:26 is in the tree, and `.a` is the bound Dependabot derives itself;
+    - the repository guard is a new check-dockerfiles rule `node-major` (repository mode). Every node FROM must have the `.node-version` major and satisfy `engines.node`. It fails closed, with an in-house engines parser for the subset in use. It has tests, including a node:26 fixture. Against main's #90 Dockerfiles it gives 10 findings and exit 1. It runs in every lane A and lane B unit run through the repository Dockerfiles test.
+    - PR87-SEC-01 (b) is `tools/ci/check-node-security.mjs`: local, zero hosted minutes, exits 0, 1 or 2, timeout plus 3 attempts with backoff and jitter, `--index` offline, unit-tested. On the head it gives `OK … 24.22.3 (2026-11-10)`.
+    - (c) The hand-bump rule is in `docs/07-ops/CI-CD.md` section 6: within 2 working days, all five FROM lines plus the debian pin if rebuilt, no cooldown wait, and never a new major.
+    - The dependabot.yml header bullet is R1-n1. The `sec-static` PR25-SEC-02 pins follow.
+  - **(c2) Stylelint 18: reverted.**
+    - Fails: peer compatibility (`stylelint-use-logical@2.1.3`, its latest, has peer `>= 11 < 18`; `npm ls` gives ELSPROBLEMS) and `npm ci --ignore-scripts` on main's lockfile (ERESOLVE). Main could not install.
+    - Pass: licences (stylelint 18.0.0 MIT, cosmiconfig 10.0.1 MIT, write-file-atomic 8.0.0 ISC; the lock diff is 1 added, 2 changed, 41 removed), release age (2026-11-03, 2026-08-30, 2026-05-08), GHSA (none) and maintenance.
+    - `npm run lint` on main gave no usable verdict, because the worktree's earlier install lacked two lockfile peers.
+    - No principal-architect consult was needed, since a check failed. `package.json` and `package-lock.json` equal `95cb411d` (empty diff). The npm ecosystem now ignores `stylelint` semver-major.
+  - **(d) #91.**
+    - rustfs 1.0.5 broke compose-stack `[PR30-SEC-08]` (compose must equal the harness `RUSTFS_IMAGE` 1.0.4). The smallest fix is the compose line back to the 1.0.4 harness digest. rustfs GHSA all affect ≤ 1.0.1.
+    - aws-cli 2.40.3 is kept: Apache-2.0, pushed 2026-11-13 (8.3 days), no pin anywhere, and awscli GHSA cover only v1. No suite-runners or harness rule covers it.
+- **Checks:** format:check, typecheck, lint (`--max-warnings 0`) pass. Unit Jest `tools/ci/` and `tools/compose/`: 33 suites, 1,317 tests pass. Lane B `20261122T0544Z_1b8db07` on `1b8db071` (profile pr, `git_dirty` false) PASS: api 262/0, catalog 121/0, integration 514/0, rls-cross-tenant 162/0, unit 8,710/0, merged coverage 99.46 % / 97.18 %, US-006 PASS; also `20261122T0507Z_36b072c` PASS on the pre-renumbering code; both committed; `check-evidence` PASS. No failure to classify. Hosted lane A run 44989421405 on `860d6651`: fast-lane green; ci-gate gitleaks, Semgrep and oasdiff pass; only `Security-owned paths need a review record` is red (record owed).
+- **Numbering:** this entry was first drafted as D-DEVOPS-004, which a parallel devops entry (D-ORCH-180 posture check) took on main. `1b8db071` moves the branch citations to D-DEVOPS-005. The subject of `36b072cc` keeps 004 (no rewrite).
+- **Housekeeping:** the leftover `docs/05-quality/tests/runs/20261121T1810Z_0ccac6b/` of #87's old lane B was moved out of the worktree to `.orch/records/leftover-NODE24-20261121T1810Z_0ccac6b` and not committed.
+- **Open:**
+  - Next month Dependabot proposes rustfs 1.0.5 again and fails `[PR30-SEC-08]` by design. Moving harness and compose together fits TASK-299.
+  - The Valkey ignore keeps the relative `update-types`, with compose-stack as its guard (PR86 follow-ups, out of scope).
+  - The PR needs code review and a security record (security-owned paths: `.github/dependabot.yml`, `tools/ci/**`, Dockerfiles, `compose.yaml`, `package*.json`).
+- **Alternatives:**
+  - accept stylelint 18 with an ADR amendment: rejected, because the install fails;
+  - move the rustfs harness to 1.0.5: rejected as wider than the smallest fix;
+  - a nightly hosted job for (b): rejected because it costs minutes, and a local tool was asked for.
+- **Reversibility:** High.
