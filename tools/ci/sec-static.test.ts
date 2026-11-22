@@ -211,10 +211,16 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     return out;
   }
 
-  it('[D-ORCH-068] .gitleaks.toml holds exactly the two reviewed allowlists; a commit-bound entry names one full SHA, one rule, one anchored path and anchored full-line patterns', () => {
+  it('[D-ORCH-068] .gitleaks.toml holds exactly the five reviewed allowlists; a commit-bound entry names one full SHA, one rule, one anchored path and anchored full-line patterns', () => {
     // Deliberate shape pin: a new allowlist (or a widened one) changes this test and needs its own security review.
     const descriptions = allowlists.map((block) => /^description = "(.*)"$/mu.exec(block)?.[1]);
-    expect(descriptions).toEqual(['PR1-SEC-11 agent docs prose', 'D-ORCH-068 PR #39 dd7a2dd effect symbol-key comment']);
+    expect(descriptions).toEqual([
+      'PR1-SEC-11 agent docs prose',
+      'D-ORCH-068 PR #39 dd7a2dd effect symbol-key comment',
+      'PR080-SEC-07 TASK-044 merge c33e5e9 D-ORCH-147 triage line',
+      'PR080-SEC-07 TASK-040 040-B merge 0ccdd00 D-ORCH-147 triage line',
+      'PR080-SEC-07 TASK-041 041-B merge aade267 D-ORCH-147 triage line',
+    ]);
     for (const block of allowlists) {
       expect(block).toMatch(/^condition = "AND"$/m);
       expect(block).toMatch(/^regexTarget = "line"$/m);
@@ -271,6 +277,108 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       'another line: the comment re-indented': at(flagged.trimStart()),
       'another line: text before the comment': at(`const token = "${awsKeyShaped()}";\n${flagged}`),
       'another line: a second newline before the comment': at(`\n\n${flagged}`),
+    };
+    const wronglyAllowed = Object.entries(controls)
+      .filter(([, finding]) => allowedByAny(finding))
+      .map(([label]) => label);
+    expect(wronglyAllowed).toEqual([]);
+  });
+
+  /**
+   * PR080-SEC-07 route (c) under D-SEC-PR45-01 (D-DEVOPS-003): the three branch merge commits whose first-parent diff
+   * re-adds main's D-ORCH-147 triage line (DECISIONS.md:7697). Main's own d7585e78 is NOT here: it is never in a PR
+   * range and stays in the gitleaks-full baseline (route (b)).
+   */
+  const PR080_MERGES = [
+    'c33e5e927f903847daf59ca5f2aa5440562401ef',
+    '0ccdd009acfe4eab53adb2bb69064aa0d537a6d9',
+    'aade267273af4bb868a4e4c4578aeb4f7378a261',
+  ];
+  const PR080_MAIN_COMMIT = 'd7585e78786e01bf772609d44f1f923203e58c5e';
+  const PR080_PATH = 'docs/sdlc/DECISIONS.md';
+  const PR080_CLASS = '[a-z=]{12}';
+  /** The flagged line with its quoted phrase as a parameter (the committed value is never quoted here). */
+  const triageLine = (value: string) =>
+    `  - **Triage (orchestrator, code review L-2):** \`gitleaks-full\` was run on \`203d02eb\`. The one finding is \`generic-api-key\` at \`prisma/tests/catalog/tenant-keys.ts:75\` in TASK-051's own commit \`b34f954e\`. That line is a doc comment, "The other key columns, \`${value}\` in key order". It is a false positive with no secret.`;
+  /** A random 12-character phrase of the entry's class, generated at run time (never committed). */
+  const phraseShaped = (length = 12, alphabet = 'abcdefghijklmnopqrstuvwxyz=') =>
+    Array.from({ length }, () => alphabet.charAt(Math.floor(Math.random() * alphabet.length))).join('');
+  /** True when `source` is `^\n?<literal>[a-z=]{12}<literal>$`: the class is the only non-literal part. */
+  function literalButClass(source: string): boolean {
+    if (!source.startsWith('^\\n?') || !source.endsWith('$')) return false;
+    const parts = source.slice('^\\n?'.length, -1).split(PR080_CLASS);
+    if (parts.length !== 2) return false;
+    const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return parts.every((part) => escape(part.replace(/\\(.)/gu, '$1')) === part);
+  }
+
+  it('[PR080-SEC-07] the three merge-commit entries: one table per commit, DECISIONS.md, generic-api-key, one anchored line whose only variable part is the 12-character class', () => {
+    const entries = allowlists.slice(2);
+    expect(entries).toHaveLength(3);
+    entries.forEach((entry, index) => {
+      expect(commitBoundViolations(entry)).toEqual([]);
+      expect(literals(entry, 'commits')).toEqual([PR080_MERGES[index]]);
+      expect(literals(entry, 'targetRules')).toEqual(['generic-api-key']);
+      expect(literals(entry, 'paths')).toEqual(['^docs/sdlc/DECISIONS\\.md$']);
+      const regexes = literals(entry, 'regexes');
+      expect(regexes).toHaveLength(1);
+      expect(literalButClass(regexes[0] ?? '')).toBe(true);
+      // The exact fingerprint is recorded next to the entry (the value is never quoted).
+      expect(gitleaks).toContain(`# Fingerprint: ${PR080_MERGES[index]}:${PR080_PATH}:generic-api-key:7697.`);
+    });
+    // The same line pattern in all three (the line has the same content hash in every merge).
+    expect(new Set(entries.map((entry) => literals(entry, 'regexes')[0])).size).toBe(1);
+    expect(literals(entries[0] ?? '', 'regexes')[0]).toBe(
+      `^\\n?${triageLine('\u0000')
+        .replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+        .replace('\u0000', PR080_CLASS)}$`,
+    );
+    // Mutations: a widened class, a dropped anchor, a widened path or a second commit are refused.
+    const entry = entries[0] ?? '';
+    const source = literals(entry, 'regexes')[0] ?? '';
+    expect(literalButClass(source.replace(PR080_CLASS, '[^\\n]*'))).toBe(false);
+    expect(literalButClass(source.replace(PR080_CLASS, '[a-z=]{1,64}'))).toBe(false);
+    expect(literalButClass(source.replace('It is a false positive with no secret\\.$', 'It is a false positive'))).toBe(false);
+    expect(literalButClass(source.replace('\\(orchestrator', '.*\\(orchestrator'))).toBe(false);
+    const twoCommits = entry.replace(`'''${PR080_MERGES[0]}'''`, `'''${PR080_MERGES[0]}''', '''${PR080_MERGES[1]}'''`);
+    expect(commitBoundViolations(twoCommits)).not.toEqual([]);
+    const widenedPath = entry.replace("'''^docs/sdlc/DECISIONS\\.md$'''", "'''^docs/sdlc/'''");
+    expect(widenedPath).not.toBe(entry);
+    expect(commitBoundViolations(widenedPath)).not.toEqual([]);
+  });
+
+  it('[PR080-SEC-07] the merge-commit entries admit only the triage line at those three commits, that path and rule; main, other commits, paths, rules and lines are still reported (negative controls)', () => {
+    const at = (line: string, over: Partial<GitleaksFinding> = {}): GitleaksFinding => ({
+      commit: PR080_MERGES[0] ?? '',
+      path: PR080_PATH,
+      rule: 'generic-api-key',
+      line,
+      ...over,
+    });
+    for (const commit of PR080_MERGES) {
+      const line = triageLine(phraseShaped());
+      expect(allowedByAny(at(`\n${line}`, { commit }))).toBe(true);
+      expect(allowedByAny(at(line, { commit }))).toBe(true);
+    }
+
+    const flagged = triageLine(phraseShaped());
+    const controls: Record<string, GitleaksFinding> = {
+      "same line, main's d7585e78 (baseline only)": at(flagged, { commit: PR080_MAIN_COMMIT }),
+      'same line, a fourth commit': at(flagged, { commit: 'f'.repeat(40) }),
+      'same line, abbreviated SHA': at(flagged, { commit: (PR080_MERGES[1] ?? '').slice(0, 7) }),
+      'same line, another markdown file': at(flagged, { path: 'docs/sdlc/STATUS.md' }),
+      'same line, a nested copy of the path': at(flagged, { path: `archive/${PR080_PATH}` }),
+      'same line, a suffixed path': at(flagged, { path: `${PR080_PATH}.bak` }),
+      'same line, another rule': at(flagged, { rule: 'aws-access-token' }),
+      'another line: an api key assignment': at(`const apiKey = "${awsKeyShaped()}";`),
+      'another line: the phrase replaced by an AWS-shaped value': at(triageLine(awsKeyShaped())),
+      'another line: a 12-character phrase with a digit': at(triageLine(`${phraseShaped(11)}7`)),
+      'another line: a 12-character phrase with upper case': at(triageLine(`${phraseShaped(11)}Q`)),
+      'another line: a 13-character phrase': at(triageLine(phraseShaped(13))),
+      'another line: a secret appended to the line': at(`${flagged} token = ${awsKeyShaped()}`),
+      'another line: the line re-indented': at(flagged.trimStart()),
+      'another line: text before the line': at(`const token = "${awsKeyShaped()}";\n${flagged}`),
+      'another line: a second newline before the line': at(`\n\n${flagged}`),
     };
     const wronglyAllowed = Object.entries(controls)
       .filter(([, finding]) => allowedByAny(finding))

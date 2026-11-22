@@ -41,3 +41,44 @@ commits = ['''dd7a2ddcad30ba422152300f21d7df5f105d283e''']
 regexTarget = "line"
 paths = ['''^tools/docker/scan-image-secrets\.mjs$''']
 regexes = ['''^\n?  // effect 3\.20\.0 \(a dependency of @prisma/config\): `IntervalSymbolKey = "effect/[A-Za-z]{1,32}"` and$''', '''^\n?  // `IntervalsSymbolKey = "effect/[A-Za-z]{1,32}"`, in the cjs, esm and src copies\.$''']
+
+# PR080-SEC-07 route (c) under D-SEC-PR45-01 (D-DEVOPS-003): three branch merge commits re-add main's D-ORCH-147
+# triage bullet (docs/sdlc/DECISIONS.md line 7697, added on main by d7585e78, reworded on main by 1a2b9d7d). It quotes a
+# doc-comment phrase (12 characters, lower-case letters and "=" only), not a credential: nothing to rotate. Each merge's
+# first-parent diff adds the line again (same content hash in all four commits), and lane A's range scan holds the
+# merge. One table per commit: that commit, that path, that rule and the one anchored line, whose quoted phrase is
+# limited to its character class and length (the value is never quoted). Main's own fingerprints (d7585e78, ed156913)
+# are never in a PR range (base..head excludes main's ancestry); they stay in the gitleaks-full baseline (route (b)).
+
+# TASK-044 merge of main 4ba683ad (branch feat/TASK-044-server-sent-events-convention, head 33262314).
+# Fingerprint: c33e5e927f903847daf59ca5f2aa5440562401ef:docs/sdlc/DECISIONS.md:generic-api-key:7697.
+[[allowlists]]
+description = "PR080-SEC-07 TASK-044 merge c33e5e9 D-ORCH-147 triage line"
+condition = "AND"
+targetRules = ['''generic-api-key''']
+commits = ['''c33e5e927f903847daf59ca5f2aa5440562401ef''']
+regexTarget = "line"
+paths = ['''^docs/sdlc/DECISIONS\.md$''']
+regexes = ['''^\n?  - \*\*Triage \(orchestrator, code review L-2\):\*\* `gitleaks-full` was run on `203d02eb`\. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys\.ts:75` in TASK-051's own commit `b34f954e`\. That line is a doc comment, "The other key columns, `[a-z=]{12}` in key order"\. It is a false positive with no secret\.$''']
+
+# TASK-040 part 040-B merge of main 4ba683ad (branch feat/TASK-040-part-b-idempotency-production, head 9d1687b1).
+# Fingerprint: 0ccdd009acfe4eab53adb2bb69064aa0d537a6d9:docs/sdlc/DECISIONS.md:generic-api-key:7697.
+[[allowlists]]
+description = "PR080-SEC-07 TASK-040 040-B merge 0ccdd00 D-ORCH-147 triage line"
+condition = "AND"
+targetRules = ['''generic-api-key''']
+commits = ['''0ccdd009acfe4eab53adb2bb69064aa0d537a6d9''']
+regexTarget = "line"
+paths = ['''^docs/sdlc/DECISIONS\.md$''']
+regexes = ['''^\n?  - \*\*Triage \(orchestrator, code review L-2\):\*\* `gitleaks-full` was run on `203d02eb`\. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys\.ts:75` in TASK-051's own commit `b34f954e`\. That line is a doc comment, "The other key columns, `[a-z=]{12}` in key order"\. It is a false positive with no secret\.$''']
+
+# TASK-041 part 041-B merge of main 3d54cef8 (branch feat/TASK-041-part-b-rate-limit-rulings-rev2, head 214ec79b).
+# Fingerprint: aade267273af4bb868a4e4c4578aeb4f7378a261:docs/sdlc/DECISIONS.md:generic-api-key:7697.
+[[allowlists]]
+description = "PR080-SEC-07 TASK-041 041-B merge aade267 D-ORCH-147 triage line"
+condition = "AND"
+targetRules = ['''generic-api-key''']
+commits = ['''aade267273af4bb868a4e4c4578aeb4f7378a261''']
+regexTarget = "line"
+paths = ['''^docs/sdlc/DECISIONS\.md$''']
+regexes = ['''^\n?  - \*\*Triage \(orchestrator, code review L-2\):\*\* `gitleaks-full` was run on `203d02eb`\. The one finding is `generic-api-key` at `prisma/tests/catalog/tenant-keys\.ts:75` in TASK-051's own commit `b34f954e`\. That line is a doc comment, "The other key columns, `[a-z=]{12}` in key order"\. It is a false positive with no secret\.$''']
