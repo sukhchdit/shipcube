@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "lane": "B",
+  "profile": "pr",
+  "git_sha": "1b8db071ba8f1b2c3fa1e4bfa4bbfca9d7b03791",
+  "git_dirty": false,
+  "build_clean": true,
+  "stamp": "20261122T0544Z",
+  "generated_at": "2026-11-22T06:02:09Z",
+  "host": {
+    "os": "Windows_NT 10.0.26300 (win32)",
+    "cpu_model": "11th Gen Intel(R) Core(TM) i9-11950H @ 2.60GHz",
+    "cores": 16,
+    "ram_gb": 31.7,
+    "docker_version": "29.8.0",
+    "node_version": "v24.22.3",
+    "npm_version": "11.19.1"
+  },
+  "lockfile_sha256": "2e4edd5bde4738178926d1c64955bd3b93cc4e65e1dd592ac6e29573c8ec1b30",
+  "manifest_sha256": "2406edad0d5d6862ba14391209b25dce08e444da89469c1db2c4fe5d151c5bc3",
+  "testcontainers_images": [
+    {
+      "image": "postgres:18@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42",
+      "digest": "sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+    },
+    {
+      "image": "valkey/valkey:8.1-alpine@sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a",
+      "digest": "sha256:2602ace2be6569bc2bbb06f873776516ab9089821525be34f4305c67eb9db02a"
+    }
+  ],
+  "env_overrides": [],
+  "suites": [
+    {
+      "name": "api",
+      "status": "passed",
+      "tests": 262,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 32.6,
+      "report": "api.junit.xml",
+      "report_sha256": "fc9f57a2cfa3cc9321de32c2d4acf1838a7a71689b951feaedea59954fb386f0"
+    },
+    {
+      "name": "catalog-c1-c14",
+      "status": "passed",
+      "tests": 121,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 48.8,
+      "report": "catalog-c1-c14.junit.xml",
+      "report_sha256": "2511692501a091bdc53aac79ae65ffa75f6d0698878474c4ce2922b26799a01a"
+    },
+    {
+      "name": "integration",
+      "status": "passed",
+      "tests": 514,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 755.2,
+      "report": "integration.junit.xml",
+      "report_sha256": "81c3878eb84f6a62c555bedb55d155fe88d0618e8163f0ee789a57f2844d70d6"
+    },
+    {
+      "name": "rls-cross-tenant",
+      "status": "passed",
+      "tests": 162,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_s": 16.8,
+      "report": "rls-cross-tenant.junit.xml",
+      "report_sha256": "7454df2a02f6843a47bb31b8bcfba7c1fb61d50485b727d9c60586633aff307a"
+    },
+    {
+      "name": "unit",
+      "status": "passed",
+      "tests": 8710,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 2,
+      "duration_s": 211.6,
+      "report": "unit.junit.xml",
+      "report_sha256": "d56883e6b069f4910b92b89bc11980864193f13bc90f29a31f21a4ab85542138"
+    }
+  ],
+  "attachments": [
+    {
+      "file": "coverage-summary.json",
+      "sha256": "15ff40441a8ee077ccce4db90ebb6aa0b0fa5e5feae0f29bf4f32e2c85c1afd2"
+    }
+  ],
+  "coverage": {
+    "line": 99.46,
+    "branch": 97.18,
+    "per_package": {
+      "apps/admin": {
+        "line": 93.85,
+        "branch": 98.48
+      },
+      "apps/api": {
+        "line": 99.39,
+        "branch": 96.93
+      },
+      "apps/web": {
+        "line": 96.04,
+        "branch": 96.81
+      },
+      "apps/worker": {
+        "line": 99.23,
+        "branch": 93.79
+      },
+      "packages/audit": {
+        "line": 100,
+        "branch": 99.76
+      },
+      "packages/authz": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/carriers": {
+        "line": 99.92,
+        "branch": 97.83
+      },
+      "packages/config": {
+        "line": 99.91,
+        "branch": 96.93
+      },
+      "packages/pricing": {
+        "line": 100,
+        "branch": 100
+      },
+      "packages/shared": {
+        "line": 99.32,
+        "branch": 95.35
+      },
+      "packages/ui": {
+        "line": 100,
+        "branch": 100
+      },
+      "prisma": {
+        "line": 99.18,
+        "branch": 96.44
+      }
+    }
+  },
+  "jest_args": [
+    "api: -i --testTimeout=30000",
+    "catalog-c1-c14: -i --testTimeout=30000",
+    "integration: -i --testTimeout=30000",
+    "rls-cross-tenant: -i --testTimeout=30000"
+  ],
+  "verdict": "PASS",
+  "invalid_reasons": []
+}
