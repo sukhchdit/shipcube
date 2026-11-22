@@ -11453,3 +11453,94 @@ Developer decisions (for docs/sdlc/DECISIONS.md, appended on main by the orchest
 - **Queue correction:** the session C summary listed 040-B PR1's delta code review, security C2 round and amendment-18 check as owed; the record shows them done (D-CRPR040B1-01 AWN, D-SECPR040B1-02 PWC, D-QG-010). 041-B QG-041B-C4 is discharged (D-SECPR041B-03). Owed for both: record the lane-B runs, merge main, lane B, merge-only rounds, PR; 041-B also the README §7 rider and D-QG-011. Lane B of task branches merged with `03aec396` reads failures caused only by #90/#92 as main-red class (3), fixed by the repair chore.
 - **Host:** node_modules cleared from ten merged/evidence worktrees (27 GB free before).
 - **Reversibility:** High.
+
+### D-QG-011 · 2026-11-22 · quality-gatekeeper · Closing entry for TASK-041 part 041-B before its pull request = PASS_WITH_CONDITIONS. QG-041B-C4 = CLOSED (PR041-SEC-11 and what remains of PR041-SEC-16 are LOW). QG-041B-C5 (a) = PASS_WITH_CONDITIONS (H6 is green against a real Valkey at the reviewed head `214ec79b`, the merged head carries the same blobs, and lane B on the final head must show it again). The two points added to ADR-0016 amendment 13 item 6 "Answer" (D-ARCH-239, D-ARCH-241) = VERIFIED, no superseding ADR; QG-041B-C8 = CLOSED_WITH_FOLLOW_UP. The api/README §7 rider `334fdb18` carries the held patch byte for byte. New conditions QG-041B-C9 (holds the merge), QG-041B-C10 and QG-041B-C11
+- **Trigger:** D-QG-010 announced this entry for QG-041B-C4. D-ARCH-239 and D-ARCH-241 route the two added points of item 6 to it. Dispatch of orchestrator session D (D-ORCH-179), re-dispatched after an API-limit stop. This is not a phase gate.
+- **Judged at:** main `2debef7d`, equal to origin/main. `git diff` to HEAD is empty for ADR-0016 and the TASK-041 rulings file since `13ecf05d`, for `docs/02-ux` since `0f8fa55d`, and `plan-data.mjs` is at `392bd8af` (D-SD-015). The branch `feat/TASK-041-part-b-rate-limit-rulings-rev2` is read by SHA: the reviewed head `214ec79b` (its origin is still there), the run record `d4e637a5`, the merge `d7cb8385` of main `030333a3`, and the rider `334fdb18`. The last three are local and not pushed. The worktree is clean.
+- **Method.**
+  - **Read in full:** D-QG-008 to D-QG-010, D-ARCH-233, D-ARCH-239 to D-ARCH-241, D-PM-090, D-PM-092, D-CRPR041B-01, D-SECPR041B-03 with round 3 of the security record (R3.1 to R3.3, R3.8 to R3.10), D-SD-015, D-ORCH-179; item 6 "Answer" with its head note; rulings sections 6 (lines 24 and 27 to 29) and 12; flow F10 §1.1 and §4; ADR-0014 amendment 6; ADR-0026 item 13; US-291; api/README §5 and §7 at `334fdb18`.
+  - **Read in the code at `334fdb18`:** `ROUTE_PIPELINE`, the header of `tx/execute.ts`, `idempotency/store.ts` and `problem.ts` (what is stored), `audit/capture.ts` (which failures get a FAILED entry), every use of the code `RATE_LIMITED` outside tests, H6 in `rate-limit.int.test.ts`.
+  - **Run (Node 24.22.3 and git, in the session scratch directory, not kept):** the hashes of the three JUnit reports against `summary.json`; the tree and raw-diff proofs of the merge; a blob comparison of the owned paths; the held patch applied to blob `f8d1d561`; a scan of `openapi.yaml` (133 operations) for `x-reauth-scope`, `x-reauth-max-age`, the classes and `x-rate-limit-route`; the quoted card lines 20 to 29 and the two quoted blocks of rulings 12.5 as substrings of `plan-data.mjs` and of the README; old against new text of item 6.
+  - **Not run:** Docker, lane B, Jest, npm, any probe. The security figures are the analyst's run. No `.env` file was opened. Nothing was written in the part-B worktree.
+
+**Part 1. QG-041B-C4: CLOSED**
+
+- Round 3 of `PR-pending-TASK-041B-security-review.md` is on main, its `Head` row names `214ec79bc583e6d9ea89e1a23e98909a3a97c3c4`, and its verdict is PASS_WITH_CONDITIONS with 0 Critical, 0 High and 0 Medium.
+- **PR041-SEC-11 stays LOW with the burst case** (R3.2, probe P7 on the head, limit 120). The rows agree with what I measured in D-QG-008: a direct store with a synchronous slot refuses nothing (300 × 200 in both), and an ES256 slot refuses what exceeds the room (136 of 300 there with the branch fake, 179 here with the in-memory store). Every refusal is `Retry-After: 1` with no event. The round-1 sentence that rested on the withdrawn claim is struck in place.
+- **What remains of PR041-SEC-16 is LOW** (R3.3, rows 5a and 5b of rulings 11.3). Only test seams have the form, and card line 21 is on five cards (my script: 5 occurrences). Not above LOW, so trigger (vi) does not fire and the wrapper change of rulings 11.7 is not triggered.
+- **The binding holds at the merged head.** `git diff 214ec79b 334fdb18` is empty for `apps/api/src/platform/rate-limit`, `routing`, `authn`, `app.ts`, `start-api.denial-budget.api.test.ts`, `packages/config` and `packages/shared`. Main brought changes under `apps/api/src/platform` (`pagination`, `validate`; #89), and none is a path that part B changes. The rider touches one file under `docs/`, which CODEOWNERS does not own.
+- **Still open under this condition, not for the merge:** the threat-model half (R-13, T-11, T-39, T-93 against item 6), security-analyst, before G3.
+
+**Part 2. QG-041B-C5 (a): PASS_WITH_CONDITIONS**
+
+- **The proof exists.** Run `20261121T1851Z_214ec79` (lane B, profile pr; committed on the branch as `d4e637a5`): `git_sha` is the full `214ec79b`, `git_dirty` false, `build_clean` true, Valkey `8.1-alpine@sha256:2602ace2…`. The three report hashes I recomputed equal `summary.json`.
+
+  | Row | Suite, result |
+  |---|---|
+  | H6, "5 of 120 are admitted" | integration, `rate-limit.int.test.ts`, passed (0.028 s), with the 8 other rows of the file. The assertions are exact: `admitted` `toBe(5)`, ledger 0, the two keys read `'5'` and `'120'` |
+  | H7 (two seams), H8, H9 | api, `authn-failed.api.test.ts`, passed; 276 tests, 0 failures |
+  | H10, H7, H8 unit rows | unit, `authn-failed.test.ts`, passed |
+  | Retries | none: `-i --testTimeout=30000`, and no retry setting in the rate-limit folder, `heavy.mjs` or `suite-runners.json` |
+
+- **The run is not the accepted run of the pull request.** Its verdict is FAIL on three rows, all of the main-red class of D-ORCH-172: `gitleaks-full` twice (the 17-line baseline, PR080-SEC-07; #85) and `compose-stack.test.ts` (the Valkey digest; #86). The commit says so itself.
+- **The merged head carries what was proven.**
+  - The tree of `d7cb8385` is the `git merge-tree` of `d4e637a5` and `030333a3` (`7ce93c55`). Both raw-diff equalities of its message hold: 34 entries on the branch side, 141 on the main side, merge base `3d54cef8`.
+  - The rate-limit sources, the H6 file and its image line are the same blobs at `214ec79b` and `334fdb18`. `ioredis` is 6.0.0 in both lockfiles. The lockfile differs in the stylelint tree only (42 entries, #92).
+- **Condition at the merged head (qa-lead runs, orchestrator reads; before the merge):** lane B on the final head, `334fdb18` or a later one, lists H6, both H7 rows, H8, H9 and H10 as passed, with no retry. A failure of that run may only be one of the main regressions of D-ORCH-179 (#90, #92). If H6 or an H row fails or is missing, QG-041B-C5 (a) is open again and the merge is held. How a run that is red only for #90 and #92 is read is the orchestrator's rule (D-ORCH-179), not this gate's.
+- QG-041B-C5 (b) and (c) are on their cards since D-SD-015 and are not judged here.
+
+**Part 3. Item 6 "Answer", the two added points (D-ARCH-239, D-ARCH-241): VERIFIED; QG-041B-C8 CLOSED_WITH_FOLLOW_UP**
+
+- **Superseding ADR: not needed.** The touch is an addition. Against `13ecf05d~1`, the head note of item 6 gains one parenthesis (the 1,465 characters before it and the 282 after it are unchanged), six lines are new, and no other line of ADR-0016 changes. The first point states the reading under which D-QG-010 closed QG-041B-C7 (a). The second states a rule for limits that are not built and describes the code as built.
+
+  | Claim | Result |
+  |---|---|
+  | A poll keeps its data, shows nothing and is held back until `Retry-After` has passed; this is F10 §1.1 | **Holds.** F10 §1.1, third case of "Where R14 appears", says the same. The flow does not change |
+  | The first load is not that case | **Holds.** F10 §1.1, second case, and W00 §3.9 through card line 27 test (4) |
+  | Each branch of the point has a test row | **Holds.** Line 27 tests (1) a longer wait, with window focus and reconnect inside it, (2) a wait of one second, (3) no `Retry-After`, (4) the first load; line 28 on the two screens |
+  | The three rows QG-041B-C8 asked for | **Present** in line 24: SAME KEY, MISSING RETRY-AFTER, WAITERS OF A REFRESH. CANCELLED and WAIT FUNCTION are added |
+  | The lines are on their cards | **Holds.** Lines 20 to 29 are verbatim in `plan-data.mjs` at `392bd8af`: 1, 5, 1, 1, 1, 1, 2, 1, 2 and 15 occurrences. "every method may be retried" and "a floor that never returns to 0": 0. Follow-up 1 of D-QG-010 is closed |
+  | "As built, three sources answer with this code", each before any effect | **Holds at `334fdb18`,** the merged head, not only at `214ec79b`. `AppError('RATE_LIMITED')` is raised in `limits.ts:76` and `authorise.ts:75` and nowhere else outside tests. `ROUTE_PIPELINE` is context, authenticate, mfaGate, authorise, rateLimit, validate, idempotency, etag, execute |
+  | A 429 is never stored under a key | **Holds.** `store.ts` and `problem.ts` store a 2xx and a 4xx other than 429; ADR-0014 amendment 6 releases a 429. A 429 gets no FAILED entry (`capture.ts`: 409, 422, 5xx), so the test of card line 29 ("no audit entry") can pass |
+  | "By the contract four operations have both" | **Holds.** 14 operations declare `x-reauth-scope`. `changePassword`, `disableTotp` and `regenerateRecoveryCodes` are in class `auth`, `requestPrivacyExport` has a route limit, and the other ten have neither. All four take a proof always: the four `x-reauth-max-age` operations are the `org.member.manage` ones |
+  | "The client asks for the proof again (flow F10 §4)" | **Holds.** A14 has the edge: the first 401 `REAUTH_REQUIRED` after a proof was sent opens the dialog again (A15), the second ends in a toast (A16). After a longer wait the user starts the action again and an always-scope opens the dialog in any case (A2). Finding 2 |
+  | Other Accepted text | **No contradiction found.** ADR-0026 item 13 and api/README §5 give the same key rule ("with a fresh re-authentication proof"; "a proof spent by an execution that ends in a 5xx stays spent"). The contract says "a proof that is sent is always verified and consumed". US-291 asks for single use and says nothing of a refused call. The one text that sets a refetch option is W13 (no refetch on window focus for the session list), a setting of one query that the point leaves alone |
+  | "A stream cap refuses before the stream opens" | **Not built; a card has it.** STREAM SLOT ACQUIRE AND RELEASE takes the slot in the pipeline step before execute, so the refusal comes before the VIEW entry of step 3a |
+  | "Applied in" against the commit | **Equal** for `13ecf05d`: ADR-0014, ADR-0016, the rulings file, this file and the architect memory |
+
+- **QG-041B-C8: CLOSED_WITH_FOLLOW_UP.** The text a developer builds from says what a poll does, with rows, and it is folded. The follow-up is QG-041B-C10.
+- **Follow-up 2 of D-QG-010 (api-designer's sentence) is met by the rider,** see part 4. api-designer has not acknowledged the text that principal-architect wrote in their place. Due before TASK-065 is dispatched; a rewording of §7 after the merge is a docs change and needs no gate.
+- **Finding 1: the product-manager's acceptance names an older text (QG-041B-C9).**
+  - D-PM-092 item 3 (b) accepts "item 6 as it stands after the touch for QG-041B-C7 (D-ARCH-233, D-ARCH-234) ... that text and no other". Item 6 changed again at `13ecf05d`, and no D-PM entry follows D-ARCH-239.
+  - The hold, its room, its cost, its release rule, change C-4, the three repeats and the rating are unchanged, so nothing that D-PM-090 weighed has moved. But the two points have effects a user sees that product-manager has not read: a poll is held back for up to 60 s with nothing shown, on a page where W09 expects a status within 2 s (US-207); data older than the user's own write stays without a sign; and a user who is rate limited on one of four sensitive actions confirms once more. D-PM-092 lists `docs/02-ux` as not read.
+  - Whether the acceptance stands on the new text is product-manager's to say, not mine. D-QG-009 closed QG-041B-C3 on that acceptance, and it is merge condition (6) of D-ORCH-159.
+- **Finding 2: flow F10 was not read again for the two points (QG-041B-C10).**
+  - ux-designer was not consulted (D-ARCH-239), and no D-UX entry answers rulings 12.6: the state with a missing `Retry-After`, data older than the user's own write, and the poll held back on the confirmation page. Each default is applied.
+  - A15 says "That took too long. Confirm it's you again." When the proof was spent by a request that a limit refused, that is not what happened.
+- **Finding 3: PR041-SEC-17 has no ruling (QG-041B-C11).** D-SECPR041B-03 routes it to principal-architect: guard C or D, or a correction of "One more limit of the form", which names the dropped spend and not the early release (observation 1 of D-QG-010; the analyst concurs with all of the QG-041B-C2 text except this sentence). D-ARCH-241 says "not ruled here". The TASK-108 card says "C or D as principal-architect picks", which is a routing without a date. It is INFO, it needs the callback form and the timer of TASK-108 together, and neither is in production.
+- **Observations (no condition):**
+  1. What counts as a missing `Retry-After` (anything but a whole number of seconds from 1 up) is in card line 24 and D-ARCH-239 item 6, not in item 6 of the ADR. The engine never sends less than 1, so nothing built depends on it.
+  2. The hold-back is per query. A tick of a second polling query inside the wait of a refused refresh starts one more refresh. That is bounded by the number of polling queries on a screen. For the code review of TASK-065 against the row WAITERS OF A REFRESH.
+
+**Part 4. The api/README §7 rider `334fdb18`: faithful**
+
+- The commit changes `docs/03-architecture/api/README.md` and nothing else: 3 insertions and 1 deletion, in two hunks at lines 183 and 216, both in §7 (line 179 to line 225). §13 is not touched.
+- Its hunks equal the hunks of `../.orch/held/TASK-041B-api-readme-s7.patch` line for line. The blob before is `f8d1d561` at `214ec79b` and at `d7cb8385`. The blob after is `2647ea25`, the post-image the patch names, and applying the patch to `f8d1d561` in a scratch directory gives the same hash.
+- Both quoted blocks of rulings 12.5 occur once in the file, verbatim. The "(§5)" reference is right: the row "Replay and re-auth proof" of §5 says when a proof is consumed.
+- Main has not changed the file since the merge base (`8c8a9e16` at `3d54cef8` and at origin/main), so a squash takes the branch blob.
+- Condition C6 of code review round 4 (the sentence of rulings 10.7 on the merge head) is met, and so is the "bound on concurrency" sentence that D-QG-009 and D-QG-010 listed.
+
+- **Conditions:**
+  - **QG-041B-C9 · product-manager · before part 041-B merges (the pull request may be opened).** One D-PM entry that reads item 6 as it stands at `13ecf05d`, with the two added points, and says whether the acceptance of D-PM-090 as amended by D-PM-092 stands on that text. It names the three effects of finding 1. An answer of "not accepted" for a point returns that point to principal-architect, and the README paragraph follows.
+  - **QG-041B-C10 · ux-designer · before TASK-065 and TASK-054 are dispatched.** One D-UX entry on rulings 12.6 items 1 to 3, and on what A15 says when the proof was spent by a rate-limited request. If a flow changes, item 6 and card lines 24, 27 and 28 are read again.
+  - **QG-041B-C11 · principal-architect · before TASK-108 is dispatched.** A D-ARCH entry on PR041-SEC-17: guard C or D on the TASK-108 card, or the sentence "One more limit of the form" and rulings 11.3 corrected to name the early release. It is Accepted text if the sentence changes.
+  - Neither QG-041B-C10 nor QG-041B-C11 holds the merge of part 041-B.
+- **What must hold at the head that merges:**
+  1. Lane B on that head as in part 2.
+  2. QG-041B-C9.
+  3. The head is `334fdb18` or a descendant with the same blobs for the README (`2647ea25`) and for the paths that part B owns. A commit that touches an owned path needs the security delta round first (D-SECPR041B-03).
+  4. The conditions of the two records: the merge-only rounds on `d7cb8385` (D-ORCH-179), C2 and C4 of the security record (lane B; the rename and the merge-ref check), C4 and C7 of code review round 4.
+- **Conditions open after this entry:** QG-041B-C5 (the lane B run of part 2; (b) and (c) on their cards), QG-041B-C6, QG-041B-C9, QG-041B-C10, QG-041B-C11; the threat-model half of QG-041B-C4 before G3; QG-040-C9 and the QG-040, QG-041, QG-043, QG-044 and QG-051 conditions as their entries left them, and follow-ups 3 (qa-lead, TEST-STRATEGY §10.4) and 4 (the JSDoc sentence, now a TASK-108 line) of D-QG-010, not read again here.
+- **Not verified:** the security probes (not run again); H6 on the merged head (no lane B has run there); that a failed refetch keeps the data of a query in the installed query library (TASK-065 and the query client do not exist); the limits that a service consumes (not built: the rule is a requirement with a test on 15 cards); hosted CI, which is blocked by billing (D-ORCH-162).
+- **No evidence note:** as for D-QG-001 to D-QG-010, this entry is the record. The next entry of this series is D-QG-012.
+- **Reversibility:** High (a verification record).
