@@ -23,6 +23,8 @@ D-QG-005 verified ADR-0005 amendment 15 as PASS_WITH_CONDITIONS. Two conditions 
 - QG-051-C6 is ruled (D-ARCH-216) but security-analyst had not seen it; its concurrence and the gatekeeper's closure are open.
 - The M2 staff-grant amendment and the Stripe saved-500 rule (see the two earlier notes).
 
+**Update 2026-11-22 (D-ARCH-242; see [[wave1-d242-bootstrap-key-c17-touch]]):** D-QG-006 closed the ruling half of QG-051-C6. TASK-298 then found a 14th key, in the bootstrap lane, with `NO ACTION`. The rule stayed, the key is corrected by a new bootstrap file, and the gatekeeper decides whether C6 closes while TASK-298's pin is open.
+
 **Process lessons:**
 1. PGlite is 17.5 and has no `pg_constraint.conenforced`. For a PostgreSQL 18 fact, run a throwaway container of the local `postgres:18` image: `MSYS_NO_PATHCONV=1 docker run -d --rm --name <unique> -e POSTGRES_HOST_AUTH_METHOD=trust <image id>` (no port, no password), wait until `docker logs` shows "ready to accept connections" twice, pipe a script with `docker exec -i <name> psql -X -U postgres -f - < file.sql`, then `docker rm -f`. `\set VERBOSITY verbose` prints the SQLSTATE. About 30 seconds end to end.
 2. psql interleaves NOTICE and ERROR lines out of order with the result tables when both streams go to one file. Map results by the `psql:<stdin>:<line>` prefix, not by position.

@@ -15,6 +15,8 @@ D-ARCH-235..238 answered condition C1 of D-SECPR034-01 (TASK-034 at `3ee36f01`, 
 
 **The fact that changed the catalog check:** PostgreSQL records no `pg_depend` row for a built-in object. The security record's query (join `pg_depend` to `pg_proc`, keep non-`pg_catalog`) found its three planted shapes and missed `CHECK (pg_catalog.query_to_xml('select w()', …) IS NOT NULL)`, through which `w` ran as the superuser in my probe. C17 therefore reads `conbin`, `adbin` and `partexprs` as text and joins `:funcid`, `:opfuncid` and `:opno` to `pg_proc`, and the property is IMMUTABLE, not "built in": every built-in that acts with the caller's authority is VOLATILE. Partition-key expressions are a fourth call site (a direct write to a leaf checks the partition constraint as the writer).
 
+**Amended 2026-11-22 (D-ARCH-243, D-ARCH-244; see [[wave1-d242-bootstrap-key-c17-touch]]):** an operator must itself be in `pg_catalog` (its routine may be STABLE, never VOLATILE), C17 (b) also refuses a cast outside an extension, and the privileged sessions set `restrict_nonsystem_relation_kind`. "IMMUTABLE built-ins only" was never true of operators.
+
 **Still owed by me:**
 - RR-19 mirrored in `risks.md` at its next revision (not touched: two other architect runs were in the register).
 - data-model §8.3 as shipped for rule R and rule 21 after TASK-034 merges (as D-ARCH-172 did for TASK-293).
