@@ -1,7 +1,7 @@
 # Dispatch brief: TASK-298, C16 follow-up: constraint state (arm c) and referential actions (arm d)
 
 - **Plan fold / dispatch:** D-SD-011 (task created), D-SD-012 (QG-051-C7 lines folded onto the card). Dispatched by senior-developer in orchestrator session C (2026-11-21). The card section below is copied verbatim from `docs/04-plan/tasks/WAVE-01.md`. If they differ, the generated card governs.
-- **Branch:** `feat/TASK-298-c16-follow-up-constraint-state`, from `origin/main` `3d54cef8` (TASK-051 is on main as PR #83, `a93a6113`). Worktree `C:/Users/MadelineMendoza/Documents/Projects/Garudavega/Shipqube-TASK-298`.
+- **Branch:** `feat/TASK-298-c16-follow-up-constraint-state`, from `origin/main` `3d54cef8` (TASK-051 is on main as PR #83, `a93a6113`). Worktree `../Shipqube-TASK-298`.
 - **Specialist and model:** database-engineer, **opus** (card: complexity S, opus).
 - **Why now:** MERGE PREREQUISITE of TASK-087 (the first quote tables, the first owner-bound pairs and the first T2-O exception entry). D-QG-006 leaves QG-051-C6 "ruling CLOSED, build OPEN" until this task is on main; QG-051-C7 (b)/(c) are due before G3.
 - **Locks:** `prisma-rls`. No migration, no schema file, no manifest, no product code.
@@ -49,7 +49,7 @@ None.
 
 ## Working rules
 
-1. **Worktree.** Work only in `C:/Users/MadelineMendoza/Documents/Projects/Garudavega/Shipqube-TASK-298` on the branch above. Dependencies are already installed there (`npm ci --ignore-scripts` + `deps:rebuild` done by the lead): do not reinstall. The main checkout is shared with other agents: never touch it. If your sandbox pins you to `.claude/worktrees/agent-*`, use `git -C <worktree>` and the Write/Edit tools instead of `cd` and heredocs.
+1. **Worktree.** Work only in `../Shipqube-TASK-298` on the branch above. Dependencies are already installed there (`npm ci --ignore-scripts` + `deps:rebuild` done by the lead): do not reinstall. The main checkout is shared with other agents: never touch it. If your sandbox pins you to `.claude/worktrees/agent-*`, use `git -C <worktree>` and the Write/Edit tools instead of `cd` and heredocs.
 2. **Node.** Every node or npm command starts with `export PATH="$APPDATA/fnm/aliases/default:$PATH";`. Tools run through `npm exec --no --`, never `npx`.
 3. **No Docker.** No Testcontainers, no `quality:heavy`, no integration/api/catalog suites, no `docker` commands: they run only in the lead's lane B slot under `../.orch/docker.lock`.
 4. **No new dependency;** do not touch `package-lock.json`, `eslint.config.mjs` or any migration.

@@ -124,7 +124,7 @@ Audit logs must NOT be editable or deletable.
 * Secrets Manager for credentials
 -PC   SES - Simple email server
 -PC   Lambda -
--PC   Dedicated Email id per study - using aws feature Exampele: tnx-cy-md201\_ssu@rhoworld.com (virtual email id generated from aws)
+-PC   Dedicated Email id per study - using aws feature (virtual email id generated from aws; example removed, D-SECPUB-01 SECPUB-03)
 
 \---
 
