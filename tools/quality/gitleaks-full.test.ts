@@ -1,7 +1,7 @@
 /**
  * gitleaks-full runner (PR25-SEC-01 runner half, PR33-SEC-08; D-SEC-PR45-01; TASK-015 part 015-B): baseline validation
  * before anything is mounted, the hardened docker argument list, the image pin and the suite-runners entry. The scans
- * themselves (17 lines -> 0 findings, 16 -> 1) are in gitleaks-full.int.test.ts (Docker).
+ * themselves (22 lines -> 0 findings, 21 -> 1) are in gitleaks-full.int.test.ts (Docker).
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -38,7 +38,7 @@ const fingerprint = (n: number): string => `${SHA}:docs/x.md:generic-api-key:${S
 describe('gitleaks-full: baseline validation (before the scan)', () => {
   it('accepts the committed baseline: exactly BASELINE_COUNT exact fingerprints', () => {
     const lines = validateBaseline(baselineText, { count: BASELINE_COUNT });
-    expect(lines).toHaveLength(17);
+    expect(lines).toHaveLength(22);
     expect(lines.every((line) => BASELINE_LINE.test(line))).toBe(true);
   });
 
@@ -173,7 +173,7 @@ function fakeDocker(findings: unknown[], status: number | null) {
 }
 
 describe('gitleaks-full: config and baseline come from --ref, never HEAD (D-TASK015-39; PR #46 r1 m2)', () => {
-  // Commit A: a valid 17-line baseline (the committed one) and config A. Commit B (HEAD): a commit-less baseline line
+  // Commit A: a valid 22-line baseline (the committed one) and config A. Commit B (HEAD): a commit-less baseline line
   // (which would silence every commit at that path) and config B. In lane B the ref is the base and HEAD the PR.
   const root = mkdtempSync(join(tmpdir(), 'gitleaks-full-ref-'));
   temps.push(root);

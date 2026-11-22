@@ -160,15 +160,35 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
     expect(mutated).toMatch(forbidden);
   });
 
-  it('[PR25-SEC-01] the gitleaks-full baseline holds exactly the 17 recorded fingerprints and nothing else', () => {
+  it('[PR25-SEC-01] the gitleaks-full baseline holds exactly the 22 recorded fingerprints and nothing else', () => {
     const lines = read('tools', 'quality', 'gitleaks-baseline.txt')
       .split(/\r?\n/u)
       .filter((line) => line !== '' && !line.startsWith('#'));
-    expect(lines).toHaveLength(17);
+    expect(lines).toHaveLength(22);
     for (const line of lines) expect(line).toMatch(/^[0-9a-f]{40}:[^:\s]+:generic-api-key:[1-9]\d*$/u);
-    expect(new Set(lines).size).toBe(17);
-    expect([...new Set(lines.map((line) => line.slice(0, 7)))].sort()).toEqual(['63accea', 'b8f805f', 'd5cdfa2']);
+    expect(new Set(lines).size).toBe(22);
+    expect([...new Set(lines.map((line) => line.slice(0, 7)))].sort()).toEqual([
+      '0ccdd00',
+      '63accea',
+      'aade267',
+      'b8f805f',
+      'c33e5e9',
+      'd5cdfa2',
+      'd7585e7',
+      'ed15691',
+    ]);
     expect(lines.filter((line) => line.includes(':docs/03-architecture/api/openapi.yaml:'))).toHaveLength(15);
+    // PR080-SEC-07 (D-SECPR080-03, D-ORCH-168): exactly these two commit-bound fingerprints, never a path-only entry.
+    expect(lines.filter((line) => /^(d7585e7|ed15691)/u.test(line))).toEqual([
+      'd7585e78786e01bf772609d44f1f923203e58c5e:docs/sdlc/DECISIONS.md:generic-api-key:7697',
+      'ed156913c734f0bc18945e7e7172fc4666331ad2:.claude/agent-memory/security-analyst/project_p5_task051.md:generic-api-key:23',
+    ]);
+    // PR080-SEC-07 branch-only merges (D-DEVOPS-001/-002): TASK-044, 040-B and 041-B, one exact line each.
+    expect(lines.filter((line) => /^(c33e5e9|0ccdd00|aade267)/u.test(line))).toEqual([
+      'c33e5e927f903847daf59ca5f2aa5440562401ef:docs/sdlc/DECISIONS.md:generic-api-key:7697',
+      '0ccdd009acfe4eab53adb2bb69064aa0d537a6d9:docs/sdlc/DECISIONS.md:generic-api-key:7697',
+      'aade267273af4bb868a4e4c4578aeb4f7378a261:docs/sdlc/DECISIONS.md:generic-api-key:7697',
+    ]);
   });
 
   const PR39_COMMIT = 'dd7a2ddcad30ba422152300f21d7df5f105d283e';

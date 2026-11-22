@@ -39,8 +39,11 @@ export const CONFIG_PATH = '.gitleaks.toml';
 export const BASELINE_PATH = 'tools/quality/gitleaks-baseline.txt';
 /** One exact fingerprint (commit AND path AND rule AND line); the sec-static pin uses the same pattern. */
 export const BASELINE_LINE = /^[0-9a-f]{40}:[^:\s]+:generic-api-key:[1-9]\d*$/u;
-/** PR25-SEC-01: the 17 recorded fingerprints; a different count is a reviewed change of this constant. */
-export const BASELINE_COUNT = 17;
+/**
+ * PR25-SEC-01 (17) plus PR080-SEC-07 (2 on main, 3 branch-only merge commits; D-DEVOPS-002): the 22 recorded
+ * fingerprints; a different count is a reviewed change of this constant.
+ */
+export const BASELINE_COUNT = 22;
 const SHA = /^[0-9a-f]{40}$/u;
 /** Every option gitleaks passes on to `git log -p -U0` before the scanned commit (PR10-SEC-01; PR #46 r1 m5). */
 export const LOG_OPTS = '--diff-merges=first-parent --text --no-textconv --no-ext-diff';
