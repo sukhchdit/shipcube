@@ -4,6 +4,7 @@ import { AppError, MAX_VALIDATION_ISSUES } from '@platform/shared';
 import Joi from 'joi';
 
 import {
+  isListQuerySchema,
   prepareSchema,
   prepareSchemas,
   SAFE_MESSAGES,
@@ -177,5 +178,76 @@ describe('[PR #32 m8] [PR32-SEC-04] server-controlled fields at any depth', () =
     let deep: Record<string, unknown> = { id: 'x' };
     for (let level = 0; level < 40; level += 1) deep = { child: deep };
     expect(serverControlledIssues(deep)).toEqual([]);
+  });
+});
+
+describe('[AT-US-037-04-1] list routes: an unknown filter key is INVALID_FILTER (REQ-API-008; D-TASK045-04)', () => {
+  const list = prepareSchemas({
+    query: Joi.object({
+      limit: Joi.number().integer().min(1).max(100).default(25),
+      cursor: Joi.string().max(512),
+      'filter[status]': Joi.string().valid('ACTIVE', 'REMOVED'),
+    }),
+  });
+
+  it('an unknown filter[...] key on a list route is 400 INVALID_FILTER without field issues, whatever else fails', () => {
+    expect(issuesOf(() => validateRequest(list, raw({ query: { 'filter[internal_notes]': 'x' } })))).toEqual({
+      code: 'INVALID_FILTER',
+      errors: undefined,
+    });
+    expect(issuesOf(() => validateRequest(list, raw({ query: { 'filter[internal_notes]': 'x', limit: '0' } })))).toEqual({
+      code: 'INVALID_FILTER',
+      errors: undefined,
+    });
+    expect(issuesOf(() => validateRequest(list, raw({ query: { filter: { internal_notes: 'x' } } })))).toEqual({
+      code: 'INVALID_FILTER',
+      errors: undefined,
+    });
+  });
+
+  it('a filter VALUE outside its schema stays VALIDATION_ERROR with the filter pointer; other unknown keys stay UNKNOWN_FIELD', () => {
+    expect(issuesOf(() => validateRequest(list, raw({ query: { 'filter[status]': 'NOPE' } })))).toEqual({
+      code: 'VALIDATION_ERROR',
+      errors: [{ pointer: '/query/filter[status]', code: 'INVALID_ENUM', message: 'Field is not one of the allowed values.' }],
+    });
+    expect(issuesOf(() => validateRequest(list, raw({ query: { filters: 'x', filterx: 'y' } })))).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      errors: [
+        { pointer: '/query/filters', code: 'UNKNOWN_FIELD' },
+        { pointer: '/query/filterx', code: 'UNKNOWN_FIELD' },
+      ],
+    });
+    expect(validateRequest(list, raw({ query: { 'filter[status]': 'ACTIVE' } })).query).toEqual({ limit: 25, 'filter[status]': 'ACTIVE' });
+  });
+
+  it('a route whose query is not a list (no limit and cursor) keeps VALIDATION_ERROR UNKNOWN_FIELD for filter keys', () => {
+    for (const query of [Joi.object({ q: Joi.string() }), Joi.object({ limit: Joi.number() }), Joi.object({ cursor: Joi.string() })]) {
+      expect(issuesOf(() => validateRequest(prepareSchemas({ query }), raw({ query: { 'filter[x]': '1' } })))).toEqual({
+        code: 'VALIDATION_ERROR',
+        errors: [{ pointer: '/query/filter[x]', code: 'UNKNOWN_FIELD', message: 'Field is not allowed.' }],
+      });
+    }
+    expect(issuesOf(() => validateRequest(prepareSchemas({}), raw({ query: { 'filter[x]': '1' } })))).toMatchObject({
+      code: 'VALIDATION_ERROR',
+    });
+  });
+
+  it('R1-n4: more than MAX_VALIDATION_ISSUES earlier issues do not hide an unknown filter key (the full Joi error decides)', () => {
+    const query: Record<string, unknown> = Object.fromEntries(
+      Array.from({ length: MAX_VALIDATION_ISSUES + 5 }, (_, index) => [`x${String(index)}`, '1']),
+    );
+    query['filter[internal_notes]'] = 'x';
+    expect(issuesOf(() => validateRequest(list, raw({ query })))).toEqual({ code: 'INVALID_FILTER', errors: undefined });
+    delete query['filter[internal_notes]'];
+    const capped = issuesOf(() => validateRequest(list, raw({ query }))) as { code: string; errors: unknown[] };
+    expect(capped.code).toBe('VALIDATION_ERROR');
+    expect(capped.errors).toHaveLength(MAX_VALIDATION_ISSUES);
+  });
+
+  it('isListQuerySchema recognises a list schema once and caches the answer per schema', () => {
+    expect(isListQuerySchema(list.query)).toBe(true);
+    expect(isListQuerySchema(list.query)).toBe(true);
+    expect(isListQuerySchema(undefined)).toBe(false);
+    expect(isListQuerySchema(Joi.object({ limit: Joi.number() }))).toBe(false);
   });
 });
