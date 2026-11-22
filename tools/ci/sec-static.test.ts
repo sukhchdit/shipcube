@@ -332,6 +332,8 @@ describe('sec-static: US-048 secrets hygiene and CI security scanning', () => {
       schedule: { interval: 'monthly' },
       cooldown: { 'default-days': '7' },
       'open-pull-requests-limit': '2',
+      // D-SECPOST-01 O-1, D-DEVOPS-001: Valkey stays on the ADR-0001 major (8) and the harness digest; 9 needs an ADR.
+      ignore: [{ 'dependency-name': 'valkey/valkey', 'update-types': ['version-update:semver-major'] }],
       groups: { 'compose-images': { patterns: ['*'] } },
       'commit-message': { prefix: 'build(deps)' },
     });

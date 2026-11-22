@@ -68,6 +68,14 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 2
+    # valkey/valkey semver-major is ignored (D-SECPOST-01 O-1, D-DEVOPS-001): ADR-0001 fixes Valkey 8 and compose.yaml
+    # carries the Testcontainers harness digest (tools/quality/suite-runners.json; compose-stack.test.ts), which
+    # Dependabot does not edit. #49 moved compose alone to 9.1 and turned main red. Valkey 9 is a reviewed task PR with
+    # a superseding ADR (harness and compose together), not an automated bump. 8.x minor and patch bumps still come and
+    # must move the harness pin in the same PR.
+    ignore:
+      - dependency-name: valkey/valkey
+        update-types: ['version-update:semver-major']
     groups:
       compose-images:
         patterns: ['*']
